@@ -10,5 +10,4 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url = https://tscyywashhafcyetqmjo.supabase.co
 }
