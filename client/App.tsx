@@ -14,7 +14,6 @@ import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import Patients from "./pages/Patients";
 
-
 const queryClient = new QueryClient();
 
 const App = () => (
