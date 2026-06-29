@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { Stethoscope, UserRound, Users, Calendar, FileText, Receipt } from "lucide-react";
 
 const doctors = [
   {
@@ -136,6 +136,105 @@ const doctors = [
   },
 ];
 
+const staff = [
+  {
+    initials: "AV",
+    initialsColor: "#00488D",
+    initBg: "#D6E3FF",
+    name: "Anita Verma",
+    id: "STF-1006",
+    dept: "Emergency",
+    deptBg: "#FFE4E6",
+    deptColor: "#BE123C",
+    branch: "Central Hospital (Tambaram)",
+    status: "Active",
+  },
+  {
+    initials: "RP",
+    initialsColor: "#7B3200",
+    initBg: "#FFDBCB",
+    name: "Ravi Patel",
+    id: "STF-1007",
+    dept: "Radiology",
+    deptBg: "#DBEAFE",
+    deptColor: "#1E40AF",
+    branch: "Central Hospital (Saidapet)",
+    status: "Suspended",
+  },
+  {
+    initials: "SJ",
+    initialsColor: "#00C896",
+    initBg: "rgba(0,200,150,0.12)",
+    name: "Dr. Sarah Joseph",
+    id: "STF-1008",
+    dept: "Surgery",
+    deptBg: "#D6E3FF",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Egmore)",
+    status: "Active",
+  },
+  {
+    initials: "MD",
+    initialsColor: "#475C7F",
+    initBg: "#E6E8EA",
+    name: "Michael Dsouza",
+    id: "STF-1009",
+    dept: "Pathology",
+    deptBg: "#E6E8EA",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Tambaram)",
+    status: "Resigned",
+  },
+  {
+    initials: "MN",
+    initialsColor: "#00488D",
+    initBg: "#D6E3FF",
+    name: "Dr. Meera Nair",
+    id: "STF-1010",
+    dept: "Maternity",
+    deptBg: "#FCE7F3",
+    deptColor: "#BE185D",
+    branch: "Central Hospital (Tambaram)",
+    status: "Active",
+  },
+  {
+    initials: "KR",
+    initialsColor: "#475C7F",
+    initBg: "#E6E8EA",
+    name: "Karthik Rajan",
+    id: "STF-1011",
+    dept: "Pharmacy",
+    deptBg: "#D6E3FF",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Saidapet)",
+    status: "Active",
+  },
+  {
+    initials: "SG",
+    initialsColor: "#7B3200",
+    initBg: "#FFDBCB",
+    name: "Dr. Sunil Gupta",
+    id: "STF-1012",
+    dept: "Pulmonology",
+    deptBg: "#DBEAFE",
+    deptColor: "#1E40AF",
+    branch: "Central Hospital (Egmore)",
+    status: "Leave",
+  },
+  {
+    initials: "PS",
+    initialsColor: "#00C896",
+    initBg: "rgba(0,200,150,0.12)",
+    name: "Dr. Priya Sharma",
+    id: "STF-1005",
+    dept: "Neurology",
+    deptBg: "#D6E3FF",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Tambaram)",
+    status: "Active",
+  },
+];
+
 const navItems = [
   {
     label: "Dashboard",
@@ -227,11 +326,7 @@ const stats = [
     bg: "#D6E3FF",
     border: "#00488D",
     valueColor: "#00488D",
-    icon: (
-      <svg width="17" height="17" viewBox="0 0 17 17" fill="none">
-        <path d="M1.66667 16.6667C1.20833 16.6667.815972 16.5035.489583 16.1771C.163194 15.8507 0 15.4583 0 15V5C0 4.54167.163194 4.14931.489583 3.82292C.815972 3.49653 1.20833 3.33333 1.66667 3.33333H5V1.66667C5 1.20833 5.16319.815972 5.48958.489583C5.81597.163194 6.20833 0 6.66667 0H10C10.4583 0 10.8507.163194 11.1771.489583C11.5035.815972 11.6667 1.20833 11.6667 1.66667V3.33333H15C15.4583 3.33333 15.8507 3.49653 16.1771 3.82292C16.5035 4.14931 16.6667 4.54167 16.6667 5V15C16.6667 15.4583 16.5035 15.8507 16.1771 16.1771C15.8507 16.5035 15.4583 16.6667 15 16.6667H1.66667ZM1.66667 15H15V5H1.66667V15ZM6.66667 3.33333H10V1.66667H6.66667V3.33333ZM7.5 10.8333V13.3333H9.16667V10.8333H11.6667V9.16667H9.16667V6.66667H7.5V9.16667H5V10.8333H7.5Z" fill="#00488D"/>
-      </svg>
-    ),
+    icon: <Stethoscope className="h-4 w-4" color="#00488D" />,
     iconBg: "rgba(255,255,255,0.20)",
   },
   {
@@ -242,11 +337,7 @@ const stats = [
     bg: "rgba(0,200,150,0.12)",
     border: "#00C896",
     valueColor: "#00C896",
-    icon: (
-      <svg width="16" height="14" viewBox="0 0 16 14" fill="none">
-        <path d="M10.8333 8.33333C10.1389 8.33333 9.54861 8.09028 9.0625 7.60417C8.57639 7.11806 8.33333 6.52778 8.33333 5.83333C8.33333 5.13889 8.57639 4.54861 9.0625 4.0625C9.54861 3.57639 10.1389 3.33333 10.8333 3.33333C11.5278 3.33333 12.1181 3.57639 12.6042 4.0625C13.0903 4.54861 13.3333 5.13889 13.3333 5.83333C13.3333 6.52778 13.0903 7.11806 12.6042 7.60417C12.1181 8.09028 11.5278 8.33333 10.8333 8.33333ZM0 8.33333V6.66667H6.66667V8.33333H0ZM0 1.66667V0H10V1.66667H0Z" fill="rgba(0,0,0,0.75)"/>
-      </svg>
-    ),
+    icon: <UserRound className="h-4 w-4" color="#00C896" />,
     iconBg: "rgba(255,255,255,0.20)",
   },
   {
@@ -257,11 +348,7 @@ const stats = [
     bg: "rgba(255,107,53,0.12)",
     border: "rgba(123,50,0,0.40)",
     valueColor: "#7B3200",
-    icon: (
-      <svg width="20" height="10" viewBox="0 0 20 10" fill="none">
-        <path d="M0 10V8.6875C0 8.09028.305556 7.60417.916667 7.22917C1.52778 6.85417 2.33333 6.66667 3.33333 6.66667C3.51389 6.66667 3.6875 6.67014 3.85417 6.67708C4.02083 6.68403 4.18056 6.70139 4.33333 6.72917C4.13889 7.02083 3.99306 7.32639 3.89583 7.64583C3.79861 7.96528 3.75 8.29861 3.75 8.64583V10H0ZM16.25 10V8.64583C16.25 8.28472 16.2049 7.94444 16.1146 7.625C16.0243 7.30556 15.8889 7.00694 15.7083 6.72917C15.8611 6.70139 16.0174 6.68403 16.1771 6.67708C16.3368 6.67014 16.5 6.66667 16.6667 6.66667C17.6667 6.66667 18.4722 6.85069 19.0833 7.21875C19.6944 7.58681 20 8.07639 20 8.6875V10H16.25ZM3.33333 5.83333C2.875 5.83333 2.48264 5.67014 2.15625 5.34375C1.82986 5.01736 1.66667 4.625 1.66667 4.16667C1.66667 3.69444 1.82986 3.29861 2.15625 2.97917C2.48264 2.65972 2.875 2.5 3.33333 2.5C3.80556 2.5 4.20139 2.65972 4.52083 2.97917C4.84028 3.29861 5 3.69444 5 4.16667C5 4.625 4.84028 5.01736 4.52083 5.34375C4.20139 5.67014 3.80556 5.83333 3.33333 5.83333ZM10 5C9.30556 5 8.71528 4.75694 8.22917 4.27083C7.74306 3.78472 7.5 3.19444 7.5 2.5C7.5 1.79167 7.74306 1.19792 8.22917.71875C8.71528.239583 9.30556 0 10 0C10.7083 0 11.3021.239583 11.7812.71875C12.2604 1.19792 12.5 1.79167 12.5 2.5C12.5 3.19444 12.2604 3.78472 11.7812 4.27083C11.3021 4.75694 10.7083 5 10 5ZM5 10V8.64583C5 8.20139 5.12153 7.79514 5.36458 7.42708C5.60764 7.05903 5.95139 6.73611 6.39583 6.45833C6.84028 6.18056 7.37153 5.97222 7.98958 5.83333C8.60764 5.69444 9.27778 5.625 10 5.625C10.7361 5.625 11.4132 5.69444 12.0312 5.83333C12.6493 5.97222 13.1806 6.18056 13.625 6.45833C14.0694 6.73611 14.4097 7.05903 14.6458 7.42708C14.8819 7.79514 15 8.20139 15 8.64583V10H5Z" fill="#7B3200"/>
-      </svg>
-    ),
+    icon: <Users className="h-4 w-4" color="#7B3200" />,
     iconBg: "#FFDBCB",
   },
   {
@@ -272,11 +359,7 @@ const stats = [
     bg: "rgba(255,255,255,0.80)",
     border: "#C2C6D4",
     valueColor: "#00488D",
-    icon: (
-      <svg width="15" height="17" viewBox="0 0 15 17" fill="none">
-        <path d="M1.66667 16.6667C1.20833 16.6667.815972 16.5035.489583 16.1771C.163194 15.8507 0 15.4583 0 15V3.33333C0 2.875.163194 2.48264.489583 2.15625C.815972 1.82986 1.20833 1.66667 1.66667 1.66667H2.5V0H4.16667V1.66667H10.8333V0H12.5V1.66667H13.3333C13.7917 1.66667 14.184 1.82986 14.5104 2.15625C14.8368 2.48264 15 2.875 15 3.33333V15C15 15.4583 14.8368 15.8507 14.5104 16.1771C14.184 16.5035 13.7917 16.6667 13.3333 16.6667H1.66667ZM1.66667 15H13.3333V6.66667H1.66667V15ZM1.66667 5H13.3333V3.33333H1.66667V5Z" fill="#00488D"/>
-      </svg>
-    ),
+    icon: <Calendar className="h-4 w-4" color="#00488D" />,
     iconBg: "rgba(168,200,255,0.20)",
   },
   {
@@ -287,11 +370,7 @@ const stats = [
     bg: "#E6E8EA",
     border: "#4A5F83",
     valueColor: "#4A5F83",
-    icon: (
-      <svg width="17" height="19" viewBox="0 0 17 19" fill="none">
-        <path d="M7.5 2.70833C7.68056 2.70833 7.82986 2.64931 7.94792 2.53125C8.06597 2.41319 8.125 2.26389 8.125 2.08333C8.125 1.90278 8.06597 1.75347 7.94792 1.63542C7.82986 1.51736 7.68056 1.45833 7.5 1.45833C7.31944 1.45833 7.17014 1.51736 7.05208 1.63542C6.93403 1.75347 6.875 1.90278 6.875 2.08333C6.875 2.26389 6.93403 2.41319 7.05208 2.53125C7.17014 2.64931 7.31944 2.70833 7.5 2.70833ZM3.33333 6.66667V5H11.6667V6.66667H3.33333ZM3.33333 10V8.33333H11.6667V10H3.33333Z" fill="#4A5F83"/>
-      </svg>
-    ),
+    icon: <FileText className="h-4 w-4" color="#4A5F83" />,
     iconBg: "rgba(236,238,240,0.40)",
   },
   {
@@ -302,34 +381,115 @@ const stats = [
     bg: "#D6E3FF",
     border: "#00488D",
     valueColor: "#00488D",
-    icon: (
-      <svg width="19" height="14" viewBox="0 0 19 14" fill="none">
-        <path d="M10.8333 7.5C10.1389 7.5 9.54861 7.25694 9.0625 6.77083C8.57639 6.28472 8.33333 5.69444 8.33333 5C8.33333 4.30556 8.57639 3.71528 9.0625 3.22917C9.54861 2.74306 10.1389 2.5 10.8333 2.5C11.5278 2.5 12.1181 2.74306 12.6042 3.22917C13.0903 3.71528 13.3333 4.30556 13.3333 5C13.3333 5.69444 13.0903 6.28472 12.6042 6.77083C12.1181 7.25694 11.5278 7.5 10.8333 7.5ZM5 10C4.54167 10 4.14931 9.83681 3.82292 9.51042C3.49653 9.18403 3.33333 8.79167 3.33333 8.33333V1.66667C3.33333 1.20833 3.49653.815972 3.82292.489583C4.14931.163194 4.54167 0 5 0H16.6667C17.125 0 17.5174.163194 17.8438.489583C18.1701.815972 18.3333 1.20833 18.3333 1.66667V8.33333C18.3333 8.79167 18.1701 9.18403 17.8438 9.51042C17.5174 9.83681 17.125 10 16.6667 10H5ZM15.8333 13.3333H1.66667C1.20833 13.3333.815972 13.1701.489583 12.8438C.163194 12.5174 0 12.125 0 11.6667V2.5H1.66667V11.6667H15.8333V13.3333Z" fill="#00488D"/>
-      </svg>
-    ),
+    icon: <Receipt className="h-4 w-4" color="#00488D" />,
     iconBg: "rgba(255,255,255,0.20)",
   },
 ];
 
-export default function Index() {
+function parseStatValue(value: string): number {
+  return Number(value.replace(/,/g, ""));
+}
+
+function formatStatValue(value: number): string {
+  return value.toLocaleString();
+}
+
+function CountUp({ target, duration = 1800 }: { target: number; duration?: number }) {
+  const [count, setCount] = useState(0);
+  const startTime = useRef<number | null>(null);
+  const rafId = useRef<number>(0);
+
+  useEffect(() => {
+    startTime.current = null;
+    const animate = (now: number) => {
+      if (startTime.current === null) startTime.current = now;
+      const elapsed = now - startTime.current;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setCount(Math.round(eased * target));
+      if (progress < 1) {
+        rafId.current = requestAnimationFrame(animate);
+      }
+    };
+    rafId.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafId.current);
+  }, [target, duration]);
+
+  return <>{formatStatValue(count)}</>;
+}
+
+export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("doctors");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(5);
 
   // Pagination calculations
-  const totalRecords = doctors.length;
+  const currentData = activeTab === "doctors" ? doctors : activeTab === "staffs" ? staff : doctors;
+  const totalRecords = currentData.length;
   const totalPages = Math.max(1, Math.ceil(totalRecords / rowsPerPage));
   const startIndex = (currentPage - 1) * rowsPerPage;
   const endIndex = startIndex + rowsPerPage;
-  const currentDoctors = doctors.slice(startIndex, endIndex);
+  const currentRows = currentData.slice(startIndex, endIndex);
   const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
   const visibleEnd = Math.min(endIndex, totalRecords);
 
+  // Branch progress bar state
+
+  const [animatedValues, setAnimatedValues] = useState<Record<string, number>>({});
+  const branchRef = useRef<HTMLDivElement>(null);
+  const hasAnimated = useRef(false);
+
+  
+  const [branches, setBranches] = useState([
+    { name: "Central Hospital (Tambaram)", pct: 92 },
+    { name: "Central Hospital (Saidapet)", pct: 78 },
+    { name: "Central Hospital (Egmore)", pct: 89 },
+  ]);
+
+
+useEffect(() => {
+  const el = branchRef.current;
+  if (!el) return;
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (entries[0].isIntersecting && !hasAnimated.current) {
+        hasAnimated.current = true;
+        observer.disconnect();
+
+        const intervals: ReturnType<typeof setInterval>[] = [];
+
+        branches.forEach((branch, index) => {
+          setTimeout(() => {
+            let current = 0;
+            const interval = setInterval(() => {
+              current += 1;
+              setAnimatedValues((prev) => ({
+                ...prev,
+                [branch.name]: current,
+              }));
+              if (current >= branch.pct) {
+                clearInterval(interval);
+              }
+            }, 30);
+            intervals.push(interval);
+          }, index * 200);
+        });
+      }
+    },
+    { threshold: 0.1 },
+  );
+
+  observer.observe(el);
+
+  return () => observer.disconnect();
+}, []);
+
   return (
-    <div className="flex h-screen overflow-hidden font-[Manrope,sans-serif] bg-[#F7F9FB]">
+    <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB]">
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -341,15 +501,15 @@ export default function Index() {
       {/* Sidebar */}
 
       {/* Main */}
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden min-h-0">
+      <div className="flex flex-col flex-1 min-w-0">
         {/* Content */}
-        <main className="flex-1 overflow-y-auto min-h-0 flex flex-col gap-6">
+        <main className="flex flex-col gap-6">
           {/* Stats Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-8 pt-10">
             {stats.map((stat) => (
               <div
                 key={stat.label}
-                className="flex flex-col p-4 rounded-lg shadow-[2px_2px_16px_0_rgba(0,0,0,0.25)]"
+                className="flex flex-col p-4 rounded-lg shadow-[2px_2px_16px_0_rgba(0,0,0,0.25)] transition-all duration-200 hover:-translate-y-1 hover:shadow-lg cursor-pointer"
                 style={{ background: stat.bg, border: `0.2px solid ${stat.border}` }}
               >
                 <div className="flex justify-between items-start">
@@ -370,7 +530,7 @@ export default function Index() {
                 </div>
                 <div className="pt-2">
                   <div className="font-extrabold text-xl leading-7 tracking-[-1px]" style={{ color: stat.valueColor }}>
-                    {stat.value}
+                    <CountUp target={parseStatValue(stat.value)} />
                   </div>
                   <div className="text-[rgba(0,0,0,0.70)] text-[9px] font-semibold tracking-[0.9px] capitalize leading-[13.5px]">
                     {stat.label}
@@ -395,7 +555,7 @@ export default function Index() {
           </div>
 
           {/* Table Card */}
-          <div className="bg-white rounded-lg border shadow-sm flex flex-col h-[600px] overflow-hidden">
+          <div className="bg-white rounded-lg border shadow-sm flex flex-col min-h-[320px] overflow-hidden transition-all duration-200 hover:shadow-md">
             {/* Table Header */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-[rgba(194,198,212,0.10)]">
               <div className="flex items-center gap-6">
@@ -424,8 +584,8 @@ export default function Index() {
                   <input
                     type="text"
                     placeholder="Search..."
-                    className="pl-8 pr-3 py-1.5 rounded-[4px] bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] focus:outline-none w-44"
-                  />
+                    className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[250px]"
+                    />
                   <svg className="absolute left-2 top-1/2 -translate-y-1/2" width="12" height="12" viewBox="0 0 12 12" fill="none">
                     <path d="M11.0667 11.5713L6.86667 7.3713C6.53333 7.638 6.15 7.8491 5.71667 8.0046C5.28333 8.1602 4.82222 8.238 4.33333 8.238C3.12222 8.238 2.09722 7.8185 1.25833 6.9796C0.419444 6.1407 0 5.1157 0 3.90462C0 2.69351.419444 1.66851 1.25833.82962C2.09722-.00927 3.12222-.42871 4.33333-.42871C5.54444-.42871 6.56944-.00927 7.40833.82962C8.24722 1.66851 8.66667 2.69351 8.66667 3.90462C8.66667 4.3935 8.58889 4.8546 8.43333 5.288C8.27778 5.7213 8.06667 6.1046 7.8 6.438L12 10.638L11.0667 11.5713ZM4.33333 6.9046C5.16667 6.9046 5.875 6.613 6.45833 6.0296C7.04167 5.4463 7.33333 4.738 7.33333 3.90462C7.33333 3.07129 7.04167 2.36296 6.45833 1.77962C5.875 1.19629 5.16667.90462 4.33333.90462C3.5.90462 2.79167 1.19629 2.20833 1.77962C1.625 2.36296 1.33333 3.07129 1.33333 3.90462C1.33333 4.738 1.625 5.4463 2.20833 6.0296C2.79167 6.613 3.5 6.9046 4.33333 6.9046Z" fill="#424752"/>
                   </svg>
@@ -457,8 +617,8 @@ export default function Index() {
             </div>
 
             {/* Table */}
-            <div className="flex-1 min-h-0 overflow-auto">
-              <table className="w-full min-w-[640px]">
+            <div className="min-h-[320px] overflow-x-auto">
+              <table className="w-full min-w-[640px] ">
                 <thead className="sticky top-0 z-10 bg-slate-100">
                   <tr className="bg-[rgba(242,244,246,0.40)]">
                     <th className="text-left px-5 py-2.5 text-[9px] font-semibold text-[#424752] tracking-[0.9px] capitalize w-64">Name ↕</th>
@@ -469,8 +629,8 @@ export default function Index() {
                   </tr>
                 </thead>
                 <tbody>
-                  {currentDoctors.map((doc, i) => (
-                    <tr key={i} className="border-t border-[rgba(194,198,212,0.05)] hover:bg-[#F7F9FB] transition-colors">
+                  {currentRows.map((doc, i) => (
+                    <tr key={`${activeTab}-${i}`} className="border-t border-[rgba(194,198,212,0.05)] hover:bg-[#F7F9FB] transition-colors">
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-2">
                           <div
@@ -530,7 +690,7 @@ export default function Index() {
             </div>
 
             {/* Pagination */}
-            <div className="sticky bottom-0 z-10 mt-auto shrink-0 flex items-center justify-between px-5 py-2 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur">
+            <div className="mt-auto shrink-0 flex items-center justify-between px-5 py-2 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur">
               <div className="flex items-center gap-2">
                 <span className="text-[8px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
                   Showing {visibleStart}-{visibleEnd} of {totalRecords}
@@ -543,9 +703,9 @@ export default function Index() {
                   }}
                   className="text-xs font-semibold border rounded px-2 py-1 outline-none bg-white text-[#6B7280]"
                 >
+                  <option value={5}>5</option>
                   <option value={10}>10</option>
                   <option value={20}>20</option>
-                  <option value={30}>30</option>
                 </select>
               </div>
               <div className="flex items-center gap-1">
@@ -589,7 +749,7 @@ export default function Index() {
           {/* Bottom Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
             {/* Branch Performance */}
-            <div className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4">
+            <div ref={branchRef} className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="text-[#191C1E] font-extrabold text-base leading-6 tracking-[-0.4px]">Branch Performance</h3>
@@ -600,17 +760,14 @@ export default function Index() {
                 </svg>
               </div>
               <div className="flex flex-col gap-4">
-                {[
-                  { name: "Central Hospital", pct: 92, width: "92%" },
-                  { name: "City Clinic", pct: 78, width: "78%" },
-                ].map((branch) => (
+                {branches.map((branch) => (
                   <div key={branch.name} className="flex flex-col gap-1">
                     <div className="flex justify-between">
                       <span className="text-[#191C1E] text-[9px] font-semibold tracking-[0.9px] capitalize">{branch.name}</span>
-                      <span className="text-[#00488D] text-[9px] font-semibold tracking-[0.9px] uppercase">{branch.pct}%</span>
+                      <span className="text-[#00488D] text-[9px] font-semibold tracking-[0.9px] uppercase">{animatedValues[branch.name] ?? 0}%</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-[#ECEEF0] overflow-hidden">
-                      <div className="h-full rounded-full bg-[#00488D]" style={{ width: branch.width }} />
+                      <div className="h-full rounded-full bg-[#00488D] transition-all duration-200" style={{ width: `${animatedValues[branch.name] ?? 0}%` }} />
                     </div>
                   </div>
                 ))}
@@ -618,7 +775,7 @@ export default function Index() {
             </div>
 
             {/* System Integrity */}
-            <div className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4">
+            <div className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="text-[#191C1E] font-extrabold text-base leading-6 tracking-[-0.4px]">System Integrity</h3>

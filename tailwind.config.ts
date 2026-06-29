@@ -14,7 +14,16 @@ export default {
     },
     extend: {
       fontFamily: {
-        manrope: ["Manrope", "-apple-system", "Roboto", "Helvetica", "sans-serif"],
+        sans: [
+          "Plus Jakarta Sans",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Segoe UI",
+          "Roboto",
+          "Helvetica",
+          "Arial",
+          "sans-serif",
+        ],
       },
       colors: {
         clinical: {

@@ -1,6 +1,35 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import {
+  LayoutDashboard,
+  Users,
+  Stethoscope,
+  UserRound,
+  Calendar,
+  Receipt,
+  FileText,
+  Settings,
+  HelpCircle,
+  Menu,
+  Bell,
+  ChevronDown,
+} from "lucide-react";
+
+const navIcon: Record<string, React.ReactNode> = {
+  Dashboard: <LayoutDashboard size={16} />,
+  Staff: <Users size={16} />,
+  Doctor: <Stethoscope size={16} />,
+  Patients: <UserRound size={16} />,
+  Appointment: <Calendar size={16} />,
+  Billing: <Receipt size={16} />,
+  Protocol: <FileText size={16} />,
+};
+
+const bottomNavIcon: Record<string, React.ReactNode> = {
+  Settings: <Settings size={16} />,
+  Support: <HelpCircle size={16} />,
+};
 
 export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -21,7 +50,7 @@ export function AppLayout() {
   ];
 
   return (
-    <div className="flex h-screen overflow-hidden font-[Manrope,sans-serif] bg-[#F7F9FB]">
+    <div className="flex h-screen overflow-hidden font-[Plus_Jakarta_Sans,sans-serif] bg-[#F7F9FB]">
 
       {/* Mobile overlay */}
       {sidebarOpen && (
@@ -65,9 +94,10 @@ export function AppLayout() {
                 )
               }
             >
+              {navIcon[item.label]}
               {item.label}
               {item.hasArrow && (
-                <span className="ml-auto text-[10px]">⌄</span>
+                <ChevronDown size={12} className="ml-auto" />
               )}
             </NavLink>
           ))}
@@ -81,6 +111,7 @@ export function AppLayout() {
               to={item.to}
               className="flex items-center gap-2 px-3 py-2 rounded-[4px] text-[#475569] hover:bg-[#E6E8EA] text-xs font-semibold"
             >
+              {bottomNavIcon[item.label]}
               {item.label}
             </NavLink>
           ))}
@@ -119,7 +150,7 @@ export function AppLayout() {
               className="lg:hidden p-1 text-[#334155]"
               onClick={() => setSidebarOpen(!sidebarOpen)}
             >
-              ☰
+              <Menu size={20} />
             </button>
 
             {/* BRANCH */}
@@ -135,7 +166,7 @@ export function AppLayout() {
 
             {/* NOTIFICATION */}
             <div className="relative">
-              🔔
+              <Bell size={18} className="text-[#334155]" />
               <span className="absolute top-0 right-0 w-1.5 h-1.5 bg-red-600 rounded-full"></span>
             </div>
 
