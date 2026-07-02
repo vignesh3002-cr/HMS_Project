@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { useState } from "react";
 import type { FormEvent, MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
@@ -12,6 +13,55 @@ export default function Login() {
     event.preventDefault();
     navigate("/dashboard");
   };
+=======
+<<<<<<<< HEAD:client/pages/Index.tsx
+export { default } from "./Login";
+========
+import { useState } from "react";
+import { login } from "../api/auth.api";
+
+import { useNavigate } from "react-router-dom";
+import {
+    saveToken,
+    saveUser
+} from "../utils/token";
+
+export default function Index() {
+  const [rememberMe, setRememberMe] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const navigate = useNavigate();
+
+const handleLogin = async (
+    e: React.FormEvent
+) => {
+
+    e.preventDefault();
+
+    try {
+
+        const response = await login(
+            username,      // We are temporarily treating this as username
+            password
+        );
+
+        saveToken(response.token);
+
+        saveUser(response.user);
+
+        navigate("/dashboard");
+
+    } catch (error: any) {
+
+        alert(
+            error.response?.data?.message ||
+            "Invalid Username or Password"
+        );
+
+    }
+
+};
+>>>>>>> 9b76a08ef21be27563c4d6c77867646c847d1988
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 md:p-8 bg-clinical-page-bg font-manrope">
@@ -35,7 +85,11 @@ export default function Login() {
             {/* Hospital/Organization ID */}
             <div className="flex flex-col gap-3">
               <label className="text-[14px] font-bold tracking-[0.9px] uppercase text-clinical-label leading-[13.5px]">
+<<<<<<< HEAD
                 Hospital/Organization ID
+=======
+                User Name
+>>>>>>> 9b76a08ef21be27563c4d6c77867646c847d1988
               </label>
               <div className="flex items-center rounded-[4px] bg-clinical-input-bg">
                 <div className="flex items-center gap-[11px] flex-1 px-4 py-3 overflow-hidden">
@@ -51,9 +105,15 @@ export default function Login() {
                   </svg>
                   <input
                     type="text"
+<<<<<<< HEAD
                     value={orgId}
                     onChange={(e) => setOrgId(e.target.value)}
                     placeholder="HOSP-2026-001"
+=======
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Username"
+>>>>>>> 9b76a08ef21be27563c4d6c77867646c847d1988
                     className="flex-1 bg-transparent text-xs font-medium outline-none border-none min-w-0 text-clinical-label placeholder:text-clinical-label/50"
                   />
                 </div>
@@ -123,7 +183,10 @@ export default function Login() {
             <div className="pt-1">
               <button
                 type="submit"
+<<<<<<< HEAD
                 onClick={handleLogin}
+=======
+>>>>>>> 9b76a08ef21be27563c4d6c77867646c847d1988
                 className="w-full flex items-center justify-between px-5 py-3 rounded-[4px] bg-gradient-to-br from-clinical-blue to-clinical-blue-mid shadow-[0_10px_15px_-3px_rgba(59,130,246,0.20),0_4px_6px_-4px_rgba(59,130,246,0.20)] hover:opacity-90 active:opacity-80 transition-opacity"
               >
                 <span className="text-base font-bold leading-5 text-white">Login</span>
@@ -205,4 +268,9 @@ export default function Login() {
       </div>
     </div>
   );
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>>> 9b76a08ef21be27563c4d6c77867646c847d1988:client/pages/Login.tsx
+>>>>>>> 9b76a08ef21be27563c4d6c77867646c847d1988
