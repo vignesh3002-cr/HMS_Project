@@ -151,23 +151,28 @@ model encounter {
 }
 
 model global_master {
-  id             String    @id @db.VarChar(20)
-  role_type      String?   @db.VarChar(50)
-  parent_id      String?   @db.VarChar(20)
-  name           String?   @db.VarChar(100)
-  district_name  String?   @db.VarChar(100)
-  hospital_name  String?   @db.VarChar(200)
-  specialization String?   @db.VarChar(100)
-  staff_role     String?   @db.VarChar(50)
-  gender         String?   @db.VarChar(10)
-  dob            DateTime? @db.Date
-  mobile         String?   @db.VarChar(15)
-  email          String?   @db.VarChar(100)
-  username       String?   @db.VarChar(50)
-  password       String?   @db.VarChar(255)
-  address        String?   @db.VarChar(500)
-  status         Int?      @default(0) @db.SmallInt
-  created_at     DateTime? @default(now()) @db.Timestamp(6)
+  id               String    @id @db.VarChar(20)
+  role_type        String?   @db.VarChar(50)
+  parent_id        String?   @db.VarChar(20)
+  name             String?   @db.VarChar(100)
+  gender           String?   @db.VarChar(10)
+  dob              DateTime? @db.Date
+  mobile           String?   @db.VarChar(15)
+  email            String?   @db.VarChar(100)
+  username         String?   @db.VarChar(50)
+  password         String?   @db.VarChar(255)
+  status           Int?      @default(0) @db.SmallInt
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  hospital_id      String?   @db.VarChar(20)
+  hospital_type    String?   @db.VarChar(50)
+  website          String?   @db.VarChar(200)
+  city             String?   @db.VarChar(100)
+  state            String?   @db.VarChar(100)
+  country          String?   @db.VarChar(100)
+  pincode          String?   @db.VarChar(10)
+  branch           String?   @db.VarChar(50)
+  hospital_name    String?   @db.VarChar(100)
+  hospital_address String?   @db.VarChar(100)
 }
 
 model lab_order {
