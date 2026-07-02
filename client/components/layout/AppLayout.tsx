@@ -50,7 +50,7 @@ export function AppLayout() {
   ];
 
   return (
-    <div className="flex h-screen overflow-hidden font-[Plus_Jakarta_Sans,sans-serif] bg-[#F7F9FB]">
+    <div className="flex h-screen overflow-hidden font-[Manrope,sans-serif] bg-[#F7F9FB]">
 
       {/* Mobile overlay */}
       {sidebarOpen && (
@@ -141,7 +141,7 @@ export function AppLayout() {
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
 
         {/* HEADER */}
-        <header className="flex items-center justify-between h-14 px-6 bg-[rgba(247,249,251,0.95)] border-b border-[rgba(194,198,212,0.05)] shadow-[0_0_4px_0_#000]">
+        <header className="flex items-center justify-between h-14 px-6 bg-[#F2F4F6] border-b border-[rgba(194,198,212,0.05)] shadow-[0_0_4px_0_#000]">
 
           {/* LEFT */}
           <div className="flex items-center gap-3">

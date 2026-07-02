@@ -1,96 +1,20 @@
 import { useState, useEffect, useRef } from "react";
-import { Stethoscope, UserRound, Users, Calendar, FileText, Receipt } from "lucide-react";
+import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, ChevronDown, Check } from "lucide-react";
+import { useNavigate } from 'react-router-dom';
+import { AppointmentsTableView, DoctorsTableView, StaffTableView, type TableRow } from "@/components/hms/DashboardTable";
+import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import CalendarPicker from "@/components/hms/Calender";
+import { FilterPanel } from "@/components/Filter/FilterPanel";
+import type { FilterField } from "@/components/Filter/types";
+
 
 const doctors = [
   {
-    initials: "JS",
-    initialsColor: "#00488D",
+    avatar: "JS",
+    avatarColor: "#00488D",
     initBg: "#D6E3FF",
-    name: "Dr.John Smith",
-    id: "DOC-9042",
-    dept: "Cardiology",
-    deptBg: "#D6E3FF",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Tambaram)",
-    status: "Active",
-  },
-    {
-    initials: "JS",
-    initialsColor: "#00488D",
-    initBg: "#D6E3FF",
-    name: "Dr.John Smith",
-    id: "DOC-9042",
-    dept: "Cardiology",
-    deptBg: "#D6E3FF",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Tambaram)",
-    status: "Active",
-  },
-    {
-    initials: "JS",
-    initialsColor: "#00488D",
-    initBg: "#D6E3FF",
-    name: "Dr.John Smith",
-    id: "DOC-9042",
-    dept: "Cardiology",
-    deptBg: "#D6E3FF",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Tambaram)",
-    status: "Active",
-  },
-    {
-    initials: "JS",
-    initialsColor: "#00488D",
-    initBg: "#D6E3FF",
-    name: "Dr.John Smith",
-    id: "DOC-9042",
-    dept: "Cardiology",
-    deptBg: "#D6E3FF",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Tambaram)",
-    status: "Active",
-  },
-    {
-    initials: "JS",
-    initialsColor: "#00488D",
-    initBg: "#D6E3FF",
-    name: "Dr.John Smith",
-    id: "DOC-9042",
-    dept: "Cardiology",
-    deptBg: "#D6E3FF",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Tambaram)",
-    status: "Active",
-  },
-    {
-    initials: "JS",
-    initialsColor: "#00488D",
-    initBg: "#D6E3FF",
-    name: "Dr.John Smith",
-    id: "DOC-9042",
-    dept: "Cardiology",
-    deptBg: "#D6E3FF",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Tambaram)",
-    status: "Active",
-  },
-    {
-    initials: "JS",
-    initialsColor: "#00488D",
-    initBg: "#D6E3FF",
-    name: "Dr.John Smith",
-    id: "DOC-9042",
-    dept: "Cardiology",
-    deptBg: "#D6E3FF",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Tambaram)",
-    status: "Active",
-  },
-    {
-    initials: "JS",
-    initialsColor: "#00488D",
-    initBg: "#D6E3FF",
-    name: "Dr.John Smith",
+    name: "Dr. John Smith",
     id: "DOC-9042",
     dept: "Cardiology",
     deptBg: "#D6E3FF",
@@ -99,11 +23,95 @@ const doctors = [
     status: "Active",
   },
   {
-    initials: "MK",
-    initialsColor: "#475C7F",
+    avatar: "EM",
+    avatarColor: "#7B3200",
+    initBg: "#FFDBCB",
+    name: "Dr. Emily Moore",
+    id: "DOC-9043",
+    dept: "Neurology",
+    deptBg: "#FFE4E6",
+    deptColor: "#BE123C",
+    branch: "Central Hospital (Saidapet)",
+    status: "Active",
+  },
+  {
+    avatar: "DW",
+    avatarColor: "#00488D",
+    initBg: "#D6E3FF",
+    name: "Dr. David Wilson",
+    id: "DOC-9044",
+    dept: "Orthopedics",
+    deptBg: "#D6E3FF",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Egmore)",
+    status: "Active",
+  },
+  {
+    avatar: "OL",
+    avatarColor: "#00C896",
+    initBg: "rgba(0,200,150,0.12)",
+    name: "Dr. Olivia Lewis",
+    id: "DOC-9045",
+    dept: "Dermatology",
+    deptBg: "rgba(0,200,150,0.12)",
+    deptColor: "#00C896",
+    branch: "Central Hospital (Tambaram)",
+    status: "Leave",
+  },
+  {
+    avatar: "JM",
+    avatarColor: "#475C7F",
     initBg: "#E6E8EA",
-    name: "Marcus Kincaid",
-    id: "DOC-2210",
+    name: "Dr. James Miller",
+    id: "DOC-9046",
+    dept: "ENT",
+    deptBg: "#E6E8EA",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Saidapet)",
+    status: "Active",
+  },
+  {
+    avatar: "SC",
+    avatarColor: "#00488D",
+    initBg: "#D6E3FF",
+    name: "Dr. Sophia Clark",
+    id: "DOC-9047",
+    dept: "Gynecology",
+    deptBg: "#FCE7F3",
+    deptColor: "#BE185D",
+    branch: "Central Hospital (Egmore)",
+    status: "Active",
+  },
+  {
+    avatar: "BN",
+    avatarColor: "#7B3200",
+    initBg: "#FFDBCB",
+    name: "Dr. Benjamin Nelson",
+    id: "DOC-9048",
+    dept: "Urology",
+    deptBg: "#DBEAFE",
+    deptColor: "#1E40AF",
+    branch: "Central Hospital (Tambaram)",
+    status: "Active",
+  },
+  {
+    avatar: "AG",
+    avatarColor: "#00C896",
+    initBg: "rgba(0,200,150,0.12)",
+    name: "Dr. Amelia Green",
+    id: "DOC-9049",
+    dept: "Oncology",
+    deptBg: "rgba(0,200,150,0.12)",
+    deptColor: "#00C896",
+    branch: "Central Hospital (Saidapet)",
+    status: "Leave",
+  },
+  {
+    avatar: "MK",
+    avatarColor: "#475C7F",
+    initBg: "#E6E8EA",
+    name: "Dr. Marcus Kincaid",
+    id: "DOC-4431",
     dept: "Cancer",
     deptBg: "#E6E8EA",
     deptColor: "#475C7F",
@@ -111,8 +119,8 @@ const doctors = [
     status: "Leave",
   },
   {
-    initials: "RL",
-    initialsColor: "#4A5F83",
+    avatar: "RL",
+    avatarColor: "#4A5F83",
     initBg: "#D6E3FF",
     name: "Dr. Robert Lee",
     id: "DOC-4431",
@@ -123,11 +131,11 @@ const doctors = [
     status: "Active",
   },
   {
-    initials: "RL",
-    initialsColor: "#00C896",
+    avatar: "AK",
+    avatarColor: "#00C896",
     initBg: "rgba(0,200,150,0.12)",
     name: "Dr. Arun Kumar",
-    id: "DOC-4431",
+    id: "DOC-4432",
     dept: "Orthology",
     deptBg: "rgba(0,200,150,0.12)",
     deptColor: "#00C896",
@@ -138,8 +146,8 @@ const doctors = [
 
 const staff = [
   {
-    initials: "AV",
-    initialsColor: "#00488D",
+    avatar: "AV",
+    avatarColor: "#00488D",
     initBg: "#D6E3FF",
     name: "Anita Verma",
     id: "STF-1006",
@@ -150,8 +158,8 @@ const staff = [
     status: "Active",
   },
   {
-    initials: "RP",
-    initialsColor: "#7B3200",
+    avatar: "RP",
+    avatarColor: "#7B3200",
     initBg: "#FFDBCB",
     name: "Ravi Patel",
     id: "STF-1007",
@@ -162,8 +170,8 @@ const staff = [
     status: "Suspended",
   },
   {
-    initials: "SJ",
-    initialsColor: "#00C896",
+    avatar: "SJ",
+    avatarColor: "#00C896",
     initBg: "rgba(0,200,150,0.12)",
     name: "Dr. Sarah Joseph",
     id: "STF-1008",
@@ -174,8 +182,8 @@ const staff = [
     status: "Active",
   },
   {
-    initials: "MD",
-    initialsColor: "#475C7F",
+    avatar: "MD",
+    avatarColor: "#475C7F",
     initBg: "#E6E8EA",
     name: "Michael Dsouza",
     id: "STF-1009",
@@ -186,8 +194,8 @@ const staff = [
     status: "Resigned",
   },
   {
-    initials: "MN",
-    initialsColor: "#00488D",
+    avatar: "MN",
+    avatarColor: "#00488D",
     initBg: "#D6E3FF",
     name: "Dr. Meera Nair",
     id: "STF-1010",
@@ -198,8 +206,8 @@ const staff = [
     status: "Active",
   },
   {
-    initials: "KR",
-    initialsColor: "#475C7F",
+    avatar: "KR",
+    avatarColor: "#475C7F",
     initBg: "#E6E8EA",
     name: "Karthik Rajan",
     id: "STF-1011",
@@ -210,8 +218,8 @@ const staff = [
     status: "Active",
   },
   {
-    initials: "SG",
-    initialsColor: "#7B3200",
+    avatar: "SG",
+    avatarColor: "#7B3200",
     initBg: "#FFDBCB",
     name: "Dr. Sunil Gupta",
     id: "STF-1012",
@@ -222,8 +230,8 @@ const staff = [
     status: "Leave",
   },
   {
-    initials: "PS",
-    initialsColor: "#00C896",
+    avatar: "PS",
+    avatarColor: "#00C896",
     initBg: "rgba(0,200,150,0.12)",
     name: "Dr. Priya Sharma",
     id: "STF-1005",
@@ -231,6 +239,81 @@ const staff = [
     deptBg: "#D6E3FF",
     deptColor: "#475C7F",
     branch: "Central Hospital (Tambaram)",
+    status: "Active",
+  },
+];
+
+const appointments = [
+  {
+    id: 1,
+    appointmentNo: "APT-9042",
+    patientName: "Divakar",
+    patientId: "PTN-9042",
+    avatar: "D",
+    avatarColor: "#00488D",
+    avatarBg: "#D6E3FF",
+    doctorName: "Dr. Sarah Jenkins",
+    doctorId: "DOC-442",
+    doctorAvatar: "SJ",
+    doctorAvatarcolor: "#FF6B35",
+    doctorAvatarBg: "#ff6b351f",
+    reason: "General Check-Up",
+    date: "12-12-2026",
+    time: "10:00 AM",
+    status: "Active",
+  },
+  {
+    id: 2,
+    appointmentNo: "APT-2219",
+    patientName: "Bharath",
+    patientId: "PTN-2219",
+    avatar: "B",
+    avatarColor: "#7B3200",
+    avatarBg: "#FFDBCB",
+    doctorName: "Dr. Robert Lee",
+    doctorId: "DOC-2210",
+    doctorAvatar: "RL",
+    doctorAvatarcolor: "#475C7F",
+    doctorAvatarBg: "#E6E8EA",
+    reason: "Initial Diagnosis",
+    date: "12-12-2026",
+    time: "11:20 AM",
+    status: "Leave",
+  },
+  {
+    id: 3,
+    appointmentNo: "APT-4431",
+    patientName: "Babu",
+    patientId: "PTN-4431",
+    avatar: "B",
+    avatarColor: "#00C896",
+    avatarBg: "rgba(0,200,150,0.12)",
+    doctorName: "Marcus Kincaid",
+    doctorId: "DOC-4431",
+    doctorAvatar: "MK",
+    doctorAvatarcolor: "#00488D",
+    doctorAvatarBg: "#D6E3FF",
+    reason: "Follow-Up Visit",
+    date: "12-12-2026",
+    time: "12:30 PM",
+    status: "Active",
+  },
+  {
+    id: 4,
+    appointmentNo: "APT-2219",
+    patientName: "Govindan",
+    patientId: "PTN-2219",
+    avatar: "G",
+    avatarColor: "#475C7F",
+    avatarBg: "#E6E8EA",
+    doctorName: "Dr. Robert Lee",
+    doctorId: "DOC-2210",
+    doctorAvatar: "RL",
+    doctorAvatarcolor: "#475C7F",
+    doctorAvatarBg: "#E6E8EA",
+    reason: "Initial Diagnosis",
+    date: "12-12-2026",
+    time: "01:15 PM",
     status: "Active",
   },
 ];
@@ -359,7 +442,7 @@ const stats = [
     bg: "rgba(255,255,255,0.80)",
     border: "#C2C6D4",
     valueColor: "#00488D",
-    icon: <Calendar className="h-4 w-4" color="#00488D" />,
+    icon: <CalendarIcon className="h-4 w-4" color="#00488D" />,
     iconBg: "rgba(168,200,255,0.20)",
   },
   {
@@ -418,16 +501,172 @@ function CountUp({ target, duration = 1800 }: { target: number; duration?: numbe
   return <>{formatStatValue(count)}</>;
 }
 
+function RowsPerPageSelect({ value, onChange, options = [5, 10, 20] }: { value: number; onChange: (val: number) => void; options?: number[] }) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative" ref={wrapperRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={`flex items-center gap-1.5 text-xs font-semibold text-[#374151] bg-white border rounded-md pl-2.5 pr-2 py-1 transition-colors ${
+          open ? "border-[#00488D] ring-2 ring-[#D6E3FF]" : "border-[#E5E7EB] hover:border-[#00488D]"
+        }`}
+      >
+        {value}
+        <ChevronDown
+          className={`w-3 h-3 text-[#6B7280] transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      <div
+        role="listbox"
+        className={`absolute right-0 top-full mt-1 w-16 origin-top-right bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
+          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
+        }`}
+      >
+        {options.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            role="option"
+            aria-selected={value === opt}
+            onClick={() => {
+              onChange(opt);
+              setOpen(false);
+            }}
+            className={`flex items-center justify-between w-full px-2.5 py-1.5 text-xs font-semibold text-left transition-colors ${
+              value === opt ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
+            }`}
+          >
+            {opt}
+            {value === opt && <Check className="w-3 h-3" />}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("doctors");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(5);
 
-  // Pagination calculations
-  const currentData = activeTab === "doctors" ? doctors : activeTab === "staffs" ? staff : doctors;
+  // Sort state (per tab)
+  const [sortField, setSortField] = useState<Record<string, string>>({});
+  const [sortDirection, setSortDirection] = useState<Record<string, "asc" | "desc">>({});
+
+  // Tabs sliding underline
+  const tabsContainerRef = useRef<HTMLDivElement>(null);
+  const [underline, setUnderline] = useState({ left: 0, width: 0 });
+
+  // Date selection state
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [filterValues, setFilterValues] = useState<Record<string, any>>({});
+
+  const doctorFields: FilterField[] = [
+    { id: "patientName", label: "Patient Name", type: "select", options: [{ label: "John", value: "1" }, { label: "David", value: "2" }] },
+    { id: "patientId", label: "Patient ID", type: "text", placeholder: "Enter Patient ID" },
+    { id: "mobile", label: "Mobile", type: "tel", placeholder: "Enter mobile" },
+    { id: "diagnose", label: "Diagnose", type: "text", placeholder: "Enter Diagnose" },
+    { id: "doctor", label: "Assigned Doctor", type: "select", options: [] },
+    { id: "status", label: "Appointment Status", type: "checkbox" },
+  ];
+
+  const handleFilterChange = (name: string, value: any) => {
+    setFilterValues((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleApplyFilter = () => {
+    console.log("Applied filters:", filterValues);
+    setIsFilterOpen(false);
+  };
+
+  const handleClearFilter = () => {
+    setFilterValues({});
+  };
+
+  useEffect(() => {
+    const container = tabsContainerRef.current;
+    if (!container) return;
+    const activeButton = container.querySelector<HTMLButtonElement>(`[data-tab="${activeTab}"]`);
+    if (activeButton) {
+      setUnderline({ left: activeButton.offsetLeft, width: activeButton.offsetWidth });
+    }
+  }, [activeTab]);
+
+  const handleSort = (field: string) => {
+    if (sortField[activeTab] === field) {
+      setSortDirection((prev) => ({
+        ...prev,
+        [activeTab]: prev[activeTab] === "asc" ? "desc" : "asc",
+      }));
+    } else {
+      setSortField((prev) => ({ ...prev, [activeTab]: field }));
+      setSortDirection((prev) => ({ ...prev, [activeTab]: "asc" }));
+    }
+  };
+
+  const activeData =
+    activeTab === "staff"
+      ? staff
+      : activeTab === "appointments"
+        ? appointments
+        : doctors ;
+
+  const searchableFields =
+    activeTab === "appointments"
+      ? ["appointmentNo", "patientName", "doctorName", "reason", "status"]
+      : ["name", "id", "dept", "branch", "status"];
+
+  const filteredData = searchQuery
+    ? activeData.filter((item) =>
+        searchableFields.some((field) =>
+          String(item[field] ?? "")
+            .toLowerCase()
+            .includes(searchQuery.toLowerCase())
+        )
+      )
+    : activeData;
+
+  const currentSortField = sortField[activeTab];
+  const currentSortDirection = sortDirection[activeTab];
+
+  const currentData = [...filteredData].sort((a, b) => {
+    if (!currentSortField) return 0;
+    const aValue = String(a[currentSortField] ?? "").toLowerCase();
+    const bValue = String(b[currentSortField] ?? "").toLowerCase();
+    if (aValue < bValue) {
+      return currentSortDirection === "asc" ? -1 : 1;
+    }
+    if (aValue > bValue) {
+      return currentSortDirection === "asc" ? 1 : -1;
+    }
+    return 0;
+  });
+
   const totalRecords = currentData.length;
   const totalPages = Math.max(1, Math.ceil(totalRecords / rowsPerPage));
   const startIndex = (currentPage - 1) * rowsPerPage;
@@ -438,55 +677,104 @@ export default function Dashboard() {
 
   // Branch progress bar state
 
-  const [animatedValues, setAnimatedValues] = useState<Record<string, number>>({});
+  const [animatedValues, setAnimatedValues] = useState<Record<number, number>>({});
   const branchRef = useRef<HTMLDivElement>(null);
   const hasAnimated = useRef(false);
 
-  
   const [branches, setBranches] = useState([
-    { name: "Central Hospital (Tambaram)", pct: 92 },
-    { name: "Central Hospital (Saidapet)", pct: 78 },
-    { name: "Central Hospital (Egmore)", pct: 89 },
+    { id: 1, name: "Central Hospital (Tambaram)", pct: 0 },
+    { id: 2, name: "Central Hospital (Saidapet)", pct: 0 },
+    { id: 3, name: "Central Hospital (Egmore)", pct: 0 },
   ]);
 
+  useEffect(() => {
+    setTimeout(() => {
+      updateBranchPercentage(1, 60);
+      updateBranchPercentage(2, 25);
+      updateBranchPercentage(3, 40);
+    }, 900);
+  }, []);  
 
+  const updateBranchPercentage = (id: number, newPct: number) => {
+    setBranches((prev) =>
+      prev.map((branch) =>
+        branch.id === id ? { ...branch, pct: newPct } : branch,
+      ),
+    );
+  };
+
+  // Initial trigger on scroll
+  useEffect(() => {
+    const el = branchRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !hasAnimated.current) {
+          hasAnimated.current = true;
+          observer.disconnect();
+
+          branches.forEach((branch, index) => {
+            setTimeout(() => {
+              let current = 0;
+              const interval = setInterval(() => {
+                current += 1;
+                setAnimatedValues((prev) => ({
+                  ...prev,
+                  [branch.id]: current,
+                }));
+                if (current >= branch.pct) {
+                  clearInterval(interval);
+                }
+              }, 30);
+            }, index * 200);
+          });
+        }
+      },
+      { threshold: 0.1 },
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Animate only the branch whose pct changed
 useEffect(() => {
-  const el = branchRef.current;
-  if (!el) return;
+  if (!hasAnimated.current) return;
 
-  const observer = new IntersectionObserver(
-    (entries) => {
-      if (entries[0].isIntersecting && !hasAnimated.current) {
-        hasAnimated.current = true;
-        observer.disconnect();
+  branches.forEach((branch) => {
+    const current = animatedValues[branch.id] ?? 0;
 
-        const intervals: ReturnType<typeof setInterval>[] = [];
+    if (current !== branch.pct) {
+      const interval = setInterval(() => {
+        setAnimatedValues((prev) => {
+          const value = prev[branch.id] ?? 0;
 
-        branches.forEach((branch, index) => {
-          setTimeout(() => {
-            let current = 0;
-            const interval = setInterval(() => {
-              current += 1;
-              setAnimatedValues((prev) => ({
-                ...prev,
-                [branch.name]: current,
-              }));
-              if (current >= branch.pct) {
-                clearInterval(interval);
-              }
-            }, 30);
-            intervals.push(interval);
-          }, index * 200);
+          if (value === branch.pct) {
+            clearInterval(interval);
+            return prev;
+          }
+
+          return {
+            ...prev,
+            [branch.id]:
+              value < branch.pct ? value + 1 : value - 1,
+          };
         });
-      }
-    },
-    { threshold: 0.1 },
-  );
+      }, 30);
+    }
+  });
+}, [branches]);
 
-  observer.observe(el);
+  const navigate = useNavigate();
 
-  return () => observer.disconnect();
-}, []);
+  const handleEdit = (id: number) => {
+    navigate(`/destination-edit/${id}`);
+  };
+
+  const handleView = (id: number) => {
+    navigate(`/destination-view/${id}`);
+  };
 
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB]">
@@ -509,7 +797,7 @@ useEffect(() => {
             {stats.map((stat) => (
               <div
                 key={stat.label}
-                className="flex flex-col p-4 rounded-lg shadow-[2px_2px_16px_0_rgba(0,0,0,0.25)] transition-all duration-200 hover:-translate-y-1 hover:shadow-lg cursor-pointer"
+                className="flex flex-col p-4 rounded-xl shadow-[2px_2px_16px_0_rgba(0,0,0,0.25)] transition-all duration-200 hover:-translate-y-1 hover:shadow-lg cursor-pointer"
                 style={{ background: stat.bg, border: `0.2px solid ${stat.border}` }}
               >
                 <div className="flex justify-between items-start">
@@ -555,28 +843,33 @@ useEffect(() => {
           </div>
 
           {/* Table Card */}
-          <div className="bg-white rounded-lg border shadow-sm flex flex-col min-h-[320px] overflow-hidden transition-all duration-200 hover:shadow-md">
-            {/* Table Header */}
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col min-h-[320px] transition-all duration-300 hover:shadow-md">
+            <div className="overflow-hidden">
+              {/* Table Header */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-[rgba(194,198,212,0.10)]">
-              <div className="flex items-center gap-6">
-                {["doctors", "Staffs", "Appointments"].map((tab) => (
+              <div className="relative flex items-center gap-6" ref={tabsContainerRef}>
+                {[
+                  { key: "doctors", label: "Doctors" },
+                  { key: "staff", label: "Staff" },
+                  { key: "appointments", label: "Appointments" },
+                ].map((tab) => (
                   <button
-                    key={tab}
+                    key={tab.key}
+                    data-tab={tab.key}
                     onClick={() => {
-                      setActiveTab(tab.toLowerCase());
+                      setActiveTab(tab.key);
                       setCurrentPage(1);
                     }}
-                    className="relative pb-1 text-xs font-semibold tracking-[1.2px] capitalize transition-colors"
-                    style={{
-                      color: activeTab === tab.toLowerCase() ? "#00488D" : "#424752",
-                    }}
+                    className="relative pb-1 text-xs font-semibold tracking-[1.2px] capitalize transition-colors duration-200"
+                    style={{ color: activeTab === tab.key ? "#00488D" : "#424752" }}
                   >
-                    {tab}
-                    {activeTab === tab.toLowerCase() && (
-                      <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#00488D]" />
-                    )}
+                    {tab.label}
                   </button>
                 ))}
+                <div
+                  className="absolute bottom-0 h-0.5 bg-[#00488D] transition-all duration-300 ease-out"
+                  style={{ left: underline.left, width: underline.width }}
+                />
               </div>
               <div className="flex items-center gap-2 flex-wrap justify-end">
                 {/* Search */}
@@ -584,6 +877,11 @@ useEffect(() => {
                   <input
                     type="text"
                     placeholder="Search..."
+                    value={searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setCurrentPage(1);
+                    }}
                     className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[250px]"
                     />
                   <svg className="absolute left-2 top-1/2 -translate-y-1/2" width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -592,121 +890,117 @@ useEffect(() => {
                 </div>
                 {/* Date nav */}
                 <div className="flex items-center">
-                  <button className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg">
+                  <button
+                    onClick={() => setSelectedDate((prev) => subDays(prev, 1))}
+                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                  >
                     <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
                       <path d="M5 1L1 5L5 9" stroke="black" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                   </button>
-                  <button className="flex items-center justify-center h-[27px] px-4 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium">
-                    Today
-                  </button>
-                  <button className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg">
+                  <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                    <PopoverTrigger asChild>
+                      <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
+                        {isToday(selectedDate)
+                          ? "Today"
+                          : isYesterday(selectedDate)
+                            ? "Yesterday"
+                            : isTomorrow(selectedDate)
+                              ? "Tomorrow"
+                              : format(selectedDate, "dd/MM/yyyy")}
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
+                      <CalendarPicker
+                        selected={selectedDate}
+                        hideThemePicker
+                        onSelect={(date) => {
+                          setSelectedDate(date);
+                          setIsCalendarOpen(false);
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <button
+                    onClick={() => setSelectedDate((prev) => addDays(prev, 1))}
+                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                  >
                     <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
                       <path d="M1 1L5 5L1 9" stroke="black" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                   </button>
                 </div>
                 {/* Filters */}
-                <button className="flex items-center gap-2 h-[27px] px-4 rounded-md border border-[#E5E7EB] text-[#374151] text-sm font-medium">
-                  <svg width="12" height="11" viewBox="0 0 12 11" fill="none">
-                    <path d="M11.293.519531C11.2292.364583 11.1266.239258 10.9854.143555C10.8441.0478516 10.6823 0 10.5 0H.875C.638021 0 .432943.0865885.259766.259766C.0865885.432943 0 .638021 0 .875C0 .984375.0205078 1.09147.0615234 1.19629C.102539 1.30111.159505 1.38997.232422 1.46289L3.9375 5.42773V9.625C3.9375 9.87109 4.02181 10.0785 4.19043 10.2471C4.35905 10.4157 4.56641 10.5 4.8125 10.5H7.4375C7.66016 10.5 7.84766 10.4219 7.99609 10.2656C8.14453 10.1094 8.21875 9.92578 8.21875 9.71094V5.42773L11.9238 1.46289C11.9967 1.38997 12.0537 1.30339 12.0947 1.20312C12.1357 1.10286 12.1562.99349 12.1562.875C12.1562.811198 12.1494.749674 12.1357.69043C12.122.631185 12.1015.574219 12.0742.519531Z" fill="#374151"/>
-                  </svg>
-                  Filters
-                </button>
+                <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+                  <PopoverTrigger asChild>
+                    <button className="flex items-center gap-2 h-[27px] px-4 rounded-md border border-[#E5E7EB] text-[#374151] text-sm font-medium transition-colors duration-150 hover:bg-[#F2F4F6] hover:border-[#00488D]">
+                      <svg width="12" height="11" viewBox="0 0 12 11" fill="none">
+                        <path d="M11.293.519531C11.2292.364583 11.1266.239258 10.9854.143555C10.8441.0478516 10.6823 0 10.5 0H.875C.638021 0 .432943.0865885.259766.259766C.0865885.432943 0 .638021 0 .875C0 .984375.0205078 1.09147.0615234 1.19629C.102539 1.30111.159505 1.38997.232422 1.46289L3.9375 5.42773V9.625C3.9375 9.87109 4.02181 10.0785 4.19043 10.2471C4.35905 10.4157 4.56641 10.5 4.8125 10.5H7.4375C7.66016 10.5 7.84766 10.4219 7.99609 10.2656C8.14453 10.1094 8.21875 9.92578 8.21875 9.71094V5.42773L11.9238 1.46289C11.9967 1.38997 12.0537 1.30339 12.0947 1.20312C12.1357 1.10286 12.1562.99349 12.1562.875C12.1562.811198 12.1494.749674 12.1357.69043C12.122.631185 12.1015.574219 12.0742.519531Z" fill="#374151"/>
+                      </svg>
+                      Filters
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg" align="end">
+                    <FilterPanel
+                      title="Advanced Filters"
+                      fields={doctorFields}
+                      values={filterValues}
+                      onChange={handleFilterChange}
+                      onApply={handleApplyFilter}
+                      onClear={handleClearFilter}
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
 
             {/* Table */}
             <div className="min-h-[320px] overflow-x-auto">
-              <table className="w-full min-w-[640px] ">
-                <thead className="sticky top-0 z-10 bg-slate-100">
-                  <tr className="bg-[rgba(242,244,246,0.40)]">
-                    <th className="text-left px-5 py-2.5 text-[9px] font-semibold text-[#424752] tracking-[0.9px] capitalize w-64">Name ↕</th>
-                    <th className="text-left px-5 py-2.5 text-[9px] font-semibold text-[#424752] tracking-[0.9px] capitalize">Role/Dept ↕</th>
-                    <th className="text-left px-5 py-2.5 text-[9px] font-semibold text-[#424752] tracking-[0.9px] capitalize">Branch ↕</th>
-                    <th className="text-left px-5 py-2.5 text-[9px] font-semibold text-[#424752] tracking-[0.9px] capitalize">Status ↕</th>
-                    <th className="text-right px-5 py-2.5 text-[9px] font-semibold text-[#424752] tracking-[0.9px] capitalize">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {currentRows.map((doc, i) => (
-                    <tr key={`${activeTab}-${i}`} className="border-t border-[rgba(194,198,212,0.05)] hover:bg-[#F7F9FB] transition-colors">
-                      <td className="px-5 py-3">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 text-[10px] font-semibold"
-                            style={{ background: doc.initBg, color: doc.initialsColor }}
-                          >
-                            {doc.initials}
-                          </div>
-                          <div>
-                            <div className="text-[#111827] font-semibold text-sm leading-[1.2]">{doc.name}</div>
-                            <div className="text-[#8C8D8F] font-semibold text-[10px] uppercase">{doc.id}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3">
-                        <span
-                          className="px-1.5 py-0.5 rounded-sm text-[10px] font-semibold tracking-[-0.4px] capitalize"
-                          style={{ background: doc.deptBg, color: doc.deptColor }}
-                        >
-                          {doc.dept}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 text-[#191C1E] font-medium text-[11px] leading-4">{doc.branch}</td>
-                      <td className="px-5 py-3">
-                        <span
-                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
-                          style={{
-                            background: doc.status === "Active" ? "#F0FDF4" : "#FFF7ED",
-                            color: doc.status === "Active" ? "#16A34A" : "#F97316",
-                          }}
-                        >
-                          <span
-                            className="w-1.5 h-1.5 rounded-full"
-                            style={{ background: doc.status === "Active" ? "#22C55E" : "#F97316" }}
-                          />
-                          {doc.status}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3">
-                        <div className="flex items-center justify-end gap-3">
-                          <button title="Edit">
-                            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-                              <path d="M1.5 15C1.0875 15.734375 14.8533 14.5599C.146875 14.2665 0 13.9139 0 13.5019V3.01498C0 2.603.146875 2.25031.440625 1.95693C.734375 1.66355 1.0875 1.51685 1.5 1.51685H8.19375L6.69375 3.01498H1.5V13.5019H12V8.29588L13.5 6.79775V13.5019C13.5 13.9139 13.3531 14.2665 13.0594 14.5599C12.7656 14.8533 12.4125 15 12 15H1.5ZM4.5 10.5056V7.3221L11.3813.449438C11.5312.299625 11.7.187266 11.8875.11236C12.075.0374532 12.2625 0 12.45 0C12.65 0 12.8406.0374532 13.0219.11236C13.2031.187266 13.3687.299625 13.5187.449438L14.5687 1.51685C14.7062 1.66667 14.8125 1.83208 14.8875 2.01311C14.9625 2.19413 15 2.37828 15 2.56554C15 2.75281 14.9656 2.93695 14.8969 3.11798C14.8281 3.299 14.7187 3.46442 14.5687 3.61423L7.6875 10.5056H4.5ZM6 9.00749H7.05L11.4 4.66292L10.875 4.13858L10.3312 3.61423L6 7.94008V9.00749Z" fill="#003EA8"/>
-                            </svg>
-                          </button>
-                          <button title="View">
-                            <svg width="22" height="20" viewBox="0 0 22 20" fill="none">
-                              <path d="M11 14.5C12.0227 14.5 12.892 14.0625 13.608 13.1875C14.3239 12.3125 14.6818 11.25 14.6818 10C14.6818 8.75 14.3239 7.6875 13.608 6.8125C12.892 5.9375 12.0227 5.5 11 5.5C9.97727 5.5 9.10795 5.9375 8.39205 6.8125C7.67614 7.6875 7.31818 8.75 7.31818 10C7.31818 11.25 7.67614 12.3125 8.39205 13.1875C9.10795 14.0625 9.97727 14.5 11 14.5ZM11 17.5C9.00909 17.5 7.19545 16.8208 5.55909 15.4625C3.92273 14.1042 2.73636 12.2833 2 10C2.73636 7.71667 3.92273 5.89583 5.55909 4.5375C7.19545 3.17917 9.00909 2.5 11 2.5C12.9909 2.5 14.8045 3.17917 16.4409 4.5375C18.0773 5.89583 19.2636 7.71667 20 10C19.2636 12.2833 18.0773 14.1042 16.4409 15.4625C14.8045 16.8208 12.9909 17.5 11 17.5Z" fill="#505F76"/>
-                            </svg>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {activeTab === "doctors" ? (
+                <DoctorsTableView
+                  rows={currentRows as TableRow[]}
+                  sortField={sortField[activeTab] ?? ""}
+                  sortDirection={sortDirection[activeTab] ?? "asc"}
+                  onSort={handleSort}
+                  onEdit={handleEdit}
+                  onView={handleView}
+                />
+              ) : activeTab === "staff" ? (
+                <StaffTableView
+                  rows={currentRows as TableRow[]}
+                  sortField={sortField[activeTab] ?? ""}
+                  sortDirection={sortDirection[activeTab] ?? "asc"}
+                  onSort={handleSort}
+                  onEdit={handleEdit}
+                  onView={handleView}
+                />
+              ) : activeTab === "appointments" ? (
+                <AppointmentsTableView
+                  rows={currentRows as TableRow[]}
+                  sortField={sortField[activeTab] ?? ""}
+                  sortDirection={sortDirection[activeTab] ?? "asc"}
+                  onSort={handleSort}
+                  onEdit={handleEdit}
+                  onView={handleView}
+                />
+              ) : null}
+            </div>
+
             </div>
 
             {/* Pagination */}
             <div className="mt-auto shrink-0 flex items-center justify-between px-5 py-2 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur">
               <div className="flex items-center gap-2">
-                <span className="text-[8px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
+                <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
                   Showing {visibleStart}-{visibleEnd} of {totalRecords}
                 </span>
-                <select
+                <RowsPerPageSelect
                   value={rowsPerPage}
-                  onChange={(e) => {
-                    setRowsPerPage(Number(e.target.value));
+                  onChange={(val) => {
+                    setRowsPerPage(val);
                     setCurrentPage(1);
                   }}
-                  className="text-xs font-semibold border rounded px-2 py-1 outline-none bg-white text-[#6B7280]"
-                >
-                  <option value={5}>5</option>
-                  <option value={10}>10</option>
-                  <option value={20}>20</option>
-                </select>
+                />
               </div>
               <div className="flex items-center gap-1">
                 <button
@@ -761,13 +1055,13 @@ useEffect(() => {
               </div>
               <div className="flex flex-col gap-4">
                 {branches.map((branch) => (
-                  <div key={branch.name} className="flex flex-col gap-1">
+                  <div key={branch.id} className="flex flex-col gap-1">
                     <div className="flex justify-between">
                       <span className="text-[#191C1E] text-[9px] font-semibold tracking-[0.9px] capitalize">{branch.name}</span>
-                      <span className="text-[#00488D] text-[9px] font-semibold tracking-[0.9px] uppercase">{animatedValues[branch.name] ?? 0}%</span>
+                      <span className="text-[#00488D] text-[9px] font-semibold tracking-[0.9px] uppercase">{animatedValues[branch.id] ?? 0}%</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-[#ECEEF0] overflow-hidden">
-                      <div className="h-full rounded-full bg-[#00488D] transition-all duration-200" style={{ width: `${animatedValues[branch.name] ?? 0}%` }} />
+                      <div className="h-full rounded-full bg-[#00488D] transition-all duration-200" style={{ width: `${animatedValues[branch.id] ?? 0}%` }} />
                     </div>
                   </div>
                 ))}
@@ -786,8 +1080,8 @@ useEffect(() => {
               <div className="flex flex-col gap-2">
                 {/* Alert 1 */}
                 <div className="flex items-start gap-3 p-2 rounded-[4px]">
-                  <svg width="17" height="15" viewBox="0 0 12 15" fill="none" className="flex-shrink-0 mt-0.5">
-                    <path d="M6 15C4.2625 14.5625 2.82812 13.5656 1.69687 12.0094C.565625 10.4531 0 8.725 0 6.825V2.25L6 0L12 2.25V6.825C12 8.725 11.4344 10.4531 10.3031 12.0094C9.17188 13.5656 7.7375 14.5625 6 15Z" fill="#00488D"/>
+                  <svg width="17" height="15" viewBox="0 0 17 15" fill="none" className="flex-shrink-0 mt-0.5">
+                    <path d="M0 14.25L8.25 0L16.5 14.25H0ZM2.5875 12.75H13.9125L8.25 3L2.5875 12.75ZM8.25 12C8.4625 12 8.64062 11.9281 8.78438 11.7844C8.92813 11.6406 9 11.4625 9 11.25C9 11.0375 8.92813 10.8594 8.78438 10.7156C8.64062 10.5719 8.4625 10.5 8.25 10.5C8.0375 10.5 7.85938 10.5719 7.71562 10.7156C7.57187 10.8594 7.5 11.0375 7.5 11.25C7.5 11.4625 7.57187 11.6406 7.71562 11.7844C7.85938 11.9281 8.0375 12 8.25 12ZM7.5 9.75H9V6H7.5V9.75Z" fill="#BA1A1A"/>
                   </svg>
                   <div>
                     <div className="text-[#191C1E] font-semibold text-xs leading-[15px]">Admin Access Granted</div>
