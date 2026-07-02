@@ -7,7 +7,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 model appointment {
@@ -278,5 +277,4 @@ model receptionist_profile {
   employee_id BigInt   @id
   remarks     String?
   employee    employee @relation(fields: [employee_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
->>>>>>> 0a415b53c9583389e209cf8d3e5515cd1bd6ed8e
 }
