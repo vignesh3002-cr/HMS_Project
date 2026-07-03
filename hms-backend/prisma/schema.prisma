@@ -38,27 +38,20 @@ model audit_log {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model branch {
-  branch_id        BigInt            @id @default(autoincrement())
-  parent_branch_id BigInt?
-  branch_code      String            @unique @db.VarChar(20)
-  name             String            @db.VarChar(150)
-  branch_type      String            @db.VarChar(20)
-  phone            String?           @db.VarChar(30)
-  email            String?           @db.VarChar(150)
-  address_line1    String?           @db.VarChar(200)
-  city             String?           @db.VarChar(100)
-  state_name       String?           @db.VarChar(100)
-  country_code     String?           @default("IN") @db.VarChar(10)
-  is_active        Boolean           @default(true)
-  created_at       DateTime          @default(now()) @db.Timestamptz(6)
-  updated_at       DateTime          @default(now()) @db.Timestamptz(6)
-  appointment      appointment[]
-  branch           branch?           @relation("branchTobranch", fields: [parent_branch_id], references: [branch_id], onDelete: NoAction, onUpdate: NoAction)
-  other_branch     branch[]          @relation("branchTobranch")
-  doctor_schedule  doctor_schedule[]
-  employee_branch  employee_branch[]
-  encounter        encounter[]
-  lab_order        lab_order[]
+  branch_id       BigInt            @id @default(autoincrement())
+  name            String            @db.VarChar(150)
+  branch_type     String            @db.VarChar(20)
+  email           String?           @db.VarChar(150)
+  address_line1   String?           @db.VarChar(200)
+  city            String?           @db.VarChar(100)
+  state_name      String?           @db.VarChar(100)
+  created_at      DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime          @default(now()) @db.Timestamptz(6)
+  appointment     appointment[]
+  doctor_schedule doctor_schedule[]
+  employee_branch employee_branch[]
+  encounter       encounter[]
+  lab_order       lab_order[]
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -153,10 +146,9 @@ model encounter {
 model global_master {
   id               String    @id @db.VarChar(20)
   role_type        String?   @db.VarChar(50)
-  parent_id        String?   @db.VarChar(20)
+  created_by       String?   @db.VarChar(20)
   name             String?   @db.VarChar(100)
   gender           String?   @db.VarChar(10)
-  dob              DateTime? @db.Date
   mobile           String?   @db.VarChar(15)
   email            String?   @db.VarChar(100)
   username         String?   @db.VarChar(50)

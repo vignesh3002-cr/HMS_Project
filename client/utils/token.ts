@@ -10,7 +10,7 @@ export const removeToken = () => {
     localStorage.removeItem("token");
 };
 
-export const saveUser = (user: any) => {
+export const saveUser = (user: object) => {
     localStorage.setItem("user", JSON.stringify(user));
 };
 

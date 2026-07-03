@@ -9,18 +9,39 @@ export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
-  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+ const handleLogin = async (e: React.FormEvent) => {
+
+    e.preventDefault();
 
     try {
-      const response = await login(username, password);
-      saveToken(response.token);
-      saveUser(response.user);
-      navigate("/dashboard");
+
+        const response = await login(username, password);
+
+        const { token, user, user_details } = response.data;
+
+        saveToken(token);
+
+        saveUser(user_details);
+
+        localStorage.setItem(
+            "user_info",
+            JSON.stringify(user)
+        );
+
+        alert("Login Successful");
+
+        navigate("/dashboard");
+
     } catch (error: any) {
-      alert(error.response?.data?.message || "Invalid Username or Password");
+
+        alert(
+            error.response?.data?.message ||
+            "Invalid Username or Password"
+        );
+
     }
-  };
+
+};
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 md:p-8 bg-clinical-page-bg font-manrope">
