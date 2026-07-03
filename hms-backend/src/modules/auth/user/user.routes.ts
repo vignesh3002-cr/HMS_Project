@@ -8,10 +8,10 @@ const router = Router();
 const userController = new UserController();
 
 router.post(
-    "/district-admin",
+    "/branch_admin",
     authenticate,
-    authorize("SUPER_ADMIN"),
-    userController.createDistrictAdmin.bind(userController)
+    authorize("ADMIN"),
+    userController.createBranchAdmin.bind(userController)
 );
 
 export default router;

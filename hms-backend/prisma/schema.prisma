@@ -173,6 +173,7 @@ model global_master {
   branch           String?   @db.VarChar(50)
   hospital_name    String?   @db.VarChar(100)
   hospital_address String?   @db.VarChar(100)
+  branch_id        String?   @db.VarChar(10)
 }
 
 model lab_order {

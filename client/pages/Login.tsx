@@ -1,56 +1,31 @@
-import { useState } from "react";
-import { login } from "../api/auth.api";
-
+﻿import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-    saveToken,
-    saveUser
-} from "../utils/token";
+import { login } from "../api/auth.api";
+import { saveToken, saveUser } from "../utils/token";
 
-export default function Index() {
+export default function Login() {
+  const navigate = useNavigate();
   const [rememberMe, setRememberMe] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const navigate = useNavigate();
 
-const handleLogin = async (
-    e: React.FormEvent
-) => {
-
-    e.preventDefault();
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
 
     try {
-
-        const response = await login(
-            username,      // We are temporarily treating this as username
-            password
-        );
-
-        saveToken(response.token);
-
-        saveUser(response.user);
-
-        navigate("/dashboard");
-
+      const response = await login(username, password);
+      saveToken(response.token);
+      saveUser(response.user);
+      navigate("/dashboard");
     } catch (error: any) {
-
-        alert(
-            error.response?.data?.message ||
-            "Invalid Username or Password"
-        );
-
+      alert(error.response?.data?.message || "Invalid Username or Password");
     }
-
-};
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 md:p-8 bg-clinical-page-bg font-manrope">
       <div className="w-full max-w-5xl flex flex-col md:flex-row rounded-xl overflow-hidden shadow-[0_25px_50px_-12px_rgba(30,58,138,0.08)] border border-[rgba(194,198,212,0.10)]">
-
-        {/* ── Left: Login Form ── */}
         <div className="bg-white flex flex-col justify-center w-full md:w-[468px] flex-shrink-0 p-8 md:p-10 relative">
-
-          {/* Heading */}
           <div className="mb-7">
             <h1 className="text-[32px] leading-[30px] tracking-[-0.6px] font-extrabold text-clinical-blue mb-2">
               Welcome Back
@@ -61,17 +36,18 @@ const handleLogin = async (
           </div>
 
           <form onSubmit={handleLogin} className="flex flex-col gap-5">
-
-            {/* Hospital/Organization ID */}
             <div className="flex flex-col gap-3">
               <label className="text-[14px] font-bold tracking-[0.9px] uppercase text-clinical-label leading-[13.5px]">
-                User Name
+                Username
               </label>
               <div className="flex items-center rounded-[4px] bg-clinical-input-bg">
                 <div className="flex items-center gap-[11px] flex-1 px-4 py-3 overflow-hidden">
                   <svg
-                    width="16" height="14" viewBox="0 0 16 14"
-                    fill="none" xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="14"
+                    viewBox="0 0 16 14"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
                     className="flex-shrink-0"
                   >
                     <path
@@ -90,7 +66,6 @@ const handleLogin = async (
               </div>
             </div>
 
-            {/* Password */}
             <div className="flex flex-col gap-3">
               <label className="text-[14px] font-bold tracking-[0.9px] uppercase text-clinical-label leading-[13.5px]">
                 Password
@@ -98,8 +73,11 @@ const handleLogin = async (
               <div className="flex items-center rounded-[4px] bg-clinical-input-bg">
                 <div className="flex items-center gap-3 flex-1 px-4 py-3 overflow-hidden">
                   <svg
-                    width="14" height="18" viewBox="0 0 14 18"
-                    fill="none" xmlns="http://www.w3.org/2000/svg"
+                    width="14"
+                    height="18"
+                    viewBox="0 0 14 18"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
                     className="flex-shrink-0"
                   >
                     <path
@@ -118,7 +96,6 @@ const handleLogin = async (
               </div>
             </div>
 
-            {/* Remember me + Forgot Password */}
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2 cursor-pointer select-none">
                 <div
@@ -137,29 +114,20 @@ const handleLogin = async (
                     </svg>
                   )}
                 </div>
-                <span className="text-xs font-medium leading-4 text-clinical-body">
-                  Remember me
-                </span>
+                <span className="text-xs font-medium leading-4 text-clinical-body">Remember me</span>
               </label>
-              <button
-                type="button"
-                className="text-xs font-bold leading-4 text-clinical-blue hover:underline"
-              >
+              <button type="button" className="text-xs font-bold leading-4 text-clinical-blue hover:underline">
                 Forgot Password?
               </button>
             </div>
 
-            {/* Login Button */}
             <div className="pt-1">
               <button
                 type="submit"
                 className="w-full flex items-center justify-between px-5 py-3 rounded-[4px] bg-gradient-to-br from-clinical-blue to-clinical-blue-mid shadow-[0_10px_15px_-3px_rgba(59,130,246,0.20),0_4px_6px_-4px_rgba(59,130,246,0.20)] hover:opacity-90 active:opacity-80 transition-opacity"
               >
                 <span className="text-base font-bold leading-5 text-white">Login</span>
-                <svg
-                  width="15" height="15" viewBox="0 0 15 15"
-                  fill="none" xmlns="http://www.w3.org/2000/svg"
-                >
+                <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <path
                     d="M7.25 14.5V12.8889H12.8889V1.61111H7.25V0H12.8889C13.3319 0 13.7112 0.157755 14.0267 0.473264C14.3422 0.788773 14.5 1.16806 14.5 1.61111V12.8889C14.5 13.3319 14.3422 13.7112 14.0267 14.0267C13.7112 14.3422 13.3319 14.5 12.8889 14.5H7.25ZM5.63889 11.2778L4.53125 10.1097L6.58542 8.05556H0V6.44444H6.58542L4.53125 4.39028L5.63889 3.22222L9.66667 7.25L5.63889 11.2778Z"
                     fill="white"
@@ -170,25 +138,12 @@ const handleLogin = async (
           </form>
         </div>
 
-        {/* ── Right: Graphic Panel ── */}
         <div className="hidden md:flex flex-col flex-1 relative overflow-hidden min-h-[500px] bg-clinical-blue-mid rounded-r-xl">
+          <div className="absolute inset-0 bg-cover bg-center bg-[url('https://api.builder.io/api/v1/image/assets/TEMP/dece4f5090fd507e2497a4bba6b015b28dc29434?width=1022')]" />
 
-          {/* Hospital background image with blend overlay */}
-          <div
-            className="absolute inset-0 bg-cover bg-center"
-            style={{
-              backgroundImage:
-                "url('https://api.builder.io/api/v1/image/assets/TEMP/dece4f5090fd507e2497a4bba6b015b28dc29434?width=1022')",
-            }}
-          />
-
-          {/* Blue gradient overlay */}
           <div className="absolute inset-0 bg-gradient-to-br from-clinical-blue via-clinical-blue-mid/80 to-clinical-blue-mid/0" />
 
-          {/* Feature cards */}
           <div className="relative z-10 flex flex-col justify-center gap-5 p-8 h-full">
-
-            {/* Card 1: Precision Administration */}
             <div className="flex flex-col gap-4 p-6 rounded-lg border border-white/10 bg-white/[0.16] backdrop-blur-xl">
               <div className="w-fit p-[10px] rounded-[4px] bg-white/20 backdrop-blur-md">
                 <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -199,16 +154,13 @@ const handleLogin = async (
                 </svg>
               </div>
               <div className="flex flex-col gap-1">
-                <h2 className="text-xl font-bold leading-7 tracking-[-0.5px] text-white">
-                  Precision Administration
-                </h2>
+                <h2 className="text-xl font-bold leading-7 tracking-[-0.5px] text-white">Precision Administration</h2>
                 <p className="text-sm font-medium text-clinical-blue-light leading-[22.75px]">
                   High-fidelity data visualization and editorial clarity for modern healthcare management.
                 </p>
               </div>
             </div>
 
-            {/* Card 2: Empowering Clinical Excellence */}
             <div className="flex flex-col gap-4 p-6 rounded-lg border border-white/10 bg-white/[0.16] backdrop-blur-xl">
               <div className="w-fit p-[10px] rounded-[4px] bg-white/20 backdrop-blur-md">
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -219,18 +171,14 @@ const handleLogin = async (
                 </svg>
               </div>
               <div className="flex flex-col gap-1">
-                <h2 className="text-xl font-bold leading-7 tracking-[-0.5px] text-white">
-                  Empowering Clinical Excellence
-                </h2>
+                <h2 className="text-xl font-bold leading-7 tracking-[-0.5px] text-white">Empowering Clinical Excellence</h2>
                 <p className="text-sm font-medium text-clinical-blue-light leading-[22.75px]">
                   High-fidelity data visualization and editorial clarity for modern healthcare management.
                 </p>
               </div>
             </div>
-
           </div>
         </div>
-
       </div>
     </div>
   );

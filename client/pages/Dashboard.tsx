@@ -1,553 +1,1067 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, ChevronDown, Check } from "lucide-react";
+import { useNavigate } from 'react-router-dom';
+import { AppointmentsTableView, DoctorsTableView, StaffTableView, type TableRow } from "@/components/hms/DashboardTable";
+import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import CalendarPicker from "@/components/hms/Calender";
+import { FilterPanel } from "@/components/Filter/FilterPanel";
+import type { FilterField } from "@/components/Filter/types";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
 
-type DoctorStatus = "Active" | "Leave";
-type ActiveTab = "Doctors" | "Staffs" | "Appointments";
-
-interface Doctor {
-  id: string;
-  initials: string;
-  name: string;
-  code: string;
-  department: string;
-  departmentColor: "blue" | "emerald";
-  branch: string;
-  location: string;
-  status: DoctorStatus;
-  avatarColor: string;
-}
-
-interface SummaryCard {
-  label: string;
-  value: string;
-  delta?: string;
-  deltaColor?: string;
-  bgColor: string;
-  borderColor: string;
-  iconColor: string;
-  icon: React.ReactNode;
-}
-
-// ─── Data ────────────────────────────────────────────────────────────────────
-
-const doctors: Doctor[] = [
+const doctors = [
   {
-    id: "1",
-    initials: "JS",
+    avatar: "JS",
+    avatarColor: "#00488D",
+    initBg: "#D6E3FF",
     name: "Dr. John Smith",
-    code: "DOC-9042",
-    department: "Cardiology",
-    departmentColor: "blue",
-    branch: "Central Hospital",
-    location: "Tambaram",
+    id: "DOC-9042",
+    dept: "Cardiology",
+    deptBg: "#D6E3FF",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Tambaram)",
     status: "Active",
-    avatarColor: "bg-blue-100 text-blue-600",
   },
   {
-    id: "2",
-    initials: "MK",
-    name: "Marcus Kincaid",
-    code: "DOC-2210",
-    department: "Cancer",
-    departmentColor: "blue",
-    branch: "Central Hospital",
-    location: "Tambaram",
+    avatar: "EM",
+    avatarColor: "#7B3200",
+    initBg: "#FFDBCB",
+    name: "Dr. Emily Moore",
+    id: "DOC-9043",
+    dept: "Neurology",
+    deptBg: "#FFE4E6",
+    deptColor: "#BE123C",
+    branch: "Central Hospital (Saidapet)",
+    status: "Active",
+  },
+  {
+    avatar: "DW",
+    avatarColor: "#00488D",
+    initBg: "#D6E3FF",
+    name: "Dr. David Wilson",
+    id: "DOC-9044",
+    dept: "Orthopedics",
+    deptBg: "#D6E3FF",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Egmore)",
+    status: "Active",
+  },
+  {
+    avatar: "OL",
+    avatarColor: "#00C896",
+    initBg: "rgba(0,200,150,0.12)",
+    name: "Dr. Olivia Lewis",
+    id: "DOC-9045",
+    dept: "Dermatology",
+    deptBg: "rgba(0,200,150,0.12)",
+    deptColor: "#00C896",
+    branch: "Central Hospital (Tambaram)",
     status: "Leave",
-    avatarColor: "bg-slate-100 text-slate-600",
   },
   {
-    id: "3",
-    initials: "RL",
+    avatar: "JM",
+    avatarColor: "#475C7F",
+    initBg: "#E6E8EA",
+    name: "Dr. James Miller",
+    id: "DOC-9046",
+    dept: "ENT",
+    deptBg: "#E6E8EA",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Saidapet)",
+    status: "Active",
+  },
+  {
+    avatar: "SC",
+    avatarColor: "#00488D",
+    initBg: "#D6E3FF",
+    name: "Dr. Sophia Clark",
+    id: "DOC-9047",
+    dept: "Gynecology",
+    deptBg: "#FCE7F3",
+    deptColor: "#BE185D",
+    branch: "Central Hospital (Egmore)",
+    status: "Active",
+  },
+  {
+    avatar: "BN",
+    avatarColor: "#7B3200",
+    initBg: "#FFDBCB",
+    name: "Dr. Benjamin Nelson",
+    id: "DOC-9048",
+    dept: "Urology",
+    deptBg: "#DBEAFE",
+    deptColor: "#1E40AF",
+    branch: "Central Hospital (Tambaram)",
+    status: "Active",
+  },
+  {
+    avatar: "AG",
+    avatarColor: "#00C896",
+    initBg: "rgba(0,200,150,0.12)",
+    name: "Dr. Amelia Green",
+    id: "DOC-9049",
+    dept: "Oncology",
+    deptBg: "rgba(0,200,150,0.12)",
+    deptColor: "#00C896",
+    branch: "Central Hospital (Saidapet)",
+    status: "Leave",
+  },
+  {
+    avatar: "MK",
+    avatarColor: "#475C7F",
+    initBg: "#E6E8EA",
+    name: "Dr. Marcus Kincaid",
+    id: "DOC-4431",
+    dept: "Cancer",
+    deptBg: "#E6E8EA",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Tambaram)",
+    status: "Leave",
+  },
+  {
+    avatar: "RL",
+    avatarColor: "#4A5F83",
+    initBg: "#D6E3FF",
     name: "Dr. Robert Lee",
-    code: "DOC-4431",
-    department: "Pediatrics",
-    departmentColor: "blue",
-    branch: "Central Hospital",
-    location: "Saidapet",
+    id: "DOC-4431",
+    dept: "Pediatrics",
+    deptBg: "#D6E3FF",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Saidapet)",
     status: "Active",
-    avatarColor: "bg-indigo-100 text-indigo-600",
   },
   {
-    id: "4",
-    initials: "AK",
+    avatar: "AK",
+    avatarColor: "#00C896",
+    initBg: "rgba(0,200,150,0.12)",
     name: "Dr. Arun Kumar",
-    code: "DOC-4432",
-    department: "Orthology",
-    departmentColor: "emerald",
-    branch: "Central Hospital",
-    location: "Egmore",
+    id: "DOC-4432",
+    dept: "Orthology",
+    deptBg: "rgba(0,200,150,0.12)",
+    deptColor: "#00C896",
+    branch: "Central Hospital (Egmore)",
     status: "Active",
-    avatarColor: "bg-emerald-100 text-emerald-600",
   },
 ];
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+const staff = [
+  {
+    avatar: "AV",
+    avatarColor: "#00488D",
+    initBg: "#D6E3FF",
+    name: "Anita Verma",
+    id: "STF-1006",
+    dept: "Emergency",
+    deptBg: "#FFE4E6",
+    deptColor: "#BE123C",
+    branch: "Central Hospital (Tambaram)",
+    status: "Active",
+  },
+  {
+    avatar: "RP",
+    avatarColor: "#7B3200",
+    initBg: "#FFDBCB",
+    name: "Ravi Patel",
+    id: "STF-1007",
+    dept: "Radiology",
+    deptBg: "#DBEAFE",
+    deptColor: "#1E40AF",
+    branch: "Central Hospital (Saidapet)",
+    status: "Suspended",
+  },
+  {
+    avatar: "SJ",
+    avatarColor: "#00C896",
+    initBg: "rgba(0,200,150,0.12)",
+    name: "Dr. Sarah Joseph",
+    id: "STF-1008",
+    dept: "Surgery",
+    deptBg: "#D6E3FF",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Egmore)",
+    status: "Active",
+  },
+  {
+    avatar: "MD",
+    avatarColor: "#475C7F",
+    initBg: "#E6E8EA",
+    name: "Michael Dsouza",
+    id: "STF-1009",
+    dept: "Pathology",
+    deptBg: "#E6E8EA",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Tambaram)",
+    status: "Resigned",
+  },
+  {
+    avatar: "MN",
+    avatarColor: "#00488D",
+    initBg: "#D6E3FF",
+    name: "Dr. Meera Nair",
+    id: "STF-1010",
+    dept: "Maternity",
+    deptBg: "#FCE7F3",
+    deptColor: "#BE185D",
+    branch: "Central Hospital (Tambaram)",
+    status: "Active",
+  },
+  {
+    avatar: "KR",
+    avatarColor: "#475C7F",
+    initBg: "#E6E8EA",
+    name: "Karthik Rajan",
+    id: "STF-1011",
+    dept: "Pharmacy",
+    deptBg: "#D6E3FF",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Saidapet)",
+    status: "Active",
+  },
+  {
+    avatar: "SG",
+    avatarColor: "#7B3200",
+    initBg: "#FFDBCB",
+    name: "Dr. Sunil Gupta",
+    id: "STF-1012",
+    dept: "Pulmonology",
+    deptBg: "#DBEAFE",
+    deptColor: "#1E40AF",
+    branch: "Central Hospital (Egmore)",
+    status: "Leave",
+  },
+  {
+    avatar: "PS",
+    avatarColor: "#00C896",
+    initBg: "rgba(0,200,150,0.12)",
+    name: "Dr. Priya Sharma",
+    id: "STF-1005",
+    dept: "Neurology",
+    deptBg: "#D6E3FF",
+    deptColor: "#475C7F",
+    branch: "Central Hospital (Tambaram)",
+    status: "Active",
+  },
+];
 
-const EditIcon = () => (
-  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path
-      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-      strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-    />
-  </svg>
-);
+const appointments = [
+  {
+    id: 1,
+    appointmentNo: "APT-9042",
+    patientName: "Divakar",
+    patientId: "PTN-9042",
+    avatar: "D",
+    avatarColor: "#00488D",
+    avatarBg: "#D6E3FF",
+    doctorName: "Dr. Sarah Jenkins",
+    doctorId: "DOC-442",
+    doctorAvatar: "SJ",
+    doctorAvatarcolor: "#FF6B35",
+    doctorAvatarBg: "#ff6b351f",
+    reason: "General Check-Up",
+    date: "12-12-2026",
+    time: "10:00 AM",
+    status: "Active",
+  },
+  {
+    id: 2,
+    appointmentNo: "APT-2219",
+    patientName: "Bharath",
+    patientId: "PTN-2219",
+    avatar: "B",
+    avatarColor: "#7B3200",
+    avatarBg: "#FFDBCB",
+    doctorName: "Dr. Robert Lee",
+    doctorId: "DOC-2210",
+    doctorAvatar: "RL",
+    doctorAvatarcolor: "#475C7F",
+    doctorAvatarBg: "#E6E8EA",
+    reason: "Initial Diagnosis",
+    date: "12-12-2026",
+    time: "11:20 AM",
+    status: "Leave",
+  },
+  {
+    id: 3,
+    appointmentNo: "APT-4431",
+    patientName: "Babu",
+    patientId: "PTN-4431",
+    avatar: "B",
+    avatarColor: "#00C896",
+    avatarBg: "rgba(0,200,150,0.12)",
+    doctorName: "Marcus Kincaid",
+    doctorId: "DOC-4431",
+    doctorAvatar: "MK",
+    doctorAvatarcolor: "#00488D",
+    doctorAvatarBg: "#D6E3FF",
+    reason: "Follow-Up Visit",
+    date: "12-12-2026",
+    time: "12:30 PM",
+    status: "Active",
+  },
+  {
+    id: 4,
+    appointmentNo: "APT-2219",
+    patientName: "Govindan",
+    patientId: "PTN-2219",
+    avatar: "G",
+    avatarColor: "#475C7F",
+    avatarBg: "#E6E8EA",
+    doctorName: "Dr. Robert Lee",
+    doctorId: "DOC-2210",
+    doctorAvatar: "RL",
+    doctorAvatarcolor: "#475C7F",
+    doctorAvatarBg: "#E6E8EA",
+    reason: "Initial Diagnosis",
+    date: "12-12-2026",
+    time: "01:15 PM",
+    status: "Active",
+  },
+];
 
-const ViewIcon = () => (
-  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-    <path
-      d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-      strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-    />
-  </svg>
-);
+const navItems = [
+  {
+    label: "Dashboard",
+    active: true,
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <path d="M7.5 4.5V0H13.5V4.5H7.5ZM0 7.5V0H6V7.5H0ZM7.5 13.5V6H13.5V13.5H7.5ZM0 13.5V9H6V13.5H0ZM1.5 6H4.5V1.5H1.5V6ZM9 12H12V7.5H9V12ZM9 3H12V1.5H9V3ZM1.5 12H4.5V10.5H1.5V12Z" fill="currentColor"/>
+      </svg>
+    ),
+  },
+  {
+    label: "Staff",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+        <path d="M8.25 0C8.6625 0 9.01582.14668 9.30957.44043C9.60332.73418 9.75 1.0875 9.75 1.5V3.75H13.5C13.9125 3.75 14.2658 3.89668 14.5596 4.19043C14.8533 4.48418 15 4.8375 15 5.25V13.5C15 13.9125 14.8533 14.2658 14.5596 14.5596C14.2658 14.8533 13.9125 15 13.5 15H1.5C1.0875 15 .73418 14.8533.44043 14.5596C.14668 14.2658 0 13.9125 0 13.5V5.25C0 4.8375.14668 4.48418.44043 4.19043C.73418 3.89668 1.0875 3.75 1.5 3.75H5.25V1.5C5.25 1.0875 5.39668.73418 5.69043.44043C5.98418.14668 6.3375 0 6.75 0H8.25ZM1.5 13.5H13.5V5.25H9.75C9.75 5.6625 9.60332 6.01582 9.30957 6.30957C9.01582 6.60332 8.6625 6.75 8.25 6.75H6.75C6.3375 6.75 5.98418 6.60332 5.69043 6.30957C5.39668 6.01582 5.25 5.6625 5.25 5.25H1.5V13.5ZM5.25 10.3125C5.5374 10.3125 5.80926 10.3403 6.06543 10.3965C6.32168 10.4527 6.5752 10.5379 6.8252 10.6504C7.03755 10.7504 7.20357 10.8911 7.32227 11.0723C7.44075 11.2533 7.49993 11.4499 7.5 11.6621V12H3V11.6621C3.00007 11.4499 3.05925 11.2533 3.17773 11.0723C3.29643 10.8911 3.46245 10.7504 3.6748 10.6504C3.9248 10.5379 4.17832 10.4527 4.43457 10.3965C4.69074 10.3403 4.9626 10.3125 5.25 10.3125ZM12 9.75V10.875H9V9.75H12ZM5.25 7.5C5.5625 7.5 5.82812 7.60938 6.04688 7.82812C6.26562 8.04688 6.375 8.3125 6.375 8.625C6.375 8.9375 6.26562 9.20312 6.04688 9.42188C5.82812 9.64062 5.5625 9.75 5.25 9.75C4.9375 9.75 4.67188 9.64062 4.45312 9.42188C4.23438 9.20312 4.125 8.9375 4.125 8.625C4.125 8.3125 4.23438 8.04688 4.45312 7.82812C4.67188 7.60938 4.9375 7.5 5.25 7.5ZM12 7.5V8.625H9V7.5H12ZM6.75 5.25H8.25V1.5H6.75V5.25Z" fill="currentColor"/>
+      </svg>
+    ),
+  },
+  {
+    label: "Doctor",
+    icon: (
+      <svg width="20" height="16" viewBox="0 0 20 16" fill="none">
+        <path fillRule="evenodd" clipRule="evenodd" d="M9.27875 3.61979C9.27875 5.05516 8.99208 6.92723 8.55108 6.64314C8.37075 7.37584 7.99216 8.00831 7.47958 8.43315C6.96701 8.85799 6.35206 9.04901 5.73914 8.97379C5.12622 8.89856 4.55311 8.56172 4.11714 8.02046C3.68117 7.4792 3.4092 6.76688 3.34741 6.00446C2.90975 5.05184 2.33575 3.14285 3.81141 1.65481C3.83808 1.64403 3.85408 1.55445 3.87808 1.42257C3.96941 0.923651 4.17175-0.185328 5.44808 0.0265973C6.43241 0.189585 9.27875 0.821628 9.27875 3.61979Z" fill="currentColor"/>
+        <path d="M2.33333 12.8216C2.33333 12.3729 2.52433 11.9797 2.811 11.7607C2.80011 11.7091 2.78988 11.6572 2.78033 11.6052C2.72995 11.3218 2.69046 11.0356 2.662 10.7476C2.63357 10.4715 2.61633 10.1938 2.61033 9.91561C1.20333 10.6028 0 11.8005 0 13.058V15.31H12V13.058C12 11.8536 10.8967 10.7044 9.56733 10.0056V10.0172C9.57333 10.2702 9.562 10.5605 9.54 10.8396C9.52 11.0984 9.49033 11.3564 9.45467 11.5774H9.66667C9.72855 11.5775 9.78921 11.5989 9.84184 11.6394C9.89447 11.6799 9.937 11.7379 9.96467 11.8068L10.298 12.6362C10.3213 12.6939 10.3333 12.7573 10.3333 12.8216V13.6511C10.3333 13.761 10.2982 13.8665 10.2357 13.9443C10.1732 14.0221 10.0884 14.0658 10 14.0658H9.33333V13.2363H9.66667V12.9195L9.46067 12.4069H8.53933L8.33333 12.9195V13.2363H8.66667V14.0658H8C7.91159 14.0658 7.82681 14.0221 7.7643 13.9443C7.70179 13.8665 7.66667 13.761 7.66667 13.6511V12.8216C7.66667 12.7573 7.67867 12.6939 7.702 12.6362L8.03533 11.8068C8.063 11.7379 8.10553 11.6799 8.15816 11.6394C8.21079 11.5989 8.27145 11.5775 8.33333 11.5774H8.77167C8.779 11.5418 8.78633 11.5022 8.79367 11.4588C8.827 11.2635 8.85667 11.0159 8.87667 10.76C8.89667 10.5037 8.906 10.2495 8.901 10.0404C8.89991 9.95384 8.89445 9.86741 8.88467 9.78166C8.87733 9.72276 8.87 9.69581 8.86867 9.69L8.86967 9.68876C8.69278 9.62049 8.51387 9.56059 8.33333 9.50918C8.16567 9.46149 7.99233 9.74848 7.91667 9.92805H4L3.97133 9.85838C3.90067 9.68336 3.81367 9.46729 3.66667 9.50918C3.53822 9.5454 3.40989 9.58646 3.28167 9.63235C3.27768 9.7051 3.2759 9.778 3.27633 9.85091C3.27767 10.0803 3.29533 10.361 3.32367 10.6447C3.352 10.9275 3.39033 11.2029 3.43033 11.4202C3.44189 11.483 3.453 11.5389 3.46367 11.5878C3.65424 11.619 3.83355 11.7178 3.98014 11.8725C4.12673 12.0272 4.23439 12.2311 4.29022 12.46C4.34605 12.6888 4.34769 12.9328 4.29495 13.1628C4.24221 13.3927 4.13731 13.5989 3.99283 13.7566C3.84834 13.9143 3.67038 14.0169 3.48026 14.052C3.29013 14.0872 3.0959 14.0534 2.9208 13.9547C2.74571 13.8561 2.59718 13.6967 2.49299 13.4958C2.3888 13.2948 2.33337 13.0607 2.33333 12.8216Z" fill="currentColor"/>
+      </svg>
+    ),
+  },
+  {
+    label: "Patients",
+    icon: (
+      <svg width="12" height="15" viewBox="0 0 12 15" fill="none">
+        <path d="M6 6C5.175 6 4.46875 5.70625 3.88125 5.11875C3.29375 4.53125 3 3.825 3 3C3 2.175 3.29375 1.46875 3.88125 0.88125C4.46875 0.29375 5.175 0 6 0C6.825 0 7.53125 0.29375 8.11875 0.88125C8.70625 1.46875 9 2.175 9 3C9 3.825 8.70625 4.53125 8.11875 5.11875C7.53125 5.70625 6.825 6 6 6ZM0 15V9.91875C0 9.49375 0.10625 9.10312 0.31875 8.74687C0.53125 8.39062 0.825 8.1125 1.2 7.9125C1.8375 7.5875 2.55937 7.3125 3.36562 7.0875C4.17188 6.8625 5.05 6.75 6 6.75C6.95 6.75 7.82812 6.8625 8.63437 7.0875C9.44062 7.3125 10.1625 7.5875 10.8 7.9125C11.175 8.1125 11.4688 8.39062 11.6812 8.74687C11.8937 9.10312 12 9.49375 12 9.91875V13.5C12 13.9125 11.8531 14.2656 11.5594 14.5594C11.2656 14.8531 10.9125 15 10.5 15H4.3125C3.7375 15 3.25 14.8 2.85 14.4C2.45 14 2.25 13.5125 2.25 12.9375C2.25 12.3625 2.45 11.875 2.85 11.475C3.25 11.075 3.7375 10.875 4.3125 10.875H6.43125L7.59375 8.4C7.34375 8.35 7.0875 8.3125 6.825 8.2875C6.5625 8.2625 6.2875 8.25 6 8.25C5.1 8.25 4.3 8.35938 3.6 8.57812C2.9 8.79688 2.33125 9.025 1.89375 9.2625C1.76875 9.325 1.67188 9.41563 1.60312 9.53438C1.53437 9.65312 1.5 9.78125 1.5 9.91875V15H0ZM4.3125 13.5H5.2125L5.7375 12.375H4.3125C4.1625 12.375 4.03125 12.4312 3.91875 12.5437C3.80625 12.6562 3.75 12.7875 3.75 12.9375C3.75 13.0875 3.80625 13.2188 3.91875 13.3313C4.03125 13.4438 4.1625 13.5 4.3125 13.5ZM6.8625 13.5H10.5V9.91875C10.5 9.78125 10.4656 9.65312 10.3969 9.53438C10.3281 9.41563 10.2375 9.325 10.125 9.2625C9.975 9.1875 9.8125 9.10938 9.6375 9.02812C9.4625 8.94687 9.275 8.86875 9.075 8.79375L6.8625 13.5Z" fill="currentColor"/>
+      </svg>
+    ),
+  },
+  {
+    label: "Appointment",
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <path d="M1.5 13.5C1.0875 13.5.734375 13.3678.440625 13.1034C.146875 12.8391 0 12.5213 0 12.15V2.7C0 2.32875.146875 2.01094.440625 1.74656C.734375 1.48219 1.0875 1.35 1.5 1.35H2.25V0H3.75V1.35H9.75V0H11.25V1.35H12C12.4125 1.35 12.7656 1.48219 13.0594 1.74656C13.3531 2.01094 13.5 2.32875 13.5 2.7V12.15C13.5 12.5213 13.3531 12.8391 13.0594 13.1034C12.7656 13.3678 12.4125 13.5 12 13.5H1.5ZM1.5 12.15H12V5.4H1.5V12.15ZM1.5 4.05H12V2.7H1.5V4.05Z" fill="currentColor"/>
+      </svg>
+    ),
+  },
+  {
+    label: "Billing",
+    icon: (
+      <svg width="14" height="15" viewBox="0 0 14 15" fill="none">
+        <path d="M2.25 15C1.625 15 1.09375 14.7812.65625 14.3438C.21875 13.9062 0 13.375 0 12.75V10.5H2.25V0L3.375 1.125L4.5 0L5.625 1.125L6.75 0L7.875 1.125L9 0L10.125 1.125L11.25 0L12.375 1.125L13.5 0V12.75C13.5 13.375 13.2812 13.9062 12.8438 14.3438C12.4062 14.7812 11.875 15 11.25 15H2.25Z" fill="currentColor"/>
+      </svg>
+    ),
+  },
+  {
+    label: "Protocol",
+    icon: (
+      <svg width="13" height="15" viewBox="0 0 13 15" fill="none">
+        <path d="M5.68803 12.8126L11.1047 6.56262C11.3578 6.27642 11.5592 5.93516 11.6973 5.55857C11.8354 5.18199 11.9074 4.77755 11.9092 4.36865C11.911 3.95975 11.8425 3.5545 11.7078 3.17632C11.573 2.79815 11.3745 2.45456 11.1239 2.16542C10.8734 1.87628 10.5756 1.64732 10.2478 1.49179C9.92007 1.33627 9.56885 1.25725 9.21447 1.25932C8.86009 1.26138 8.50958 1.34449 8.18321 1.50383C7.85683 1.66317 7.56108 1.89558 7.31303 2.18762L1.89636 8.43762C1.64326 8.72383 1.44183 9.06509 1.30374 9.44167C1.16565 9.81826 1.09362 10.2227 1.09183 10.6316C1.09004 11.0405 1.15852 11.4458 1.29331 11.8239C1.4281 12.2021 1.62653 12.5457 1.87712 12.8348C2.12771 13.124 2.42548 13.3529 2.75324 13.5085C3.08099 13.664 3.43221 13.743 3.78659 13.7409C4.14097 13.7389 4.49148 13.6558 4.81785 13.4964C5.14423 13.3371 5.43999 13.1047 5.68803 12.8126Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M4.60352 5.3125L8.39518 9.6875" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    ),
+    hasArrow: true,
+  },
+];
 
-const DoctorRow = ({ doc }: { doc: Doctor }) => {
-  const deptClass =
-    doc.departmentColor === "emerald"
-      ? "bg-emerald-50 text-emerald-500"
-      : "bg-blue-50 text-blue-500";
+const bottomNavItems = [
+  {
+    label: "Settings",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+        <path d="M5.475 15L5.175 12.6C5.0125 12.5375 4.85938 12.4625 4.71562 12.375C4.57187 12.2875 4.43125 12.1938 4.29375 12.0938L2.0625 13.0312L0 9.46875L1.93125 8.00625C1.91875 7.91875 1.9125 7.83438 1.9125 7.75313C1.9125 7.67188 1.9125 7.5875 1.9125 7.5C1.9125 7.4125 1.9125 7.32812 1.9125 7.24687C1.9125 7.16562 1.91875 7.08125 1.93125 6.99375L0 5.53125L2.0625 1.96875L4.29375 2.90625C4.43125 2.80625 4.575 2.7125 4.725 2.625C4.875 2.5375 5.025 2.4625 5.175 2.4L5.475 0H9.6L9.9 2.4C10.0625 2.4625 10.2156 2.5375 10.3594 2.625C10.5031 2.7125 10.6438 2.80625 10.7812 2.90625L13.0125 1.96875L15.075 5.53125L13.1438 6.99375C13.1562 7.08125 13.1625 7.16562 13.1625 7.24687C13.1625 7.32812 13.1625 7.4125 13.1625 7.5C13.1625 7.5875 13.1625 7.67188 13.1625 7.75313C13.1625 7.83438 13.15 7.91875 13.125 8.00625L15.0562 9.46875L12.9937 13.0312L10.7812 12.0938C10.6438 12.1938 10.5 12.2875 10.35 12.375C10.2 12.4625 10.05 12.5375 9.9 12.6L9.6 15H5.475Z" fill="currentColor"/>
+      </svg>
+    ),
+  },
+  {
+    label: "Support",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+        <path d="M7.4625 12C7.725 12 7.94688 11.9094 8.12813 11.7281C8.30937 11.5469 8.4 11.325 8.4 11.0625C8.4 10.8 8.30937 10.5781 8.12813 10.3969C7.94688 10.2156 7.725 10.125 7.4625 10.125C7.2 10.125 6.97813 10.2156 6.79688 10.3969C6.61562 10.5781 6.525 10.8 6.525 11.0625C6.525 11.325 6.61562 11.5469 6.79688 11.7281C6.97813 11.9094 7.2 12 7.4625 12ZM6.7875 9.1125H8.175C8.175 8.7 8.22188 8.375 8.31563 8.1375C8.40938 7.9 8.675 7.575 9.1125 7.1625C9.4375 6.8375 9.69375 6.52812 9.88125 6.23438C10.0688 5.94063 10.1625 5.5875 10.1625 5.175C10.1625 4.475 9.90625 3.9375 9.39375 3.5625C8.88125 3.1875 8.275 3 7.575 3C6.8625 3 6.28437 3.1875 5.84062 3.5625C5.39687 3.9375 5.0875 4.3875 4.9125 4.9125L6.15 5.4C6.2125 5.175 6.35313 4.93125 6.57188 4.66875C6.79063 4.40625 7.125 4.275 7.575 4.275C7.975 4.275 8.275 4.38438 8.475 4.60313C8.675 4.82188 8.775 5.0625 8.775 5.325C8.775 5.575 8.7 5.80937 8.55 6.02812C8.4 6.24687 8.2125 6.45 7.9875 6.6375C7.4375 7.125 7.1 7.49375 6.975 7.74375C6.85 7.99375 6.7875 8.45 6.7875 9.1125ZM7.5 15C6.4625 15 5.4875 14.8031 4.575 14.4094C3.6625 14.0156 2.86875 13.4812 2.19375 12.8062C1.51875 12.1312.984375 11.3375.590625 10.425C.196875 9.5125 0 8.5375 0 7.5C0 6.4625.196875 5.4875.590625 4.575C.984375 3.6625 1.51875 2.86875 2.19375 2.19375C2.86875 1.51875 3.6625.984375 4.575.590625C5.4875.196875 6.4625 0 7.5 0C8.5375 0 9.5125.196875 10.425.590625C11.3375.984375 12.1312 1.51875 12.8062 2.19375C13.4812 2.86875 14.0156 3.6625 14.4094 4.575C14.8031 5.4875 15 6.4625 15 7.5C15 8.5375 14.8031 9.5125 14.4094 10.425C14.0156 11.3375 13.4812 12.1312 12.8062 12.8062C12.1312 13.4812 11.3375 14.0156 10.425 14.4094C9.5125 14.8031 8.5375 15 7.5 15Z" fill="currentColor"/>
+      </svg>
+    ),
+  },
+];
 
-  const statusClass =
-    doc.status === "Active" ? "text-green-500" : "text-orange-400";
+const stats = [
+  {
+    label: "Doctors",
+    value: "124",
+    change: "+2",
+    changeType: "positive",
+    bg: "#D6E3FF",
+    border: "#00488D",
+    valueColor: "#00488D",
+    icon: <Stethoscope className="h-4 w-4" color="#00488D" />,
+    iconBg: "rgba(255,255,255,0.20)",
+  },
+  {
+    label: "Patients",
+    value: "12,450",
+    change: "+20",
+    changeType: "positive",
+    bg: "rgba(0,200,150,0.12)",
+    border: "#00C896",
+    valueColor: "#00C896",
+    icon: <UserRound className="h-4 w-4" color="#00C896" />,
+    iconBg: "rgba(255,255,255,0.20)",
+  },
+  {
+    label: "Staff",
+    value: "342",
+    change: "",
+    changeType: "neutral",
+    bg: "rgba(255,107,53,0.12)",
+    border: "rgba(123,50,0,0.40)",
+    valueColor: "#7B3200",
+    icon: <Users className="h-4 w-4" color="#7B3200" />,
+    iconBg: "#FFDBCB",
+  },
+  {
+    label: "Appointments",
+    value: "1,204",
+    change: "+114",
+    changeType: "positive",
+    bg: "rgba(255,255,255,0.80)",
+    border: "#C2C6D4",
+    valueColor: "#00488D",
+    icon: <CalendarIcon className="h-4 w-4" color="#00488D" />,
+    iconBg: "rgba(168,200,255,0.20)",
+  },
+  {
+    label: "Prescription Generated",
+    value: "8,432",
+    change: "124",
+    changeType: "negative",
+    bg: "#E6E8EA",
+    border: "#4A5F83",
+    valueColor: "#4A5F83",
+    icon: <FileText className="h-4 w-4" color="#4A5F83" />,
+    iconBg: "rgba(236,238,240,0.40)",
+  },
+  {
+    label: "Bills Generated",
+    value: "2700",
+    change: "+160",
+    changeType: "positive",
+    bg: "#D6E3FF",
+    border: "#00488D",
+    valueColor: "#00488D",
+    icon: <Receipt className="h-4 w-4" color="#00488D" />,
+    iconBg: "rgba(255,255,255,0.20)",
+  },
+];
+
+function parseStatValue(value: string): number {
+  return Number(value.replace(/,/g, ""));
+}
+
+function formatStatValue(value: number): string {
+  return value.toLocaleString();
+}
+
+function CountUp({ target, duration = 1800 }: { target: number; duration?: number }) {
+  const [count, setCount] = useState(0);
+  const startTime = useRef<number | null>(null);
+  const rafId = useRef<number>(0);
+
+  useEffect(() => {
+    startTime.current = null;
+    const animate = (now: number) => {
+      if (startTime.current === null) startTime.current = now;
+      const elapsed = now - startTime.current;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setCount(Math.round(eased * target));
+      if (progress < 1) {
+        rafId.current = requestAnimationFrame(animate);
+      }
+    };
+    rafId.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafId.current);
+  }, [target, duration]);
+
+  return <>{formatStatValue(count)}</>;
+}
+
+function RowsPerPageSelect({ value, onChange, options = [5, 10, 20] }: { value: number; onChange: (val: number) => void; options?: number[] }) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   return (
-    <tr className="hover:bg-slate-50 transition-colors">
-      {/* Name */}
-      <td className="px-6 py-4">
-        <div className="flex items-center">
-          <div
-            className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-[10px] mr-3 ${doc.avatarColor}`}
+    <div className="relative" ref={wrapperRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={`flex items-center gap-1.5 text-xs font-semibold text-[#374151] bg-white border rounded-md pl-2.5 pr-2 py-1 transition-colors ${
+          open ? "border-[#00488D] ring-2 ring-[#D6E3FF]" : "border-[#E5E7EB] hover:border-[#00488D]"
+        }`}
+      >
+        {value}
+        <ChevronDown
+          className={`w-3 h-3 text-[#6B7280] transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      <div
+        role="listbox"
+        className={`absolute right-0 top-full mt-1 w-16 origin-top-right bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
+          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
+        }`}
+      >
+        {options.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            role="option"
+            aria-selected={value === opt}
+            onClick={() => {
+              onChange(opt);
+              setOpen(false);
+            }}
+            className={`flex items-center justify-between w-full px-2.5 py-1.5 text-xs font-semibold text-left transition-colors ${
+              value === opt ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
+            }`}
           >
-            {doc.initials}
-          </div>
-          <div>
-            <p className="font-semibold text-slate-700 text-sm">{doc.name}</p>
-            <p className="text-[11px] text-slate-400">{doc.code}</p>
-          </div>
-        </div>
-      </td>
-
-      {/* Department */}
-      <td className="px-6 py-4">
-        <span className={`px-2.5 py-0.5 rounded text-[11px] font-medium ${deptClass}`}>
-          {doc.department}
-        </span>
-      </td>
-
-      {/* Branch */}
-      <td className="px-6 py-4">
-        <p className="text-slate-600 text-sm">{doc.branch}</p>
-        <p className="text-[11px] text-slate-400">({doc.location})</p>
-      </td>
-
-      {/* Status */}
-      <td className="px-6 py-4">
-        <div className={`flex items-center font-medium text-sm ${statusClass}`}>
-          <span className="w-1.5 h-1.5 rounded-full bg-current mr-2" />
-          {doc.status}
-        </div>
-      </td>
-
-      {/* Actions */}
-      <td className="px-6 py-4 text-right">
-        <div className="flex items-center justify-end space-x-3 text-slate-400">
-          <button className="hover:text-[#004a99] transition-colors" aria-label="Edit">
-            <EditIcon />
+            {opt}
+            {value === opt && <Check className="w-3 h-3" />}
           </button>
-          <button className="hover:text-[#004a99] transition-colors" aria-label="View">
-            <ViewIcon />
-          </button>
-        </div>
-      </td>
-    </tr>
+        ))}
+      </div>
+    </div>
   );
-};
+}
 
-// ─── Main Component ───────────────────────────────────────────────────────────
-
-export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>("Doctors");
+export default function Dashboard() {
+  const [activeTab, setActiveTab] = useState("doctors");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  
+  // Search state
   const [searchQuery, setSearchQuery] = useState("");
 
-  const tabs: ActiveTab[] = ["Doctors", "Staffs", "Appointments"];
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(5);
 
-  const filteredDoctors = doctors.filter(
-    (d) =>
-      d.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      d.code.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Sort state (per tab)
+  const [sortField, setSortField] = useState<Record<string, string>>({});
+  const [sortDirection, setSortDirection] = useState<Record<string, "asc" | "desc">>({});
+
+  // Tabs sliding underline
+  const tabsContainerRef = useRef<HTMLDivElement>(null);
+  const [underline, setUnderline] = useState({ left: 0, width: 0 });
+
+  // Date selection state
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [filterValues, setFilterValues] = useState<Record<string, any>>({});
+
+  const doctorFields: FilterField[] = [
+    { id: "patientName", label: "Patient Name", type: "select", options: [{ label: "John", value: "1" }, { label: "David", value: "2" }] },
+    { id: "patientId", label: "Patient ID", type: "text", placeholder: "Enter Patient ID" },
+    { id: "mobile", label: "Mobile", type: "tel", placeholder: "Enter mobile" },
+    { id: "diagnose", label: "Diagnose", type: "text", placeholder: "Enter Diagnose" },
+    { id: "doctor", label: "Assigned Doctor", type: "select", options: [] },
+    { id: "status", label: "Appointment Status", type: "checkbox" },
+  ];
+
+  const handleFilterChange = (name: string, value: any) => {
+    setFilterValues((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleApplyFilter = () => {
+    console.log("Applied filters:", filterValues);
+    setIsFilterOpen(false);
+  };
+
+  const handleClearFilter = () => {
+    setFilterValues({});
+  };
+
+  useEffect(() => {
+    const container = tabsContainerRef.current;
+    if (!container) return;
+    const activeButton = container.querySelector<HTMLButtonElement>(`[data-tab="${activeTab}"]`);
+    if (activeButton) {
+      setUnderline({ left: activeButton.offsetLeft, width: activeButton.offsetWidth });
+    }
+  }, [activeTab]);
+
+  const handleSort = (field: string) => {
+    if (sortField[activeTab] === field) {
+      setSortDirection((prev) => ({
+        ...prev,
+        [activeTab]: prev[activeTab] === "asc" ? "desc" : "asc",
+      }));
+    } else {
+      setSortField((prev) => ({ ...prev, [activeTab]: field }));
+      setSortDirection((prev) => ({ ...prev, [activeTab]: "asc" }));
+    }
+  };
+
+  const activeData =
+    activeTab === "staff"
+      ? staff
+      : activeTab === "appointments"
+        ? appointments
+        : doctors ;
+
+  const searchableFields =
+    activeTab === "appointments"
+      ? ["appointmentNo", "patientName", "doctorName", "reason", "status"]
+      : ["name", "id", "dept", "branch", "status"];
+
+  const filteredData = searchQuery
+    ? activeData.filter((item) =>
+        searchableFields.some((field) =>
+          String(item[field] ?? "")
+            .toLowerCase()
+            .includes(searchQuery.toLowerCase())
+        )
+      )
+    : activeData;
+
+  const currentSortField = sortField[activeTab];
+  const currentSortDirection = sortDirection[activeTab];
+
+  const currentData = [...filteredData].sort((a, b) => {
+    if (!currentSortField) return 0;
+    const aValue = String(a[currentSortField] ?? "").toLowerCase();
+    const bValue = String(b[currentSortField] ?? "").toLowerCase();
+    if (aValue < bValue) {
+      return currentSortDirection === "asc" ? -1 : 1;
+    }
+    if (aValue > bValue) {
+      return currentSortDirection === "asc" ? 1 : -1;
+    }
+    return 0;
+  });
+
+  const totalRecords = currentData.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / rowsPerPage));
+  const startIndex = (currentPage - 1) * rowsPerPage;
+  const endIndex = startIndex + rowsPerPage;
+  const currentRows = currentData.slice(startIndex, endIndex);
+  const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
+  const visibleEnd = Math.min(endIndex, totalRecords);
+
+  // Branch progress bar state
+
+  const [animatedValues, setAnimatedValues] = useState<Record<number, number>>({});
+  const branchRef = useRef<HTMLDivElement>(null);
+  const hasAnimated = useRef(false);
+
+  const [branches, setBranches] = useState([
+    { id: 1, name: "Central Hospital (Tambaram)", pct: 0 },
+    { id: 2, name: "Central Hospital (Saidapet)", pct: 0 },
+    { id: 3, name: "Central Hospital (Egmore)", pct: 0 },
+  ]);
+
+  useEffect(() => {
+    setTimeout(() => {
+      updateBranchPercentage(1, 60);
+      updateBranchPercentage(2, 25);
+      updateBranchPercentage(3, 40);
+    }, 900);
+  }, []);  
+
+  const updateBranchPercentage = (id: number, newPct: number) => {
+    setBranches((prev) =>
+      prev.map((branch) =>
+        branch.id === id ? { ...branch, pct: newPct } : branch,
+      ),
+    );
+  };
+
+  // Initial trigger on scroll
+  useEffect(() => {
+    const el = branchRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !hasAnimated.current) {
+          hasAnimated.current = true;
+          observer.disconnect();
+
+          branches.forEach((branch, index) => {
+            setTimeout(() => {
+              let current = 0;
+              const interval = setInterval(() => {
+                current += 1;
+                setAnimatedValues((prev) => ({
+                  ...prev,
+                  [branch.id]: current,
+                }));
+                if (current >= branch.pct) {
+                  clearInterval(interval);
+                }
+              }, 30);
+            }, index * 200);
+          });
+        }
+      },
+      { threshold: 0.1 },
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Animate only the branch whose pct changed
+useEffect(() => {
+  if (!hasAnimated.current) return;
+
+  branches.forEach((branch) => {
+    const current = animatedValues[branch.id] ?? 0;
+
+    if (current !== branch.pct) {
+      const interval = setInterval(() => {
+        setAnimatedValues((prev) => {
+          const value = prev[branch.id] ?? 0;
+
+          if (value === branch.pct) {
+            clearInterval(interval);
+            return prev;
+          }
+
+          return {
+            ...prev,
+            [branch.id]:
+              value < branch.pct ? value + 1 : value - 1,
+          };
+        });
+      }, 30);
+    }
+  });
+}, [branches]);
+
+  const navigate = useNavigate();
+
+  const handleEdit = (id: number) => {
+    navigate(`/destination-edit/${id}`);
+  };
+
+  const handleView = (id: number) => {
+    navigate(`/destination-view/${id}`);
+  };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f8fafc] text-slate-700 font-['Inter',sans-serif]">
-      {/* ── Sidebar ── */}
-      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shrink-0">
-        {/* Logo */}
-        <div className="p-6">
-          <h1 className="text-[#004a99] font-bold text-xl leading-none">HMS</h1>
-          <p className="text-xs text-slate-400 mt-1">Admin Portal</p>
-        </div>
+    <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB]">
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 z-20 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
 
-        {/* Nav */}
-        <nav className="flex-1 px-4 py-2 space-y-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {[
-            { label: "Dashboard", active: true, icon: <path d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} /> },
-            { label: "Staff", icon: <path d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} /> },
-            { label: "Doctor", icon: <path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} /> },
-            { label: "Patients", icon: <path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} /> },
-            { label: "Appointment", icon: <path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} /> },
-            { label: "Billing", icon: <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} /> },
-          ].map(({ label, active, icon }) => (
-            <a
-              key={label}
-              href="#"
-              className={`flex items-center px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                active
-                  ? "bg-[#004a99] text-white"
-                  : "text-slate-500 hover:bg-slate-50"
-              }`}
-            >
-              <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                {icon}
-              </svg>
-              {label}
-            </a>
-          ))}
+      {/* Sidebar */}
 
-          {/* Protocol with chevron */}
-          <a
-            href="#"
-            className="flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium text-slate-500 hover:bg-slate-50 transition-colors"
-          >
-            <span className="flex items-center">
-              <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-              </svg>
-              Protocol
-            </span>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path d="M19 9l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-            </svg>
-          </a>
-        </nav>
-
-        {/* Bottom Links */}
-        <div className="px-4 py-6 border-t border-slate-100 space-y-1">
-          <a href="#" className="flex items-center px-4 py-2 rounded-lg text-sm font-medium text-slate-500 hover:bg-slate-50 transition-colors">
-            <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-              <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-            </svg>
-            Settings
-          </a>
-          <a href="#" className="flex items-center px-4 py-2 rounded-lg text-sm font-medium text-slate-500 hover:bg-slate-50 transition-colors">
-            <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-            </svg>
-            Support
-          </a>
-
-          {/* Profile */}
-          <div className="flex items-center px-4 py-4 mt-2">
-            <div className="w-10 h-10 rounded-full bg-[#004a99] flex items-center justify-center text-white font-bold text-sm">
-              A
-            </div>
-            <div className="ml-3 overflow-hidden">
-              <p className="text-sm font-semibold text-slate-700 truncate">Admin</p>
-              <p className="text-xs text-slate-400 truncate">Admin User</p>
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      {/* ── Main ── */}
-      <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Header */}
-        <header className="bg-[#f8fafc] px-8 py-4 flex items-center justify-between border-b border-slate-100">
-          <div className="flex items-center cursor-pointer text-slate-600 hover:text-slate-800 transition-colors">
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-            </svg>
-            <span className="font-medium text-sm">Main Branch</span>
-            <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path d="M19 9l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-            </svg>
-          </div>
-
-          <div className="flex items-center space-x-6">
-            {/* Notification Bell */}
-            <div className="relative cursor-pointer">
-              <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-              </svg>
-              <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-[#f8fafc]" />
-            </div>
-
-            {/* User */}
-            <div className="flex items-center space-x-2 cursor-pointer">
-              <span className="text-sm font-semibold text-slate-600">HMS</span>
-              <div className="w-8 h-8 rounded-full bg-[#004a99] flex items-center justify-center text-white font-bold text-xs">
-                H
-              </div>
-            </div>
-          </div>
-        </header>
-
-        {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-8 pt-4 space-y-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-
-          {/* ── Summary Cards ── */}
-          <section className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            {[
-              {
-                label: "Doctors",
-                value: "124",
-                delta: "+2",
-                deltaColor: "text-[#004a99]",
-                bg: "bg-[#eef2ff]",
-                border: "border-[#e0e7ff]",
-                iconColor: "text-[#004a99]",
-                icon: <path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />,
-              },
-              {
-                label: "Patients",
-                value: "12,450",
-                delta: "+20",
-                deltaColor: "text-[#059669]",
-                bg: "bg-[#ecfdf5]",
-                border: "border-[#d1fae5]",
-                iconColor: "text-[#059669]",
-                icon: <path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />,
-              },
-              {
-                label: "Staff",
-                value: "342",
-                bg: "bg-[#fff7ed]",
-                border: "border-[#ffedd5]",
-                iconColor: "text-[#ea580c]",
-                icon: <path d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />,
-              },
-              {
-                label: "Appointments",
-                value: "1,204",
-                delta: "+114",
-                deltaColor: "text-[#2563eb]",
-                bg: "bg-[#eff6ff]",
-                border: "border-[#dbeafe]",
-                iconColor: "text-[#2563eb]",
-                icon: <path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />,
-              },
-              {
-                label: "Prescription Generated",
-                value: "8,432",
-                delta: "124",
-                deltaColor: "text-red-400",
-                bg: "bg-[#f1f5f9]",
-                border: "border-[#e2e8f0]",
-                iconColor: "text-slate-600",
-                icon: <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />,
-              },
-              {
-                label: "Bills Generated",
-                value: "2700",
-                delta: "+160",
-                deltaColor: "text-[#004a99]",
-                bg: "bg-[#eef2ff]",
-                border: "border-[#e0e7ff]",
-                iconColor: "text-[#004a99]",
-                icon: <path d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />,
-              },
-            ].map(({ label, value, delta, deltaColor, bg, border, iconColor, icon }) => (
+      {/* Main */}
+      <div className="flex flex-col flex-1 min-w-0">
+        {/* Content */}
+        <main className="flex flex-col gap-6">
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-8 pt-10">
+            {stats.map((stat) => (
               <div
-                key={label}
-                className={`${bg} p-5 rounded-2xl border ${border} relative overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.05)]`}
+                key={stat.label}
+                className="flex flex-col p-4 rounded-xl shadow-[2px_2px_16px_0_rgba(0,0,0,0.25)] transition-all duration-200 hover:-translate-y-1 hover:shadow-lg cursor-pointer"
+                style={{ background: stat.bg, border: `0.2px solid ${stat.border}` }}
               >
-                {delta && (
-                  <div className={`absolute top-2 right-3 text-xs font-bold ${deltaColor}`}>{delta}</div>
-                )}
-                <div className="w-10 h-10 bg-white/60 rounded-lg flex items-center justify-center mb-4">
-                  <svg className={`w-6 h-6 ${iconColor}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    {icon}
-                  </svg>
+                <div className="flex justify-between items-start">
+                  <div
+                    className="w-8 h-8 flex items-center justify-center rounded-[4px]"
+                    style={{ background: stat.iconBg }}
+                  >
+                    {stat.icon}
+                  </div>
+                  <span
+                    className="text-[9px] font-semibold leading-[13.5px]"
+                    style={{
+                      color: stat.changeType === "negative" ? "#EF4444" : "#16A34A",
+                    }}
+                  >
+                    {stat.change}
+                  </span>
                 </div>
-                <h3 className="text-2xl font-bold text-slate-800 leading-tight">{value}</h3>
-                <p className="text-xs font-medium text-slate-500">{label}</p>
+                <div className="pt-2">
+                  <div className="font-extrabold text-xl leading-7 tracking-[-1px]" style={{ color: stat.valueColor }}>
+                    <CountUp target={parseStatValue(stat.value)} />
+                  </div>
+                  <div className="text-[rgba(0,0,0,0.70)] text-[9px] font-semibold tracking-[0.9px] capitalize leading-[13.5px]">
+                    {stat.label}
+                  </div>
+                </div>
               </div>
             ))}
-          </section>
+          </div>
 
-          {/* ── Admin Overview ── */}
-          <section className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-slate-800">Admin Overview</h2>
-                <p className="text-sm text-slate-400">Real-time performance across all branches.</p>
-              </div>
-              <button className="bg-[#004a99] text-white px-5 py-2 rounded-lg text-sm font-semibold flex items-center shadow-lg hover:bg-[#003d80] transition-colors">
-                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 6v6m0 0v6m0-6h6m-6 0H6" strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} />
-                </svg>
-                New Appointment
-              </button>
+          {/* Overview Header */}
+          <div className="flex items-end justify-between">
+            <div>
+              <h2 className="text-[#191C1E] font-extrabold text-2xl leading-8 tracking-[-0.6px]">Admin Overview</h2>
+              <p className="text-[#424752] text-xs font-medium leading-4">Real-time performance across all branches.</p>
             </div>
+            <button className="flex items-center gap-1.5 px-5 py-2.5 bg-[#004785] rounded-[10px] text-white text-xs font-semibold whitespace-nowrap">
+              <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
+                <path d="M8 2V10M4 6H12" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+              New Appointment
+            </button>
+          </div>
 
-            {/* Data Table Card */}
-            <div className="bg-white rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.05)] overflow-hidden">
-              {/* Table Header / Tabs */}
-              <div className="px-6 py-4 flex items-center justify-between border-b border-slate-100">
-                <div className="flex space-x-8">
-                  {tabs.map((tab) => (
-                    <button
-                      key={tab}
-                      onClick={() => setActiveTab(tab)}
-                      className={`text-sm font-semibold pb-4 transition-colors ${
-                        activeTab === tab
-                          ? "text-[#004a99] border-b-2 border-[#004a99]"
-                          : "text-slate-400 hover:text-slate-600"
-                      }`}
-                    >
-                      {tab}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex items-center space-x-4">
-                  {/* Search */}
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center">
-                      <svg className="h-4 w-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-                      </svg>
-                    </span>
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search..."
-                      className="bg-slate-50 border-none rounded-lg pl-10 pr-4 py-1.5 text-sm w-64 focus:ring-1 focus:ring-[#004a99] outline-none"
+          {/* Table Card */}
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col min-h-[320px] transition-all duration-300 hover:shadow-md">
+            <div className="overflow-hidden">
+              {/* Table Header */}
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[rgba(194,198,212,0.10)]">
+              <div className="relative flex items-center gap-6" ref={tabsContainerRef}>
+                {[
+                  { key: "doctors", label: "Doctors" },
+                  { key: "staff", label: "Staff" },
+                  { key: "appointments", label: "Appointments" },
+                ].map((tab) => (
+                  <button
+                    key={tab.key}
+                    data-tab={tab.key}
+                    onClick={() => {
+                      setActiveTab(tab.key);
+                      setCurrentPage(1);
+                    }}
+                    className="relative pb-1 text-xs font-semibold tracking-[1.2px] capitalize transition-colors duration-200"
+                    style={{ color: activeTab === tab.key ? "#00488D" : "#424752" }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+                <div
+                  className="absolute bottom-0 h-0.5 bg-[#00488D] transition-all duration-300 ease-out"
+                  style={{ left: underline.left, width: underline.width }}
+                />
+              </div>
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                {/* Search */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search..."
+                    value={searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[250px]"
                     />
-                  </div>
-
-                  {/* Date Nav */}
-                  <div className="flex items-center space-x-2">
-                    <button className="p-1.5 bg-white border border-slate-200 rounded text-slate-400">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path d="M15 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-                      </svg>
-                    </button>
-                    <button className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded text-xs font-semibold text-slate-600">
-                      Today
-                    </button>
-                    <button className="p-1.5 bg-white border border-slate-200 rounded text-slate-400">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path d="M9 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-                      </svg>
-                    </button>
-                  </div>
-
-                  {/* Filter */}
-                  <button className="flex items-center space-x-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-                    </svg>
-                    <span>Filters</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Table */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead className="bg-slate-50/50 text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                    <tr>
-                      {["Name", "Role/Dept", "Branch", "Status", "Actions"].map((h, i) => (
-                        <th
-                          key={h}
-                          className={`px-6 py-3 ${i === 4 ? "text-right" : ""}`}
-                        >
-                          {h}
-                          {i < 4 && <span className="ml-1 text-slate-300">↑↓</span>}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-sm">
-                    {activeTab === "Doctors" &&
-                      filteredDoctors.map((doc) => <DoctorRow key={doc.id} doc={doc} />)}
-                    {activeTab !== "Doctors" && (
-                      <tr>
-                        <td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-400">
-                          No data for {activeTab} yet.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Table Footer */}
-              <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
-                <div className="flex items-center text-xs text-slate-400">
-                  Showing 1–10 of 124
-                  <select className="ml-4 bg-transparent border-none focus:ring-0 text-slate-600 font-bold cursor-pointer text-xs">
-                    <option>10</option>
-                    <option>25</option>
-                    <option>50</option>
-                  </select>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <button className="p-1 text-slate-400">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path d="M15 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-                    </svg>
-                  </button>
-                  <button className="w-7 h-7 flex items-center justify-center rounded-full bg-[#004a99] text-white text-xs font-bold shadow-md">
-                    1
-                  </button>
-                  <button className="w-7 h-7 flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-50 text-xs font-bold">
-                    2
-                  </button>
-                  <button className="p-1 text-slate-400">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path d="M9 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* ── Bottom Widgets ── */}
-          <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Branch Performance */}
-            <div className="bg-white p-6 rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.05)]">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-800">Branch Performance</h3>
-                  <p className="text-xs text-slate-400 font-medium">Efficiency</p>
-                </div>
-                <div className="p-2 bg-slate-50 rounded text-slate-400">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
+                  <svg className="absolute left-2 top-1/2 -translate-y-1/2" width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path d="M11.0667 11.5713L6.86667 7.3713C6.53333 7.638 6.15 7.8491 5.71667 8.0046C5.28333 8.1602 4.82222 8.238 4.33333 8.238C3.12222 8.238 2.09722 7.8185 1.25833 6.9796C0.419444 6.1407 0 5.1157 0 3.90462C0 2.69351.419444 1.66851 1.25833.82962C2.09722-.00927 3.12222-.42871 4.33333-.42871C5.54444-.42871 6.56944-.00927 7.40833.82962C8.24722 1.66851 8.66667 2.69351 8.66667 3.90462C8.66667 4.3935 8.58889 4.8546 8.43333 5.288C8.27778 5.7213 8.06667 6.1046 7.8 6.438L12 10.638L11.0667 11.5713ZM4.33333 6.9046C5.16667 6.9046 5.875 6.613 6.45833 6.0296C7.04167 5.4463 7.33333 4.738 7.33333 3.90462C7.33333 3.07129 7.04167 2.36296 6.45833 1.77962C5.875 1.19629 5.16667.90462 4.33333.90462C3.5.90462 2.79167 1.19629 2.20833 1.77962C1.625 2.36296 1.33333 3.07129 1.33333 3.90462C1.33333 4.738 1.625 5.4463 2.20833 6.0296C2.79167 6.613 3.5 6.9046 4.33333 6.9046Z" fill="#424752"/>
                   </svg>
                 </div>
-              </div>
-              <div className="space-y-6">
-                {[
-                  { name: "Central Hospital", pct: 92 },
-                  { name: "City Clinic", pct: 78 },
-                ].map(({ name, pct }) => (
-                  <div key={name}>
-                    <div className="flex justify-between text-[11px] font-bold text-slate-500 mb-1.5">
-                      <span>{name}</span>
-                      <span className="text-[#004a99]">{pct}%</span>
-                    </div>
-                    <div className="w-full bg-slate-100 rounded-full h-2">
-                      <div
-                        className="bg-[#004a99] h-2 rounded-full transition-all duration-500"
-                        style={{ width: `${pct}%` }}
+                {/* Date nav */}
+                <div className="flex items-center">
+                  <button
+                    onClick={() => setSelectedDate((prev) => subDays(prev, 1))}
+                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                  >
+                    <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
+                      <path d="M5 1L1 5L5 9" stroke="black" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                  <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                    <PopoverTrigger asChild>
+                      <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
+                        {isToday(selectedDate)
+                          ? "Today"
+                          : isYesterday(selectedDate)
+                            ? "Yesterday"
+                            : isTomorrow(selectedDate)
+                              ? "Tomorrow"
+                              : format(selectedDate, "dd/MM/yyyy")}
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
+                      <CalendarPicker
+                        selected={selectedDate}
+                        hideThemePicker
+                        onSelect={(date) => {
+                          setSelectedDate(date);
+                          setIsCalendarOpen(false);
+                        }}
                       />
+                    </PopoverContent>
+                  </Popover>
+                  <button
+                    onClick={() => setSelectedDate((prev) => addDays(prev, 1))}
+                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                  >
+                    <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
+                      <path d="M1 1L5 5L1 9" stroke="black" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                </div>
+                {/* Filters */}
+                <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+                  <PopoverTrigger asChild>
+                    <button className="flex items-center gap-2 h-[27px] px-4 rounded-md border border-[#E5E7EB] text-[#374151] text-sm font-medium transition-colors duration-150 hover:bg-[#F2F4F6] hover:border-[#00488D]">
+                      <svg width="12" height="11" viewBox="0 0 12 11" fill="none">
+                        <path d="M11.293.519531C11.2292.364583 11.1266.239258 10.9854.143555C10.8441.0478516 10.6823 0 10.5 0H.875C.638021 0 .432943.0865885.259766.259766C.0865885.432943 0 .638021 0 .875C0 .984375.0205078 1.09147.0615234 1.19629C.102539 1.30111.159505 1.38997.232422 1.46289L3.9375 5.42773V9.625C3.9375 9.87109 4.02181 10.0785 4.19043 10.2471C4.35905 10.4157 4.56641 10.5 4.8125 10.5H7.4375C7.66016 10.5 7.84766 10.4219 7.99609 10.2656C8.14453 10.1094 8.21875 9.92578 8.21875 9.71094V5.42773L11.9238 1.46289C11.9967 1.38997 12.0537 1.30339 12.0947 1.20312C12.1357 1.10286 12.1562.99349 12.1562.875C12.1562.811198 12.1494.749674 12.1357.69043C12.122.631185 12.1015.574219 12.0742.519531Z" fill="#374151"/>
+                      </svg>
+                      Filters
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg" align="end">
+                    <FilterPanel
+                      title="Advanced Filters"
+                      fields={doctorFields}
+                      values={filterValues}
+                      onChange={handleFilterChange}
+                      onApply={handleApplyFilter}
+                      onClear={handleClearFilter}
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="min-h-[320px] overflow-x-auto">
+              {activeTab === "doctors" ? (
+                <DoctorsTableView
+                  rows={currentRows as TableRow[]}
+                  sortField={sortField[activeTab] ?? ""}
+                  sortDirection={sortDirection[activeTab] ?? "asc"}
+                  onSort={handleSort}
+                  onEdit={handleEdit}
+                  onView={handleView}
+                />
+              ) : activeTab === "staff" ? (
+                <StaffTableView
+                  rows={currentRows as TableRow[]}
+                  sortField={sortField[activeTab] ?? ""}
+                  sortDirection={sortDirection[activeTab] ?? "asc"}
+                  onSort={handleSort}
+                  onEdit={handleEdit}
+                  onView={handleView}
+                />
+              ) : activeTab === "appointments" ? (
+                <AppointmentsTableView
+                  rows={currentRows as TableRow[]}
+                  sortField={sortField[activeTab] ?? ""}
+                  sortDirection={sortDirection[activeTab] ?? "asc"}
+                  onSort={handleSort}
+                  onEdit={handleEdit}
+                  onView={handleView}
+                />
+              ) : null}
+            </div>
+
+            </div>
+
+            {/* Pagination */}
+            <div className="mt-auto shrink-0 flex items-center justify-between px-5 py-2 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
+                  Showing {visibleStart}-{visibleEnd} of {totalRecords}
+                </span>
+                <RowsPerPageSelect
+                  value={rowsPerPage}
+                  onChange={(val) => {
+                    setRowsPerPage(val);
+                    setCurrentPage(1);
+                  }}
+                />
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((prev) => prev - 1)}
+                  className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30"
+                  title="Previous page"
+                >
+                  <svg width="5" height="8" viewBox="0 0 5 8" fill="none">
+                    <path d="M4 8L0 4L4 0L4.93333.933333L1.86667 4L4.93333 7.06667L4 8Z" fill="#424752"/>
+                  </svg>
+                </button>
+                {Array.from({ length: totalPages }, (_, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setCurrentPage(index + 1)}
+                    className={`w-6 h-6 flex items-center justify-center rounded-md text-[10px] font-semibold ${
+                      currentPage === index + 1
+                        ? "bg-[#004785] text-white"
+                        : "text-[#1D1A1A]"
+                    }`}
+                  >
+                    {index + 1}
+                  </button>
+                ))}
+                <button
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage((prev) => prev + 1)}
+                  className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30"
+                  title="Next page"
+                >
+                  <svg width="5" height="8" viewBox="0 0 5 8" fill="none">
+                    <path d="M1 8L5 4L1 0L.0666656.933333L3.13333 4L.0666656 7.06667L1 8Z" fill="#424752"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
+            {/* Branch Performance */}
+            <div ref={branchRef} className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="text-[#191C1E] font-extrabold text-base leading-6 tracking-[-0.4px]">Branch Performance</h3>
+                  <p className="text-[#424752] text-[9px] font-semibold tracking-[0.9px] capitalize">Efficiency</p>
+                </div>
+                <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+                  <path d="M3.33333 11.6667H5V7.5H3.33333V11.6667ZM10 11.6667H11.6667V3.33333H10V11.6667ZM6.66667 11.6667H8.33333V9.16667H6.66667V11.6667ZM6.66667 7.5H8.33333V5.83333H6.66667V7.5ZM1.66667 15C1.20833 15.815972 14.8368 14.5104 14.184 15 13.7917 15 13.3333V1.66667C13.3333 1.20833 13.7917.815972 14.5104.489583C14.184.163194 13.7917 0 13.3333 0H1.66667C1.20833 0 .815972.163194.489583.489583C.163194.815972 0 1.20833 0 1.66667V13.3333C0 13.7917.163194 14.184.489583 14.5104C.815972 14.8368 1.20833 15 1.66667 15Z" fill="#00488D"/>
+                </svg>
+              </div>
+              <div className="flex flex-col gap-4">
+                {branches.map((branch) => (
+                  <div key={branch.id} className="flex flex-col gap-1">
+                    <div className="flex justify-between">
+                      <span className="text-[#191C1E] text-[9px] font-semibold tracking-[0.9px] capitalize">{branch.name}</span>
+                      <span className="text-[#00488D] text-[9px] font-semibold tracking-[0.9px] uppercase">{animatedValues[branch.id] ?? 0}%</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-[#ECEEF0] overflow-hidden">
+                      <div className="h-full rounded-full bg-[#00488D] transition-all duration-200" style={{ width: `${animatedValues[branch.id] ?? 0}%` }} />
                     </div>
                   </div>
                 ))}
@@ -555,51 +1069,45 @@ export default function AdminDashboard() {
             </div>
 
             {/* System Integrity */}
-            <div className="bg-white p-6 rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.05)] flex flex-col">
-              <div className="flex items-center justify-between mb-6">
+            <div className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+              <div className="flex items-start justify-between">
                 <div>
-                  <h3 className="text-lg font-bold text-slate-800">System Integrity</h3>
-                  <p className="text-xs text-slate-400 font-medium">Alerts</p>
+                  <h3 className="text-[#191C1E] font-extrabold text-base leading-6 tracking-[-0.4px]">System Integrity</h3>
+                  <p className="text-[#424752] text-[9px] font-semibold tracking-[0.9px] capitalize">Alerts</p>
                 </div>
-                <button className="text-[10px] font-bold text-slate-400 border border-slate-200 px-3 py-1 rounded-full hover:bg-slate-50 transition-colors uppercase">
-                  View All
-                </button>
+                <button className="px-3 py-1 rounded border border-[rgba(194,198,212,0.30)] text-[#424752] text-[9px] font-semibold tracking-[0.9px]">View All</button>
               </div>
-              <div className="space-y-4 flex-1">
-                {/* Alert: Access Granted */}
-                <div className="p-2.5 border-l-2 border-[#004a99] bg-blue-50/50 rounded-r-lg">
-                  <div className="flex items-center text-[#004a99] mb-0.5">
-                    <svg className="w-3.5 h-3.5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-                    </svg>
-                    <span className="text-xs font-bold uppercase">Admin Access Granted</span>
+              <div className="flex flex-col gap-2">
+                {/* Alert 1 */}
+                <div className="flex items-start gap-3 p-2 rounded-[4px]">
+                  <svg width="17" height="15" viewBox="0 0 17 15" fill="none" className="flex-shrink-0 mt-0.5">
+                    <path d="M0 14.25L8.25 0L16.5 14.25H0ZM2.5875 12.75H13.9125L8.25 3L2.5875 12.75ZM8.25 12C8.4625 12 8.64062 11.9281 8.78438 11.7844C8.92813 11.6406 9 11.4625 9 11.25C9 11.0375 8.92813 10.8594 8.78438 10.7156C8.64062 10.5719 8.4625 10.5 8.25 10.5C8.0375 10.5 7.85938 10.5719 7.71562 10.7156C7.57187 10.8594 7.5 11.0375 7.5 11.25C7.5 11.4625 7.57187 11.6406 7.71562 11.7844C7.85938 11.9281 8.0375 12 8.25 12ZM7.5 9.75H9V6H7.5V9.75Z" fill="#BA1A1A"/>
+                  </svg>
+                  <div>
+                    <div className="text-[#191C1E] font-semibold text-xs leading-[15px]">Admin Access Granted</div>
+                    <div className="text-[#424752] font-normal text-[10px] leading-[15px]">John Doe (IT) authorized for DB.</div>
                   </div>
-                  <p className="text-[11px] text-slate-500 ml-5">John Doe (IT) authorized for DB.</p>
                 </div>
-
-                {/* Alert: Server Latency */}
-                <div className="p-2.5 rounded-r-lg">
-                  <div className="flex items-center text-red-500 mb-0.5">
-                    <svg className="w-3.5 h-3.5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-                    </svg>
-                    <span className="text-xs font-bold uppercase">Server Latency</span>
+                {/* Alert 2 */}
+                <div className="flex items-start gap-3 p-2 rounded-[4px]">
+                  <svg width="17" height="15" viewBox="0 0 17 15" fill="none" className="flex-shrink-0 mt-0.5">
+                    <path d="M0 14.25L8.25 0L16.5 14.25H0ZM2.5875 12.75H13.9125L8.25 3L2.5875 12.75ZM8.25 12C8.4625 12 8.64062 11.9281 8.78438 11.7844C8.92813 11.6406 9 11.4625 9 11.25C9 11.0375 8.92813 10.8594 8.78438 10.7156C8.64062 10.5719 8.4625 10.5 8.25 10.5C8.0375 10.5 7.85938 10.5719 7.71562 10.7156C7.57187 10.8594 7.5 11.0375 7.5 11.25C7.5 11.4625 7.57187 11.6406 7.71562 11.7844C7.85938 11.9281 8.0375 12 8.25 12ZM7.5 9.75H9V6H7.5V9.75Z" fill="#BA1A1A"/>
+                  </svg>
+                  <div>
+                    <div className="text-[#191C1E] font-semibold text-xs leading-[15px]">Server Latency</div>
+                    <div className="text-[#424752] font-normal text-[10px] leading-[15px]">Billing module experiencing delays.</div>
                   </div>
-                  <p className="text-[11px] text-slate-500 ml-5">Billing module experiencing delays.</p>
                 </div>
               </div>
             </div>
-          </section>
-        </div>
-      </main>
+          </div>
+        </main>
+      </div>
 
-      {/* Floating Action Button */}
-      <button
-        className="fixed bottom-8 right-8 w-12 h-12 bg-[#004a99] text-white rounded-xl shadow-2xl flex items-center justify-center hover:scale-105 active:scale-95 transition-transform"
-        aria-label="New action"
-      >
-        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path d="M12 4v16m8-8H4" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
+      {/* FAB */}
+      <button className="fixed bottom-6 right-6 w-12 h-12 bg-[#00488D] rounded-2xl flex items-center justify-center shadow-lg z-10">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <path d="M9 11H4V9H9V4H11V9H16V11H11V16H9V11Z" fill="#FFFAFA"/>
         </svg>
       </button>
     </div>
