@@ -1,8 +1,12 @@
+import { useMemo } from "react";
 import { Activity, BedDouble, Building2, UsersRound } from "lucide-react";
 
 import { DataPanel } from "@/components/hms/DataPanel";
 import { PageHeader } from "@/components/hms/PageHeader";
 import { StatusBadge } from "@/components/hms/StatusBadge";
+import { FilterPopover, useFilterPanel } from "@/components/Filter";
+import type { FilterField } from "@/components/Filter/types";
+import { filterDataByValues } from "@/components/Filter/utils";
 
 const departments = [
   {
@@ -62,6 +66,40 @@ const departments = [
 ] as const;
 
 export default function Departments() {
+  const {
+    values: filterValues,
+    appliedValues,
+    isOpen: isFilterOpen,
+    setIsOpen: setIsFilterOpen,
+    handleChange: handleFilterChange,
+    handleApply: handleApplyFilter,
+    handleClear: handleClearFilter,
+  } = useFilterPanel();
+
+  const departmentFilterFields: FilterField[] = [
+    { id: "name", label: "Department", type: "multiselect", options: [
+      { label: "Emergency", value: "Emergency" },
+      { label: "Cardiology", value: "Cardiology" },
+      { label: "Pediatrics", value: "Pediatrics" },
+      { label: "Surgery", value: "Surgery" },
+      { label: "Maternity", value: "Maternity" },
+      { label: "Diagnostics", value: "Diagnostics" },
+    ]},
+    { id: "lead", label: "Department Head", type: "text", placeholder: "Search by name" },
+    { id: "status", label: "Status", type: "multiselect", options: [
+      { label: "High load", value: "High load" },
+      { label: "Stable", value: "Stable" },
+      { label: "Full review", value: "Full review" },
+      { label: "Normal", value: "Normal" },
+    ]},
+    { id: "utilization", label: "Min Utilization", type: "number", placeholder: "Minimum %", min: 0, max: 100 },
+  ];
+
+  const filteredDepartments = useMemo(() => {
+    const result = filterDataByValues(departments, appliedValues);
+    return result;
+  }, [appliedValues]);
+
   return (
     <>
       <PageHeader
@@ -70,8 +108,23 @@ export default function Departments() {
         description="Review department load, leadership, and current capacity across the hospital."
       />
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {departments.map((department) => (
+      <DataPanel
+        title="Departments Overview"
+        description={`${filteredDepartments.length} departments shown`}
+        action={
+          <FilterPopover
+            fields={departmentFilterFields}
+            values={filterValues}
+            onChange={handleFilterChange}
+            onApply={handleApplyFilter}
+            onClear={handleClearFilter}
+            open={isFilterOpen}
+            onOpenChange={setIsFilterOpen}
+          />
+        }
+      >
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {filteredDepartments.map((department) => (
           <article
             key={department.name}
             className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
@@ -132,6 +185,7 @@ export default function Departments() {
           </article>
         ))}
       </section>
+      </DataPanel>
 
       <DataPanel
         title="Department Notes"

@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
+import { getUser } from "@/utils/token";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -48,6 +49,25 @@ export function AppLayout() {
     { label: "Settings", to: "/settings" },
     { label: "Support", to: "/support" },
   ];
+
+  const [hospitalData, setHospitalData] = useState({
+  hospital_id: "",
+  hospital_name: "",
+  branch_id: "",
+  branch: "",
+});
+
+useEffect(() => {
+  const user = getUser();
+  if (user) {
+    setHospitalData({
+      hospital_id: user.hospital_id ?? "",
+      hospital_name: user.hospital_name ?? "",
+      branch_id: user.branch_id ?? "",
+      branch: user.branch ?? "",
+    });
+  }
+}, []);
 
   return (
     <div className="flex h-screen overflow-hidden font-[Manrope,sans-serif] bg-[#F7F9FB]">
@@ -127,10 +147,10 @@ export function AppLayout() {
             />
             <div>
               <div className="text-[#191C1E] font-semibold text-[10px]">
-                Admin
+                {hospitalData.hospital_name || "HMS"}
               </div>
               <div className="text-[#64748B] text-[8px]">
-                Admin user
+                {hospitalData.branch || "Admin user"}
               </div>
             </div>
           </div>
@@ -156,7 +176,10 @@ export function AppLayout() {
             {/* BRANCH */}
             <div className="flex items-center gap-2">
               <span className="text-[#334155] font-semibold text-sm">
-                Main Branch
+                {hospitalData.branch || "Main Branch"}
+              </span>
+              <span className="text-[#64748B] font-semibold text-xs">
+                {hospitalData.branch_id || ""}
               </span>
             </div>
           </div>

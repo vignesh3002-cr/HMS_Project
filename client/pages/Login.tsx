@@ -9,18 +9,23 @@ export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
-  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+  event.preventDefault();
 
-    try {
-      const response = await login(username, password);
-      saveToken(response.token);
-      saveUser(response.user);
-      navigate("/dashboard");
-    } catch (error: any) {
-      alert(error.response?.data?.message || "Invalid Username or Password");
-    }
-  };
+  try {
+    const response = await login(username, password);
+
+    console.log("Login Response:", response);
+
+    saveToken(response.token);
+
+    saveUser(response.user);
+
+    navigate("/dashboard");
+  } catch (error: any) {
+    alert(error.response?.data?.message || error.message);
+  }
+};
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 md:p-8 bg-clinical-page-bg font-manrope">

@@ -6,6 +6,9 @@ import { PageHeader } from "@/components/hms/PageHeader";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { FilterPopover, useFilterPanel } from "@/components/Filter";
+import type { FilterField } from "@/components/Filter/types";
+import { filterDataByValues } from "@/components/Filter/utils";
 
 const statusTone = {
   Admitted: "green",
@@ -65,20 +68,53 @@ const patients = [
 export default function Patients() {
   const [search, setSearch] = useState("");
 
+  const {
+    values: filterValues,
+    appliedValues,
+    isOpen: isFilterOpen,
+    setIsOpen: setIsFilterOpen,
+    handleChange: handleFilterChange,
+    handleApply: handleApplyFilter,
+    handleClear: handleClearFilter,
+  } = useFilterPanel();
+
+  const patientFilterFields: FilterField[] = [
+    { id: "name", label: "Patient Name", type: "text", placeholder: "Search by name" },
+    { id: "id", label: "Patient ID", type: "text", placeholder: "Enter ID" },
+    { id: "department", label: "Department", type: "multiselect", options: [
+      { label: "Emergency", value: "Emergency" },
+      { label: "Surgery", value: "Surgery" },
+      { label: "Cardiology", value: "Cardiology" },
+      { label: "Maternity", value: "Maternity" },
+      { label: "Pediatrics", value: "Pediatrics" },
+    ]},
+    { id: "doctor", label: "Doctor", type: "text", placeholder: "Search doctor" },
+    { id: "status", label: "Status", type: "multiselect", options: [
+      { label: "Admitted", value: "Admitted" },
+      { label: "Observation", value: "Observation" },
+      { label: "Critical", value: "Critical" },
+      { label: "Discharge", value: "Discharge" },
+    ]},
+  ];
+
   const filteredPatients = useMemo(() => {
     const term = search.trim().toLowerCase();
 
-    if (!term) {
-      return patients;
+    let result = [...patients];
+
+    if (term) {
+      result = result.filter((patient) =>
+        [patient.id, patient.name, patient.department, patient.doctor, patient.room]
+          .join(" ")
+          .toLowerCase()
+          .includes(term),
+      );
     }
 
-    return patients.filter((patient) =>
-      [patient.id, patient.name, patient.department, patient.doctor, patient.room]
-        .join(" ")
-        .toLowerCase()
-        .includes(term),
-    );
-  }, [search]);
+    result = filterDataByValues(result, appliedValues);
+
+    return result;
+  }, [search, appliedValues]);
 
   return (
     <>
@@ -98,13 +134,24 @@ export default function Patients() {
         title="Patient List"
         description={`${filteredPatients.length} patients shown`}
         action={
-          <div className="relative w-full sm:w-80">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search patients"
-              className="pl-9"
+          <div className="flex items-center gap-2">
+            <div className="relative w-full sm:w-80">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search patients"
+                className="pl-9"
+              />
+            </div>
+            <FilterPopover
+              fields={patientFilterFields}
+              values={filterValues}
+              onChange={handleFilterChange}
+              onApply={handleApplyFilter}
+              onClear={handleClearFilter}
+              open={isFilterOpen}
+              onOpenChange={setIsFilterOpen}
             />
           </div>
         }

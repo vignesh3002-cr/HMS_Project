@@ -7,7 +7,7 @@ interface FilterCheckboxProps {
 
 export function FilterCheckbox({ id, label, checked, onChange }: FilterCheckboxProps) {
   return (
-    <label className="flex items-center gap-3 cursor-pointer">
+    <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">
       <div className="relative flex items-center justify-center">
         <input
           type="checkbox"
@@ -16,9 +16,9 @@ export function FilterCheckbox({ id, label, checked, onChange }: FilterCheckboxP
           onChange={(e) => onChange(e.target.checked)}
           className="peer sr-only"
         />
-        <div className="w-5 h-5 rounded border border-gray-300 bg-white peer-checked:bg-[#322cc9] peer-checked:border-[#322cc9]" />
+        <div className="h-2 w-2 rounded border border-[#CBD5E1] bg-white transition peer-checked:border-[#322CC9] peer-checked:bg-[#322CC9]" />
         <svg
-          className="absolute w-3.5 h-3.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none"
+          className="pointer-events-none absolute h-3 w-3 text-white opacity-0 transition peer-checked:opacity-100"
           fill="none"
           stroke="currentColor"
           strokeWidth={3}
@@ -29,7 +29,7 @@ export function FilterCheckbox({ id, label, checked, onChange }: FilterCheckboxP
           <polyline points="20 6 9 17 4 12" />
         </svg>
       </div>
-      <span className="text-[15px] text-[#1a1b26]">{label}</span>
+      <span className="text-[12px] text-[#334155]">{label}</span>
     </label>
   );
 }

@@ -6,6 +6,9 @@ import { PageHeader } from "@/components/hms/PageHeader";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { FilterPopover, useFilterPanel } from "@/components/Filter";
+import type { FilterField } from "@/components/Filter/types";
+import { filterDataByValues } from "@/components/Filter/utils";
 
 const statusTone = {
   Active: "green",
@@ -32,16 +35,67 @@ const staffMembers = [
 export default function Staff() {
   const [search, setSearch] = useState("");
 
+  const {
+    values: filterValues,
+    appliedValues,
+    isOpen: isFilterOpen,
+    setIsOpen: setIsFilterOpen,
+    handleChange: handleFilterChange,
+    handleApply: handleApplyFilter,
+    handleClear: handleClearFilter,
+  } = useFilterPanel();
+
+  const staffFilterFields: FilterField[] = [
+    { id: "name", label: "Staff Name", type: "text", placeholder: "Search by name" },
+    { id: "id", label: "Staff ID", type: "text", placeholder: "Enter ID" },
+    { id: "role", label: "Role", type: "multiselect", options: [
+      { label: "Cardiologist", value: "Cardiologist" },
+      { label: "Oncologist", value: "Oncologist" },
+      { label: "Pediatrician", value: "Pediatrician" },
+      { label: "Neurologist", value: "Neurologist" },
+      { label: "Head Nurse", value: "Head Nurse" },
+      { label: "Radiologist", value: "Radiologist" },
+      { label: "General Surgeon", value: "General Surgeon" },
+    ]},
+    { id: "department", label: "Department", type: "multiselect", options: [
+      { label: "Cardiology", value: "Cardiology" },
+      { label: "Cancer", value: "Cancer" },
+      { label: "Pediatrics", value: "Pediatrics" },
+      { label: "Neurology", value: "Neurology" },
+      { label: "Emergency", value: "Emergency" },
+      { label: "Surgery", value: "Surgery" },
+    ]},
+    { id: "branch", label: "Branch", type: "multiselect", options: [
+      { label: "Central Hospital (Tambaram)", value: "Central Hospital (Tambaram)" },
+      { label: "Central Hospital (Saidapet)", value: "Central Hospital (Saidapet)" },
+      { label: "Central Hospital (Egmore)", value: "Central Hospital (Egmore)" },
+    ]},
+    { id: "status", label: "Status", type: "multiselect", options: [
+      { label: "Active", value: "Active" },
+      { label: "Leave", value: "Leave" },
+      { label: "Resigned", value: "Resigned" },
+      { label: "Suspended", value: "Suspended" },
+    ]},
+  ];
+
   const filteredStaff = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return staffMembers;
-    return staffMembers.filter((member) =>
-      [member.id, member.name, member.role, member.department, member.branch]
-        .join(" ")
-        .toLowerCase()
-        .includes(term),
-    );
-  }, [search]);
+
+    let result = [...staffMembers];
+
+    if (term) {
+      result = result.filter((member) =>
+        [member.id, member.name, member.role, member.department, member.branch]
+          .join(" ")
+          .toLowerCase()
+          .includes(term),
+      );
+    }
+
+    result = filterDataByValues(result, appliedValues);
+
+    return result;
+  }, [search, appliedValues]);
 
   return (
     <>
@@ -61,13 +115,24 @@ export default function Staff() {
         title="Staff Directory"
         description={`${filteredStaff.length} staff members`}
         action={
-          <div className="relative w-full sm:w-80">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search staff"
-              className="pl-9"
+          <div className="flex items-center gap-2">
+            <div className="relative w-full sm:w-80">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search staff"
+                className="pl-9"
+              />
+            </div>
+            <FilterPopover
+              fields={staffFilterFields}
+              values={filterValues}
+              onChange={handleFilterChange}
+              onApply={handleApplyFilter}
+              onClear={handleClearFilter}
+              open={isFilterOpen}
+              onOpenChange={setIsFilterOpen}
             />
           </div>
         }
