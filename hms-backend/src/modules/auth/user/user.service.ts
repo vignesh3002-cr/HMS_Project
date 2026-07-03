@@ -1,5 +1,5 @@
 import { UserRepository } from "./user.repository";
-import { CreateDistrictAdminDto } from "./user.interface";
+import { CreateBranchAdminDto} from "./user.interface";
 import { hashPassword } from "../../../utils/bcrypt";
 import { generateUserId } from "../../../utils/idGenerator";
 
@@ -7,9 +7,9 @@ export class UserService {
 
     private userRepository = new UserRepository();
 
-    async createDistrictAdmin(
-        data: CreateDistrictAdminDto,
-        superAdminId: string
+    async createBranchAdmin(
+        data: CreateBranchAdminDto,
+        adminId: string
     ) {
 
         // Check username
@@ -36,14 +36,14 @@ export class UserService {
             throw new Error("Mobile number already exists");
         }
 
-        // Get last District Admin
+        // Get last Branch Admin
         const lastUser =
-            await this.userRepository.findLastUser("DISTRICT_ADMIN");
+            await this.userRepository.findLastUser("BRANCH_ADMIN");
 
         // Generate ID
         const id =
             generateUserId(
-                "DISTRICT_ADMIN",
+                "BRANCH_ADMIN",
                 lastUser?.id
             );
 
@@ -57,13 +57,13 @@ export class UserService {
 
                 id,
 
-                role_type: "DISTRICT_ADMIN",
+                role_type: "BRANCH_ADMIN",
 
-                parent_id: superAdminId,
+                parent_id: adminId,
 
                 name: data.name,
 
-                district_name: data.district_name,
+                branch_name: data.branch_name,
 
                 mobile: data.mobile,
 
@@ -78,7 +78,7 @@ export class UserService {
             });
 
         return {
-            message: "District Admin Created Successfully",
+            message: "Branch Admin Created Successfully",
             user
         };
 

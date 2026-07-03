@@ -27,11 +27,11 @@ router.get(
 router.get(
   "/admin",
   authenticate,
-  authorize("SUPER_ADMIN"),
+  authorize("ADMIN"),
   (req, res) => {
     res.json({
       success: true,
-      message: "Welcome Super Admin"
+      message: "Welcome Admin"
     });
   }
 );

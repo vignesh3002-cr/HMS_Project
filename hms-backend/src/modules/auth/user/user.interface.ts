@@ -1,8 +1,8 @@
-export interface CreateDistrictAdminDto {
+export interface CreateBranchAdminDto {
 
     name: string;
 
-    district_name: string;
+    branch_name: string;
 
     mobile: string;
 

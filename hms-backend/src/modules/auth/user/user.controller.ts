@@ -6,14 +6,14 @@ const userService = new UserService();
 
 export class UserController {
 
-    async createDistrictAdmin(
+    async createBranchAdmin(
         req: AuthRequest,
         res: Response
     ) {
 
         try {
 
-            const result = await userService.createDistrictAdmin(
+            const result = await userService.createBranchAdmin(
                 req.body,
                 req.user.id
             );
