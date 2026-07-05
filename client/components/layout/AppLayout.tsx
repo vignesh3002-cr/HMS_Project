@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { getUser } from "@/utils/token";
 import { cn } from "@/lib/utils";
+import { BranchSelector } from "@/components/hms/BranchSelector";
 import {
   LayoutDashboard,
   Users,
@@ -58,15 +59,21 @@ export function AppLayout() {
 });
 
 useEffect(() => {
-  const user = getUser();
-  if (user) {
-    setHospitalData({
-      hospital_id: user.hospital_id ?? "",
-      hospital_name: user.hospital_name ?? "",
-      branch_id: user.branch_id ?? "",
-      branch: user.branch ?? "",
-    });
-  }
+  const syncUserData = () => {
+    const user = getUser();
+    if (user) {
+      setHospitalData({
+        hospital_id: user.hospital_id ?? "",
+        hospital_name: user.hospital_name ?? "",
+        branch_id: user.branch_id ?? "",
+        branch: user.branch ?? "",
+      });
+    }
+  };
+
+  syncUserData();
+  window.addEventListener("user-updated", syncUserData);
+  return () => window.removeEventListener("user-updated", syncUserData);
 }, []);
 
   return (
@@ -146,11 +153,14 @@ useEffect(() => {
               className="w-8 h-8 rounded-xl object-cover"
             />
             <div>
-              <div className="text-[#191C1E] font-semibold text-[10px]">
+              <div className="text-[#191C1E] font-bold text-[12px]">
                 {hospitalData.hospital_name || "HMS"}
               </div>
-              <div className="text-[#64748B] text-[8px]">
+              <div className="text-[#64748B] text-[11px]">
                 {hospitalData.branch || "Admin user"}
+              </div>
+              <div className="text-[#64748B] text-[10px]">
+                ({hospitalData.branch_id || "Admin user ID"})
               </div>
             </div>
           </div>
@@ -173,15 +183,7 @@ useEffect(() => {
               <Menu size={20} />
             </button>
 
-            {/* BRANCH */}
-            <div className="flex items-center gap-2">
-              <span className="text-[#334155] font-semibold text-sm">
-                {hospitalData.branch || "Main Branch"}
-              </span>
-              <span className="text-[#64748B] font-semibold text-xs">
-                {hospitalData.branch_id || ""}
-              </span>
-            </div>
+            <BranchSelector />
           </div>
 
           {/* RIGHT */}

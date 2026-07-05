@@ -9,7 +9,6 @@ export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
-<<<<<<< HEAD
 const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
   event.preventDefault();
 
@@ -26,7 +25,6 @@ const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
   } catch (error: any) {
     alert(error.response?.data?.message || error.message);
   }
-=======
  const handleLogin = async (e: React.FormEvent) => {
 
     e.preventDefault();
@@ -58,9 +56,7 @@ const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
         );
 
     }
-
->>>>>>> 5bad46d09911a7c1a88cc5fbc35715db6c15ed67
-};
+}};
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 md:p-8 bg-clinical-page-bg font-manrope">
