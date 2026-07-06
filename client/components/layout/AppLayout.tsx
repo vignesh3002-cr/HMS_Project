@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 import {
-logout
+ remove
 } from "../../utils/token";
 import { getUser } from "@/utils/token";
 import { cn } from "@/lib/utils";
@@ -45,8 +45,8 @@ export function AppLayout() {
 
 const logout = () => {
 
+    remove();
 
-    logout();
     localStorage.removeItem("user_info");
 
     navigate("/");
