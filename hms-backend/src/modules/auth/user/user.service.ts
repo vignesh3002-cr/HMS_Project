@@ -44,7 +44,7 @@ export class UserService {
         const id =
             generateUserId(
                 "BRANCH_ADMIN",
-                lastUser?.id
+                lastUser?.id?.toString()
             );
 
         // Hash password
