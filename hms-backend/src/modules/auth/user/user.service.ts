@@ -37,13 +37,6 @@ export class UserService {
 
         // Get last Branch Admin
 
-        // Generate ID
-        const id =
-            generateUserId(
-                "BRANCH_ADMIN",
-                lastUser?.id
-            );
-
         // Hash password
         const hashedPassword =
             await hashPassword(data.password);
