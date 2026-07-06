@@ -140,12 +140,12 @@ export default function Staff() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] border-collapse text-left">
             <thead>
-              <tr className="border-b border-slate-200 text-xs uppercase tracking-[0.12em] text-slate-500">
-                <th className="pb-3 font-bold">Employee</th>
-                <th className="pb-3 font-bold">Role</th>
-                <th className="pb-3 font-bold">Department</th>
-                <th className="pb-3 font-bold">Branch</th>
-                <th className="pb-3 font-bold">Status</th>
+              <tr className="border-b border-slate-200">
+                <th className="hms-table-header pb-3">Employee</th>
+                <th className="hms-table-header pb-3">Role</th>
+                <th className="hms-table-header pb-3">Department</th>
+                <th className="hms-table-header pb-3">Branch</th>
+                <th className="hms-table-header pb-3">Status</th>
               </tr>
             </thead>
             <tbody>

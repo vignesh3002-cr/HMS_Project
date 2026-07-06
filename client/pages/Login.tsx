@@ -8,55 +8,24 @@ export default function Login() {
   const [rememberMe, setRememberMe] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
-const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
-  event.preventDefault();
-
-  try {
-    const response = await login(username, password);
-
-    console.log("Login Response:", response);
-
-    saveToken(response.token);
-
-    saveUser(response.user);
-
-    navigate("/dashboard");
-  } catch (error: any) {
-    alert(error.response?.data?.message || error.message);
-  }
- const handleLogin = async (e: React.FormEvent) => {
-
-    e.preventDefault();
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
 
     try {
+      const response = await login(username, password);
 
-        const response = await login(username, password);
+      console.log("Login Response:", response);
 
-        const { token, user, user_details } = response.data;
+      saveToken(response.token);
+      saveUser(response.user);
 
-        saveToken(token);
-
-        saveUser(user_details);
-
-        localStorage.setItem(
-            "user_info",
-            JSON.stringify(user)
-        );
-
-        alert("Login Successful");
-
-        navigate("/dashboard");
-
+      navigate("/dashboard");
     } catch (error: any) {
-
-        alert(
-            error.response?.data?.message ||
-            "Invalid Username or Password"
-        );
-
+      alert(error.response?.data?.message || error.message);
     }
-}};
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 md:p-8 bg-clinical-page-bg font-manrope">
@@ -122,12 +91,33 @@ const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
                     />
                   </svg>
                   <input
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
                     className="flex-1 bg-transparent text-xs font-medium outline-none border-none min-w-0 text-clinical-label/50 placeholder:text-clinical-label/50"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="flex-shrink-0 text-clinical-label/60 hover:text-clinical-label transition-colors"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m15 18-.722-3.25" />
+                        <path d="M2 8a10.645 10.645 0 0 0 20 0" />
+                        <path d="m20 15-1.726-2.05" />
+                        <path d="m4 15 1.726-2.05" />
+                        <path d="m9 18 .722-3.25" />
+                      </svg>
+                    )}
+                  </button>
                 </div>
               </div>
             </div>

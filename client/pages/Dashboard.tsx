@@ -160,18 +160,6 @@ const staff = [
     status: "Active",
   },
   {
-    avatar: "RP",
-    avatarColor: "#7B3200",
-    initBg: "#FFDBCB",
-    name: "Ravi Patel",
-    id: "STF-1007",
-    dept: "Radiology",
-    deptBg: "#DBEAFE",
-    deptColor: "#1E40AF",
-    branch: "Central Hospital (Saidapet)",
-    status: "Suspended",
-  },
-  {
     avatar: "SJ",
     avatarColor: "#00C896",
     initBg: "rgba(0,200,150,0.12)",
@@ -183,18 +171,7 @@ const staff = [
     branch: "Central Hospital (Egmore)",
     status: "Active",
   },
-  {
-    avatar: "MD",
-    avatarColor: "#475C7F",
-    initBg: "#E6E8EA",
-    name: "Michael Dsouza",
-    id: "STF-1009",
-    dept: "Pathology",
-    deptBg: "#E6E8EA",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Tambaram)",
-    status: "Resigned",
-  },
+
   {
     avatar: "MN",
     avatarColor: "#00488D",
@@ -290,7 +267,7 @@ const appointments = [
     avatar: "B",
     avatarColor: "#00C896",
     avatarBg: "rgba(0,200,150,0.12)",
-    doctorName: "Marcus Kincaid",
+    doctorName: "Dr.Marcus Kincaid",
     doctorId: "DOC-4431",
     doctorAvatar: "MK",
     doctorAvatarcolor: "#00488D",
@@ -524,8 +501,9 @@ function RowsPerPageSelect({ value, onChange, options = [5, 10, 20] }: { value: 
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
+        // rows-per-page dropdown
         className={`flex items-center gap-1.5 text-xs font-semibold text-[#374151] bg-white border rounded-md pl-2.5 pr-2 py-1 transition-colors ${
-          open ? "border-[#00488D] ring-2 ring-[#D6E3FF]" : "border-[#E5E7EB] hover:border-[#00488D]"
+          open ? "border-[#00488D] ring-2 ring-[#D6E3FF]" : "border-[#E5E7EB] hover:border-[#0c63b4]"
         }`}
       >
         {value}
@@ -641,8 +619,6 @@ export default function Dashboard() {
     ]},
     { id: "status", label: "Status", type: "multiselect", options: [
       { label: "Active", value: "Active" },
-      { label: "Suspended", value: "Suspended" },
-      { label: "Resigned", value: "Resigned" },
       { label: "Leave", value: "Leave" },
     ]},
   ];
@@ -896,8 +872,8 @@ useEffect(() => {
           {/* Overview Header */}
           <div className="flex items-end justify-between">
             <div>
-              <h2 className="text-[#191C1E] font-extrabold text-2xl leading-8 tracking-[-0.6px]">Admin Overview</h2>
-              <p className="text-[#424752] text-xs font-medium leading-4">Real-time performance across all branches.</p>
+              <h2 className="hms-heading">Admin Overview</h2>
+              <p className="hms-subheading">Real-time performance across all branches.</p>
             </div>
             <button className="flex items-center gap-1.5 px-5 py-2.5 bg-[#004785] rounded-[10px] text-white text-xs font-semibold whitespace-nowrap">
               <svg width="16" height="12" viewBox="0 0 16 12" fill="none">

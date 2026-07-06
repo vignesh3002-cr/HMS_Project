@@ -35,7 +35,7 @@ export function TableView({ columns, rows, sortField, sortDirection, onSort, ren
             <th
               key={column.key}
               onClick={() => column.sortable !== false && onSort(column.key)}
-              className={`px-5 py-2.5 text-[12px] font-bold text-[#424752] tracking-[0.9px] capitalize ${
+               className={`px-5 py-2.5 hms-table-header ${
                 column.sortable === false ? "text-right" : "text-left"
               } ${column.sortable !== false ? "cursor-pointer select-none whitespace-nowrap" : "whitespace-nowrap"}`}
             >
@@ -102,21 +102,21 @@ export function DoctorsTableView({ rows, sortField, sortDirection, onSort, onEdi
           <>
             <td className="px-5 py-3">
               <div className="flex items-center gap-2">
-                <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 text-[10px] font-semibold" style={{ background: String(row.initBg), color: String(row.avatarColor) }}>
+                <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: String(row.initBg), color: String(row.avatarColor) }}>
                   {String(row.avatar)}
                 </div>
                 <div>
-                  <div className="text-[#111827] font-semibold text-sm leading-[1.2]">{String(row.name)}</div>
-                  <div className="text-[#8C8D8F] font-semibold text-[10px] uppercase">{String(row.id)}</div>
+                  <div className="hms-name-text">{String(row.name)}</div>
+                  <div className="hms-id-text">{String(row.id)}</div>
                 </div>
               </div>
             </td>
             <td className="px-5 py-3">
-              <span className="px-1.5 py-0.5 rounded-sm text-[10px] font-semibold tracking-[-0.4px] capitalize" style={{ background: String(row.deptBg), color: String(row.deptColor) }}>
+              <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: String(row.deptBg), color: String(row.deptColor) }}>
                 {String(row.dept)}
               </span>
             </td>
-            <td className="px-5 py-3 text-[#191C1E] font-medium text-[11px] leading-4">{String(row.branch)}</td>
+            <td className="px-5 py-3 text-[#191C1E] hms-content-text leading-4">{String(row.branch)}</td>
             <td className="px-5 py-3">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />
@@ -154,21 +154,21 @@ export function StaffTableView({ rows, sortField, sortDirection, onSort, onEdit,
           <>
             <td className="px-5 py-3">
               <div className="flex items-center gap-2">
-                <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 text-[10px] font-semibold" style={{ background: String(row.initBg), color: String(row.avatarColor) }}>
+                <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: String(row.initBg), color: String(row.avatarColor) }}>
                   {String(row.avatar)}
                 </div>
                 <div>
-                  <div className="text-[#111827] font-semibold text-sm leading-[1.2]">{String(row.name)}</div>
-                  <div className="text-[#8C8D8F] font-semibold text-[10px] uppercase">{String(row.id)}</div>
+                  <div className="hms-name-text">{String(row.name)}</div>
+                  <div className="hms-id-text">{String(row.id)}</div>
                 </div>
               </div>
             </td>
             <td className="px-5 py-3">
-              <span className="px-1.5 py-0.5 rounded-sm text-[10px] font-semibold tracking-[-0.4px] capitalize" style={{ background: String(row.deptBg), color: String(row.deptColor) }}>
+              <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: String(row.deptBg), color: String(row.deptColor) }}>
                 {String(row.dept)}
               </span>
             </td>
-            <td className="px-5 py-3 text-[#191C1E] font-medium text-[11px] leading-4">{String(row.branch)}</td>
+            <td className="px-5 py-3 text-[#191C1E] hms-content-text leading-4">{String(row.branch)}</td>
             <td className="px-5 py-3">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />
@@ -209,15 +209,15 @@ export function AppointmentsTableView({ rows, sortField, sortDirection, onSort, 
           <>
             <td className="px-5 py-3">
               <div className="flex items-center gap-2">
-                <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 text-[10px] font-semibold" style={{ background: String(row.avatarBg), color: String(row.avatarColor) }}>
+                <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: String(row.avatarBg), color: String(row.avatarColor) }}>
                   {String(row.avatar)}
                 </div>
 
                 <div>
-                  <div className="text-[#111827] font-semibold text-sm leading-[1.2]">
+                  <div className="hms-name-text">
                     {String(row.patientName)}
                   </div>
-                  <div className="text-[#8C8D8F] font-semibold text-[10px] uppercase">
+                  <div className="hms-id-text">
                     {String(row.patientId)}
                   </div>
                 </div>
@@ -225,35 +225,35 @@ export function AppointmentsTableView({ rows, sortField, sortDirection, onSort, 
             </td>
 
             <td className="px-5 py-3">
-              <span className="px-3 py-1 rounded-[20px] text-[11px] font-semibold inline-block" style={{ background: "#EEF2FF", color: "#4F46E5" }}>
+              <span className="px-3 py-1 rounded-[20px] hms-content-text inline-block" style={{ background: "#EEF2FF", color: "#4F46E5" }}>
                 {String(row.appointmentNo)}
               </span>
             </td>
 
             <td className="px-5 py-3">
               <div className="flex items-center gap-2">
-                <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 text-[10px] font-semibold" style={{ background: String(row.doctorAvatarBg), color: String(row.doctorAvatarcolor) }}>
+                <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: String(row.doctorAvatarBg), color: String(row.doctorAvatarcolor) }}>
                   {String(row.doctorAvatar)}
                 </div>
 
                 <div>
-                  <div className="text-sm font-medium text-[#111827]">
+                  <div className="hms-name-text">
                     {String(row.doctorName)}
                   </div>
-                  <div className="text-[#8C8D8F] font-semibold text-[10px] uppercase">
+                  <div className="hms-id-text">
                     {String(row.doctorId)}
                   </div>
                 </div>
               </div>
             </td>
 
-            <td className="px-5 py-3 text-[#191C1E] font-medium text-[11px] leading-4">
+            <td className="px-5 py-3 text-[#191C1E] hms-content-text leading-4">
               {String(row.reason)}
             </td>
 
-            <td className="px-5 py-3 text-[#191C1E] font-medium text-[11px] leading-4">
+            <td className="px-5 py-3 text-[#191C1E] hms-content-text leading-4">
               <div>{String(row.date)}</div>
-              <div className="text-[#8C8D8F] text-[10px]">
+              <div className="text-[#8C8D8F] hms-department-text">
                 {String(row.time)}
               </div>
             </td>
