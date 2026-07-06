@@ -1,12 +1,14 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, ChevronDown, Check } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import { AppointmentsTableView, DoctorsTableView, StaffTableView, type TableRow } from "@/components/hms/DashboardTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
-import { FilterPanel } from "@/components/Filter/FilterPanel";
+import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
+import { filterDataByValues } from "@/components/Filter/utils";
+
 
 
 const doctors = [
@@ -158,18 +160,6 @@ const staff = [
     status: "Active",
   },
   {
-    avatar: "RP",
-    avatarColor: "#7B3200",
-    initBg: "#FFDBCB",
-    name: "Ravi Patel",
-    id: "STF-1007",
-    dept: "Radiology",
-    deptBg: "#DBEAFE",
-    deptColor: "#1E40AF",
-    branch: "Central Hospital (Saidapet)",
-    status: "Suspended",
-  },
-  {
     avatar: "SJ",
     avatarColor: "#00C896",
     initBg: "rgba(0,200,150,0.12)",
@@ -181,18 +171,7 @@ const staff = [
     branch: "Central Hospital (Egmore)",
     status: "Active",
   },
-  {
-    avatar: "MD",
-    avatarColor: "#475C7F",
-    initBg: "#E6E8EA",
-    name: "Michael Dsouza",
-    id: "STF-1009",
-    dept: "Pathology",
-    deptBg: "#E6E8EA",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Tambaram)",
-    status: "Resigned",
-  },
+
   {
     avatar: "MN",
     avatarColor: "#00488D",
@@ -288,7 +267,7 @@ const appointments = [
     avatar: "B",
     avatarColor: "#00C896",
     avatarBg: "rgba(0,200,150,0.12)",
-    doctorName: "Marcus Kincaid",
+    doctorName: "Dr.Marcus Kincaid",
     doctorId: "DOC-4431",
     doctorAvatar: "MK",
     doctorAvatarcolor: "#00488D",
@@ -522,8 +501,9 @@ function RowsPerPageSelect({ value, onChange, options = [5, 10, 20] }: { value: 
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
+        // rows-per-page dropdown
         className={`flex items-center gap-1.5 text-xs font-semibold text-[#374151] bg-white border rounded-md pl-2.5 pr-2 py-1 transition-colors ${
-          open ? "border-[#00488D] ring-2 ring-[#D6E3FF]" : "border-[#E5E7EB] hover:border-[#00488D]"
+          open ? "border-[#00488D] ring-2 ring-[#D6E3FF]" : "border-[#E5E7EB] hover:border-[#0c63b4]"
         }`}
       >
         {value}
@@ -583,30 +563,83 @@ export default function Dashboard() {
   // Date selection state
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [filterValues, setFilterValues] = useState<Record<string, any>>({});
+  const {
+    values: filterValues,
+    appliedValues,
+    isOpen: isFilterOpen,
+    setIsOpen: setIsFilterOpen,
+    handleChange: handleFilterChange,
+    handleApply: handleApplyFilter,
+    handleClear: handleClearFilter,
+  } = useFilterPanel();
 
-  const doctorFields: FilterField[] = [
-    { id: "patientName", label: "Patient Name", type: "select", options: [{ label: "John", value: "1" }, { label: "David", value: "2" }] },
-    { id: "patientId", label: "Patient ID", type: "text", placeholder: "Enter Patient ID" },
-    { id: "mobile", label: "Mobile", type: "tel", placeholder: "Enter mobile" },
-    { id: "diagnose", label: "Diagnose", type: "text", placeholder: "Enter Diagnose" },
-    { id: "doctor", label: "Assigned Doctor", type: "select", options: [] },
-    { id: "status", label: "Appointment Status", type: "checkbox" },
+  useEffect(() => {
+    handleClearFilter();
+  }, [activeTab]);
+
+  const doctorFilterFields: FilterField[] = [
+    { id: "name", label: "Doctor Name", type: "text", placeholder: "Search by name" },
+    { id: "dept", label: "Department", type: "multiselect", options: [
+      { label: "Cardiology", value: "Cardiology" },
+      { label: "Neurology", value: "Neurology" },
+      { label: "Orthopedics", value: "Orthopedics" },
+      { label: "Dermatology", value: "Dermatology" },
+      { label: "ENT", value: "ENT" },
+      { label: "Gynecology", value: "Gynecology" },
+      { label: "Urology", value: "Urology" },
+      { label: "Orthology", value: "Orthology" },
+    ]},
+    { id: "branch", label: "Branch", type: "multiselect", options: [
+      { label: "Central Hospital (Tambaram)", value: "Central Hospital (Tambaram)" },
+      { label: "Central Hospital (Saidapet)", value: "Central Hospital (Saidapet)" },
+      { label: "Central Hospital (Egmore)", value: "Central Hospital (Egmore)" },
+    ]},
+    { id: "status", label: "Status", type: "multiselect", options: [
+      { label: "Active", value: "Active" },
+      { label: "Leave", value: "Leave" },
+    ]},
   ];
 
-  const handleFilterChange = (name: string, value: any) => {
-    setFilterValues((prev) => ({ ...prev, [name]: value }));
-  };
+  const staffFilterFields: FilterField[] = [
+    { id: "name", label: "Staff Name", type: "text", placeholder: "Search by name" },
+    { id: "dept", label: "Department", type: "multiselect", options: [
+      { label: "Emergency", value: "Emergency" },
+      { label: "Radiology", value: "Radiology" },
+      { label: "Surgery", value: "Surgery" },
+      { label: "Pathology", value: "Pathology" },
+      { label: "Maternity", value: "Maternity" },
+      { label: "Pharmacy", value: "Pharmacy" },
+      { label: "Pulmonology", value: "Pulmonology" },
+      { label: "Neurology", value: "Neurology" },
+    ]},
+    { id: "branch", label: "Branch", type: "multiselect", options: [
+      { label: "Central Hospital (Tambaram)", value: "Central Hospital (Tambaram)" },
+      { label: "Central Hospital (Saidapet)", value: "Central Hospital (Saidapet)" },
+      { label: "Central Hospital (Egmore)", value: "Central Hospital (Egmore)" },
+    ]},
+    { id: "status", label: "Status", type: "multiselect", options: [
+      { label: "Active", value: "Active" },
+      { label: "Leave", value: "Leave" },
+    ]},
+  ];
 
-  const handleApplyFilter = () => {
-    console.log("Applied filters:", filterValues);
-    setIsFilterOpen(false);
-  };
+  const appointmentFilterFields: FilterField[] = [
+    { id: "patientName", label: "Patient Name", type: "text", placeholder: "Search by name" },
+    { id: "doctorName", label: "Doctor Name", type: "text", placeholder: "Search by doctor" },
+    { id: "reason", label: "Reason", type: "text", placeholder: "Search reason" },
+    { id: "status", label: "Status", type: "multiselect", options: [
+      { label: "Active", value: "Active" },
+      { label: "Leave", value: "Leave" },
+    ]},
+  ];
 
-  const handleClearFilter = () => {
-    setFilterValues({});
-  };
+  const activeFilterFields = useMemo(() => {
+    switch (activeTab) {
+      case "staff": return staffFilterFields;
+      case "appointments": return appointmentFilterFields;
+      default: return doctorFilterFields;
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     const container = tabsContainerRef.current;
@@ -641,15 +674,23 @@ export default function Dashboard() {
       ? ["appointmentNo", "patientName", "doctorName", "reason", "status"]
       : ["name", "id", "dept", "branch", "status"];
 
-  const filteredData = searchQuery
-    ? activeData.filter((item) =>
+  const filteredData = useMemo(() => {
+    let result = [...activeData];
+
+    if (searchQuery) {
+      result = result.filter((item) =>
         searchableFields.some((field) =>
           String(item[field] ?? "")
             .toLowerCase()
             .includes(searchQuery.toLowerCase())
         )
-      )
-    : activeData;
+      );
+    }
+
+    result = filterDataByValues(result, appliedValues);
+
+    return result;
+  }, [searchQuery, activeTab, appliedValues]);
 
   const currentSortField = sortField[activeTab];
   const currentSortDirection = sortDirection[activeTab];
@@ -831,8 +872,8 @@ useEffect(() => {
           {/* Overview Header */}
           <div className="flex items-end justify-between">
             <div>
-              <h2 className="text-[#191C1E] font-extrabold text-2xl leading-8 tracking-[-0.6px]">Admin Overview</h2>
-              <p className="text-[#424752] text-xs font-medium leading-4">Real-time performance across all branches.</p>
+              <h2 className="hms-heading">Admin Overview</h2>
+              <p className="hms-subheading">Real-time performance across all branches.</p>
             </div>
             <button className="flex items-center gap-1.5 px-5 py-2.5 bg-[#004785] rounded-[10px] text-white text-xs font-semibold whitespace-nowrap">
               <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
@@ -931,26 +972,16 @@ useEffect(() => {
                   </button>
                 </div>
                 {/* Filters */}
-                <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
-                  <PopoverTrigger asChild>
-                    <button className="flex items-center gap-2 h-[27px] px-4 rounded-md border border-[#E5E7EB] text-[#374151] text-sm font-medium transition-colors duration-150 hover:bg-[#F2F4F6] hover:border-[#00488D]">
-                      <svg width="12" height="11" viewBox="0 0 12 11" fill="none">
-                        <path d="M11.293.519531C11.2292.364583 11.1266.239258 10.9854.143555C10.8441.0478516 10.6823 0 10.5 0H.875C.638021 0 .432943.0865885.259766.259766C.0865885.432943 0 .638021 0 .875C0 .984375.0205078 1.09147.0615234 1.19629C.102539 1.30111.159505 1.38997.232422 1.46289L3.9375 5.42773V9.625C3.9375 9.87109 4.02181 10.0785 4.19043 10.2471C4.35905 10.4157 4.56641 10.5 4.8125 10.5H7.4375C7.66016 10.5 7.84766 10.4219 7.99609 10.2656C8.14453 10.1094 8.21875 9.92578 8.21875 9.71094V5.42773L11.9238 1.46289C11.9967 1.38997 12.0537 1.30339 12.0947 1.20312C12.1357 1.10286 12.1562.99349 12.1562.875C12.1562.811198 12.1494.749674 12.1357.69043C12.122.631185 12.1015.574219 12.0742.519531Z" fill="#374151"/>
-                      </svg>
-                      Filters
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg" align="end">
-                    <FilterPanel
-                      title="Advanced Filters"
-                      fields={doctorFields}
-                      values={filterValues}
-                      onChange={handleFilterChange}
-                      onApply={handleApplyFilter}
-                      onClear={handleClearFilter}
-                    />
-                  </PopoverContent>
-                </Popover>
+                <FilterPopover
+                  title="Advanced Filters"
+                  fields={activeFilterFields}
+                  values={filterValues}
+                  onChange={handleFilterChange}
+                  onApply={handleApplyFilter}
+                  onClear={handleClearFilter}
+                  open={isFilterOpen}
+                  onOpenChange={setIsFilterOpen}
+                />
               </div>
             </div>
 

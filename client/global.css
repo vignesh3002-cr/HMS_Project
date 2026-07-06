@@ -3,8 +3,35 @@
 
 
 @tailwind base;
-@tailwind components;
+@tailwind compon  ents;
 @tailwind utilities;
+
+@layer utilities {
+  .hms-heading {
+    @apply text-[#191C1E] font-extrabold text-2xl leading-8 tracking-[-0.6px];
+  }
+  .hms-subheading {
+    @apply text-[#424752] text-xs font-medium leading-4;
+  }
+  .hms-table-header {
+    @apply text-[12px] font-bold text-[#424752] tracking-[0.9px] capitalize;
+  }
+  .hms-avatar-text {
+  @apply text-[14px] font-semibold;
+}
+   .hms-name-text {
+  @apply text-[#111827] font-semibold text-sm leading-[1.2];
+}
+   .hms-id-text {
+  @apply text-[#8C8D8F] font-semibold text-[10px] uppercase;
+}
+   .hms-department-text {
+  @apply text-[10px] font-semibold; /* 10 */
+}
+    .hms-content-text {
+  @apply font-medium text-[11px]; /* 11 */
+} 
+}
 
 @layer base {
   /**

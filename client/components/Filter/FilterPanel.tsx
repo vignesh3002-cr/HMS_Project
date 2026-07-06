@@ -11,13 +11,13 @@ export function FilterPanel({
   onClear,
 }: FilterPanelProps) {
   return (
-    <div className="w-[367px] rounded-2xl bg-white shadow-xl p-6 pb-8">
-      <div className="flex items-center justify-between mb-8">
-        <h2 className="text-[17px] font-bold text-[#1A1B26]">{title}</h2>
+    <div className="w-[280px] max-w-[calc(100vw-2rem)] rounded-[16px] border border-[#EEF2F7] bg-white p-5 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.12)]">
+      <div className="mb-5 flex items-center justify-between">
+        <h2 className="text-[14px] font-bold text-[#0F172A]">{title}</h2>
         <button
           type="button"
           onClick={onClear}
-          className="text-[15px] font-medium text-[#322CC9] hover:underline"
+          className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#322CC9] transition-colors hover:text-[#252099] hover:underline"
         >
           Clear All
         </button>
@@ -28,7 +28,7 @@ export function FilterPanel({
           e.preventDefault();
           onApply();
         }}
-        className="space-y-6"
+        className="space-y-4"
       >
         {fields.map((field) => (
           <FilterField
@@ -39,7 +39,9 @@ export function FilterPanel({
           />
         ))}
 
-        <FilterButton onApply={onApply} />
+        <div className="pt-1">
+          <FilterButton onApply={onApply} />
+        </div>
       </form>
     </div>
   );

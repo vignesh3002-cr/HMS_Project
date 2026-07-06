@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 import {
-    removeToken,
-    removeUser
+logout
 } from "../../utils/token";
+import { getUser } from "@/utils/token";
 import { cn } from "@/lib/utils";
+import { BranchSelector } from "@/components/hms/BranchSelector";
 import {
   LayoutDashboard,
   Users,
@@ -44,10 +45,8 @@ export function AppLayout() {
 
 const logout = () => {
 
-    removeToken();
 
-    removeUser();
-
+    logout();
     localStorage.removeItem("user_info");
 
     navigate("/");
@@ -68,6 +67,31 @@ const logout = () => {
     { label: "Settings", to: "/settings" },
     { label: "Support", to: "/support" },
   ];
+
+  const [hospitalData, setHospitalData] = useState({
+  hospital_id: "",
+  hospital_name: "",
+  branch_id: "",
+  branch: "",
+});
+
+useEffect(() => {
+  const syncUserData = () => {
+    const user = getUser();
+    if (user) {
+      setHospitalData({
+        hospital_id: user.hospital_id ?? "",
+        hospital_name: user.hospital_name ?? "",
+        branch_id: user.branch_id ?? "",
+        branch: user.branch ?? "",
+      });
+    }
+  };
+
+  syncUserData();
+  window.addEventListener("user-updated", syncUserData);
+  return () => window.removeEventListener("user-updated", syncUserData);
+}, []);
 
   return (
     <div className="flex h-screen overflow-hidden font-[Manrope,sans-serif] bg-[#F7F9FB]">
@@ -147,11 +171,14 @@ const logout = () => {
               className="w-8 h-8 rounded-xl object-cover"
             />
             <div>
-              <div className="text-[#191C1E] font-semibold text-[10px]">
-                Admin
+              <div className="text-[#191C1E] font-bold text-[12px]">
+                {hospitalData.hospital_name || "HMS"}
               </div>
-              <div className="text-[#64748B] text-[8px]">
-                Admin user
+              <div className="text-[#64748B] text-[11px]">
+                {hospitalData.branch || "Admin user"}
+              </div>
+              <div className="text-[#64748B] text-[10px]">
+                ({hospitalData.branch_id || "Admin user ID"})
               </div>
             </div>
           </div>
@@ -178,12 +205,7 @@ const logout = () => {
               <Menu size={20} />
             </button>
 
-            {/* BRANCH */}
-            <div className="flex items-center gap-2">
-              <span className="text-[#334155] font-semibold text-sm">
-                Main Branch
-              </span>
-            </div>
+            <BranchSelector />
           </div>
 
           {/* RIGHT */}

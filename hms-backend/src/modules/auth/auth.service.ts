@@ -37,8 +37,11 @@ export class AuthService {
         name: user.name,
         username: user.username,
         role: user.role_type,
+        role_id: user.role_id,
+        branch_id: user.branch_id
       },
     };
+    
   }
 
 }

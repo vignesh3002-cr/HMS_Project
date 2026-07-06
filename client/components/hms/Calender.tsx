@@ -21,7 +21,7 @@ type ThemeName = "light" | "dark" | "forest" | "breeze" | "custom";
  
 interface Theme {
   label: string;
-  icon: React.ComponentType<{ size?: number }>;
+  icon: React.ComponentType<{ size?: number | string }>;
   vars: Record<string, string>;
 }
  
@@ -88,6 +88,22 @@ const THEMES: Record<ThemeName, Theme> = {
       "--cal-today-ring": "#0ea5b7",
       "--cal-hover": "#dcf0f4",
       "--cal-shadow": "0 1px 2px rgba(14,110,125,0.05), 0 10px 24px rgba(14,110,125,0.10)",
+    },
+  },
+  custom: {
+    label: "Custom",
+    icon: Palette,
+    vars: {
+      "--cal-bg": "#fdf6ec",
+      "--cal-surface": "#fef7ed",
+      "--cal-border": "#f3d8c4",
+      "--cal-text": "#2b2118",
+      "--cal-text-muted": "#8a6f57",
+      "--cal-accent": "#e0703f",
+      "--cal-accent-text": "#ffffff",
+      "--cal-today-ring": "#e0703f",
+      "--cal-hover": "#fde7d8",
+      "--cal-shadow": "0 1px 2px rgba(0,0,0,0.05), 0 10px 24px rgba(0,0,0,0.08)",
     },
   },
 };

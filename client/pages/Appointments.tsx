@@ -6,6 +6,9 @@ import { PageHeader } from "@/components/hms/PageHeader";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { FilterPopover, useFilterPanel } from "@/components/Filter";
+import type { FilterField } from "@/components/Filter/types";
+import { filterDataByValues } from "@/components/Filter/utils";
 
 const appointmentFilters = ["All", "Confirmed", "Waiting", "Completed"] as const;
 type AppointmentFilter = (typeof appointmentFilters)[number];
@@ -57,13 +60,44 @@ const appointments = [
 export default function Appointments() {
   const [filter, setFilter] = useState<AppointmentFilter>("All");
 
+  const {
+    values: filterValues,
+    appliedValues,
+    isOpen: isFilterOpen,
+    setIsOpen: setIsFilterOpen,
+    handleChange: handleFilterChange,
+    handleApply: handleApplyFilter,
+    handleClear: handleClearFilter,
+  } = useFilterPanel();
+
+  const appointmentFilterFields: FilterField[] = [
+    { id: "patient", label: "Patient Name", type: "text", placeholder: "Search by name" },
+    { id: "doctor", label: "Doctor", type: "text", placeholder: "Search by doctor" },
+    { id: "department", label: "Department", type: "multiselect", options: [
+      { label: "Cardiology", value: "Cardiology" },
+      { label: "Orthopedics", value: "Orthopedics" },
+      { label: "Pediatrics", value: "Pediatrics" },
+      { label: "Neurology", value: "Neurology" },
+      { label: "General Medicine", value: "General Medicine" },
+    ]},
+    { id: "status", label: "Status", type: "multiselect", options: [
+      { label: "Confirmed", value: "Confirmed" },
+      { label: "Waiting", value: "Waiting" },
+      { label: "Completed", value: "Completed" },
+    ]},
+  ];
+
   const visibleAppointments = useMemo(() => {
-    if (filter === "All") {
-      return appointments;
+    let result = [...appointments];
+
+    if (filter !== "All") {
+      result = result.filter((appointment) => appointment.status === filter);
     }
 
-    return appointments.filter((appointment) => appointment.status === filter);
-  }, [filter]);
+    result = filterDataByValues(result, appliedValues);
+
+    return result;
+  }, [filter, appliedValues]);
 
   return (
     <>
@@ -83,7 +117,7 @@ export default function Appointments() {
         title="Today's Schedule"
         description={`${visibleAppointments.length} appointments in view`}
         action={
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {appointmentFilters.map((item) => (
               <button
                 key={item}
@@ -99,6 +133,15 @@ export default function Appointments() {
                 {item}
               </button>
             ))}
+            <FilterPopover
+              fields={appointmentFilterFields}
+              values={filterValues}
+              onChange={handleFilterChange}
+              onApply={handleApplyFilter}
+              onClear={handleClearFilter}
+              open={isFilterOpen}
+              onOpenChange={setIsFilterOpen}
+            />
           </div>
         }
       >
