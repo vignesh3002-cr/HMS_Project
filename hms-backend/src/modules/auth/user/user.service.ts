@@ -1,7 +1,6 @@
 import { UserRepository } from "./user.repository";
 import { CreateBranchAdminDto} from "./user.interface";
 import { hashPassword } from "../../../utils/bcrypt";
-import { generateUserId } from "../../../utils/idGenerator";
 
 export class UserService {
 
@@ -37,15 +36,9 @@ export class UserService {
         }
 
         // Get last Branch Admin
-        const lastUser =
-            await this.userRepository.findLastUser("BRANCH_ADMIN");
 
         // Generate ID
-        const id =
-            generateUserId(
-                "BRANCH_ADMIN",
-                lastUser?.id
-            );
+   
 
         // Hash password
         const hashedPassword =
@@ -55,7 +48,6 @@ export class UserService {
         const user =
             await this.userRepository.create({
 
-                id,
 
                 role_type: "BRANCH_ADMIN",
 
@@ -79,7 +71,9 @@ export class UserService {
 
         return {
             message: "Branch Admin Created Successfully",
-            user
+            user:{
+                
+            }
         };
 
     }

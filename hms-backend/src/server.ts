@@ -5,6 +5,7 @@ import cors from "cors";
 
 import authRoutes from "./modules/auth/auth.routes";
 import userRoutes from "./modules/auth/user/user.routes";
+import branchRoutes from "./modules/branch/branch.routes";
 import { hashPassword } from "./utils/bcrypt";
 const app = express();
 
@@ -14,6 +15,7 @@ app.use(express.json());
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/branch", branchRoutes);
 app.use("/api/hashpassword", async (req, res) => {
 
     const { password } = req.body;

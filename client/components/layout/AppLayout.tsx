@@ -1,5 +1,10 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import {
+    removeToken,
+    removeUser
+} from "../../utils/token";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -15,6 +20,8 @@ import {
   Bell,
   ChevronDown,
 } from "lucide-react";
+
+
 
 const navIcon: Record<string, React.ReactNode> = {
   Dashboard: <LayoutDashboard size={16} />,
@@ -33,6 +40,19 @@ const bottomNavIcon: Record<string, React.ReactNode> = {
 
 export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const navigate = useNavigate();
+
+const logout = () => {
+
+    removeToken();
+
+    removeUser();
+
+    localStorage.removeItem("user_info");
+
+    navigate("/");
+
+};
 
   const navItems = [
     { label: "Dashboard", to: "/dashboard" },
@@ -119,6 +139,7 @@ export function AppLayout() {
 
         {/* USER */}
         <div className="pt-4">
+
           <div className="flex items-center gap-2 p-3 rounded-lg bg-[#F2F4F6]">
             <img
               src="https://i.pravatar.cc/40"
@@ -135,6 +156,10 @@ export function AppLayout() {
             </div>
           </div>
         </div>
+          <button onClick={logout}>
+    Logout
+</button>
+
       </aside>
 
       {/* MAIN */}

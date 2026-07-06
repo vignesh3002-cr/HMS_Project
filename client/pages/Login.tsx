@@ -28,8 +28,6 @@ export default function Login() {
             JSON.stringify(user)
         );
 
-        alert("Login Successful");
-
         navigate("/dashboard");
 
     } catch (error: any) {

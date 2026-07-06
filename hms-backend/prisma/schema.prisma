@@ -11,7 +11,7 @@ model appointment {
   appointment_no   String           @unique @db.VarChar(30)
   patient_id       BigInt
   doctor_id        BigInt
-  branch_id        BigInt
+  branch_id        String           @db.VarChar(10)
   schedule_id      BigInt?
   appointment_ts   DateTime         @db.Timestamptz(6)
   status           String           @db.VarChar(20)
@@ -19,7 +19,6 @@ model appointment {
   created_by       BigInt?
   created_at       DateTime         @default(now()) @db.Timestamptz(6)
   updated_at       DateTime         @default(now()) @db.Timestamptz(6)
-  branch           branch           @relation(fields: [branch_id], references: [branch_id], onDelete: NoAction, onUpdate: NoAction)
   employee         employee?        @relation(fields: [created_by], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
   doctor_profile   doctor_profile   @relation(fields: [doctor_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
   patient          patient          @relation(fields: [patient_id], references: [patient_id], onDelete: NoAction, onUpdate: NoAction)
@@ -38,20 +37,30 @@ model audit_log {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model branch {
-  branch_id       BigInt            @id @default(autoincrement())
-  name            String            @db.VarChar(150)
-  branch_type     String            @db.VarChar(20)
-  email           String?           @db.VarChar(150)
-  address_line1   String?           @db.VarChar(200)
-  city            String?           @db.VarChar(100)
-  state_name      String?           @db.VarChar(100)
-  created_at      DateTime          @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime          @default(now()) @db.Timestamptz(6)
-  appointment     appointment[]
-  doctor_schedule doctor_schedule[]
-  employee_branch employee_branch[]
-  encounter       encounter[]
-  lab_order       lab_order[]
+  branch_id          String    @id @default(dbgenerated("nextval('branch_branch_id_seq'::regclass)")) @db.VarChar(10)
+  branch_name        String    @db.VarChar(150)
+  branch_type        String    @db.VarChar(20)
+  email              String?   @db.VarChar(150)
+  address            String?   @db.VarChar(200)
+  city               String?   @db.VarChar(100)
+  state_name         String?   @db.VarChar(100)
+  branch_address     String?
+  branch_code        String?   @db.VarChar(20)
+  emergency_number   String?   @db.VarChar(100)
+  contact_number     String?   @db.VarChar(15)
+  country            String?   @db.VarChar(50)
+  pincode            String?   @db.VarChar(10)
+  license_number     String?   @db.VarChar(50)
+  total_beds         Int?
+  branch_status      String?   @default("Active") @db.VarChar(20)
+  created_by         String?   @db.VarChar(20)
+  date_of_establish  DateTime? @db.Date
+  medical_services   String?   @db.VarChar(100)
+  icu_beds           Int?
+  consulation_rooms  Int?
+  operation_theaters Int?
+  id                 BigInt    @default(autoincrement())
+  hospital_id        String?   @db.VarChar(20)
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -72,14 +81,13 @@ model doctor_profile {
 model doctor_schedule {
   schedule_id      BigInt         @id @default(autoincrement())
   doctor_id        BigInt
-  branch_id        BigInt
+  branch_id        String         @db.VarChar(10)
   slot_start       DateTime       @db.Timestamptz(6)
   slot_end         DateTime       @db.Timestamptz(6)
   slot_status      String         @default("OPEN") @db.VarChar(20)
   max_appointments Int            @default(1)
   created_at       DateTime       @default(now()) @db.Timestamptz(6)
   appointment      appointment[]
-  branch           branch         @relation(fields: [branch_id], references: [branch_id], onDelete: NoAction, onUpdate: NoAction)
   doctor_profile   doctor_profile @relation(fields: [doctor_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
 }
 
@@ -108,14 +116,13 @@ model employee {
 model employee_branch {
   employee_branch_id BigInt    @id @default(autoincrement())
   employee_id        BigInt
-  branch_id          BigInt
+  branch_id          String    @db.VarChar(10)
   role_code          String    @db.VarChar(30)
   department_name    String?   @db.VarChar(100)
   start_date         DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
   end_date           DateTime? @db.Date
   is_primary_branch  Boolean   @default(false)
   created_at         DateTime  @default(now()) @db.Timestamptz(6)
-  branch             branch    @relation(fields: [branch_id], references: [branch_id], onDelete: NoAction, onUpdate: NoAction)
   employee           employee  @relation(fields: [employee_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([employee_id, branch_id, role_code, start_date])
@@ -125,7 +132,7 @@ model encounter {
   encounter_id        BigInt          @id @default(autoincrement())
   encounter_no        String          @unique @db.VarChar(30)
   patient_id          BigInt
-  branch_id           BigInt
+  branch_id           String          @db.VarChar(10)
   appointment_id      BigInt?         @unique
   attending_doctor_id BigInt?
   encounter_ts        DateTime        @default(now()) @db.Timestamptz(6)
@@ -135,7 +142,6 @@ model encounter {
   created_at          DateTime        @default(now()) @db.Timestamptz(6)
   appointment         appointment?    @relation(fields: [appointment_id], references: [appointment_id], onDelete: NoAction, onUpdate: NoAction)
   doctor_profile      doctor_profile? @relation(fields: [attending_doctor_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
-  branch              branch          @relation(fields: [branch_id], references: [branch_id], onDelete: NoAction, onUpdate: NoAction)
   patient             patient         @relation(fields: [patient_id], references: [patient_id], onDelete: NoAction, onUpdate: NoAction)
   lab_order           lab_order[]
   prescription        prescription[]
@@ -144,7 +150,7 @@ model encounter {
 }
 
 model global_master {
-  id               String    @id @db.VarChar(20)
+  role_id          String?   @db.VarChar(20)
   role_type        String?   @db.VarChar(50)
   created_by       String?   @db.VarChar(20)
   name             String?   @db.VarChar(100)
@@ -155,7 +161,6 @@ model global_master {
   password         String?   @db.VarChar(255)
   status           Int?      @default(0) @db.SmallInt
   created_at       DateTime? @default(now()) @db.Timestamp(6)
-  hospital_id      String?   @db.VarChar(20)
   hospital_type    String?   @db.VarChar(50)
   website          String?   @db.VarChar(200)
   city             String?   @db.VarChar(100)
@@ -166,17 +171,18 @@ model global_master {
   hospital_name    String?   @db.VarChar(100)
   hospital_address String?   @db.VarChar(100)
   branch_id        String?   @db.VarChar(10)
+  id               BigInt    @id @default(autoincrement())
+  hospital_id      String    @unique(map: "uq_hospital_id") @default(dbgenerated("nextval('global_master_hospital_id_seq'::regclass)")) @db.VarChar(20)
 }
 
 model lab_order {
   lab_order_id BigInt       @id @default(autoincrement())
   encounter_id BigInt
   ordered_by   BigInt
-  branch_id    BigInt
+  branch_id    String       @db.VarChar(10)
   order_status String       @default("ORDERED") @db.VarChar(20)
   ordered_at   DateTime     @default(now()) @db.Timestamptz(6)
   notes        String?
-  branch       branch       @relation(fields: [branch_id], references: [branch_id], onDelete: NoAction, onUpdate: NoAction)
   encounter    encounter    @relation(fields: [encounter_id], references: [encounter_id], onDelete: Cascade, onUpdate: NoAction)
   employee     employee     @relation(fields: [ordered_by], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
   lab_result   lab_result[]
@@ -272,4 +278,382 @@ model receptionist_profile {
   employee_id BigInt   @id
   remarks     String?
   employee    employee @relation(fields: [employee_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model appointment_history {
+  appointment_id                String    @unique(map: "uq_appointment_id") @db.VarChar(20)
+  patient_id                    String    @db.VarChar(20)
+  patient_name                  String    @db.VarChar(100)
+  patient_age                   Int?
+  patient_gender                String?   @db.VarChar(10)
+  patient_mobile                String?   @db.VarChar(15)
+  doctor_id                     String    @db.VarChar(20)
+  doctor_name                   String    @db.VarChar(100)
+  department                    String?   @db.VarChar(100)
+  specialization                String?   @db.VarChar(100)
+  appointment_date              DateTime  @db.Date
+  appointment_time              DateTime  @db.Time(6)
+  token_number                  Int?
+  booking_source                String?   @db.VarChar(30)
+  appointment_status            String?   @db.VarChar(30)
+  chief_complaint               String?
+  symptoms                      String?
+  diagnosis                     String?
+  consultation_summary          String?
+  consultation_notes            String?
+  doctor_notes                  String?
+  prescription_id               String?   @db.VarChar(20)
+  prescription_details          String?
+  lab_test_required             Boolean?  @default(false)
+  lab_test_request_id           String?   @db.VarChar(20)
+  lab_test_details              String?
+  scan_required                 Boolean?  @default(false)
+  scan_request_id               String?   @db.VarChar(20)
+  scan_details                  String?
+  followup_required             Boolean?  @default(false)
+  followup_date                 DateTime? @db.Date
+  followup_information          String?
+  consultation_fee              Decimal?  @db.Decimal(10, 2)
+  bill_amount                   Decimal?  @db.Decimal(10, 2)
+  payment_status                String?   @db.VarChar(20)
+  payment_mode                  String?   @db.VarChar(30)
+  insurance_provider            String?   @db.VarChar(100)
+  insurance_policy_no           String?   @db.VarChar(50)
+  insurance_details             String?
+  checkin_time                  DateTime? @db.Timestamp(6)
+  checkout_time                 DateTime? @db.Timestamp(6)
+  waiting_time_minutes          Int?
+  consultation_duration_minutes Int?
+  cancellation_reason           String?
+  cancelled_by                  String?   @db.VarChar(100)
+  cancelled_at                  DateTime? @db.Timestamp(6)
+  rescheduled_from              DateTime? @db.Date
+  rescheduled_to                DateTime? @db.Date
+  reschedule_reason             String?
+  patient_rating                Int?
+  patient_feedback              String?
+  created_by                    String?   @db.VarChar(50)
+  created_at                    DateTime? @default(now()) @db.Timestamp(6)
+  updated_by                    String?   @db.VarChar(50)
+  updated_at                    DateTime? @default(now()) @db.Timestamp(6)
+  id                            BigInt    @id @default(autoincrement())
+  branch_id                     String?   @db.VarChar(10)
+  hospital_id                   String?   @db.VarChar(20)
+  department_id                 String?   @db.VarChar(20)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model employees {
+  id                             BigInt    @id @default(autoincrement())
+  role_id                        String?   @db.VarChar(20)
+  first_name                     String    @db.VarChar(50)
+  middle_name                    String?   @db.VarChar(50)
+  last_name                      String    @db.VarChar(50)
+  blood_group                    String?   @db.VarChar(5)
+  nationality                    String?   @db.VarChar(50)
+  marital_status                 String?   @db.VarChar(20)
+  mobile_no                      String?   @db.VarChar(15)
+  parmanant_address              String?   @db.VarChar(255)
+  current_address                String?   @db.VarChar(255)
+  city                           String?   @db.VarChar(50)
+  state                          String?   @db.VarChar(50)
+  country                        String?   @db.VarChar(50)
+  pincode                        String?   @db.VarChar(10)
+  emergency_contact_name         String?   @db.VarChar(100)
+  emergency_contact_relationship String?   @db.VarChar(50)
+  emergency_contact_number       String?   @db.VarChar(15)
+  aadhaar_no                     String?   @db.VarChar(20)
+  pan_no                         String?   @db.VarChar(20)
+  passport_no                    String?   @db.VarChar(20)
+  department                     String?   @db.VarChar(100)
+  designation                    String?   @db.VarChar(100)
+  specialization                 String?   @db.VarChar(100)
+  qualification                  String?   @db.VarChar(255)
+  license_number                 String?   @db.VarChar(100)
+  joining_date                   DateTime? @db.Date
+  confirmation_date              DateTime? @db.Date
+  employment_type                String?   @db.VarChar(20)
+  shift_type                     String?   @db.VarChar(20)
+  reporting_manager              String?   @db.VarChar(100)
+  experience_years               Decimal?  @db.Decimal(5, 2)
+  basic_salary                   Decimal?  @db.Decimal(12, 2)
+  hra                            Decimal?  @db.Decimal(12, 2)
+  allowances                     Decimal?  @db.Decimal(12, 2)
+  pf                             Decimal?  @db.Decimal(12, 2)
+  net_salary                     Decimal?  @db.Decimal(12, 2)
+  bank_name                      String?   @db.VarChar(100)
+  account_number                 String?   @db.VarChar(30)
+  ifsc_code                      String?   @db.VarChar(20)
+  bp                             String?   @db.VarChar(20)
+  sugar                          String?   @db.VarChar(30)
+  allergies                      String?
+  chronic_diseases               String?
+  medical_history                String?
+  leave_balance                  Int?      @default(0)
+  branch_id                      String?   @db.VarChar(10)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model department {
+  department_id   String @id @db.VarChar(20)
+  department_name String @db.VarChar(100)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model patient_histroy {
+  id                         BigInt    @id @default(autoincrement())
+  patient_id                 String?   @unique(map: "uq_patient_id") @db.VarChar(20)
+  mrn_no                     String?   @db.VarChar(50)
+  first_name                 String?   @db.VarChar(100)
+  middle_name                String?   @db.VarChar(100)
+  last_name                  String?   @db.VarChar(100)
+  gender                     String?   @db.VarChar(20)
+  dob                        DateTime? @db.Date
+  age                        Int?
+  blood_group                String?   @db.VarChar(10)
+  marital_status             String?   @db.VarChar(20)
+  nationality                String?   @db.VarChar(50)
+  photo_url                  String?
+  aadhaar_no                 String?   @db.VarChar(20)
+  pan_no                     String?   @db.VarChar(20)
+  mobile_no                  String?   @db.VarChar(15)
+  alternate_mobile           String?   @db.VarChar(15)
+  email                      String?   @db.VarChar(100)
+  occupation                 String?   @db.VarChar(100)
+  education                  String?   @db.VarChar(100)
+  language                   String?   @db.VarChar(50)
+  address_line1              String?
+  address_line2              String?
+  city                       String?   @db.VarChar(100)
+  district                   String?   @db.VarChar(100)
+  state                      String?   @db.VarChar(100)
+  country                    String?   @db.VarChar(100)
+  pincode                    String?   @db.VarChar(10)
+  emergency_contact_name     String?   @db.VarChar(100)
+  emergency_relationship     String?   @db.VarChar(50)
+  emergency_mobile           String?   @db.VarChar(15)
+  emergency_alternate_mobile String?   @db.VarChar(15)
+  emergency_address          String?
+  insurance_id               String?   @db.VarChar(50)
+  insurance_provider         String?   @db.VarChar(100)
+  policy_number              String?   @db.VarChar(100)
+  coverage_limit             Decimal?  @db.Decimal(12, 2)
+  valid_from                 DateTime? @db.Date
+  valid_to                   DateTime? @db.Date
+  tpa_name                   String?   @db.VarChar(100)
+  tpa_id                     String?   @db.VarChar(50)
+  claim_status               String?   @db.VarChar(50)
+  diabetes                   Boolean?  @default(false)
+  hypertension               Boolean?  @default(false)
+  asthma                     Boolean?  @default(false)
+  thyroid                    Boolean?  @default(false)
+  heart_disease              Boolean?  @default(false)
+  kidney_disease             Boolean?  @default(false)
+  liver_disease              Boolean?  @default(false)
+  cancer                     Boolean?  @default(false)
+  stroke                     Boolean?  @default(false)
+  tuberculosis               Boolean?  @default(false)
+  family_history             String?
+  past_surgery               String?
+  past_hospitalization       String?
+  smoking_status             String?   @db.VarChar(50)
+  alcohol_status             String?   @db.VarChar(50)
+  drug_abuse                 String?   @db.VarChar(50)
+  allergy_drugs              String?
+  allergy_food               String?
+  allergy_others             String?
+  encounter_id               String?   @db.VarChar(50)
+  visit_type                 String?   @db.VarChar(50)
+  hospital_id                String?   @db.VarChar(20)
+  branch_id                  String?   @db.VarChar(10)
+  department_id              String?   @db.VarChar(50)
+  doctor_id                  String?   @db.VarChar(20)
+  visit_date                 DateTime? @db.Date
+  checkin_time               DateTime? @db.Timestamp(6)
+  checkout_time              DateTime? @db.Timestamp(6)
+  chief_complaint            String?
+  diagnosis                  String?
+  clinical_notes             String?
+  height                     Decimal?  @db.Decimal(5, 2)
+  weight                     Decimal?  @db.Decimal(5, 2)
+  bmi                        Decimal?  @db.Decimal(5, 2)
+  temperature                Decimal?  @db.Decimal(5, 2)
+  pulse                      Int?
+  respiratory_rate           Int?
+  oxygen_saturation          Decimal?  @db.Decimal(5, 2)
+  systolic_bp                Int?
+  diastolic_bp               Int?
+  diagnosis_id               String?   @db.VarChar(50)
+  icd_code                   String?   @db.VarChar(20)
+  diagnosis_name             String?   @db.VarChar(255)
+  primary_diagnosis          String?
+  secondary_diagnosis        String?
+  diagnosed_date             DateTime? @db.Date
+  prescription_id            String?   @db.VarChar(50)
+  drug_name                  String?   @db.VarChar(255)
+  generic_name               String?   @db.VarChar(255)
+  dosage                     String?   @db.VarChar(100)
+  frequency                  String?   @db.VarChar(100)
+  duration                   String?   @db.VarChar(100)
+  instructions               String?
+  start_date                 DateTime? @db.Date
+  end_date                   DateTime? @db.Date
+  lab_order_id               String?   @db.VarChar(50)
+  test_code                  String?   @db.VarChar(50)
+  test_name                  String?   @db.VarChar(255)
+  result_value               String?   @db.VarChar(255)
+  normal_range               String?   @db.VarChar(255)
+  result_status              String?   @db.VarChar(50)
+  report_date                DateTime? @db.Date
+  pathologist_id             String?   @db.VarChar(50)
+  lab_report_url             String?
+  radiology_id               String?   @db.VarChar(50)
+  xray                       String?
+  ct_scan                    String?
+  mri                        String?
+  ultrasound                 String?
+  findings                   String?
+  impression                 String?
+  radiologist_id             String?   @db.VarChar(50)
+  scan_date                  DateTime? @db.Date
+  radiology_report_url       String?
+  image_url                  String?
+  procedure_id               String?   @db.VarChar(50)
+  procedure_code             String?   @db.VarChar(50)
+  procedure_name             String?   @db.VarChar(255)
+  procedure_date             DateTime? @db.Date
+  procedure_notes            String?
+  outcome                    String?
+  surgery_id                 String?   @db.VarChar(50)
+  surgeon_id                 String?   @db.VarChar(50)
+  anesthetist_id             String?   @db.VarChar(50)
+  surgery_name               String?   @db.VarChar(255)
+  surgery_date               DateTime? @db.Date
+  surgery_duration           String?   @db.VarChar(100)
+  complications              String?
+  operation_notes            String?
+  discharge_notes            String?
+  admission_id               String?   @db.VarChar(50)
+  ward_id                    String?   @db.VarChar(50)
+  room_id                    String?   @db.VarChar(50)
+  bed_id                     String?   @db.VarChar(50)
+  admission_date             DateTime? @db.Date
+  discharge_date             DateTime? @db.Date
+  admitting_doctor           String?   @db.VarChar(100)
+  attender_name              String?   @db.VarChar(100)
+  admission_reason           String?
+  discharge_summary          String?
+  bill_id                    String?   @db.VarChar(50)
+  consultation_charge        Decimal?  @db.Decimal(12, 2)
+  lab_charge                 Decimal?  @db.Decimal(12, 2)
+  radiology_charge           Decimal?  @db.Decimal(12, 2)
+  procedure_charge           Decimal?  @db.Decimal(12, 2)
+  room_charge                Decimal?  @db.Decimal(12, 2)
+  medicine_charge            Decimal?  @db.Decimal(12, 2)
+  discount                   Decimal?  @db.Decimal(12, 2)
+  tax                        Decimal?  @db.Decimal(12, 2)
+  total_amount               Decimal?  @db.Decimal(12, 2)
+  paid_amount                Decimal?  @db.Decimal(12, 2)
+  balance_amount             Decimal?  @db.Decimal(12, 2)
+  payment_mode               String?   @db.VarChar(50)
+  payment_status             String?   @db.VarChar(50)
+  pharmacy_txn_id            String?   @db.VarChar(50)
+  medicine_name              String?   @db.VarChar(255)
+  batch_no                   String?   @db.VarChar(100)
+  quantity                   Int?
+  unit_price                 Decimal?  @db.Decimal(12, 2)
+  amount                     Decimal?  @db.Decimal(12, 2)
+  issued_date                DateTime? @db.Date
+  vaccine_id                 String?   @db.VarChar(50)
+  vaccine_name               String?   @db.VarChar(255)
+  dose_no                    Int?
+  administered_date          DateTime? @db.Date
+  next_due_date              DateTime? @db.Date
+  monitor_id                 String?   @db.VarChar(50)
+  heart_rate                 Int?
+  blood_pressure             String?   @db.VarChar(20)
+  spo2                       Decimal?  @db.Decimal(5, 2)
+  ecg_status                 String?   @db.VarChar(100)
+  ventilator_status          String?   @db.VarChar(100)
+  captured_at                DateTime? @db.Timestamp(6)
+  document_id                String?   @db.VarChar(50)
+  document_type              String?   @db.VarChar(100)
+  file_name                  String?   @db.VarChar(255)
+  file_url                   String?
+  uploaded_by                String?   @db.VarChar(50)
+  uploaded_at                DateTime? @db.Timestamp(6)
+  audit_id                   String?   @db.VarChar(50)
+  action_type                String?   @db.VarChar(50)
+  old_value                  String?
+  new_value                  String?
+  action_by                  String?   @db.VarChar(50)
+  action_at                  DateTime? @db.Timestamp(6)
+  ip_address                 String?   @db.VarChar(50)
+  status                     Int?      @default(1) @db.SmallInt
+  created_at                 DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                 DateTime? @default(now()) @db.Timestamp(6)
+  appointment_id             String?   @db.VarChar(20)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model patient_table {
+  id                     String    @id @db.VarChar(20)
+  first_name             String    @db.VarChar(100)
+  middle_name            String?   @db.VarChar(100)
+  last_name              String?   @db.VarChar(100)
+  age                    Int?
+  blood_group            String?   @db.VarChar(5)
+  marital_status         String?   @db.VarChar(20)
+  alternate_mobile       String?   @db.VarChar(15)
+  aadhaar_no             String?   @db.VarChar(20)
+  nationality            String?   @db.VarChar(50)
+  language               String?   @db.VarChar(50)
+  photo                  String?   @db.VarChar(500)
+  permanent_address      String?   @db.VarChar(250)
+  current_address        String?   @db.VarChar(250)
+  area                   String?   @db.VarChar(100)
+  city                   String?   @db.VarChar(100)
+  district               String?   @db.VarChar(100)
+  state                  String?   @db.VarChar(100)
+  country                String?   @db.VarChar(100)
+  pincode                String?   @db.VarChar(10)
+  emergency_contact_name String?   @db.VarChar(100)
+  relationship           String?   @db.VarChar(50)
+  emergency_mobile       String?   @db.VarChar(15)
+  emergency_address      String?   @db.VarChar(300)
+  guardian_name          String?   @db.VarChar(100)
+  guardian_relation      String?   @db.VarChar(50)
+  guardian_mobile        String?   @db.VarChar(15)
+  insurance_available    Boolean?  @default(false)
+  insurance_company      String?   @db.VarChar(100)
+  insurance_policy_no    String?   @db.VarChar(50)
+  policy_holder_name     String?   @db.VarChar(100)
+  insurance_valid_from   DateTime? @db.Date
+  insurance_valid_to     DateTime? @db.Date
+  patient_type           String?   @db.VarChar(20)
+  visit_type             String?   @db.VarChar(20)
+  referred_by            String?   @db.VarChar(100)
+  referral_hospital      String?   @db.VarChar(100)
+  allergies              String?
+  chronic_disease        String?
+  current_medication     String?
+  medical_history        String?
+  surgical_history       String?
+  family_history         String?
+  smoking                Boolean?  @default(false)
+  alcohol                Boolean?  @default(false)
+  created_by             String?   @db.VarChar(15)
+  created_date           DateTime? @default(now()) @db.Timestamp(6)
+  modified_by            String?   @db.VarChar(15)
+  modified_date          DateTime? @db.Timestamp(6)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model role_id_config {
+  role_type      String    @id @db.VarChar(50)
+  prefix         String    @unique @db.VarChar(5)
+  current_number Int       @default(0)
+  description    String?   @db.VarChar(100)
+  created_at     DateTime? @default(now()) @db.Timestamp(6)
 }
