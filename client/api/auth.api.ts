@@ -22,8 +22,11 @@ export const login = async (
     throw new Error(res.data.message);
   }
 
+  const payload = res.data?.data ?? {};
+  const user = payload.user_details ?? payload.user ?? null;
+
   return {
-    token: res.data.data.token,
-    user: res.data.data.user,
+    token: payload.token,
+    user,
   };
 };

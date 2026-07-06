@@ -1,5 +1,9 @@
 import { useState, useEffect } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import {
+ remove
+} from "../../utils/token";
 import { getUser } from "@/utils/token";
 import { cn } from "@/lib/utils";
 import { BranchSelector } from "@/components/hms/BranchSelector";
@@ -18,6 +22,8 @@ import {
   ChevronDown,
 } from "lucide-react";
 
+
+
 const navIcon: Record<string, React.ReactNode> = {
   Dashboard: <LayoutDashboard size={16} />,
   Staff: <Users size={16} />,
@@ -35,6 +41,17 @@ const bottomNavIcon: Record<string, React.ReactNode> = {
 
 export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const navigate = useNavigate();
+
+const logout = () => {
+
+    remove();
+
+    localStorage.removeItem("user_info");
+
+    navigate("/");
+
+};
 
   const navItems = [
     { label: "Dashboard", to: "/dashboard" },
@@ -146,6 +163,7 @@ useEffect(() => {
 
         {/* USER */}
         <div className="pt-4">
+
           <div className="flex items-center gap-2 p-3 rounded-lg bg-[#F2F4F6]">
             <img
               src="https://i.pravatar.cc/40"
@@ -165,6 +183,10 @@ useEffect(() => {
             </div>
           </div>
         </div>
+          <button onClick={logout}>
+    Logout
+</button>
+
       </aside>
 
       {/* MAIN */}

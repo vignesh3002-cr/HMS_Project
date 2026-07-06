@@ -21,7 +21,7 @@ export class UserRepository {
             },
 
             orderBy: {
-                id: "desc"
+                branch_id: "desc"
             }
 
         });

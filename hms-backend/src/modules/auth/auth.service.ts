@@ -27,15 +27,21 @@ export class AuthService {
     }
 
     const token = generateToken({
-      id: user.id,
       username: user.username,
       role: user.role_type,
     });
 
     return {
       token,
-      user
+      user_details: {
+        name: user.name,
+        username: user.username,
+        role: user.role_type,
+        role_id: user.role_id,
+        branch_id: user.branch_id
+      },
     };
+    
   }
 
 }
