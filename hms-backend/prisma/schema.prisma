@@ -6,6 +6,7 @@ datasource db {
   provider = "postgresql"
 }
 
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model appointment {
   appointment_id   BigInt           @id @default(autoincrement())
   appointment_no   String           @unique @db.VarChar(30)
@@ -28,6 +29,45 @@ model appointment {
   @@index([patient_id], map: "idx_appointment_patient")
 }
 
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model appointment_history {
+  appointment_id       String    @unique(map: "uq_appointment_id") @db.VarChar(20)
+  patient_id           String    @db.VarChar(20)
+  patient_name         String    @db.VarChar(100)
+  patient_age          Int?
+  patient_gender       String?   @db.VarChar(10)
+  patient_mobile       String?   @db.VarChar(15)
+  doctor_id            String    @db.VarChar(20)
+  doctor_name          String    @db.VarChar(100)
+  department           String?   @db.VarChar(100)
+  specialization       String?   @db.VarChar(100)
+  appointment_date     DateTime  @db.Date
+  appointment_time     DateTime  @db.Time(6)
+  token_number         Int?
+  booking_source       String?   @db.VarChar(30)
+  appointment_status   String?   @db.VarChar(30)
+  chief_complaint      String?
+  symptoms             String?
+  diagnosis            String?
+  prescription_details String?
+  lab_test_details     String?
+  scan_details         String?
+  consultation_fee     Decimal?  @db.Decimal(10, 2)
+  bill_amount          Decimal?  @db.Decimal(10, 2)
+  payment_status       String?   @db.VarChar(20)
+  payment_mode         String?   @db.VarChar(30)
+  checkin_time         DateTime? @db.Timestamp(6)
+  checkout_time        DateTime? @db.Timestamp(6)
+  created_by           String?   @db.VarChar(50)
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  updated_by           String?   @db.VarChar(50)
+  updated_at           DateTime? @default(now()) @db.Timestamp(6)
+  id                   BigInt    @id @default(autoincrement())
+  branch_id            String?   @db.VarChar(10)
+  department_id        String?   @db.VarChar(20)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model audit_log {
   audit_log_id BigInt    @id @default(autoincrement())
   action_type  String?   @db.VarChar(50)
@@ -35,35 +75,40 @@ model audit_log {
   event_ts     DateTime? @default(now()) @db.Timestamptz(6)
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model branch {
-  branch_id          String    @id @default(dbgenerated("nextval('branch_branch_id_seq'::regclass)")) @db.VarChar(10)
-  branch_name        String    @db.VarChar(150)
-  branch_type        String    @db.VarChar(20)
-  email              String?   @db.VarChar(150)
-  address            String?   @db.VarChar(200)
-  city               String?   @db.VarChar(100)
-  state_name         String?   @db.VarChar(100)
-  branch_address     String?
-  branch_code        String?   @db.VarChar(20)
-  emergency_number   String?   @db.VarChar(100)
-  contact_number     String?   @db.VarChar(15)
-  country            String?   @db.VarChar(50)
-  pincode            String?   @db.VarChar(10)
-  license_number     String?   @db.VarChar(50)
+  branch_id          String        @unique(map: "uq_branch_branch_id") @default(dbgenerated("nextval('branch_branch_id_seq'::regclass)")) @db.VarChar(10)
+  branch_type        String        @db.VarChar(20)
+  email              String?       @db.VarChar(150)
+  address            String?       @db.VarChar(200)
+  district           String?       @db.VarChar(100)
+  state_name         String?       @db.VarChar(100)
+  branch_code        String?       @db.VarChar(20)
+  emergency_number   String?       @db.VarChar(100)
+  contact_number     String?       @db.VarChar(15)
+  country            String?       @db.VarChar(50)
+  pincode            String?       @db.VarChar(10)
+  license_number     String?       @db.VarChar(50)
   total_beds         Int?
-  branch_status      String?   @default("Active") @db.VarChar(20)
-  created_by         String?   @db.VarChar(20)
-  date_of_establish  DateTime? @db.Date
-  medical_services   String?   @db.VarChar(100)
+  branch_status      String?       @default("Active") @db.VarChar(20)
+  created_by         String?       @db.VarChar(20)
+  date_of_establish  DateTime?     @db.Date
+  medical_services   String?       @db.VarChar(100)
   icu_beds           Int?
   consulation_rooms  Int?
   operation_theaters Int?
-  id                 BigInt    @default(autoincrement())
-  hospital_id        String?   @db.VarChar(20)
+  id                 BigInt        @id @default(autoincrement())
+  global_master      global_master @relation(fields: [branch_id], references: [branch_id], map: "fk_branch_global_master")
+  employees          employees[]
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model department {
+  department_id   String @id @db.VarChar(20)
+  department_name String @db.VarChar(100)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model doctor_profile {
   employee_id          BigInt            @id
   specialization       String            @db.VarChar(100)
@@ -77,7 +122,7 @@ model doctor_profile {
   prescription         prescription[]
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model doctor_schedule {
   schedule_id      BigInt         @id @default(autoincrement())
   doctor_id        BigInt
@@ -91,7 +136,7 @@ model doctor_schedule {
   doctor_profile   doctor_profile @relation(fields: [doctor_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model employee {
   employee_id          BigInt                @id @default(autoincrement())
   employee_code        String                @unique @db.VarChar(30)
@@ -112,7 +157,7 @@ model employee {
   receptionist_profile receptionist_profile?
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model employee_branch {
   employee_branch_id BigInt    @id @default(autoincrement())
   employee_id        BigInt
@@ -128,6 +173,60 @@ model employee_branch {
   @@unique([employee_id, branch_id, role_code, start_date])
 }
 
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model employees {
+  id                             BigInt         @id @default(autoincrement())
+  role_id                        String?        @db.VarChar(20)
+  first_name                     String         @db.VarChar(50)
+  middle_name                    String?        @db.VarChar(50)
+  last_name                      String         @db.VarChar(50)
+  blood_group                    String?        @db.VarChar(5)
+  nationality                    String?        @db.VarChar(50)
+  marital_status                 String?        @db.VarChar(20)
+  mobile_no                      String?        @db.VarChar(15)
+  parmanant_address              String?        @db.VarChar(255)
+  current_address                String?        @db.VarChar(255)
+  city                           String?        @db.VarChar(50)
+  state                          String?        @db.VarChar(50)
+  country                        String?        @db.VarChar(50)
+  pincode                        String?        @db.VarChar(10)
+  emergency_contact_name         String?        @db.VarChar(100)
+  emergency_contact_relationship String?        @db.VarChar(50)
+  emergency_contact_number       String?        @db.VarChar(15)
+  aadhaar_no                     String?        @db.VarChar(20)
+  pan_no                         String?        @db.VarChar(20)
+  passport_no                    String?        @db.VarChar(20)
+  department                     String?        @db.VarChar(100)
+  designation                    String?        @db.VarChar(100)
+  specialization                 String?        @db.VarChar(100)
+  qualification                  String?        @db.VarChar(255)
+  license_number                 String?        @db.VarChar(100)
+  joining_date                   DateTime?      @db.Date
+  confirmation_date              DateTime?      @db.Date
+  employment_type                String?        @db.VarChar(20)
+  shift_type                     String?        @db.VarChar(20)
+  reporting_manager              String?        @db.VarChar(100)
+  experience_years               Decimal?       @db.Decimal(5, 2)
+  basic_salary                   Decimal?       @db.Decimal(12, 2)
+  hra                            Decimal?       @db.Decimal(12, 2)
+  allowances                     Decimal?       @db.Decimal(12, 2)
+  pf                             Decimal?       @db.Decimal(12, 2)
+  net_salary                     Decimal?       @db.Decimal(12, 2)
+  bank_name                      String?        @db.VarChar(100)
+  account_number                 String?        @db.VarChar(30)
+  ifsc_code                      String?        @db.VarChar(20)
+  bp                             String?        @db.VarChar(20)
+  sugar                          String?        @db.VarChar(30)
+  allergies                      String?
+  chronic_diseases               String?
+  medical_history                String?
+  leave_balance                  Int?           @default(0)
+  branch_id                      String?        @db.VarChar(10)
+  branch                         branch?        @relation(fields: [branch_id], references: [branch_id], onDelete: Restrict, map: "fk_employees_branch")
+  global_master                  global_master? @relation(fields: [role_id], references: [role_id], onDelete: Restrict, map: "fk_employees_global_master")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model encounter {
   encounter_id        BigInt          @id @default(autoincrement())
   encounter_no        String          @unique @db.VarChar(30)
@@ -149,32 +248,29 @@ model encounter {
   @@index([patient_id], map: "idx_encounter_patient")
 }
 
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model global_master {
-  role_id          String?   @db.VarChar(20)
-  role_type        String?   @db.VarChar(50)
-  created_by       String?   @db.VarChar(20)
-  name             String?   @db.VarChar(100)
-  gender           String?   @db.VarChar(10)
-  mobile           String?   @db.VarChar(15)
-  email            String?   @db.VarChar(100)
-  username         String?   @db.VarChar(50)
-  password         String?   @db.VarChar(255)
-  status           Int?      @default(0) @db.SmallInt
-  created_at       DateTime? @default(now()) @db.Timestamp(6)
-  hospital_type    String?   @db.VarChar(50)
-  website          String?   @db.VarChar(200)
-  city             String?   @db.VarChar(100)
-  state            String?   @db.VarChar(100)
-  country          String?   @db.VarChar(100)
-  pincode          String?   @db.VarChar(10)
-  branch           String?   @db.VarChar(50)
-  hospital_name    String?   @db.VarChar(100)
-  hospital_address String?   @db.VarChar(100)
-  branch_id        String?   @db.VarChar(10)
-  id               BigInt    @id @default(autoincrement())
-  hospital_id      String    @unique(map: "uq_hospital_id") @default(dbgenerated("nextval('global_master_hospital_id_seq'::regclass)")) @db.VarChar(20)
+  role_id       String?     @unique(map: "uq_global_master_role_id") @db.VarChar(20)
+  role_type     String?     @db.VarChar(50)
+  created_by    String?     @db.VarChar(20)
+  name          String?     @db.VarChar(100)
+  gender        String?     @db.VarChar(10)
+  mobile        String?     @db.VarChar(15)
+  username      String?     @db.VarChar(50)
+  password      String?     @db.VarChar(255)
+  status        Int?        @default(0) @db.SmallInt
+  created_at    DateTime?   @default(now()) @db.Timestamp(6)
+  hospital_type String?     @db.VarChar(50)
+  website       String?     @db.VarChar(200)
+  branch_name   String?     @db.VarChar(50)
+  hospital_name String?     @db.VarChar(100)
+  branch_id     String?     @unique(map: "uq_global_master_branch_id") @db.VarChar(10)
+  id            BigInt      @id @default(autoincrement())
+  branch        branch?
+  employees     employees[]
 }
 
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model lab_order {
   lab_order_id BigInt       @id @default(autoincrement())
   encounter_id BigInt
@@ -190,6 +286,7 @@ model lab_order {
   @@index([encounter_id], map: "idx_lab_order")
 }
 
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model lab_result {
   lab_result_id BigInt    @id @default(autoincrement())
   lab_order_id  BigInt
@@ -205,6 +302,7 @@ model lab_result {
   @@unique([lab_order_id, test_code])
 }
 
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model lab_tech_profile {
   employee_id      BigInt   @id
   certification_no String?  @db.VarChar(50)
@@ -212,6 +310,7 @@ model lab_tech_profile {
   employee         employee @relation(fields: [employee_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
 }
 
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model patient {
   patient_id         BigInt               @id @default(autoincrement())
   patient_no         String               @unique @db.VarChar(30)
@@ -229,6 +328,7 @@ model patient {
   patient_identifier patient_identifier[]
 }
 
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model patient_contact {
   patient_contact_id BigInt   @id @default(autoincrement())
   patient_id         BigInt
@@ -239,6 +339,7 @@ model patient_contact {
   patient            patient  @relation(fields: [patient_id], references: [patient_id], onDelete: Cascade, onUpdate: NoAction)
 }
 
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model patient_identifier {
   patient_identifier_id BigInt    @id @default(autoincrement())
   patient_id            BigInt
@@ -252,6 +353,60 @@ model patient_identifier {
   @@unique([id_type, id_value])
 }
 
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model patient_table {
+  id                     String    @id @db.VarChar(20)
+  first_name             String    @db.VarChar(100)
+  middle_name            String?   @db.VarChar(100)
+  last_name              String?   @db.VarChar(100)
+  age                    Int?
+  blood_group            String?   @db.VarChar(5)
+  marital_status         String?   @db.VarChar(20)
+  alternate_mobile       String?   @db.VarChar(15)
+  aadhaar_no             String?   @db.VarChar(20)
+  nationality            String?   @db.VarChar(50)
+  language               String?   @db.VarChar(50)
+  photo                  String?   @db.VarChar(500)
+  permanent_address      String?   @db.VarChar(250)
+  current_address        String?   @db.VarChar(250)
+  area                   String?   @db.VarChar(100)
+  city                   String?   @db.VarChar(100)
+  district               String?   @db.VarChar(100)
+  state                  String?   @db.VarChar(100)
+  country                String?   @db.VarChar(100)
+  pincode                String?   @db.VarChar(10)
+  emergency_contact_name String?   @db.VarChar(100)
+  relationship           String?   @db.VarChar(50)
+  emergency_mobile       String?   @db.VarChar(15)
+  emergency_address      String?   @db.VarChar(300)
+  guardian_name          String?   @db.VarChar(100)
+  guardian_relation      String?   @db.VarChar(50)
+  guardian_mobile        String?   @db.VarChar(15)
+  insurance_available    Boolean?  @default(false)
+  insurance_company      String?   @db.VarChar(100)
+  insurance_policy_no    String?   @db.VarChar(50)
+  policy_holder_name     String?   @db.VarChar(100)
+  insurance_valid_from   DateTime? @db.Date
+  insurance_valid_to     DateTime? @db.Date
+  patient_type           String?   @db.VarChar(20)
+  visit_type             String?   @db.VarChar(20)
+  referred_by            String?   @db.VarChar(100)
+  referral_hospital      String?   @db.VarChar(100)
+  allergies              String?
+  chronic_disease        String?
+  current_medication     String?
+  medical_history        String?
+  surgical_history       String?
+  family_history         String?
+  smoking                Boolean?  @default(false)
+  alcohol                Boolean?  @default(false)
+  created_by             String?   @db.VarChar(15)
+  created_date           DateTime? @default(now()) @db.Timestamp(6)
+  modified_by            String?   @db.VarChar(15)
+  modified_date          DateTime? @db.Timestamp(6)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model prescription {
   prescription_id   BigInt              @id @default(autoincrement())
   encounter_id      BigInt
@@ -263,6 +418,7 @@ model prescription {
   prescription_item prescription_item[]
 }
 
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model prescription_item {
   prescription_item_id BigInt       @id @default(autoincrement())
   prescription_id      BigInt
@@ -274,8 +430,18 @@ model prescription_item {
   prescription         prescription @relation(fields: [prescription_id], references: [prescription_id], onDelete: Cascade, onUpdate: NoAction)
 }
 
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model receptionist_profile {
   employee_id BigInt   @id
   remarks     String?
   employee    employee @relation(fields: [employee_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model role_id_config {
+  role_type      String    @id @db.VarChar(50)
+  prefix         String    @unique @db.VarChar(5)
+  current_number Int       @default(0)
+  description    String?   @db.VarChar(100)
+  created_at     DateTime? @default(now()) @db.Timestamp(6)
 }

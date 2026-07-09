@@ -5,6 +5,22 @@ const service = new BranchService();
 
 export class BranchController {
 
+    // ✅ Add this method for GET all branches
+  async getAllBranches(req: Request, res: Response) {
+    try {
+      const branches = await service.getAllBranches();
+      return res.status(200).json({
+        success: true,
+        data: branches,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
     async createBranch(req: Request, res: Response) {
 
         try {

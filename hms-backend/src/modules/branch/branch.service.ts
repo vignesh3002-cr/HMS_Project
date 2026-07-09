@@ -5,6 +5,17 @@ import { CreateBranchDto } from "./branch.types";
 
 const repository = new BranchRepository();
 export class BranchService {
+
+  // ✅ Add this method for fetching all branches
+  async getAllBranches() {
+    try {
+      const branches = await prisma.branch.findMany();
+      return branches;
+    } catch (error: any) {
+      throw new Error(`Failed to fetch branches: ${error.message}`);
+    }
+  }
+
 async createBranch(
     data: CreateBranchDto,
     createdBy: string

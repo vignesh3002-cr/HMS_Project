@@ -5,6 +5,9 @@ const router = Router();
 
 const controller = new BranchController();
 
+// ✅ Add this ONE line for BranchSelector to work
+router.get("/", controller.getAllBranches.bind(controller));
+
 router.post(
     "/",
     controller.createBranch.bind(controller)

@@ -7,15 +7,25 @@ import authRoutes from "./modules/auth/auth.routes";
 import userRoutes from "./modules/auth/user/user.routes";
 import branchRoutes from "./modules/branch/branch.routes";
 import { hashPassword } from "./utils/bcrypt";
+
+// Fix BigInt serialization - Prisma returns BigInt types that JSON.stringify can't handle
+(BigInt.prototype as any).toJSON = function () {
+    return this.toString();
+};
+
 const app = express();
 
 app.use(cors());
 
 app.use(express.json());
 
+app.get("/api/health", (_req, res) => {
+    res.json({ success: true, message: "Server is running" });
+});
+
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
-app.use("/api/branch", branchRoutes);
+app.use("/api/branches", branchRoutes);
 app.use("/api/hashpassword", async (req, res) => {
 
     const { password } = req.body;
@@ -26,7 +36,7 @@ app.use("/api/hashpassword", async (req, res) => {
 
 });
 
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
 
