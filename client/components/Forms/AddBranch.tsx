@@ -3,49 +3,39 @@ import { Building2, Plus } from "lucide-react";
 
 // Strongly typed interface for the form state
 interface BranchFormData {
-  branchId: string;
-  branchType: string;
+  branchCode: string;
   branchName: string;
+  state: string;
+  district: string;
+  licenseNumber: string;
+  mobileNumber: string;
+  emergencyNumber: string;
   email: string;
   address: string;
-  state: string;
-  contactNumber: string;
-  country: string;
-  branchCode: string;
-  licenseNumber: string;
-  emergencyNumber: string;
   dateOfEstablish: string;
   adminUsername: string;
   password: string;
-  consultationRooms: string;
-  createdBy: string;
-  branchStatus: string;
+  confirmPassword: string;
   medicalServices: string;
-  liveStatus: string;
 }
 
 export default function AddBranch() {
   // State initialized with the interface type
   const [formData, setFormData] = useState<BranchFormData>({
-    branchId: "",
-    branchType: "",
+    branchCode: "",
     branchName: "",
+    state: "",
+    district: "",
+    licenseNumber: "",
+    mobileNumber: "",
+    emergencyNumber: "",
     email: "",
     address: "",
-    state: "",
-    contactNumber: "",
-    country: "",
-    branchCode: "",
-    licenseNumber: "",
-    emergencyNumber: "",
     dateOfEstablish: "",
     adminUsername: "",
     password: "",
-    consultationRooms: "",
-    createdBy: "",
-    branchStatus: "",
+    confirmPassword: "",
     medicalServices: "",
-    liveStatus: "",
   });
 
   // Generic handle change with correct TypeScript typing
@@ -64,33 +54,28 @@ export default function AddBranch() {
 
   const handleReset = () => {
     setFormData({
-      branchId: "",
-      branchType: "",
+      branchCode: "",
       branchName: "",
+      state: "",
+      district: "",
+      licenseNumber: "",
+      mobileNumber: "",
+      emergencyNumber: "",
       email: "",
       address: "",
-      state: "",
-      contactNumber: "",
-      country: "",
-      branchCode: "",
-      licenseNumber: "",
-      emergencyNumber: "",
       dateOfEstablish: "",
       adminUsername: "",
       password: "",
-      consultationRooms: "",
-      createdBy: "",
-      branchStatus: "",
+      confirmPassword: "",
       medicalServices: "",
-      liveStatus: "",
     });
   };
 
   // Shared input class for consistent styling
   const inputClass =
     "w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200";
-  const labelClass = "block text-sm font-bold text-gray-800 mb-1.5";
-  const requiredStar = <span className="text-red-500 ml-0.5">*</span>;
+  const labelClass = "block text-sm font-semibold text-gray-800 mb-1.5";
+  const requiredStar = <span className="text-red-600 ml-0.5">*</span>;
 
   return (
     <div className="min-h-screen bg-[#F4F6F9] p-6 flex items-start justify-center font-sans">
@@ -101,41 +86,25 @@ export default function AddBranch() {
           <div className="p-2.5 bg-blue-50 rounded-xl flex items-center justify-center">
             <Building2 className="w-5 h-5 text-blue-600" />
           </div>
-          <h1 className="text-xl font-extrabold text-gray-900 tracking-tight">
+          <h4 className="hms-heading text-gray-900 tracking-tight">
             Add Branch
-          </h1>
+          </h4>
         </div>
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-8">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6">
-            {/* Row 1 */}
+            {/* Row 1 - Branch Code, Branch Name */}
             <div>
-              <label className={labelClass}>Branch ID {requiredStar}</label>
+              <label className={labelClass}>Branch Code {requiredStar}</label>
               <input
                 type="text"
-                name="branchId"
-                placeholder="Branch ID"
+                name="branchCode"
+                placeholder="Enter Branch Code"
                 className={inputClass}
-                value={formData.branchId}
+                value={formData.branchCode}
                 onChange={handleChange}
               />
-            </div>
-            <div>
-              <label className={labelClass}>Branch Type {requiredStar}</label>
-              <select
-                name="branchType"
-                className={
-                  inputClass +
-                  " appearance-none bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOCIgdmlld0JveD0iMCAwIDEyIDgiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEgMS41TDYgNi41TDExIDEuNSIgc3Ryb2tlPSIjNkI3MjgwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+')] bg-no-repeat bg-[length:12px_8px] bg-[center_right_1rem]"
-                }
-                value={formData.branchType}
-                onChange={handleChange}
-              >
-                <option value="">Select Branch Type</option>
-                <option value="Main">Main</option>
-                <option value="Sub">Sub</option>
-              </select>
             </div>
             <div>
               <label className={labelClass}>Branch Name {requiredStar}</label>
@@ -149,8 +118,84 @@ export default function AddBranch() {
               />
             </div>
 
-            {/* Row 2 - Email full width */}
+            {/* Row 2 - State, District */}
             <div>
+              <label className={labelClass}>State {requiredStar}</label>
+              <select
+                name="state"
+                className={inputClass + " appearance-none bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOCIgdmlld0JveD0iMCAwIDEyIDgiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEgMS41TDYgNi41TDExIDEuNSIgc3Ryb2tlPSIjNkI3MjgwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+')] bg-no-repeat bg-[length:12px_8px] bg-[center_right_1rem]"}
+                value={formData.state}
+                onChange={handleChange}
+              >
+                <option value="">Select State</option>
+                <option value="TN">Tamil Nadu</option>
+                <option value="KA">Karnataka</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelClass}>District {requiredStar}</label>
+              <select
+                name="district"
+                className={inputClass + " appearance-none bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOCIgdmlld0JveD0iMCAwIDEyIDgiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEgMS41TDYgNi41TDExIDEuNSIgc3Ryb2tlPSIjNkI3MjgwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+')] bg-no-repeat bg-[length:12px_8px] bg-[center_right_1rem]"}
+                value={formData.district}
+                onChange={handleChange}
+              >
+                <option value="">Select District</option>
+                <option value="Chennai">Chennai</option>
+                <option value="Coimbatore">Coimbatore</option>
+                <option value="Madurai">Madurai</option>
+                <option value="Bangalore">Bangalore</option>
+                <option value="Mysore">Mysore</option>
+              </select>
+            </div>
+
+            {/* Row 3 - License Number, Mobile Number, Emergency Number */}
+            <div>
+              <label className={labelClass}>License Number {requiredStar}</label>
+              <input
+                type="text"
+                name="licenseNumber"
+                placeholder="Enter License Number"
+                className={inputClass}
+                value={formData.licenseNumber}
+                onChange={handleChange}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Mobile Number {requiredStar}</label>
+              <input
+                type="text"
+                name="mobileNumber"
+                placeholder="Enter Mobile Number"
+                className={inputClass}
+                value={formData.mobileNumber}
+                onChange={handleChange}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Emergency Number {requiredStar}</label>
+              <input
+                type="text"
+                name="emergencyNumber"
+                placeholder="Enter Emergency Number"
+                className={inputClass}
+                value={formData.emergencyNumber}
+                onChange={handleChange}
+              />
+            </div>
+
+            {/* Row 4 - Date of Establish, Email */}
+            <div>
+              <label className={labelClass}>Date of Establish {requiredStar}</label>
+              <input
+                type="date"
+                name="dateOfEstablish"
+                className={inputClass + " text-gray-500"}
+                value={formData.dateOfEstablish}
+                onChange={handleChange}
+              />
+            </div>
+            <div className="lg:col-span-1">
               <label className={labelClass}>Email {requiredStar}</label>
               <input
                 type="email"
@@ -161,7 +206,9 @@ export default function AddBranch() {
                 onChange={handleChange}
               />
             </div>
-            <div className="lg:col-span-2">
+
+            {/* Row 5 - Address (full width) */}
+            <div className="lg:col-span-3">
               <label className={labelClass}>Address {requiredStar}</label>
               <input
                 type="text"
@@ -173,103 +220,13 @@ export default function AddBranch() {
               />
             </div>
 
-            {/* Row 3 */}
+            {/* Row 6 - Admin Username, Password, Confirm Password */}
             <div>
-              <label className={labelClass}>State Name {requiredStar}</label>
-              <select
-                name="state"
-                className={
-                  inputClass +
-                  " appearance-none bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOCIgdmlld0JveD0iMCAwIDEyIDgiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEgMS41TDYgNi41TDExIDEuNSIgc3Ryb2tlPSIjNkI3MjgwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+')] bg-no-repeat bg-[length:12px_8px] bg-[center_right_1rem]"
-                }
-                value={formData.state}
-                onChange={handleChange}
-              >
-                <option value="">Select State</option>
-                <option value="TN">Tamil Nadu</option>
-                <option value="KA">Karnataka</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelClass}>Contact Number {requiredStar}</label>
-              <input
-                type="text"
-                name="contactNumber"
-                placeholder="Enter Number"
-                className={inputClass}
-                value={formData.contactNumber}
-                onChange={handleChange}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Country {requiredStar}</label>
-              <select
-                name="country"
-                className={
-                  inputClass +
-                  " appearance-none bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOCIgdmlld0JveD0iMCAwIDEyIDgiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEgMS41TDYgNi41TDExIDEuNSIgc3Ryb2tlPSIjNkI3MjgwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+')] bg-no-repeat bg-[length:12px_8px] bg-[center_right_1rem]"
-                }
-                value={formData.country}
-                onChange={handleChange}
-              >
-                <option value="">Select Country</option>
-                <option value="IN">India</option>
-                <option value="US">USA</option>
-              </select>
-            </div>
-
-            {/* Row 4 */}
-            <div>
-              <label className={labelClass}>Branch Code {requiredStar}</label>
-              <input
-                type="text"
-                name="branchCode"
-                placeholder="Enter Code"
-                className={inputClass}
-                value={formData.branchCode}
-                onChange={handleChange}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>License Number {requiredStar}</label>
-              <input
-                type="text"
-                name="licenseNumber"
-                placeholder="Enter Number"
-                className={inputClass}
-                value={formData.licenseNumber}
-                onChange={handleChange}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Emergency Number {requiredStar}</label>
-              <input
-                type="text"
-                name="emergencyNumber"
-                placeholder="Enter Number"
-                className={inputClass}
-                value={formData.emergencyNumber}
-                onChange={handleChange}
-              />
-            </div>
-
-            {/* Row 5 */}
-            <div>
-              <label className={labelClass}>Date of Establish {requiredStar}</label>
-              <input
-                type="date"
-                name="dateOfEstablish"
-                className={inputClass + " text-gray-500"}
-                value={formData.dateOfEstablish}
-                onChange={handleChange}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Admin User name {requiredStar}</label>
+              <label className={labelClass}>Admin Username {requiredStar}</label>
               <input
                 type="text"
                 name="adminUsername"
-                placeholder="Enter Code"
+                placeholder="Enter Admin Username"
                 className={inputClass}
                 value={formData.adminUsername}
                 onChange={handleChange}
@@ -286,74 +243,29 @@ export default function AddBranch() {
                 onChange={handleChange}
               />
             </div>
-
-            {/* Row 6 */}
             <div>
-              <label className={labelClass}>Consultation Rooms {requiredStar}</label>
+              <label className={labelClass}>Confirm Password {requiredStar}</label>
               <input
-                type="text"
-                name="consultationRooms"
-                placeholder="Enter Room"
+                type="password"
+                name="confirmPassword"
+                placeholder="Confirm Password"
                 className={inputClass}
-                value={formData.consultationRooms}
+                value={formData.confirmPassword}
                 onChange={handleChange}
               />
             </div>
-            <div>
-              <label className={labelClass}>Created By {requiredStar}</label>
-              <input
-                type="text"
-                name="createdBy"
-                placeholder="Enter created"
-                className={inputClass}
-                value={formData.createdBy}
-                onChange={handleChange}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Branch Status {requiredStar}</label>
-              <select
-                name="branchStatus"
-                className={
-                  inputClass +
-                  " appearance-none bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOCIgdmlld0JveD0iMCAwIDEyIDgiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEgMS41TDYgNi41TDExIDEuNSIgc3Ryb2tlPSIjNkI3MjgwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+')] bg-no-repeat bg-[length:12px_8px] bg-[center_right_1rem]"
-                }
-                value={formData.branchStatus}
-                onChange={handleChange}
-              >
-                <option value="">Select Status</option>
-                <option value="Active">Active</option>
-                <option value="Inactive">Inactive</option>
-              </select>
-            </div>
 
-            {/* Row 7 - Medical Services (2 cols) + Live Status (1 col) */}
-            <div className="lg:col-span-2">
+            {/* Row 7 - Medical Services (full width) */}
+            <div className="lg:col-span-3">
               <label className={labelClass}>Medical Services {requiredStar}</label>
               <textarea
                 name="medicalServices"
-                rows={1}
+                rows={2}
                 placeholder="Enter Medical Services"
                 className={`${inputClass} resize-none`}
                 value={formData.medicalServices}
                 onChange={handleChange}
               />
-            </div>
-            <div>
-              <label className={labelClass}>Live {requiredStar}</label>
-              <select
-                name="liveStatus"
-                className={
-                  inputClass +
-                  " appearance-none bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOCIgdmlld0JveD0iMCAwIDEyIDgiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEgMS41TDYgNi41TDExIDEuNSIgc3Ryb2tlPSIjNkI3MjgwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+')] bg-no-repeat bg-[length:12px_8px] bg-[center_right_1rem]"
-                }
-                value={formData.liveStatus}
-                onChange={handleChange}
-              >
-                <option value="">Select Status</option>
-                <option value="Yes">Yes</option>
-                <option value="No">No</option>
-              </select>
             </div>
           </div>
 
@@ -372,7 +284,7 @@ export default function AddBranch() {
             >
               <Plus className="w-4 h-4" />
               Add Branch
-            </button>
+            </button> 
           </div>
         </form>
       </div>
