@@ -35,6 +35,7 @@ export const authenticate = (
       token,
       process.env.JWT_SECRET!
     );
+    console.log(decoded);
 
     req.user = decoded;
 

@@ -43,7 +43,7 @@ export class UserRepository {
 
     }
     async findByEmail(email: string) {
-    return prisma.global_master.findFirst({
+    return prisma.branch.findFirst({
         where: {
             email
         }
