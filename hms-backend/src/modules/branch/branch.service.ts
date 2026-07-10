@@ -19,7 +19,7 @@ export class BranchService {
                     branch_name: branch.branch?.branch_name,
                     branch_area: branch.branch?.branch_area,
                     branch_email: branch.branch?.branch_email,
-                    branch_contact_number: branch.branch?.emergency_no,
+                    branch_contact_number: branch.branch?.emergency_no
                 }))
             }
         };
