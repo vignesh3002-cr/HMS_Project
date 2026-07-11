@@ -25,7 +25,7 @@ app.get("/api/health", (_req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
-app.use("/api/branches", branchRoutes);
+app.use("/api/branch", branchRoutes);
 app.use("/api/hashpassword", async (req, res) => {
 
     const { password } = req.body;

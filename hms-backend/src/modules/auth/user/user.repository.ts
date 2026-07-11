@@ -4,7 +4,7 @@ export class UserRepository {
 
     async findByUsername(username: string) {
 
-        return prisma.global_master.findFirst({
+        return prisma.user_table.findFirst({
             where: {
                 username
             }
@@ -14,40 +14,40 @@ export class UserRepository {
 
     async findLastUser(role: string) {
 
-        return prisma.global_master.findFirst({
+        return prisma.user_table.findFirst({
 
             where: {
                 role_type: role
             },
 
             orderBy: {
-                branch_id: "desc"
+                id: "desc"
             }
 
         });
 
     }
         async findByMobile(mobile: string) {
-        return prisma.global_master.findFirst({
+        return prisma.employees.findFirst({
             where: {
-                mobile
+                mobile_no: mobile
             }
         });
     }
 
     async create(data: any) {
 
-        return prisma.global_master.create({
+        return prisma.user_table.create({
             data
         });
 
     }
     async findByEmail(email: string) {
-    return prisma.global_master.findFirst({
-        where: {
-            email
-        }
-    });
-}
+        return prisma.employees.findFirst({
+            where: {
+                email
+            }
+        });
+    }
 
 }

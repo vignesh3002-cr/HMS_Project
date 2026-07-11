@@ -8,7 +8,8 @@ export class BranchController {
     // ✅ Add this method for GET all branches
   async getAllBranches(req: Request, res: Response) {
     try {
-      const branches = await service.getAllBranches();
+      const createdBy = "SA001"; // Replace later with JWT logged-in user
+      const branches = await service.getAllBranches(createdBy);
       return res.status(200).json({
         success: true,
         data: branches,
@@ -26,10 +27,12 @@ export class BranchController {
         try {
 
             const createdBy = "SA001"; // Replace later with JWT logged-in user
+            const hospitalId = "HOSP001"; // Replace later with JWT logged-in user
 
             const result = await service.createBranch(
                 req.body,
-                createdBy
+                createdBy,
+                hospitalId
             );
 
             return res.status(201).json({

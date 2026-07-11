@@ -31,40 +31,38 @@ model appointment {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model appointment_history {
-  appointment_id       String    @unique(map: "uq_appointment_id") @db.VarChar(20)
-  patient_id           String    @db.VarChar(20)
-  patient_name         String    @db.VarChar(100)
+  appointment_id       String            @unique(map: "uq_appointment_id") @db.VarChar(20)
+  patient_id           String            @db.VarChar(20)
+  patient_name         String            @db.VarChar(100)
   patient_age          Int?
-  patient_gender       String?   @db.VarChar(10)
-  patient_mobile       String?   @db.VarChar(15)
-  doctor_id            String    @db.VarChar(20)
-  doctor_name          String    @db.VarChar(100)
-  department           String?   @db.VarChar(100)
-  specialization       String?   @db.VarChar(100)
-  appointment_date     DateTime  @db.Date
-  appointment_time     DateTime  @db.Time(6)
+  patient_gender       String?           @db.VarChar(10)
+  patient_mobile       String?           @db.VarChar(15)
+  doctor_name          String            @db.VarChar(100)
+  department           String?           @db.VarChar(100)
+  appointment_date     DateTime          @db.Date
+  appointment_time     DateTime          @db.Time(6)
   token_number         Int?
-  booking_source       String?   @db.VarChar(30)
-  appointment_status   String?   @db.VarChar(30)
+  booking_source       String?           @db.VarChar(30)
+  appointment_status   String?           @db.VarChar(30)
   chief_complaint      String?
   symptoms             String?
   diagnosis            String?
   prescription_details String?
   lab_test_details     String?
   scan_details         String?
-  consultation_fee     Decimal?  @db.Decimal(10, 2)
-  bill_amount          Decimal?  @db.Decimal(10, 2)
-  payment_status       String?   @db.VarChar(20)
-  payment_mode         String?   @db.VarChar(30)
-  checkin_time         DateTime? @db.Timestamp(6)
-  checkout_time        DateTime? @db.Timestamp(6)
-  created_by           String?   @db.VarChar(50)
-  created_at           DateTime? @default(now()) @db.Timestamp(6)
-  updated_by           String?   @db.VarChar(50)
-  updated_at           DateTime? @default(now()) @db.Timestamp(6)
-  id                   BigInt    @id @default(autoincrement())
-  branch_id            String?   @db.VarChar(10)
-  department_id        String?   @db.VarChar(20)
+  consultation_fee     Decimal?          @db.Decimal(10, 2)
+  bill_amount          Decimal?          @db.Decimal(10, 2)
+  payment_status       String?           @db.VarChar(20)
+  payment_mode         String?           @db.VarChar(30)
+  checkin_time         DateTime?         @db.Timestamp(6)
+  checkout_time        DateTime?         @db.Timestamp(6)
+  id                   BigInt            @id @default(autoincrement())
+  branch_id            String?           @db.VarChar(10)
+  department_id        String?           @db.VarChar(20)
+  user_id              String?           @db.VarChar(20)
+  branch               branch?           @relation(fields: [branch_id], references: [branch_id], onDelete: Cascade, map: "fk_appointment_branch")
+  user_table           user_table?       @relation(fields: [user_id], references: [user_id], onDelete: Cascade, map: "fk_appointment_user")
+  patient_history      patient_history[]
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -77,35 +75,44 @@ model audit_log {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model branch {
-  branch_id          String        @unique(map: "uq_branch_branch_id") @default(dbgenerated("nextval('branch_branch_id_seq'::regclass)")) @db.VarChar(10)
-  branch_type        String        @db.VarChar(20)
-  email              String?       @db.VarChar(150)
-  address            String?       @db.VarChar(200)
-  district           String?       @db.VarChar(100)
-  state_name         String?       @db.VarChar(100)
-  branch_code        String?       @db.VarChar(20)
-  emergency_number   String?       @db.VarChar(100)
-  contact_number     String?       @db.VarChar(15)
-  country            String?       @db.VarChar(50)
-  pincode            String?       @db.VarChar(10)
-  license_number     String?       @db.VarChar(50)
-  total_beds         Int?
-  branch_status      String?       @default("Active") @db.VarChar(20)
-  created_by         String?       @db.VarChar(20)
-  date_of_establish  DateTime?     @db.Date
-  medical_services   String?       @db.VarChar(100)
-  icu_beds           Int?
-  consulation_rooms  Int?
-  operation_theaters Int?
-  id                 BigInt        @id @default(autoincrement())
-  global_master      global_master @relation(fields: [branch_id], references: [branch_id], map: "fk_branch_global_master")
-  employees          employees[]
+  branch_id           String                @unique(map: "uq_branch_branch_id") @default(dbgenerated("nextval('branch_branch_id_seq'::regclass)")) @db.VarChar(10)
+  branch_type         String                @db.VarChar(20)
+  district            String?               @db.VarChar(100)
+  state_name          String?               @db.VarChar(100)
+  branch_code         String?               @db.VarChar(20)
+  country             String?               @db.VarChar(50)
+  total_beds          Int?
+  branch_status       String?               @default("Active") @db.VarChar(20)
+  date_of_establish   DateTime?             @db.Date
+  medical_services    String?               @db.VarChar(100)
+  id                  BigInt                @id @default(autoincrement())
+  branch_name         String?               @db.VarChar(50)
+  branch_area         String?               @db.VarChar(50)
+  address             String?               @db.VarChar(500)
+  emergency_no        String?               @db.VarChar(20)
+  hospital_id         String?               @db.VarChar(20)
+  branch_license_no   String?               @db.VarChar(20)
+  website_address     String?               @db.VarChar(100)
+  pan_no              String?               @db.VarChar(20)
+  gst_no              String?               @db.VarChar(20)
+  total_no_emp        String?               @db.VarChar(500)
+  branch_email        String?               @db.VarChar(100)
+  fax_no              String?               @db.VarChar(20)
+  branch_pincode      Int?
+  appointment_history appointment_history[]
+  hospital            hospital?             @relation(fields: [hospital_id], references: [hospital_id], onDelete: Cascade, map: "fk_branch_hospital")
+  employees           employees[]
+  patient_history     patient_history[]
+  user_branch_mapping user_branch_mapping[]
+  user_table          user_table[]
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-model department {
-  department_id   String @id @db.VarChar(20)
-  department_name String @db.VarChar(100)
+model department_master {
+  department_id   String            @id(map: "department_pkey") @db.VarChar(20)
+  department_name String            @db.VarChar(100)
+  employees       employees[]
+  patient_history patient_history[]
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -175,55 +182,41 @@ model employee_branch {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model employees {
-  id                             BigInt         @id @default(autoincrement())
-  role_id                        String?        @db.VarChar(20)
-  first_name                     String         @db.VarChar(50)
-  middle_name                    String?        @db.VarChar(50)
-  last_name                      String         @db.VarChar(50)
-  blood_group                    String?        @db.VarChar(5)
-  nationality                    String?        @db.VarChar(50)
-  marital_status                 String?        @db.VarChar(20)
-  mobile_no                      String?        @db.VarChar(15)
-  parmanant_address              String?        @db.VarChar(255)
-  current_address                String?        @db.VarChar(255)
-  city                           String?        @db.VarChar(50)
-  state                          String?        @db.VarChar(50)
-  country                        String?        @db.VarChar(50)
-  pincode                        String?        @db.VarChar(10)
-  emergency_contact_name         String?        @db.VarChar(100)
-  emergency_contact_relationship String?        @db.VarChar(50)
-  emergency_contact_number       String?        @db.VarChar(15)
-  aadhaar_no                     String?        @db.VarChar(20)
-  pan_no                         String?        @db.VarChar(20)
-  passport_no                    String?        @db.VarChar(20)
-  department                     String?        @db.VarChar(100)
-  designation                    String?        @db.VarChar(100)
-  specialization                 String?        @db.VarChar(100)
-  qualification                  String?        @db.VarChar(255)
-  license_number                 String?        @db.VarChar(100)
-  joining_date                   DateTime?      @db.Date
-  confirmation_date              DateTime?      @db.Date
-  employment_type                String?        @db.VarChar(20)
-  shift_type                     String?        @db.VarChar(20)
-  reporting_manager              String?        @db.VarChar(100)
-  experience_years               Decimal?       @db.Decimal(5, 2)
-  basic_salary                   Decimal?       @db.Decimal(12, 2)
-  hra                            Decimal?       @db.Decimal(12, 2)
-  allowances                     Decimal?       @db.Decimal(12, 2)
-  pf                             Decimal?       @db.Decimal(12, 2)
-  net_salary                     Decimal?       @db.Decimal(12, 2)
-  bank_name                      String?        @db.VarChar(100)
-  account_number                 String?        @db.VarChar(30)
-  ifsc_code                      String?        @db.VarChar(20)
-  bp                             String?        @db.VarChar(20)
-  sugar                          String?        @db.VarChar(30)
+  id                             BigInt             @id @default(autoincrement())
+  user_id                        String?            @unique(map: "uq_employees_user_id") @db.VarChar(20)
+  first_name                     String             @db.VarChar(50)
+  middle_name                    String?            @db.VarChar(50)
+  last_name                      String             @db.VarChar(50)
+  blood_group                    String?            @db.VarChar(5)
+  nationality                    String?            @db.VarChar(50)
+  marital_status                 String?            @db.VarChar(20)
+  mobile_no                      String?            @db.VarChar(15)
+  parmanant_address              String?            @db.VarChar(255)
+  current_address                String?            @db.VarChar(255)
+  emergency_contact_name         String?            @db.VarChar(100)
+  emergency_contact_relationship String?            @db.VarChar(50)
+  emergency_contact_number       String?            @db.VarChar(15)
+  aadhaar_no                     String?            @db.VarChar(20)
+  pan_no                         String?            @db.VarChar(20)
+  passport_no                    String?            @db.VarChar(20)
+  department                     String?            @db.VarChar(100)
+  designation                    String?            @db.VarChar(100)
+  specialization                 String?            @db.VarChar(100)
+  qualification                  String?            @db.VarChar(255)
+  doc_license_no                 String?            @db.VarChar(100)
+  joining_date                   DateTime?          @db.Date
+  bp                             String?            @db.VarChar(20)
+  sugar                          String?            @db.VarChar(30)
   allergies                      String?
   chronic_diseases               String?
   medical_history                String?
-  leave_balance                  Int?           @default(0)
-  branch_id                      String?        @db.VarChar(10)
-  branch                         branch?        @relation(fields: [branch_id], references: [branch_id], onDelete: Restrict, map: "fk_employees_branch")
-  global_master                  global_master? @relation(fields: [role_id], references: [role_id], onDelete: Restrict, map: "fk_employees_global_master")
+  branch_id                      String?            @db.VarChar(10)
+  emp_status                     Boolean?
+  email                          String?            @db.VarChar(50)
+  department_id                  String?            @db.VarChar(20)
+  branch                         branch?            @relation(fields: [branch_id], references: [branch_id], onDelete: Cascade, map: "fk_employee_branch")
+  department_master              department_master? @relation(fields: [department_id], references: [department_id], onDelete: Cascade, map: "fk_employee_department")
+  user_table                     user_table?        @relation(fields: [user_id], references: [user_id], onDelete: Cascade, map: "fk_employee_user")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -249,25 +242,27 @@ model encounter {
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-model global_master {
-  role_id       String?     @unique(map: "uq_global_master_role_id") @db.VarChar(20)
-  role_type     String?     @db.VarChar(50)
-  created_by    String?     @db.VarChar(20)
-  name          String?     @db.VarChar(100)
-  gender        String?     @db.VarChar(10)
-  mobile        String?     @db.VarChar(15)
-  username      String?     @db.VarChar(50)
-  password      String?     @db.VarChar(255)
-  status        Int?        @default(0) @db.SmallInt
-  created_at    DateTime?   @default(now()) @db.Timestamp(6)
-  hospital_type String?     @db.VarChar(50)
-  website       String?     @db.VarChar(200)
-  branch_name   String?     @db.VarChar(50)
-  hospital_name String?     @db.VarChar(100)
-  branch_id     String?     @unique(map: "uq_global_master_branch_id") @db.VarChar(10)
-  id            BigInt      @id @default(autoincrement())
-  branch        branch?
-  employees     employees[]
+model hospital {
+  hospital_id         String   @unique(map: "hospital_id_unique") @db.VarChar(20)
+  hospital_name       String   @db.VarChar(200)
+  Hospital_address    String?  @db.VarChar(300)
+  pincode             String?  @db.VarChar(10)
+  contact_number      String?  @db.VarChar(15)
+  fax_number          String?  @db.VarChar(20)
+  email_id            String?  @db.VarChar(150)
+  website_address     String?  @db.VarChar(200)
+  hospital_type       String?  @db.VarChar(50)
+  hospital_license_no String?  @db.VarChar(50)
+  id                  BigInt   @id @default(autoincrement())
+  branch              branch[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model id_sequences {
+  entity_name    String    @id @db.VarChar(50)
+  prefix         String    @db.VarChar(10)
+  current_number Int       @default(0)
+  updated_at     DateTime? @default(now()) @db.Timestamp(6)
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -337,6 +332,77 @@ model patient_contact {
   is_primary         Boolean  @default(false)
   created_at         DateTime @default(now()) @db.Timestamptz(6)
   patient            patient  @relation(fields: [patient_id], references: [patient_id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model patient_history {
+  id                         BigInt               @id @default(autoincrement())
+  mrn_no                     String?              @db.VarChar(30)
+  first_name                 String?              @db.VarChar(100)
+  middle_name                String?              @db.VarChar(100)
+  last_name                  String?              @db.VarChar(100)
+  dob                        DateTime?            @db.Date
+  blood_group                String?              @db.VarChar(10)
+  patient_address            String?
+  previous_hospital_name     String?              @db.VarChar(200)
+  previous_doctor_name       String?              @db.VarChar(200)
+  previous_visit_date        DateTime?            @db.Date
+  previous_diagnosis         String?
+  previous_treatment         String?
+  previous_surgery           String?
+  previous_medications       String?
+  previous_hospitalization   String?
+  allergy_history            String?
+  chronic_disease            String?
+  visit_type                 String?              @db.VarChar(30)
+  visit_date                 DateTime?            @db.Date
+  history_of_present_illness String?
+  clinical_notes             String?
+  height                     Decimal?             @db.Decimal(5, 2)
+  weight                     Decimal?             @db.Decimal(5, 2)
+  bmi                        Decimal?             @db.Decimal(5, 2)
+  temperature                Decimal?             @db.Decimal(5, 2)
+  pulse                      Int?
+  respiratory_rate           Int?
+  systolic_bp                Int?
+  diastolic_bp               Int?
+  oxygen_saturation          Decimal?             @db.Decimal(5, 2)
+  blood_sugar                String?              @db.VarChar(50)
+  diagnosis_type             String?              @db.VarChar(50)
+  icd_code                   String?              @db.VarChar(20)
+  severity                   String?              @db.VarChar(30)
+  treatment_plan             String?
+  procedure_done             String?
+  surgery_done               String?
+  operation_notes            String?
+  physiotherapy_notes        String?
+  prescribed_medicines       String?
+  dosage_details             String?
+  duration                   String?
+  medicine_instruction       String?
+  lab_summary                String?
+  scan_summary               String?
+  admitted                   String?              @db.VarChar(50)
+  admission_date             DateTime?            @db.Date
+  discharge_date             DateTime?            @db.Date
+  ward                       String?              @db.VarChar(100)
+  room                       String?              @db.VarChar(50)
+  bed                        String?              @db.VarChar(50)
+  discharge_summary          String?
+  treating_doctor_name       String?              @db.VarChar(150)
+  consulting_doctor_name     String?              @db.VarChar(150)
+  uploaded_document_url      String?
+  patient_status             String?              @db.VarChar(30)
+  updated_by                 String?              @db.VarChar(20)
+  updated_at                 DateTime?            @default(now()) @db.Timestamp(6)
+  appointment_id             String?              @db.VarChar(20)
+  user_id                    String?              @db.VarChar(20)
+  branch_id                  String?              @db.VarChar(20)
+  department_id              String?              @db.VarChar(20)
+  appointment_history        appointment_history? @relation(fields: [appointment_id], references: [appointment_id], onDelete: Cascade, map: "fk_patienthistory_appointment")
+  branch                     branch?              @relation(fields: [branch_id], references: [branch_id], onDelete: Cascade, map: "fk_patienthistory_branch")
+  department_master          department_master?   @relation(fields: [department_id], references: [department_id], onDelete: Cascade, map: "fk_patienthistory_department")
+  user_table                 user_table?          @relation(fields: [user_id], references: [user_id], onDelete: Cascade, map: "fk_patienthistory_user")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -444,4 +510,34 @@ model role_id_config {
   current_number Int       @default(0)
   description    String?   @db.VarChar(100)
   created_at     DateTime? @default(now()) @db.Timestamp(6)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model user_branch_mapping {
+  user_id       String     @db.VarChar(20)
+  branch_id     String     @db.VarChar(10)
+  assigned_date DateTime?  @default(now()) @db.Timestamp(6)
+  status        Int?       @default(1) @db.SmallInt
+  id            BigInt     @id @default(autoincrement())
+  mapping_id    String?    @db.VarChar(20)
+  branch        branch     @relation(fields: [branch_id], references: [branch_id], onDelete: Cascade, map: "fk_mapping_branch")
+  user_table    user_table @relation(fields: [user_id], references: [user_id], onDelete: Cascade, map: "fk_mapping_user")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model user_table {
+  user_id             String?               @unique(map: "user_table_user_id_unique") @db.VarChar(20)
+  role_type           String?               @db.VarChar(50)
+  created_by          String?               @db.VarChar(20)
+  username            String?               @db.VarChar(50)
+  password            String?               @db.VarChar(255)
+  user_status         Int?                  @default(0) @db.SmallInt
+  created_at          DateTime?             @default(now()) @db.Timestamp(6)
+  id                  BigInt                @id @default(autoincrement())
+  branch_id           String?               @db.VarChar(10)
+  appointment_history appointment_history[]
+  employees           employees?
+  patient_history     patient_history[]
+  user_branch_mapping user_branch_mapping[]
+  branch              branch?               @relation(fields: [branch_id], references: [branch_id], onDelete: Cascade, map: "fk_user_branch")
 }

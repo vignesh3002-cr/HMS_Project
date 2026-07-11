@@ -1,30 +1,49 @@
-export const generateUserId = (
-    role: string,
-    lastUserId?: string
-): string => {
+import { Prisma } from "@prisma/client";
 
-    const prefixMap: Record<string, string> = {
-        SUPER_ADMIN: "SA",
-        DISTRICT_ADMIN: "DA",
-        BRANCH_ADMIN: "BA",
-        DOCTOR: "DR",
-        NURSE: "NU",
-        RECEPTIONIST: "RC",
-        LAB_TECH: "LT",
-        PHARMACIST: "PH"
-    };
+export async function generateId(
+    tx: Prisma.TransactionClient,
+    entity: string
+): Promise<string> {
 
-    const prefix = prefixMap[role];
+    // Lock the row
+    const rows = await tx.$queryRawUnsafe<any[]>(`
+        SELECT *
+        FROM id_sequences
+        WHERE entity_name='${entity}'
+        FOR UPDATE
+    `);
 
-    if (!prefix) {
-        throw new Error("Invalid Role");
+    if (rows.length === 0) {
+
+        throw new Error(`Sequence not found for ${entity}`);
+
     }
 
-    let nextNumber = 1;
+    const sequence = rows[0];
 
-    if (lastUserId) {
-        nextNumber = parseInt(lastUserId.substring(2)) + 1;
-    }
+    const nextNumber = sequence.current_number + 1;
 
-    return `${prefix}${nextNumber.toString().padStart(6, "0")}`;
-};
+    await tx.id_sequences.update({
+
+        where: {
+
+            entity_name: entity
+
+        },
+
+        data: {
+
+            current_number: nextNumber,
+
+            updated_at: new Date()
+
+        }
+
+    });
+
+    return sequence.prefix +
+        nextNumber
+            .toString()
+            .padStart(3, "0");
+
+}

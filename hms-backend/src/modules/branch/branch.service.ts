@@ -2,120 +2,108 @@ import bcrypt from "bcrypt";
 import prisma from "../../config/prisma";
 import { BranchRepository } from "./branch.repository";
 import { CreateBranchDto } from "./branch.types";
+import { generateId } from "../../utils/idGenerator";
 
 const repository = new BranchRepository();
 export class BranchService {
+        async getAllBranches(createdBy: string) {
 
-  // ✅ Add this method for fetching all branches
-  async getAllBranches() {
-    try {
-      const branches = await prisma.branch.findMany();
-      return branches;
-    } catch (error: any) {
-      throw new Error(`Failed to fetch branches: ${error.message}`);
+        const branches = await repository.getAllBranches(createdBy);
+
+        return {
+            success: true,
+            message: "Branches fetched successfully",
+            data: {
+                branches: branches.map((branch) => ({
+                    branch_id: branch.branch_id,
+                    branch_name: branch.branch?.branch_name,
+                    branch_area: branch.branch?.branch_area,
+                    branch_email: branch.branch?.branch_email,
+                    branch_contact_number: branch.branch?.emergency_no
+                }))
+            }
+        };
     }
-  }
-
 async createBranch(
     data: CreateBranchDto,
-    createdBy: string
+    createdBy: string,
+    hospitalId: string
 ) {
-    const branch = await repository.findBranchCode(data.branch_code);
-
-if (branch) {
-    throw new Error("Branch Code already exists");
-}
 
     const username = await repository.findUsername(data.username);
 
 if (username) {
     throw new Error("Username already exists");
 }
-const email = await repository.findEmail(data.admin_email);
 
-if (email) {
-    throw new Error("Email already exists");
-}
-const mobile = await repository.findMobile(data.mobile);
 
-if (mobile) {
-    throw new Error("Mobile already exists");
-}
 const hashedPassword = await bcrypt.hash(
     data.password,
     Number(process.env.BCRYPT_SALT_ROUNDS)
 );
 const result = await prisma.$transaction(async (tx) => {
-    const branch = await tx.branch.create({
+    const branchId = await generateId(
+    tx,
+    "BRANCH",
+);
+    const userId = await generateId(
+        tx,
+        "USER"
+    );
 
-    data: {
+     const branch = await tx.branch.create({
 
-        branch_name: data.branch_name,
+        data: {
 
-        branch_type: "CHILD",
+            branch_type: "CHILD",
 
-        email: data.email,
+            address: data.address,
 
-        address: data.address,
+            district: data.district,
 
-        city: data.city,
+            state_name: data.state_name,
 
-        state_name: data.state_name,
-
-        branch_code: data.branch_code,
-
-        emergency_number: data.emergency_number,
-
-        contact_number: data.contact_number,
-
-        country: data.country,
-
-        pincode: data.pincode,
-
-        license_number: data.license_number,
-
-        branch_status: "Active",
-
-        created_by: createdBy,
-
-        date_of_establish: new Date(data.date_of_establish),
-
-        medical_services: data.medical_services,
-
-        icu_beds: data.icu_beds,
-
-        consulation_rooms: data.consultation_rooms,
-
-        operation_theaters: data.operation_theaters
+            emergency_no: data.emergency_number,
+            branch_pincode: data.pincode,
+            branch_name: data.branch_name,
+            branch_status: "Active",
+            branch_email: data.email,
+            gst_no: data.gst_no,
+            pan_no: data.pan_no,
+            branch_area:data.area,
+            date_of_establish: new Date(),
+            website_address: data.website_address,
+            branch_license_no: data.license_number,
+            total_beds: data.total_beds,
+            medical_services: data.medical_services,
+            branch_id: branchId,
+            hospital_id: hospitalId,
 
     }
 
 });
-    const admin = await tx.global_master.create({
+    const admin = await tx.user_table.create({
         data: {
-            role_type: "BRANCH_ADMIN",
             created_by: createdBy,
-            name: data.admin_name,
-            mobile: data.mobile,
-            email: data.admin_email,
             username: data.username,
             password: hashedPassword,
-            status: 0,
-            branch_id: branch.branch_id
+            user_status: 0,
+            user_id: userId,
+            branch_id: branchId,
         }
     });
    return {
     branch: {
         branch_id: branch.branch_id,
-        branch_name: branch.branch_name,
-        emergency_number: branch.emergency_number,
-        contact_number: branch.contact_number,
-        address: branch.address
+        emergency_number: branch.emergency_no,
+        address: branch.address,
+        branch_email: branch.branch_email,
+        branch_area: branch.branch_area,
     },
     admin: {
-        role_id: admin.role_id,
+        user_id: admin.user_id,
+        branch_name: branch.branch_name,
         username: admin.username,
-        name: admin.name
     }
 };
 });
