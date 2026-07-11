@@ -62,7 +62,7 @@ export function BranchSelector() {
         id: item.id || item.branch_id,
         name: item.name || item.branch_name || "Unnamed Branch",
         code: item.code || item.branch_code || item.id?.slice(0, 8) || "N/A",
-        hospital_name: item.hospital_name || item.hospital?.name || "SVG Hospital",
+        hospital_name: item.hospital_name || item.hospital?.name || "Dummy Hospital",
       }));
 
       setBranches(mappedBranches);
