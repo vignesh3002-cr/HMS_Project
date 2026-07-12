@@ -15,7 +15,9 @@ export class BranchService {
             branch_name: branch.branch_name,
             branch_area: branch.branch_area,
             branch_email: branch.branch_email,
-            branch_contact_number: branch.emergency_no
+            branch_contact_number: branch.emergency_no,
+            hospital_name: branch.hospital?.hospital_name || "pummy Hospital",
+            hospital_id: branch.hospital?.hospital_id || "D002",
         }));
     }
 async createBranch(
