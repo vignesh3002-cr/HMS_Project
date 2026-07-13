@@ -17,7 +17,7 @@
     @apply text-[12px] font-bold text-[#424752] tracking-[0.9px] capitalize;
   }
   .hms-avatar-text {
-  @apply text-[14px] font-semibold;
+  @apply text-[10px] font-semibold;
 }
    .hms-name-text {
   @apply text-[#111827] font-semibold text-sm leading-[1.2];
@@ -30,7 +30,21 @@
 }
     .hms-content-text {
   @apply font-medium text-[11px]; /* 11 */
-} 
+}
+    .hms-columnHeading-style {
+  @apply sticky top-0 z-10 bg-slate-100;
+/* sticky top-0 z-10 bg-slate-100 */ 
+}
+  .hide-scrollbar {
+    @apply overflow-auto;
+    /* Hide scrollbar for IE, Edge and Firefox */
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+  
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari, Opera */
+  }
 }
 
 @layer base {

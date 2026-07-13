@@ -33,16 +33,10 @@ export class BranchRepository {
             }
         });
     }
-        async getAllBranches(role_id: string) {
-        return await prisma.user_table.findMany({
-            where: {
-               created_by : role_id
-            },
+        async getAllBranches() {
+        return await prisma.branch.findMany({
             orderBy: {
                 id: "desc"
-            },
-            include: {
-                branch: true
             }
         });
     }

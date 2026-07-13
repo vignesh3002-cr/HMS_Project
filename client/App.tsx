@@ -15,7 +15,23 @@ import NotFound from "./pages/NotFound";
 import Patients from "./pages/Patients";
 import ProtectedRoute from "./routes/ProtectedRoute";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5,
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
+// Define protected routes for better maintainability
+const protectedRoutes = [
+  { path: "/dashboard", element: <Dashboard /> },
+  { path: "/patients", element: <Patients /> },
+  { path: "/appointments", element: <Appointments /> },
+  { path: "/departments", element: <Departments /> },
+];
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -24,13 +40,21 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
+          {/* Public Routes */}
           <Route path="/" element={<Login />} />
+          
+          {/* Protected Routes with Layout */}
           <Route element={<AppLayout />}>
-            <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/patients" element={<ProtectedRoute><Patients /></ProtectedRoute>} />
-            <Route path="/appointments" element={<ProtectedRoute><Appointments /></ProtectedRoute>} />
-            <Route path="/departments" element={<ProtectedRoute><Departments /></ProtectedRoute>} />
+            {protectedRoutes.map(({ path, element }) => (
+              <Route
+                key={path}
+                path={path}
+                element={<ProtectedRoute>{element}</ProtectedRoute>}
+              />
+            ))}
           </Route>
+          
+          {/* 404 Route */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

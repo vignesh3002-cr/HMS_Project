@@ -6,23 +6,17 @@ import { generateId } from "../../utils/idGenerator";
 
 const repository = new BranchRepository();
 export class BranchService {
-        async getAllBranches(createdBy: string, hospitalId: string) {
+        async getAllBranches() {
 
-        const branches = await repository.getAllBranches(createdBy);
+        const branches = await repository.getAllBranches();
 
-        return {
-            success: true,
-            message: "Branches fetched successfully",
-            data: {
-                branches: branches.map((branch) => ({
-                    branch_id: branch.branch_id,
-                    branch_name: branch.branch?.branch_name,
-                    branch_area: branch.branch?.branch_area,
-                    branch_email: branch.branch?.branch_email,
-                    branch_contact_number: branch.branch?.emergency_no
-                }))
-            }
-        };
+        return branches.map((branch) => ({
+            branch_id: branch.branch_id,
+            branch_name: branch.branch_name,
+            branch_area: branch.branch_area,
+            branch_email: branch.branch_email,
+            branch_contact_number: branch.emergency_no
+        }));
     }
 async createBranch(
     data: CreateBranchDto,

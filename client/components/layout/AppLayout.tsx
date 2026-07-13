@@ -1,9 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
-import {
- remove
-} from "../../utils/token";
+import { remove } from "../../utils/token";
 import { getUser } from "@/utils/token";
 import { cn } from "@/lib/utils";
 import { BranchSelector } from "@/components/hms/BranchSelector";

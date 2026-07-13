@@ -1,41 +1,32 @@
-import { Response } from "express";
-import { AuthRequest } from "../auth/auth.middleware";
+import { Request, Response } from "express";
 import { BranchService } from "./branch.service";
 
 const service = new BranchService();
 
 export class BranchController {
 
-    async getAllBranches(req: AuthRequest, res: Response) {
-
-        try {
-
-            const createdBy = req.user!.role_id;
-            const hospitalId = req.user!.hospital_id;
-
-            const result = await service.getAllBranches(createdBy, hospitalId);
-
-            return res.status(200).json(result);
-
-        } catch (error: any) {
-
-            return res.status(500).json({
-                success: false,
-                message: error.message
-            });
-
-        }
-
+    // ✅ Add this method for GET all branches
+  async getAllBranches(req: Request, res: Response) {
+    try {
+      const branches = await service.getAllBranches();
+      return res.status(200).json({
+        success: true,
+        data: branches,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
     }
+  }
 
-    async createBranch(req: AuthRequest, res: Response) {
+    async createBranch(req: Request, res: Response) {
 
         try {
 
-            const createdBy = req.user!.role;
-            const hospitalId = req.user!.hospital_id;
-            console.log("by user", createdBy);
-            console.log("hospital id", hospitalId);
+            const createdBy = "SA001"; // Replace later with JWT logged-in user
+            const hospitalId = "HOSP001"; // Replace later with JWT logged-in user
 
             const result = await service.createBranch(
                 req.body,
