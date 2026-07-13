@@ -233,7 +233,7 @@ export default function Staff() {
 
   const staffFilterFields: FilterField[] = [
     { id: "name", label: "Staff Name", type: "text", placeholder: "Search by name" },
-    { id: "id", label: "Staff ID", type: "text", placeholder: "Enter ID" },
+      { id: "id", label: "Staff ID", type: "text", placeholder: "Enter ID" },
     {
       id: "dept", label: "Department", type: "multiselect", options: [
         { label: "Neuroscience", value: "Neuroscience" },
@@ -260,6 +260,41 @@ export default function Staff() {
         { label: "Inactive", value: "inactive" },
       ],
     },
+    {
+      id: "id",
+      label: "Staff ID",
+      type: "combobox",
+      placeholder: "Search ID",
+      options: staffData.map((s) => ({ label: s.id, value: s.id })),
+    },
+    { id: "role", label: "Role", type: "multiselect", options: [
+      { label: "Cardiologist", value: "Cardiologist" },
+      { label: "Oncologist", value: "Oncologist" },
+      { label: "Pediatrician", value: "Pediatrician" },
+      { label: "Neurologist", value: "Neurologist" },
+      { label: "Head Nurse", value: "Head Nurse" },
+      { label: "Radiologist", value: "Radiologist" },
+      { label: "General Surgeon", value: "General Surgeon" },
+    ]},
+    { id: "department", label: "Department", type: "multiselect", options: [
+      { label: "Cardiology", value: "Cardiology" },
+      { label: "Cancer", value: "Cancer" },
+      { label: "Pediatrics", value: "Pediatrics" },
+      { label: "Neurology", value: "Neurology" },
+      { label: "Emergency", value: "Emergency" },
+      { label: "Surgery", value: "Surgery" },
+    ]},
+    { id: "branch", label: "Branch", type: "multiselect", options: [
+      { label: "Central Hospital (Tambaram)", value: "Central Hospital (Tambaram)" },
+      { label: "Central Hospital (Saidapet)", value: "Central Hospital (Saidapet)" },
+      { label: "Central Hospital (Egmore)", value: "Central Hospital (Egmore)" },
+    ]},
+    { id: "status", label: "Status", type: "multiselect", options: [
+      { label: "Active", value: "Active" },
+      { label: "Leave", value: "Leave" },
+      { label: "Resigned", value: "Resigned" },
+      { label: "Suspended", value: "Suspended" },
+    ]},
   ];
 
   // ---- EXPORT DROPDOWN ----

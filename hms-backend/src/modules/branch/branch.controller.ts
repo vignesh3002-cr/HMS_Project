@@ -26,7 +26,7 @@ export class BranchController {
         try {
 
             const createdBy = "SA001"; // Replace later with JWT logged-in user
-            const hospitalId = "HOSP001"; // Replace later with JWT logged-in user
+            const hospitalId = "HSP001"; // Replace later with JWT logged-in user (matches the hospital row's actual hospital_id)
 
             const result = await service.createBranch(
                 req.body,
