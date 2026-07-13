@@ -14,6 +14,8 @@ import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import Patients from "./pages/Patients";
 import ProtectedRoute from "./routes/ProtectedRoute";
+import Doctor from "./pages/Doctor";
+import Staff from "./pages/Staff";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,8 +31,10 @@ const queryClient = new QueryClient({
 const protectedRoutes = [
   { path: "/dashboard", element: <Dashboard /> },
   { path: "/patients", element: <Patients /> },
+  { path: "/doctor", element: <Doctor /> },
   { path: "/appointments", element: <Appointments /> },
   { path: "/departments", element: <Departments /> },
+   { path: "/Staff", element: <Staff /> },
 ];
 
 const App = () => (

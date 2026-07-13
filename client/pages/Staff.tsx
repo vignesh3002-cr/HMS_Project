@@ -1,40 +1,226 @@
-import { useMemo, useState } from "react";
-import { Plus, Search } from "lucide-react";
+import { useState, useEffect, useRef, useMemo, Fragment } from "react";
+import CalendarPicker from "@/components/hms/Calender";
+import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Search, FileText, File, ChevronDown, Check, Plus } from "lucide-react";
 
-import { DataPanel } from "@/components/hms/DataPanel";
-import { PageHeader } from "@/components/hms/PageHeader";
-import { StatusBadge } from "@/components/hms/StatusBadge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
 
-const statusTone = {
-  Active: "green",
-  Leave: "amber",
-  Resigned: "slate",
-  Suspended: "rose",
-} as const;
+interface StaffMember {
+  initials: string;
+  name: string;
+  phone: string;
+  id: string;
+  dept: string;
+  deptClass: string;
+  branch: string[];
+  status: "active" | "leave" | "inactive";
+}
 
-const staffMembers = [
-  { id: "STF-1001", name: "Dr. John Smith", role: "Cardiologist", department: "Cardiology", branch: "Central Hospital (Tambaram)", status: "Active" },
-  { id: "STF-1002", name: "Marcus Kincaid", role: "Oncologist", department: "Cancer", branch: "Central Hospital (Tambaram)", status: "Leave" },
-  { id: "STF-1003", name: "Dr. Robert Lee", role: "Pediatrician", department: "Pediatrics", branch: "Central Hospital (Saidapet)", status: "Active" },
-  { id: "STF-1004", name: "Dr. Arun Kumar", role: "Orthologist", department: "Orthology", branch: "Central Hospital (Egmore)", status: "Active" },
-  { id: "STF-1005", name: "Dr. Priya Sharma", role: "Neurologist", department: "Neurology", branch: "Central Hospital (Tambaram)", status: "Active" },
-  { id: "STF-1006", name: "Anita Verma", role: "Head Nurse", department: "Emergency", branch: "Central Hospital (Tambaram)", status: "Active" },
-  { id: "STF-1007", name: "Ravi Patel", role: "Radiologist", department: "Radiology", branch: "Central Hospital (Saidapet)", status: "Leave" },
-  { id: "STF-1008", name: "Dr. Sarah Joseph", role: "General Surgeon", department: "Surgery", branch: "Central Hospital (Egmore)", status: "Active" },
-  { id: "STF-1009", name: "Michael Dsouza", role: "Lab Technician", department: "Pathology", branch: "Central Hospital (Tambaram)", status: "Resigned" },
-  { id: "STF-1010", name: "Dr. Meera Nair", role: "Gynecologist", department: "Maternity", branch: "Central Hospital (Tambaram)", status: "Active" },
-  { id: "STF-1011", name: "Karthik Rajan", role: "Pharmacist", department: "Pharmacy", branch: "Central Hospital (Saidapet)", status: "Active" },
-  { id: "STF-1012", name: "Dr. Sunil Gupta", role: "Pulmonologist", department: "Pulmonology", branch: "Central Hospital (Egmore)", status: "Leave" },
+const staffData: StaffMember[] = [
+  {
+    initials: "SJ",
+    name: "Dr. Sarah Jenkins",
+    phone: "+1 (555) 123-4567",
+    id: "DOC-9042",
+    dept: "Neuroscience",
+    deptClass: "bg-blue-100 text-slate-600",
+    branch: ["Central Hospital Tambaram"],
+    status: "active",
+  },
+  {
+    initials: "AM",
+    name: "Dr. Ajay Mehta",
+    phone: "+1 (555) 123-4567",
+    id: "DOC-9042",
+    dept: "Cardiology",
+    deptClass: "bg-purple-100 text-slate-600",
+    branch: ["Central Hospital Tambaram"],
+    status: "leave",
+  },
+  {
+    initials: "RL",
+    name: "Dr. Robert lee",
+    phone: "+1 (555) 234-5678",
+    id: "DOC-4431",
+    dept: "Pediatrics",
+    deptClass: "bg-yellow-100 text-orange-700",
+    branch: ["Central Hospital Saidapet"],
+    status: "active",
+  },
+  {
+    initials: "MD",
+    name: "Mahesh Dhori",
+    phone: "+1 (555) 345-6789",
+    id: "NUR-0098",
+    dept: "Nursing",
+    deptClass: "bg-emerald-100 text-emerald-700",
+    branch: ["Central Hospital Egmore"],
+    status: "leave",
+  },
+  {
+    initials: "DT",
+    name: "David Tan",
+    phone: "+1 (555) 456-7890",
+    id: "ADM-0032",
+    dept: "Admin",
+    deptClass: "bg-lime-100 text-lime-700",
+    branch: ["East wing"],
+    status: "inactive",
+  },
+  {
+    initials: "EW",
+    name: "Elena Wright",
+    phone: "+1 (555) 567-8901",
+    id: "DOC-1192",
+    dept: "Cardiology",
+    deptClass: "bg-red-100 text-purple-700",
+    branch: ["North wing"],
+    status: "active",
+  },
+  {
+    initials: "SS",
+    name: "Dr. Steven Strange",
+    phone: "+1 (555) 123-4567",
+    id: "DOC-9042",
+    dept: "Neuroscience",
+    deptClass: "bg-blue-100 text-slate-600",
+    branch: ["Central Hospital Tambaram"],
+    status: "active",
+  },
+  {
+    initials: "SR",
+    name: "Dr. Steve Rogers",
+    phone: "+1 (555) 123-4567",
+    id: "DOC-9042",
+    dept: "Cardiology",
+    deptClass: "bg-purple-100 text-slate-600",
+    branch: ["Central Hospital Tambaram"],
+    status: "leave",
+  },
+  {
+    initials: "BB",
+    name: "Bruce Banner",
+    phone: "+1 (555) 456-7890",
+    id: "ADM-0032",
+    dept: "Admin",
+    deptClass: "bg-lime-100 text-lime-700",
+    branch: ["East wing"],
+    status: "inactive",
+  },
+  {
+    initials: "NR",
+    name: "Natasha Romanoff",
+    phone: "+1 (555) 567-8901",
+    id: "DOC-1192",
+    dept: "Cardiology",
+    deptClass: "bg-red-100 text-purple-700",
+    branch: ["North wing"],
+    status: "active",
+  },
 ];
 
-export default function Staff() {
-  const [search, setSearch] = useState("");
+const statusConfig = {
+  active: {
+    label: "Active",
+    className: "bg-green-50 text-green-600",
+    dot: "bg-green-500",
+  },
+  leave: {
+    label: "Leave",
+    className: "bg-orange-50 text-orange-500",
+    dot: "bg-orange-500",
+  },
+  inactive: {
+    label: "Inactive",
+    className: "bg-slate-100 text-slate-600",
+    dot: "bg-slate-400",
+  },
+};
 
+const TABS = ["All staff", "Medical", "Administrative", "Support"];
+
+// Rows-per-page dropdown (matches Doctor.tsx / Patients.tsx)
+function RowsPerPageSelect({
+  value,
+  onChange,
+  options = [5, 10, 20],
+}: {
+  value: number;
+  onChange: (val: number) => void;
+  options?: number[];
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative" ref={wrapperRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-1.5 text-xs font-semibold text-[#374151] bg-white border rounded-md pl-2.5 pr-2 py-1 transition-colors ${
+          open ? "border-[#00488D] ring-2 ring-[#D6E3FF]" : "border-[#E5E7EB] hover:border-[#00488D]"
+        }`}
+      >
+        {value}
+        <ChevronDown className={`w-3 h-3 text-[#6B7280] transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      <div
+        className={`absolute right-0 top-full mt-1 w-16 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
+          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
+        }`}
+      >
+        {options.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => { onChange(opt); setOpen(false); }}
+            className={`flex items-center justify-between w-full px-2.5 py-1.5 text-xs font-semibold text-left transition-colors ${
+              value === opt ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
+            }`}
+          >
+            {opt}
+            {value === opt && <Check className="w-3 h-3" />}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function Staff() {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState(0);
+
+  // Search
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+
+  // Date selection
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+
+  // Sorting
+  const [sortField, setSortField] = useState("name");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  // Filters
   const {
     values: filterValues,
     appliedValues,
@@ -48,132 +234,439 @@ export default function Staff() {
   const staffFilterFields: FilterField[] = [
     { id: "name", label: "Staff Name", type: "text", placeholder: "Search by name" },
     { id: "id", label: "Staff ID", type: "text", placeholder: "Enter ID" },
-    { id: "role", label: "Role", type: "multiselect", options: [
-      { label: "Cardiologist", value: "Cardiologist" },
-      { label: "Oncologist", value: "Oncologist" },
-      { label: "Pediatrician", value: "Pediatrician" },
-      { label: "Neurologist", value: "Neurologist" },
-      { label: "Head Nurse", value: "Head Nurse" },
-      { label: "Radiologist", value: "Radiologist" },
-      { label: "General Surgeon", value: "General Surgeon" },
-    ]},
-    { id: "department", label: "Department", type: "multiselect", options: [
-      { label: "Cardiology", value: "Cardiology" },
-      { label: "Cancer", value: "Cancer" },
-      { label: "Pediatrics", value: "Pediatrics" },
-      { label: "Neurology", value: "Neurology" },
-      { label: "Emergency", value: "Emergency" },
-      { label: "Surgery", value: "Surgery" },
-    ]},
-    { id: "branch", label: "Branch", type: "multiselect", options: [
-      { label: "Central Hospital (Tambaram)", value: "Central Hospital (Tambaram)" },
-      { label: "Central Hospital (Saidapet)", value: "Central Hospital (Saidapet)" },
-      { label: "Central Hospital (Egmore)", value: "Central Hospital (Egmore)" },
-    ]},
-    { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "Active", value: "Active" },
-      { label: "Leave", value: "Leave" },
-      { label: "Resigned", value: "Resigned" },
-      { label: "Suspended", value: "Suspended" },
-    ]},
+    {
+      id: "dept", label: "Department", type: "multiselect", options: [
+        { label: "Neuroscience", value: "Neuroscience" },
+        { label: "Cardiology", value: "Cardiology" },
+        { label: "Pediatrics", value: "Pediatrics" },
+        { label: "Nursing", value: "Nursing" },
+        { label: "Admin", value: "Admin" },
+      ],
+    },
+    {
+      id: "branch", label: "Branch", type: "multiselect", options: [
+        { label: "Central Hospital", value: "Central Hospital" },
+        { label: "Tambaram", value: "Tambaram" },
+        { label: "Saidapet", value: "Saidapet" },
+        { label: "Egmore", value: "Egmore" },
+        { label: "East wing", value: "East wing" },
+        { label: "North wing", value: "North wing" },
+      ],
+    },
+    {
+      id: "status", label: "Status", type: "multiselect", options: [
+        { label: "Active", value: "active" },
+        { label: "Leave", value: "leave" },
+        { label: "Inactive", value: "inactive" },
+      ],
+    },
   ];
 
-  const filteredStaff = useMemo(() => {
-    const term = search.trim().toLowerCase();
+  // ---- EXPORT DROPDOWN ----
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+  const exportOptions = [
+    { id: "pdf", label: "Export as PDF", icon: FileText },
+    { id: "csv", label: "Export as CSV", icon: File },
+  ];
+  const handleExport = (format: string) => {
+    console.log(`Exporting as ${format}`);
+    setExportOpen(false);
+  };
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
-    let result = [...staffMembers];
+  // ---- SEARCH & FILTER ----
+  const filteredData = useMemo(() => {
+    let result: StaffMember[] = [...staffData];
 
-    if (term) {
-      result = result.filter((member) =>
-        [member.id, member.name, member.role, member.department, member.branch]
+    if (searchQuery) {
+      result = result.filter((staff) =>
+        [staff.name, staff.id, staff.dept, staff.branch.join(" "), staff.status]
           .join(" ")
           .toLowerCase()
-          .includes(term),
+          .includes(searchQuery.toLowerCase())
       );
     }
 
     result = filterDataByValues(result, appliedValues);
 
     return result;
-  }, [search, appliedValues]);
+  }, [searchQuery, appliedValues]);
+
+  // ---- SORTING ----
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDirection("asc");
+    }
+  };
+
+  const sortedData = useMemo(() => {
+    return [...filteredData].sort((a, b) => {
+      const aValue = String((a as any)[sortField] ?? "").toLowerCase();
+      const bValue = String((b as any)[sortField] ?? "").toLowerCase();
+      if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
+      if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [filteredData, sortField, sortDirection]);
+
+  // ---- PAGINATION ----
+  const totalRecords = sortedData.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / rowsPerPage));
+  const startIndex = (currentPage - 1) * rowsPerPage;
+  const endIndex = startIndex + rowsPerPage;
+  const currentRows = sortedData.slice(startIndex, endIndex);
+  const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
+  const visibleEnd = Math.min(endIndex, totalRecords);
+
+  const columns = [
+    { key: "name", label: "Name" },
+    { key: "phone", label: "Phone Number" },
+    { key: "dept", label: "Department" },
+    { key: "branch", label: "Branch" },
+    { key: "status", label: "Status" },
+    { key: "actions", label: "Action" },
+  ];
 
   return (
-    <>
-      <PageHeader
-        eyebrow="Hospital staff"
-        title="Staff"
-        description="Manage all staff members, view roles, and track availability across branches."
-        actions={
-          <Button className="bg-clinical-blue hover:bg-clinical-blue-mid">
-            <Plus className="h-4 w-4" />
-            Add Staff
-          </Button>
-        }
-      />
+    <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
+      <div className="flex flex-col flex-1 min-w-0">
+        <main className="flex flex-col gap-6">
 
-      <DataPanel
-        title="Staff Directory"
-        description={`${filteredStaff.length} staff members`}
-        action={
-          <div className="flex items-center gap-2">
-            <div className="relative w-full sm:w-80">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search staff"
-                className="pl-9"
-              />
+          {/* ==================== HEADER ==================== */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between">
+            <div>
+              <h1 className="hms-heading">Staff Management</h1>
+              <p className="hms-subheading">Manage and overview all staff members across branches.</p>
             </div>
-            <FilterPopover
-              fields={staffFilterFields}
-              values={filterValues}
-              onChange={handleFilterChange}
-              onApply={handleApplyFilter}
-              onClear={handleClearFilter}
-              open={isFilterOpen}
-              onOpenChange={setIsFilterOpen}
-            />
-          </div>
-        }
-      >
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-slate-200">
-                <th className="hms-table-header pb-3">Employee</th>
-                <th className="hms-table-header pb-3">Role</th>
-                <th className="hms-table-header pb-3">Department</th>
-                <th className="hms-table-header pb-3">Branch</th>
-                <th className="hms-table-header pb-3">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredStaff.map((member) => (
-                <tr
-                  key={member.id}
-                  className="border-b border-slate-100 last:border-0"
+            <div className="flex items-center gap-3">
+              <div className="relative" ref={exportRef}>
+                <button
+                  onClick={() => setExportOpen(!exportOpen)}
+                  className="flex items-center gap-2 px-4 py-2 border border-[#E5E7EB] bg-white rounded-lg text-[#424752] text-xs font-semibold shadow-sm hover:bg-[#F2F4F6] transition-colors"
                 >
-                  <td className="py-4">
-                    <p className="font-bold text-slate-950">{member.name}</p>
-                    <p className="mt-1 text-sm text-slate-500">{member.id}</p>
-                  </td>
-                  <td className="py-4 font-semibold text-slate-700">
-                    {member.role}
-                  </td>
-                  <td className="py-4 text-slate-600">{member.department}</td>
-                  <td className="py-4 text-slate-600">{member.branch}</td>
-                  <td className="py-4">
-                    <StatusBadge tone={statusTone[member.status]}>
-                      {member.status}
-                    </StatusBadge>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </DataPanel>
-    </>
+                  <FileText className="w-4 h-4" />
+                  Export report
+                  <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${exportOpen ? "rotate-180" : ""}`} />
+                </button>
+
+                {exportOpen && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-[#E5E7EB] py-1 z-10 animate-slideDown">
+                    {exportOptions.map((option) => (
+                      <button
+                        key={option.id}
+                        onClick={() => handleExport(option.id)}
+                        className="flex items-center gap-2 w-full px-4 py-2 text-[#424752] text-xs font-medium hover:bg-[#F2F4F6] transition-colors"
+                      >
+                        <option.icon className="w-4 h-4" />
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors">
+                <Plus className="w-4 h-4" />
+                Add new staff
+              </button>
+            </div>
+          </div>
+
+          {/* ==================== MAIN CARD ==================== */}
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col min-h-[500px] transition-all duration-300 hover:shadow-md">
+
+            {/* ==================== TOOLBAR ==================== */}
+            <div className="px-5 py-4 border-b border-[#E5E7EB] flex flex-wrap items-center justify-between gap-4">
+
+              {/* TABS */}
+              <div className="flex items-center">
+                <button
+                  onClick={() => setMenuOpen(!menuOpen)}
+                  className="hidden max-[1024px]:flex w-9 h-9 items-center justify-center flex-col gap-1 border border-[#E5E7EB] rounded-md"
+                >
+                  <span className="w-4 h-[2px] bg-gray-600" />
+                  <span className="w-4 h-[2px] bg-gray-600" />
+                  <span className="w-4 h-[2px] bg-gray-600" />
+                </button>
+
+                <ul className={`flex items-center gap-6 list-none m-0 p-0 max-[1024px]:${menuOpen ? "flex flex-col" : "hidden"}`}>
+                  {TABS.map((tab, index) => (
+                    <li key={tab} className="relative">
+                      <button
+                        onClick={() => setActiveTab(index)}
+                        className={`py-1 text-xs font-semibold capitalize ${
+                          activeTab === index ? "text-[#00488D] tracking-wider" : "text-[#424752]"
+                        }`}
+                      >
+                        {tab}
+                      </button>
+
+                      {activeTab === index && (
+                        <span className="absolute left-0 right-0 bottom-0 h-[2px] bg-[#00488D]" />
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* SEARCH / DATE / FILTERS */}
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* Search Box */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search..."
+                    value={searchQuery}
+                    onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+                    className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:w-[200px] sm:focus:w-[250px]"
+                  />
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
+                </div>
+
+                {/* Date nav */}
+                <div className="flex items-center">
+                  <button
+                    onClick={() => setSelectedDate((prev) => subDays(prev, 1))}
+                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                  >
+                    <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
+                      <path d="M5 1L1 5L5 9" stroke="black" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                  <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                    <PopoverTrigger asChild>
+                      <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
+                        {isToday(selectedDate)
+                          ? "Today"
+                          : isYesterday(selectedDate)
+                            ? "Yesterday"
+                            : isTomorrow(selectedDate)
+                              ? "Tomorrow"
+                              : format(selectedDate, "dd/MM/yyyy")}
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
+                      <CalendarPicker
+                        selected={selectedDate}
+                        hideThemePicker
+                        onSelect={(date) => {
+                          setSelectedDate(date);
+                          setIsCalendarOpen(false);
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <button
+                    onClick={() => setSelectedDate((prev) => addDays(prev, 1))}
+                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                  >
+                    <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
+                      <path d="M1 1L5 5L1 9" stroke="black" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Filters */}
+                <FilterPopover
+                  title="Filters"
+                  fields={staffFilterFields}
+                  values={filterValues}
+                  onChange={handleFilterChange}
+                  onApply={handleApplyFilter}
+                  onClear={handleClearFilter}
+                  open={isFilterOpen}
+                  onOpenChange={setIsFilterOpen}
+                />
+              </div>
+            </div>
+
+            {/* ==================== TABLE ==================== */}
+            <div className="overflow-x-auto flex-1">
+              <table className="w-full min-w-[900px]">
+                <thead className="hms-columnHeading-style">
+                  <tr className="bg-[rgba(242,244,246,0.40)]">
+                    {columns.map(({ key, label }, idx) => {
+                      const isSorted = sortField === key;
+                      return (
+                        <th
+                          key={key}
+                          className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-8" : ""}`}
+                        >
+                          <div
+                            className="flex items-center gap-1 cursor-pointer select-none"
+                            onClick={key !== "actions" ? () => handleSort(key) : undefined}
+                          >
+                            <span>{label}</span>
+                            {key !== "actions" && (
+                              <span className="inline-flex h-3 w-3 items-center justify-center text-[7px] shrink-0">
+                                {isSorted ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                              </span>
+                            )}
+                          </div>
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {currentRows.length > 0 ? (
+                    currentRows.map((staff, index) => (
+                      <tr key={staff.id + index} className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F7F9FB] transition-colors group">
+
+                        {/* NAME */}
+                        <td className="px-5 py-4 pl-8">
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 bg-emerald-100 text-emerald-600 hms-avatar-text">
+                              {staff.initials}
+                            </div>
+                            <div>
+                              <p className="hms-name-text">{staff.name}</p>
+                              <p className="hms-id-text">{staff.id}</p>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* PHONE */}
+                        <td className="px-5 py-4">
+                          <span className="text-[#191C1E] hms-content-text">
+                            {staff.phone}
+                          </span>
+                        </td>
+
+                        {/* DEPARTMENT */}
+                        <td className="px-5 py-4">
+                          <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize ${staff.deptClass}`}>
+                            {staff.dept}
+                          </span>
+                        </td>
+
+                        {/* BRANCH */}
+                        <td className="px-5 py-4">
+                          <span className="text-[#191C1E] hms-content-text">
+                            {staff.branch.map((b, i) => (
+                              <Fragment key={b}>
+                                {b}
+                                {i < staff.branch.length - 1 && <br />}
+                              </Fragment>
+                            ))}
+                          </span>
+                        </td>
+
+                        {/* STATUS */}
+                        <td className="px-5 py-4">
+                          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${statusConfig[staff.status].className}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${statusConfig[staff.status].dot}`} />
+                            {statusConfig[staff.status].label}
+                          </span>
+                        </td>
+
+                        {/* ACTIONS */}
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-1">
+                            <button title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
+                                <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+                                <circle cx="12" cy="12" r="3" />
+                              </svg>
+                            </button>
+                            <button title="Edit" className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
+                                <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
+                              </svg>
+                            </button>
+                            <button title="Delete" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
+                                <path d="M10 11v6"/>
+                                <path d="M14 11v6"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+                                <path d="M3 6h18"/>
+                                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                              </svg>
+                            </button>
+                          </div>
+                        </td>
+
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={6} className="px-5 py-10 text-center text-[#6B7280] text-sm">
+                        No staff found matching the current filters.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* ==================== PAGINATION ==================== */}
+            <div className="mt-auto shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
+                  Showing {visibleStart}-{visibleEnd} of {totalRecords}
+                </span>
+                <RowsPerPageSelect
+                  value={rowsPerPage}
+                  onChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
+                  options={[5, 10, 20]}
+                />
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((prev) => prev - 1)}
+                  className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
+                >
+                  <svg width="5" height="8" viewBox="0 0 5 8" fill="none">
+                    <path d="M4 8L0 4L4 0L4.93333.933333L1.86667 4L4.93333 7.06667L4 8Z" fill="#424752"/>
+                  </svg>
+                </button>
+
+                {Array.from({ length: Math.min(totalPages, 5) }, (_, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setCurrentPage(index + 1)}
+                    className={`w-6 h-6 flex items-center justify-center rounded-md text-[10px] font-semibold transition-colors ${
+                      currentPage === index + 1
+                        ? "bg-[#004785] text-white"
+                        : "text-[#1D1A1A] hover:bg-[#F2F4F6]"
+                    }`}
+                  >
+                    {index + 1}
+                  </button>
+                ))}
+                {totalPages > 5 && <span className="text-[#6B7280] text-xs">...</span>}
+
+                <button
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage((prev) => prev + 1)}
+                  className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
+                >
+                  <svg width="5" height="8" viewBox="0 0 5 8" fill="none">
+                    <path d="M1 8L5 4L1 0L.0666656.933333L3.13333 4L.0666656 7.06667L1 8Z" fill="#424752"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </main>
+      </div>
+    </div>
   );
 }

@@ -4,6 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -20,7 +21,6 @@ model appointment {
   created_by       BigInt?
   created_at       DateTime         @default(now()) @db.Timestamptz(6)
   updated_at       DateTime         @default(now()) @db.Timestamptz(6)
-  employee         employee?        @relation(fields: [created_by], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
   doctor_profile   doctor_profile   @relation(fields: [doctor_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
   patient          patient          @relation(fields: [patient_id], references: [patient_id], onDelete: NoAction, onUpdate: NoAction)
   doctor_schedule  doctor_schedule? @relation(fields: [schedule_id], references: [schedule_id], onDelete: NoAction, onUpdate: NoAction)
@@ -123,7 +123,6 @@ model doctor_profile {
   license_no           String?           @unique @db.VarChar(50)
   consultation_minutes Int               @default(15)
   appointment          appointment[]
-  employee             employee          @relation(fields: [employee_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
   doctor_schedule      doctor_schedule[]
   encounter            encounter[]
   prescription         prescription[]
@@ -141,43 +140,6 @@ model doctor_schedule {
   created_at       DateTime       @default(now()) @db.Timestamptz(6)
   appointment      appointment[]
   doctor_profile   doctor_profile @relation(fields: [doctor_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
-}
-
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-model employee {
-  employee_id          BigInt                @id @default(autoincrement())
-  employee_code        String                @unique @db.VarChar(30)
-  full_name            String                @db.VarChar(150)
-  gender               String?               @db.VarChar(20)
-  dob                  DateTime?             @db.Date
-  phone                String?               @db.VarChar(30)
-  email                String?               @db.VarChar(150)
-  hire_date            DateTime?             @db.Date
-  status               String                @default("ACTIVE") @db.VarChar(20)
-  created_at           DateTime              @default(now()) @db.Timestamptz(6)
-  updated_at           DateTime              @default(now()) @db.Timestamptz(6)
-  appointment          appointment[]
-  doctor_profile       doctor_profile?
-  employee_branch      employee_branch[]
-  lab_order            lab_order[]
-  lab_tech_profile     lab_tech_profile?
-  receptionist_profile receptionist_profile?
-}
-
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-model employee_branch {
-  employee_branch_id BigInt    @id @default(autoincrement())
-  employee_id        BigInt
-  branch_id          String    @db.VarChar(10)
-  role_code          String    @db.VarChar(30)
-  department_name    String?   @db.VarChar(100)
-  start_date         DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
-  end_date           DateTime? @db.Date
-  is_primary_branch  Boolean   @default(false)
-  created_at         DateTime  @default(now()) @db.Timestamptz(6)
-  employee           employee  @relation(fields: [employee_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([employee_id, branch_id, role_code, start_date])
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -214,6 +176,7 @@ model employees {
   emp_status                     Boolean?
   email                          String?            @db.VarChar(50)
   department_id                  String?            @db.VarChar(20)
+  employee_id                    String?            @unique(map: "uq_employee_id") @db.VarChar(20)
   branch                         branch?            @relation(fields: [branch_id], references: [branch_id], onDelete: Cascade, map: "fk_employee_branch")
   department_master              department_master? @relation(fields: [department_id], references: [department_id], onDelete: Cascade, map: "fk_employee_department")
   user_table                     user_table?        @relation(fields: [user_id], references: [user_id], onDelete: Cascade, map: "fk_employee_user")
@@ -275,7 +238,6 @@ model lab_order {
   ordered_at   DateTime     @default(now()) @db.Timestamptz(6)
   notes        String?
   encounter    encounter    @relation(fields: [encounter_id], references: [encounter_id], onDelete: Cascade, onUpdate: NoAction)
-  employee     employee     @relation(fields: [ordered_by], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
   lab_result   lab_result[]
 
   @@index([encounter_id], map: "idx_lab_order")
@@ -299,10 +261,9 @@ model lab_result {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model lab_tech_profile {
-  employee_id      BigInt   @id
-  certification_no String?  @db.VarChar(50)
+  employee_id      BigInt  @id
+  certification_no String? @db.VarChar(50)
   skill_notes      String?
-  employee         employee @relation(fields: [employee_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -498,9 +459,8 @@ model prescription_item {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model receptionist_profile {
-  employee_id BigInt   @id
+  employee_id BigInt  @id
   remarks     String?
-  employee    employee @relation(fields: [employee_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.

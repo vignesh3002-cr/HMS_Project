@@ -191,13 +191,13 @@ useEffect(() => {
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
 
         {/* HEADER */}
-        <header className="flex items-center justify-between h-14 px-6 bg-[#F2F4F6] border-b border-[rgba(194,198,212,0.05)] shadow-[0_0_4px_0_#000]">
+        <header className="h-14 bg-white/90 backdrop-blur-sm border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-30">
 
           {/* LEFT */}
           <div className="flex items-center gap-3">
             {/* MOBILE BUTTON */}
             <button
-              className="lg:hidden p-1 text-[#334155]"
+              className="lg:hidden p-2 rounded-md hover:bg-slate-100 text-[#334155]"
               onClick={() => setSidebarOpen(!sidebarOpen)}
             >
               <Menu size={20} />
@@ -210,20 +210,20 @@ useEffect(() => {
           <div className="flex items-center gap-4">
 
             {/* NOTIFICATION */}
-            <div className="relative">
+            <button className="relative p-2 rounded-full hover:bg-slate-100 transition-colors">
               <Bell size={18} className="text-[#334155]" />
-              <span className="absolute top-0 right-0 w-1.5 h-1.5 bg-red-600 rounded-full"></span>
-            </div>
+              <span className="absolute top-1 right-1 w-2 h-2 bg-red-600 rounded-full"></span>
+            </button>
 
             <div className="w-px h-6 bg-[rgba(194,198,212,0.30)]" />
 
             {/* PROFILE */}
             <div className="flex items-center gap-2">
-              <span className="text-[#00488D] font-semibold text-xs">HMS</span>
+              <span className="hidden sm:block text-[#00488D] font-semibold text-xs">HMS</span>
               <img
                 src="https://i.pravatar.cc/40"
                 alt="Profile"
-                className="w-7 h-7 rounded-xl object-cover"
+                className="w-8 h-8 rounded-full object-cover"
               />
             </div>
           </div>
