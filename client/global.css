@@ -3,7 +3,7 @@
 
 
 @tailwind base;
-@tailwind compon  ents;
+@tailwind components;
 @tailwind utilities;
 
 @layer utilities {
@@ -44,6 +44,36 @@
   
   .hide-scrollbar::-webkit-scrollbar {
     display: none;  /* Chrome, Safari, Opera */
+  }
+
+  .slim-scrollbar {
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: #CBD5E1 transparent;
+  }
+
+  .slim-scrollbar::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  .slim-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .slim-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #CBD5E1;
+    border-radius: 9999px;
+  }
+
+  .slim-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: #94A3B8;
+  }
+
+  /* No up/down arrow buttons on the scrollbar */
+  .slim-scrollbar::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
   }
 }
 

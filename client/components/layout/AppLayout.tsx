@@ -5,6 +5,8 @@ import { remove } from "../../utils/token";
 import { getUser } from "@/utils/token";
 import { cn } from "@/lib/utils";
 import { BranchSelector } from "@/components/hms/BranchSelector";
+import { QuickAddFab } from "@/components/hms/QuickAddFab";
+import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 import {
   LayoutDashboard,
   Users,
@@ -70,6 +72,7 @@ const logout = () => {
   hospital_id: "",
   hospital_name: "",
   branch_id: "",
+  branch_area: "",
   branch: "",
 });
 
@@ -81,6 +84,7 @@ useEffect(() => {
         hospital_id: user.hospital_id ?? "",
         hospital_name: user.hospital_name ?? "",
         branch_id: user.branch_id ?? "",
+        branch_area: user.branch_area ?? "",
         branch: user.branch ?? "",
       });
     }
@@ -176,14 +180,11 @@ useEffect(() => {
                 {hospitalData.branch || "Admin user"}
               </div>
               <div className="text-[#64748B] text-[10px]">
-                ({hospitalData.branch_id || "Admin user ID"})
+                Branch Location: {hospitalData.branch_area || "N/A"}
               </div>
             </div>
           </div>
         </div>
-          <button onClick={logout}>
-    Logout
-</button>
 
       </aside>
 
@@ -191,7 +192,7 @@ useEffect(() => {
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
 
         {/* HEADER */}
-        <header className="flex items-center justify-between h-14 px-6 bg-[#F2F4F6] border-b border-[rgba(194,198,212,0.05)] shadow-[0_0_4px_0_#000]">
+        <header className="flex h-16 items-center justify-between bg-white px-8 shadow-sm z-10">
 
           {/* LEFT */}
           <div className="flex items-center gap-3">
@@ -217,15 +218,12 @@ useEffect(() => {
 
             <div className="w-px h-6 bg-[rgba(194,198,212,0.30)]" />
 
-            {/* PROFILE */}
-            <div className="flex items-center gap-2">
-              <span className="text-[#00488D] font-semibold text-xs">HMS</span>
-              <img
-                src="https://i.pravatar.cc/40"
-                alt="Profile"
-                className="w-7 h-7 rounded-xl object-cover"
-              />
-            </div>
+            {/* PROFILE DROPDOWN */}
+            <UserProfileDropdown
+              userName={hospitalData.hospital_name || "HMS"}
+              userSubtext={hospitalData.branch || "Admin user"}
+              onLogout={logout}
+            />
           </div>
         </header>
 
@@ -234,6 +232,8 @@ useEffect(() => {
           <Outlet />
         </main>
       </div>
+
+      <QuickAddFab />
     </div>
   );
 }

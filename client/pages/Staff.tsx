@@ -47,7 +47,13 @@ export default function Staff() {
 
   const staffFilterFields: FilterField[] = [
     { id: "name", label: "Staff Name", type: "text", placeholder: "Search by name" },
-    { id: "id", label: "Staff ID", type: "text", placeholder: "Enter ID" },
+    {
+      id: "id",
+      label: "Staff ID",
+      type: "combobox",
+      placeholder: "Search ID",
+      options: staffMembers.map((s) => ({ label: s.id, value: s.id })),
+    },
     { id: "role", label: "Role", type: "multiselect", options: [
       { label: "Cardiologist", value: "Cardiologist" },
       { label: "Oncologist", value: "Oncologist" },

@@ -7,6 +7,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
+import AddBranch from "@/components/Forms/AddBranch";
+import AddEmployee from "@/components/Forms/Addemployee";
 import Appointments from "./pages/Appointments";
 import Dashboard from "./pages/Dashboard";
 import Departments from "./pages/Departments";
@@ -31,6 +33,8 @@ const protectedRoutes = [
   { path: "/patients", element: <Patients /> },
   { path: "/appointments", element: <Appointments /> },
   { path: "/departments", element: <Departments /> },
+  { path: "/branches/add", element: <AddBranch /> },
+  { path: "/staff/add", element: <AddEmployee /> },
 ];
 
 const App = () => (
