@@ -45,7 +45,8 @@ export function BranchSelector() {
     try {
       setLoading(true);
       setError(null);
-      const response = await branchApi.getAll();
+      const res
+      ponse = await branchApi.getAll();
       
       // Handle different response structures
       let branchList = [];
