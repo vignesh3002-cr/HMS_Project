@@ -36,12 +36,12 @@ const protectedRoutes = [
   { path: "/doctor", element: <Doctor /> },
   { path: "/appointments", element: <Appointments /> },
   { path: "/departments", element: <Departments /> },
-<<<<<<< HEAD
+
    { path: "/Staff", element: <Staff /> },
-=======
+
   { path: "/branches/add", element: <AddBranch /> },
   { path: "/staff/add", element: <AddEmployee /> },
->>>>>>> d816369d2e209aec71904be392d949e367342a3e
+
 ];
 
 const App = () => (

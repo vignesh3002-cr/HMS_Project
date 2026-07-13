@@ -192,11 +192,8 @@ useEffect(() => {
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
 
         {/* HEADER */}
-<<<<<<< HEAD
-        <header className="h-14 bg-white/90 backdrop-blur-sm border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-30">
-=======
-        <header className="flex h-16 items-center justify-between bg-white px-8 shadow-sm z-10">
->>>>>>> d816369d2e209aec71904be392d949e367342a3e
+
+        <header className="flex h-16 items-center justify-between bg-white/90 backdrop-blur-sm border-b border-slate-200 px-8 shadow-sm sticky top-0 z-30">
 
           {/* LEFT */}
           <div className="flex items-center gap-3">
@@ -222,7 +219,7 @@ useEffect(() => {
 
             <div className="w-px h-6 bg-[rgba(194,198,212,0.30)]" />
 
-<<<<<<< HEAD
+
             {/* PROFILE */}
             <div className="flex items-center gap-2">
               <span className="hidden sm:block text-[#00488D] font-semibold text-xs">HMS</span>
@@ -232,14 +229,14 @@ useEffect(() => {
                 className="w-8 h-8 rounded-full object-cover"
               />
             </div>
-=======
+
             {/* PROFILE DROPDOWN */}
             <UserProfileDropdown
               userName={hospitalData.hospital_name || "HMS"}
               userSubtext={hospitalData.branch || "Admin user"}
               onLogout={logout}
             />
->>>>>>> d816369d2e209aec71904be392d949e367342a3e
+
           </div>
         </header>
 

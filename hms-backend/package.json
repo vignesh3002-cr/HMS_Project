@@ -13,11 +13,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-<<<<<<< HEAD
     "@prisma/adapter-pg": "^7.8.0",
-=======
-    "@prisma/adapter-pg": "^6.19.3",
->>>>>>> d816369d2e209aec71904be392d949e367342a3e
     "@prisma/client": "^6.19.3",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
