@@ -15,7 +15,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
-////app.use("/api/employees", employeeRoutes);
+app.use("/api/employees", employeeRoutes);
 //app.use("/api/users", userRoutes);
 app.use("/api/branch", branchRoutes);
 app.use("/api/hashpassword", async (req, res) => {

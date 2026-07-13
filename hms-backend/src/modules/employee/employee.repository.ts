@@ -4,19 +4,25 @@ export class EmployeeRepository {
 
     async findUsername(username: string) {
         return prisma.user_table.findFirst({
-            where: { username }
+            where: {
+                username
+            }
         });
     }
 
     async findEmail(email: string) {
         return prisma.employees.findFirst({
-            where: { email }
+            where: {
+                email
+            }
         });
     }
 
     async findMobile(mobile: string) {
         return prisma.employees.findFirst({
-            where: { mobile_no: mobile }
+            where: {
+                mobile_no: mobile
+            }
         });
     }
 
@@ -28,10 +34,26 @@ export class EmployeeRepository {
         });
     }
 
-    async findPan(pan: string) {
+    async findPAN(pan: string) {
         return prisma.employees.findFirst({
             where: {
                 pan_no: pan
+            }
+        });
+    }
+
+    async findLicense(license: string) {
+        return prisma.doctor_profile.findFirst({
+            where: {
+                license_no: license
+            }
+        });
+    }
+
+    async findDepartment(id: string) {
+        return prisma.department_master.findUnique({
+            where: {
+                department_id: id
             }
         });
     }
@@ -43,13 +65,4 @@ export class EmployeeRepository {
             }
         });
     }
-
-    async findDepartment(departmentId: string) {
-        return prisma.department_master.findUnique({
-            where: {
-                department_id: departmentId
-            }
-        });
-    }
-
 }

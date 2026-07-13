@@ -2,110 +2,127 @@ import bcrypt from "bcrypt";
 import prisma from "../../config/prisma";
 import { EmployeeRepository } from "./employee.repository";
 import { CreateEmployeeDto } from "./employee.types";
+import { generateId } from "../../utils/idGenerator";
 
 const repository = new EmployeeRepository();
 
 export class EmployeeService {
-
     async createEmployee(
-        data: CreateEmployeeDto,
-        createdBy: string
-    ) {
+    data: CreateEmployeeDto,
+    createdBy: string
+) {
+    const username = await repository.findUsername(data.username);
 
-        const username = await repository.findUsername(data.username);
+if (username) {
+    throw new Error("Username already exists");
+}
 
-        if (username) {
-            throw new Error("Username already exists");
-        }
+const email = await repository.findEmail(data.email);
 
-        if (data.email) {
+if (email) {
+    throw new Error("Email already exists");
+}
 
-            const email = await repository.findEmail(data.email);
+const mobile = await repository.findMobile(data.mobile_no);
 
-            if (email) {
-                throw new Error("Email already exists");
-            }
+if (mobile) {
+    throw new Error("Mobile already exists");
+}
+if (data.aadhaar_no) {
 
-        }
+    const aadhaar = await repository.findAadhaar(data.aadhaar_no);
 
-        if (data.mobile_no) {
+    if (aadhaar) {
+        throw new Error("Aadhaar already exists");
+    }
 
-            const mobile = await repository.findMobile(data.mobile_no);
+}
+if (data.pan_no) {
 
-            if (mobile) {
-                throw new Error("Mobile already exists");
-            }
+    const pan = await repository.findPAN(data.pan_no);
 
-        }
+    if (pan) {
+        throw new Error("PAN already exists");
+    }
 
-        if (data.aadhaar_no) {
+}
+const department = await repository.findDepartment(
+    data.department_id
+);
 
-            const aadhaar = await repository.findAadhaar(data.aadhaar_no);
+if (!department) {
 
-            if (aadhaar) {
-                throw new Error("Aadhaar already exists");
-            }
+    throw new Error("Department not found");
 
-        }
+}
+for (const branchId of data.branch_ids) {
 
-        if (data.pan_no) {
+    const branch = await repository.findBranch(branchId);
 
-            const pan = await repository.findPan(data.pan_no);
+    if (!branch) {
 
-            if (pan) {
-                throw new Error("PAN already exists");
-            }
+        throw new Error(`Branch ${branchId} not found`);
 
-        }
+    }
 
-        const branch = await repository.findBranch(data.branch_id);
+}
+if (
+    data.role_type === "DOCTOR" &&
+    data.doc_license_no
+) {
 
-        if (!branch) {
-            throw new Error("Branch not found");
-        }
+    const license = await repository.findLicense(
+        data.doc_license_no
+    );
 
-        if (data.department_id) {
+    if (license) {
 
-            const department = await repository.findDepartment(
-                data.department_id
-            );
+        throw new Error("Doctor License already exists");
 
-            if (!department) {
-                throw new Error("Department not found");
-            }
+    }
 
-        }
-
-        const hashedPassword = await bcrypt.hash(
-            data.password,
-            Number(process.env.BCRYPT_SALT_ROUNDS)
-        );
-        return await prisma.$transaction(async (tx) => {
-
-    const user = await tx.user_table.create({
-
-        data: {
-
-            role_type: data.role_type,
-
-            username: data.username,
-
-            password: hashedPassword,
-
-            created_by: createdBy,
-
-            branch_id: data.branch_id,
-
-            user_status: 0
-
-        }
-
-    });
-    const employee = await tx.employees.create({
+}
+const hashedPassword = await bcrypt.hash(
+    data.password,
+    Number(process.env.BCRYPT_SALT_ROUNDS)
+);
+return await prisma.$transaction(async (tx) => {
+    const userId = await generateId(
+    tx,
+    "USER"
+);
+const user = await tx.user_table.create({
 
     data: {
 
+        user_id: userId,
+
+        username: data.username,
+
+        password: hashedPassword,
+
+        role_type: data.role_type,
+
+        created_by: createdBy,
+
+        user_status: 0
+
+    }
+
+});
+const employeeId = await generateId(
+    tx,
+    "EMPLOYEE"
+);
+const employee = await tx.employees.create({
+
+    data: {
+
+        employee_id: employeeId,
+
         user_id: user.user_id,
+
+        branch_id: data.branch_ids[0],
 
         first_name: data.first_name,
 
@@ -117,36 +134,23 @@ export class EmployeeService {
 
         mobile_no: data.mobile_no,
 
-        branch_id: data.branch_id,
+        blood_group: data.blood_group,
 
-        department_id: data.department_id,
+        nationality: data.nationality,
 
-        designation: data.designation,
-
-        qualification: data.qualification,
-
-        specialization: data.specialization,
-
-        joining_date: data.joining_date
-            ? new Date(data.joining_date)
-            : null,
+        marital_status: data.marital_status,
 
         aadhaar_no: data.aadhaar_no,
 
         pan_no: data.pan_no,
 
-        nationality: data.nationality,
+        passport_no: data.passport_no,
 
-        blood_group: data.blood_group,
-
-        marital_status: data.marital_status,
+        parmanant_address: data.permanent_address,
 
         current_address: data.current_address,
 
-        parmanant_address: data.parmanant_address,
-
-        emergency_contact_name:
-            data.emergency_contact_name,
+        emergency_contact_name: data.emergency_contact_name,
 
         emergency_contact_relationship:
             data.emergency_contact_relationship,
@@ -154,101 +158,104 @@ export class EmployeeService {
         emergency_contact_number:
             data.emergency_contact_number,
 
-        emp_status: true
+        department_id: data.department_id,
+
+        designation: data.designation,
+
+        joining_date: new Date(data.joining_date),
+
+        emp_status: data.emp_status
 
     }
 
 });
-switch (data.role_type) {
+for (const branchId of data.branch_ids) {
 
-    case "DOCTOR":
+    await tx.user_branch_mapping.create({
 
-        await tx.doctor_profile.create({
+        data: {
 
-            data: {
+            user_id: user.user_id!,
 
-                employee_id: employee.id,
+            branch_id: branchId,
 
-                specialization:
-                    data.specialization || "",
+            status: 1
 
-                qualification:
-                    data.qualification,
+        }
 
-                license_no:
-                    data.license_no,
+    });
 
-                consultation_minutes:
-                    data.consultation_minutes ?? 15
+}
+if (data.role_type === "DOCTOR") {
 
-            }
+    await tx.doctor_profile.create({
 
-        });
+        data: {
 
-        break;
+            employee_id: employee.employee_id!,
 
-    case "RECEPTIONIST":
+            specialization: data.specialization,
 
-        await tx.receptionist_profile.create({
+            qualification: data.qualification,
 
-            data: {
+            license_no: data.doc_license_no,
 
-                employee_id: employee.id,
+            consultation_minutes:
+                data.consultation_minutes ?? 20
 
-                remarks:
-                    data.remarks
+        }
 
-            }
+    });
 
-        });
+}
+for (const schedule of data.working_hours ?? []) {
 
-        break;
+    await tx.doctor_schedule.create({
 
-    case "LAB_TECHNICIAN":
+        data: {
 
-        await tx.lab_tech_profile.create({
+            employee_id: employee.employee_id!,
 
-            data: {
+            branch_id: schedule.branch_id,
 
-                employee_id: employee.id,
+            day_of_week: schedule.day_of_week,
 
-                certification_no:
-                    data.certification_no,
+            shift_name: schedule.shift_name,
 
-                skill_notes:
-                    data.skill_notes
+            start_time: new Date(
+                `1970-01-01T${schedule.start_time}:00`
+            ),
 
-            }
+            end_time: new Date(
+                `1970-01-01T${schedule.end_time}:00`
+            ),
 
-        });
+            consultation_minutes:
+                data.consultation_minutes ?? 20,
 
-        break;
+            is_active: true
+
+        }
+
+    });
 
 }
 return {
 
-    success: true,
-
-    message: "Employee created successfully",
-
-    data: {
-
+    user:{
+        user_username: user.username,
         user_id: user.user_id,
+        role_type: user.role_type,
+        user_status: user.user_status,
+    },
 
+    employee:{
         employee_id: employee.employee_id,
-
-        employee_name:
-            employee.first_name + " " + employee.last_name,
-
-        role_type: data.role_type,
-
-        branch_id: employee.branch_id
-
+        first_name: employee.first_name,
+        middle_name: employee.middle_name,
     }
 
 };
 
 });
-
-    }
-}
+}}

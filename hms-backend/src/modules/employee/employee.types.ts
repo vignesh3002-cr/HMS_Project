@@ -1,57 +1,80 @@
+export interface WorkingHourDto {
+
+    branch_id: string;
+
+    day_of_week:
+        | "MONDAY"
+        | "TUESDAY"
+        | "WEDNESDAY"
+        | "THURSDAY"
+        | "FRIDAY"
+        | "SATURDAY"
+        | "SUNDAY";
+
+    shift_name: string;
+
+    start_time: string;
+
+    end_time: string;
+
+}
+
 export interface CreateEmployeeDto {
 
-  // Login Details
-  username: string;
-  password: string;
-  role_type:
-    | "BRANCH_ADMIN"
-    | "DOCTOR"
-    | "NURSE"
-    | "RECEPTIONIST"
-    | "LAB_TECHNICIAN"
-    | "PHARMACIST"
-    | "ACCOUNTANT";
+    // Login
 
-  // Basic Details
-  first_name: string;
-  middle_name?: string;
-  last_name: string;
+    username: string;
+    password: string;
+    role_type:
+        | "DOCTOR"
+        | "NURSE"
+        | "LAB_TECHNICIAN"
+        | "PHARMACIST"
+        | "RECEPTIONIST";
 
-  email?: string;
-  mobile_no?: string;
+    // Personal
 
-  department_id?: string;
-  designation?: string;
+    first_name: string;
+    middle_name?: string;
+    last_name: string;
 
-  branch_id: string;
+    email: string;
+    mobile_no: string;
 
-  blood_group?: string;
-  nationality?: string;
-  marital_status?: string;
+    blood_group?: string;
+    nationality?: string;
+    marital_status?: string;
 
-  qualification?: string;
-  specialization?: string;
+    aadhaar_no?: string;
+    pan_no?: string;
+    passport_no?: string;
 
-  joining_date?: string;
+    permanent_address?: string;
+    current_address?: string;
 
-  aadhaar_no?: string;
-  pan_no?: string;
+    emergency_contact_name?: string;
+    emergency_contact_relationship?: string;
+    emergency_contact_number?: string;
 
-  current_address?: string;
-  parmanant_address?: string;
+    // Employment
 
-  emergency_contact_name?: string;
-  emergency_contact_relationship?: string;
-  emergency_contact_number?: string;
+    department_id: string;
+    designation: string;
+    joining_date: string;
+    emp_status: boolean;
 
-  // Doctor
-  license_no?: string;
-  consultation_minutes?: number;
+    // Doctor only
 
-  // Lab Technician
-  certification_no?: string;
-  skill_notes?: string;
+    specialization: string;
+    qualification: string;
+    doc_license_no: string;
+    consultation_minutes: number;
 
-  // Receptionist
-  remarks?: string;
+    // Multi Branch
+
+    branch_ids: string[];
+
+    // Doctor Schedule
+
+    working_hours?: WorkingHourDto[];
 }
