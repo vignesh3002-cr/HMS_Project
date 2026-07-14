@@ -94,17 +94,6 @@ export function TableView({ columns, rows, sortField, sortDirection, onSort, ren
 export function ActionButtons({ onEdit, onView, id }: { onEdit: (id: number) => void; onView: (id: number) => void; id: number }) {
   return (
     <div className="flex items-center justify-end gap-3">
-      {/* Edit Button - Blue themed, with hover effect */}
-      <button 
-        title="Edit" 
-        onClick={() => onEdit(id)} 
-        className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] group-hover:stroke-[#5E87CF] lucide lucide-square-pen">
-          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-          <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
-        </svg>
-      </button>
       {/* View Button - Dark themed, with hover effect */}
       <button 
         title="View" 
@@ -114,6 +103,18 @@ export function ActionButtons({ onEdit, onView, id }: { onEdit: (id: number) => 
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] group-hover:stroke-[#505F76] lucide lucide-eye">
           <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
           <circle cx="12" cy="12" r="3" />
+        </svg>
+      </button>
+
+            {/* Edit Button - Blue themed, with hover effect */}
+      <button 
+        title="Edit" 
+        onClick={() => onEdit(id)} 
+        className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] group-hover:stroke-[#5E87CF] lucide lucide-square-pen">
+          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+          <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
         </svg>
       </button>
     </div>

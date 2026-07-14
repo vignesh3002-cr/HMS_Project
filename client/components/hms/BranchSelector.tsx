@@ -21,7 +21,7 @@ import { useToast } from "@/hooks/use-toast";
 interface Branch {
   id: string;
   name: string;
-  code: string;
+  area: string;
   hospital_name: string;
 }
 
@@ -37,6 +37,7 @@ export function BranchSelector() {
     hospital_id: "",
     hospital_name: "",
     branch_id: "",
+    branch_area: "",
     branch: "",
   });
 
@@ -61,7 +62,7 @@ export function BranchSelector() {
       const mappedBranches = branchList.map((item: any) => ({
         id: item.id || item.branch_id,
         name: item.name || item.branch_name || "Unnamed Branch",
-        code: item.code || item.branch_code || item.id?.slice(0, 8) || "N/A",
+        area: item.area || item.branch_area || "N/A",
         hospital_name: item.hospital_name || item.hospital?.name || "Dummy Hospital",
       }));
 
@@ -85,6 +86,7 @@ export function BranchSelector() {
           hospital_id: user?.hospital_id ?? "",
           hospital_name: branchToSelect.hospital_name,
           branch_id: branchToSelect.id,
+          branch_area: branchToSelect.area,
           branch: branchToSelect.name,
         });
 
@@ -94,6 +96,7 @@ export function BranchSelector() {
             ...user,
             hospital_name: branchToSelect.hospital_name,
             branch_id: branchToSelect.id,
+            branch_area: branchToSelect.area,
             branch: branchToSelect.name,
           });
         }
@@ -106,7 +109,7 @@ export function BranchSelector() {
       // Fallback to dummy data if API fails
       const fallbackBranches = getDummyBranches();
       setBranches(fallbackBranches);
-      
+
       // Auto-select first fallback branch
       if (fallbackBranches.length > 0) {
         const fallbackBranch = fallbackBranches[0];
@@ -116,6 +119,7 @@ export function BranchSelector() {
           hospital_id: user?.hospital_id ?? "",
           hospital_name: fallbackBranch.hospital_name,
           branch_id: fallbackBranch.id,
+          branch_area: fallbackBranch.area,
           branch: fallbackBranch.name,
         });
       }
@@ -132,9 +136,9 @@ export function BranchSelector() {
 
   // Fallback dummy data
   const getDummyBranches = (): Branch[] => [
-    { id: "BRA001", name: "Medavakkam Branch", code: "MN-401", hospital_name: "SVG Hospital" },
-    { id: "BRA002", name: "Vadapalani Branch", code: "VD-204", hospital_name: "SVG Hospital" },
-    { id: "BRA003", name: "Tambaram Branch", code: "TB-112", hospital_name: "SVG Hospital" },
+    { id: "BRA001", name: "Medavakkam Branch", area: "Medavakkam", hospital_name: "SVG Hospital" },
+    { id: "BRA002", name: "Vadapalani Branch", area: "Vadapalani", hospital_name: "SVG Hospital" },
+    { id: "BRA003", name: "Tambaram Branch", area: "Tambaram", hospital_name: "SVG Hospital" },
   ];
 
   useEffect(() => {
@@ -147,15 +151,17 @@ export function BranchSelector() {
       ...prev,
       hospital_name: branch.hospital_name,
       branch_id: branch.id,
+      branch_area: branch.area,
       branch: branch.name,
     }));
-    
+
     const currentUser = getUser();
     if (currentUser) {
       saveUser({
         ...currentUser,
         hospital_name: branch.hospital_name,
         branch_id: branch.id,
+        branch_area: branch.area,
         branch: branch.name,
       });
       window.dispatchEvent(new Event("user-updated"));
@@ -199,9 +205,9 @@ export function BranchSelector() {
       <PopoverTrigger asChild>
         <button className="flex items-center gap-1.5 text-[#334155] font-semibold text-sm hover:text-[#00488D] transition-colors">
           <Building2 size={16} className="text-[#64748B]" />
-          {hospitalData.hospital_name || "Select Hospital"}
+          {selected?.name || "Select Branch"}
           <span className="text-xs font-normal text-[#64748B]">
-            ({selected?.name || "Select Branch"})
+            ({hospitalData.branch_area || "N/A"})
           </span>
           <ChevronDown
             size={14}
@@ -229,7 +235,7 @@ export function BranchSelector() {
               </button>
             )}
           </div>
-          <CommandList>
+          <CommandList className="slim-scrollbar">
             <CommandEmpty>
               <div className="py-6 text-center">
                 <Building2 className="mx-auto h-8 w-8 text-gray-300 mb-2" />
@@ -246,7 +252,7 @@ export function BranchSelector() {
               {branches.map((branch) => (
                 <CommandItem
                   key={branch.id}
-                  value={`${branch.name} ${branch.code}`}
+                  value={`${branch.name} ${branch.id}`}
                   onSelect={() => handleSelect(branch)}
                   className="flex items-center gap-3 py-2.5 px-3 cursor-pointer hover:bg-gray-50"
                 >
@@ -263,7 +269,7 @@ export function BranchSelector() {
                       {branch.name}
                     </span>
                     <span className="text-xs text-[#64748B]">
-                      {branch.hospital_name} · ID: {branch.code}
+                      {branch.hospital_name} · ID: {branch.id}
                     </span>
                   </div>
                   {selected?.id === branch.id && (

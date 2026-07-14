@@ -37,8 +37,10 @@ export class BranchRepository {
         return await prisma.branch.findMany({
             orderBy: {
                 id: "desc"
+            },
+            include: {
+                hospital: true
             }
         });
     }
-
-}
+        }

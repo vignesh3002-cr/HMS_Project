@@ -16,6 +16,7 @@ export type FieldType =
   | "week"
   | "select"
   | "multiselect"
+  | "combobox"
   | "checkbox"
   | "radio"
   | "switch"

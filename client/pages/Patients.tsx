@@ -8,9 +8,11 @@ import {
   Check,
   FileText,
   Infinity,
+  Download,
   List,
   LayoutGrid,
   Plus,
+  FileSpreadsheet,
   MoreVertical,
   CalendarCheck,
   User,
@@ -264,7 +266,13 @@ export default function PatientsManagement() {
   // (a) List view filters
   const listFilterFields: FilterField[] = [
     { id: "name", label: "Patient Name", type: "text", placeholder: "Search by name" },
-    { id: "id", label: "Patient ID", type: "text", placeholder: "Enter ID" },
+    {
+      id: "id",
+      label: "Patient ID",
+      type: "combobox",
+      placeholder: "Search ID",
+      options: listPatientsData.map((p) => ({ label: p.id, value: p.id })),
+    },
     { id: "diagnose", label: "Diagnosis", type: "text", placeholder: "Search diagnosis" },
     { id: "doctor", label: "Assigned Doctor", type: "text", placeholder: "Search doctor" },
     { id: "status", label: "Status", type: "multiselect", options: [
@@ -276,7 +284,13 @@ export default function PatientsManagement() {
   // (b) Grid view filters
   const gridFilterFields: FilterField[] = [
     { id: "name", label: "Patient Name", type: "text", placeholder: "Search by name" },
-    { id: "id", label: "Patient ID", type: "text", placeholder: "Enter ID" },
+    {
+      id: "id",
+      label: "Patient ID",
+      type: "combobox",
+      placeholder: "Search ID",
+      options: gridPatientsData.map((p) => ({ label: p.id, value: p.id })),
+    },
     { id: "bloodGroup", label: "Blood Group", type: "text", placeholder: "Search blood group" },
     { id: "status", label: "Status", type: "multiselect", options: [
       { label: "Active", value: "Active" },
@@ -291,7 +305,7 @@ export default function PatientsManagement() {
   const exportRef = useRef<HTMLDivElement>(null);
   const exportOptions = [
     { id: 'pdf', label: 'Export as PDF', icon: FileText },
-    { id: 'csv', label: 'Export as CSV', icon: File },
+    { id: 'csv', label: 'Export as CSV', icon: FileSpreadsheet },
   ];
   const handleExport = (format: string) => {
     console.log(`Exporting as ${format}`);
@@ -308,23 +322,33 @@ export default function PatientsManagement() {
   }, []);
 
   // ---- SEARCH & FILTER ----
+  const searchableFields = useMemo(
+    () => viewMode === "grid"
+      ? ["name", "id", "mobile", "bloodGroup", "status", "age", "gender"]
+      : ["name", "id", "mobile", "diagnose", "doctor", "status", "age", "gender"],
+    [viewMode],
+  );
+
   const filteredData = useMemo(() => {
-    const rawData = viewMode === "grid" ? [...gridPatientsData] : [...listPatientsData] as unknown as Record<string, string | number>[];
+    const rawData: Record<string, string | number>[] = viewMode === "grid"
+      ? [...gridPatientsData] as unknown as Record<string, string | number>[]
+      : [...listPatientsData] as unknown as Record<string, string | number>[];
     let result = rawData;
 
     if (searchQuery) {
-      const searchFields = viewMode === "grid"
-        ? ["name", "id", "mobile", "bloodGroup", "status"]
-        : ["name", "id", "diagnose", "doctor", "status"];
       result = result.filter((item) =>
-        searchFields.map((f) => String(item[f] ?? "")).join(" ").toLowerCase().includes(searchQuery.toLowerCase())
+        searchableFields.some((field) =>
+          String(item[field] ?? "")
+            .toLowerCase()
+            .includes(searchQuery.toLowerCase())
+        )
       );
     }
 
     result = filterDataByValues(result, appliedValues);
 
     return result;
-  }, [searchQuery, appliedValues, viewMode]);
+  }, [searchQuery, searchableFields, appliedValues, viewMode]);
 
   // ---- SORTING (list only) ----
   const handleSort = (field: string) => {
@@ -408,7 +432,7 @@ export default function PatientsManagement() {
         onClick={() => setExportOpen(!exportOpen)}
         className="flex items-center gap-2 px-4 py-2 border border-[#E5E7EB] bg-white rounded-lg text-[#424752] text-xs font-semibold shadow-sm hover:bg-[#F2F4F6] transition-colors"
       >
-        <FileText className="w-4 h-4" />
+        <Download className="w-4 h-4" />
         Export report
         <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${exportOpen ? 'rotate-180' : ''}`} />
       </button>
@@ -791,14 +815,6 @@ export default function PatientsManagement() {
           </div>
         </main>
       </div>
-
-      {/* FAB */}
-      <button
-        onClick={handleAddDoctor}
-        className="fixed bottom-6 right-6 w-12 h-12 bg-[#00488D] rounded-2xl flex items-center justify-center shadow-lg z-10 hover:bg-[#003a6b] transition-colors"
-      >
-        <Plus className="w-5 h-5 text-white" />
-      </button>
     </div>
   );
 }

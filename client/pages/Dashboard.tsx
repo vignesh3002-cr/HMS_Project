@@ -1134,13 +1134,6 @@ useEffect(() => {
           </div>
         </main>
       </div>
-
-      {/* FAB */}
-      <button className="fixed bottom-6 right-6 w-12 h-12 bg-[#00488D] rounded-2xl flex items-center justify-center shadow-lg z-10">
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-          <path d="M9 11H4V9H9V4H11V9H16V11H11V16H9V11Z" fill="#FFFAFA"/>
-        </svg>
-      </button>
     </div>
   );
 }
