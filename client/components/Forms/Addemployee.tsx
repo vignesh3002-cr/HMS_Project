@@ -1,14 +1,188 @@
-import { useState, ChangeEvent, FormEvent } from "react";
+import { useState, useEffect, ChangeEvent, FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, UserRound, Loader2, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
+import { employeeApi } from "@/api/employee.api";
+import { branchApi, Branch } from "@/api/branch.api";
+
+// ---------------------------------------------------------------------------
+// Role configuration
+// Each role gets its own preset options for department / designation /
+// specialization / qualification, and its own label for the "license" field.
+// Add a new role here and the whole form adapts automatically.
+// ---------------------------------------------------------------------------
+type RoleType = "Doctor" | "Nurse" | "Pharmacist" | "Staff" | "";
+
+interface RoleConfig {
+  departments: string[];
+  designations: string[];
+  specializations: string[];
+  qualifications: string[];
+  licenseLabel: string; // label shown for the license/registration number field
+  licensePlaceholder: string;
+}
+
+const ROLE_CONFIG: Record<Exclude<RoleType, "">, RoleConfig> = {
+  Doctor: {
+    departments: [
+      "General Medicine",
+      "Cardiology",
+      "Orthopedics",
+      "Pediatrics",
+      "Neurology",
+      "Emergency",
+      "Surgery",
+      "Radiology",
+      "ENT",
+      "Dermatology",
+      "Gynecology",
+      "Psychiatry",
+    ],
+    designations: [
+      "Consultant",
+      "Senior Consultant",
+      "Resident Doctor",
+      "Junior Doctor",
+      "Chief Medical Officer",
+      "Visiting Doctor",
+    ],
+    specializations: [
+      "Cardiology",
+      "Neurology",
+      "Orthopedics",
+      "Pediatrics",
+      "General Medicine",
+      "Dermatology",
+      "ENT",
+      "Gynecology",
+      "Psychiatry",
+      "Radiology",
+      "Anesthesiology",
+      "Surgery",
+    ],
+    qualifications: ["MBBS", "MD", "MS", "DM", "MCh", "BDS", "MDS"],
+    licenseLabel: "Doctor License No",
+    licensePlaceholder: "Enter Doctor License Number",
+  },
+  Nurse: {
+    departments: [
+      "General Ward",
+      "ICU",
+      "OT",
+      "Emergency",
+      "Pediatric Ward",
+      "Maternity Ward",
+      "Outpatient",
+    ],
+    designations: [
+      "Staff Nurse",
+      "Head Nurse",
+      "Nursing Supervisor",
+      "Nursing Superintendent",
+      "ICU Nurse",
+      "OT Nurse",
+    ],
+    specializations: [
+      "General Nursing",
+      "ICU Care",
+      "Pediatric Nursing",
+      "Emergency Nursing",
+      "OT Nursing",
+      "Maternity Care",
+    ],
+    qualifications: [
+      "ANM",
+      "GNM",
+      "B.Sc Nursing",
+      "Post Basic B.Sc Nursing",
+      "M.Sc Nursing",
+    ],
+    licenseLabel: "Nurse Registration No",
+    licensePlaceholder: "Enter Nursing Council Registration Number",
+  },
+  Pharmacist: {
+    departments: [
+      "Inpatient Pharmacy",
+      "Outpatient Pharmacy",
+      "Clinical Pharmacy",
+      "Central Store",
+    ],
+    designations: [
+      "Chief Pharmacist",
+      "Senior Pharmacist",
+      "Pharmacist",
+      "Assistant Pharmacist",
+    ],
+    specializations: [
+      "Clinical Pharmacy",
+      "Hospital Pharmacy",
+      "Retail Pharmacy",
+      "Drug Information",
+    ],
+    qualifications: ["D.Pharm", "B.Pharm", "M.Pharm", "Pharm.D"],
+    licenseLabel: "Pharmacist License No",
+    licensePlaceholder: "Enter Pharmacist License Number",
+  },
+  // Non-medical staff — no specialization/qualification/license fields.
+  Staff: {
+    departments: ["Administration"],
+    designations: [
+      "Receptionist",
+      "Admin Executive",
+      "Accountant",
+      "HR Executive",
+      "IT Support",
+      "Office Manager",
+      "Security Officer",
+      "Housekeeping Staff",
+    ],
+    specializations: [],
+    qualifications: [],
+    licenseLabel: "License No",
+    licensePlaceholder: "",
+  },
+};
+
+const ROLE_OPTIONS: Exclude<RoleType, "">[] = ["Doctor", "Nurse", "Pharmacist", "Staff"];
+
+// Maps each department name to its department_master ID.
+// NOTE: only "Administration" -> "DEP001" is a confirmed real row today;
+// the rest are placeholders and will need correcting once verified.
+const DEPARTMENT_MAP: Record<string, string> = {
+  "General Medicine": "DEPT001",
+  "Cardiology": "DEPT002",
+  "Orthopedics": "DEPT003",
+  "Pediatrics": "DEPT004",
+  "Neurology": "DEPT005",
+  "Emergency": "DEPT006",
+  "Surgery": "DEPT007",
+  "Radiology": "DEPT008",
+  "ENT": "DEPT009",
+  "Dermatology": "DEPT010",
+  "Gynecology": "DEPT011",
+  "Psychiatry": "DEPT012",
+  "General Ward": "DEPT013",
+  "ICU": "DEPT014",
+  "OT": "DEPT015",
+  "Pediatric Ward": "DEPT016",
+  "Maternity Ward": "DEPT017",
+  "Outpatient": "DEPT018",
+  "Inpatient Pharmacy": "DEPT019",
+  "Outpatient Pharmacy": "DEPT020",
+  "Clinical Pharmacy": "DEPT021",
+  "Central Store": "DEPT022",
+  "Administration": "DEP001",
+};
 
 // Strongly typed interface for the form state.
 // Field names mirror the `employees` table columns (see hms-backend/prisma/schema.prisma)
 // so every input here has a real column to be saved into.
 interface EmployeeFormData {
   userId: string;
+  username: string;
+  password: string;
+  roleType: RoleType;
   firstName: string;
   middleName: string;
   lastName: string;
@@ -31,11 +205,6 @@ interface EmployeeFormData {
   qualification: string;
   docLicenseNo: string;
   joiningDate: string;
-  bp: string;
-  sugar: string;
-  allergies: string;
-  chronicDiseases: string;
-  medicalHistory: string;
   branchId: string;
   empStatus: string;
   email: string;
@@ -43,6 +212,9 @@ interface EmployeeFormData {
 
 const emptyFormData: EmployeeFormData = {
   userId: "",
+  username: "",
+  password: "",
+  roleType: "",
   firstName: "",
   middleName: "",
   lastName: "",
@@ -65,11 +237,6 @@ const emptyFormData: EmployeeFormData = {
   qualification: "",
   docLicenseNo: "",
   joiningDate: "",
-  bp: "",
-  sugar: "",
-  allergies: "",
-  chronicDiseases: "",
-  medicalHistory: "",
   branchId: "",
   empStatus: "",
   email: "",
@@ -79,30 +246,116 @@ export default function AddEmployee() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
+  const [branches, setBranches] = useState<Branch[]>([]);
 
   // State initialized with the interface type
   const [formData, setFormData] = useState<EmployeeFormData>(emptyFormData);
+
+  // Fetch branches on mount for the branch dropdown
+  useEffect(() => {
+    branchApi
+      .getAll()
+      .then((res) => {
+        if (res.data?.data) setBranches(res.data.data);
+        else if (Array.isArray(res.data)) setBranches(res.data as unknown as Branch[]);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Whether the Permanent Address should mirror the Current Address
+  const [sameAsCurrent, setSameAsCurrent] = useState(false);
+
+  // Convenience lookup: the field presets for the currently selected role.
+  // When no role is selected yet, dropdown-driven fields fall back to an
+  // empty option list and are disabled with a "select role first" hint.
+  const roleConfig = formData.roleType ? ROLE_CONFIG[formData.roleType] : null;
+
+  // "Staff" is a non-medical role — it has no specialization/qualification/
+  // license fields. Everything else (including no role picked yet, so the
+  // form still shows its normal "select a role first" placeholders) does.
+  const isMedicalRole = formData.roleType !== "Staff";
 
   // Generic handle change with correct TypeScript typing
   const handleChange = (
     e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+
+    setFormData((prev) => {
+      const next = { ...prev, [name]: value };
+
+      // Keep Permanent Address mirrored to Current Address while the
+      // "Same as Current Address" checkbox is ticked.
+      if (name === "currentAddress" && sameAsCurrent) {
+        next.permanentAddress = value;
+      }
+
+      return next;
+    });
+  };
+
+  // Changing the role resets the role-specific fields so a stale
+  // Doctor designation doesn't linger after switching to Nurse, etc.
+  const handleRoleChange = (val: string) => {
+    const newRole = val as RoleType;
+    setFormData((prev) => ({
+      ...prev,
+      roleType: newRole,
+      department: "",
+      designation: "",
+      specialization: "",
+      qualification: "",
+      docLicenseNo: "",
+    }));
+  };
+
+  // Toggling the checkbox copies the current address into permanent
+  // address immediately; unticking it just unlocks the field again.
+  const handleSameAsCurrentToggle = (e: ChangeEvent<HTMLInputElement>) => {
+    const checked = e.target.checked;
+    setSameAsCurrent(checked);
+    if (checked) {
+      setFormData((prev) => ({
+        ...prev,
+        permanentAddress: prev.currentAddress,
+      }));
+    }
   };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
+    // Every field is mandatory except Middle Name and Passport No.
     const requiredFields: { key: keyof EmployeeFormData; label: string }[] = [
+      { key: "username", label: "Username" },
+      { key: "password", label: "Password" },
+      { key: "roleType", label: "Role" },
       { key: "firstName", label: "First Name" },
       { key: "lastName", label: "Last Name" },
+      { key: "bloodGroup", label: "Blood Group" },
+      { key: "nationality", label: "Nationality" },
+      { key: "maritalStatus", label: "Marital Status" },
       { key: "mobileNo", label: "Mobile Number" },
       { key: "email", label: "Email" },
+      { key: "aadhaarNo", label: "Aadhaar No" },
+      { key: "panNo", label: "PAN No" },
       { key: "department", label: "Department" },
       { key: "designation", label: "Designation" },
+      ...(isMedicalRole
+        ? [
+            { key: "specialization" as const, label: "Specialization" },
+            { key: "qualification" as const, label: "Qualification" },
+            { key: "docLicenseNo" as const, label: "License No" },
+          ]
+        : []),
       { key: "joiningDate", label: "Joining Date" },
       { key: "empStatus", label: "Employee Status" },
+      { key: "branchId", label: "Branch" },
+      { key: "emergencyContactName", label: "Emergency Contact Name" },
+      { key: "emergencyContactRelation", label: "Emergency Contact Relation" },
+      { key: "emergencyContactNumber", label: "Emergency Contact Number" },
+      { key: "currentAddress", label: "Current Address" },
+      { key: "permanentAddress", label: "Permanent Address" },
     ];
 
     const missing = requiredFields.find((f) => !formData[f.key].trim());
@@ -118,8 +371,40 @@ export default function AddEmployee() {
     setSubmitting(true);
 
     try {
-      // Static mode – simulate a short delay then show success
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      const response = await employeeApi.create({
+        username: formData.username,
+        password: formData.password,
+        role_type: formData.roleType.toUpperCase() as "DOCTOR" | "NURSE" | "PHARMACIST" | "STAFF",
+        first_name: formData.firstName,
+        middle_name: formData.middleName || undefined,
+        last_name: formData.lastName,
+        email: formData.email,
+        mobile_no: formData.mobileNo,
+        blood_group: formData.bloodGroup,
+        nationality: formData.nationality,
+        marital_status: formData.maritalStatus,
+        aadhaar_no: formData.aadhaarNo,
+        pan_no: formData.panNo,
+        passport_no: formData.passportNo || undefined,
+        permanent_address: formData.permanentAddress,
+        current_address: formData.currentAddress,
+        emergency_contact_name: formData.emergencyContactName,
+        emergency_contact_relationship: formData.emergencyContactRelation,
+        emergency_contact_number: formData.emergencyContactNumber,
+        department_id: DEPARTMENT_MAP[formData.department] ?? formData.department,
+        designation: formData.designation,
+        specialization: isMedicalRole ? formData.specialization : undefined,
+        qualification: isMedicalRole ? formData.qualification : undefined,
+        doc_license_no: isMedicalRole ? formData.docLicenseNo : undefined,
+        joining_date: formData.joiningDate,
+        emp_status: formData.empStatus === "Active",
+        branch_ids: [formData.branchId],
+        consultation_minutes: 20,
+      });
+
+      if (!response.data.success) {
+        throw new Error(response.data.message);
+      }
 
       toast({
         title: "Employee added",
@@ -127,10 +412,11 @@ export default function AddEmployee() {
       });
 
       navigate(-1);
-    } catch {
+    } catch (error: any) {
       toast({
         title: "Failed to add employee",
-        description: "Something went wrong.",
+        description:
+          error.response?.data?.message ?? error.message ?? "Something went wrong.",
         variant: "destructive",
       });
     } finally {
@@ -140,11 +426,14 @@ export default function AddEmployee() {
 
   const handleReset = () => {
     setFormData(emptyFormData);
+    setSameAsCurrent(false);
   };
 
   // Shared input class for consistent styling
   const inputClass =
     "w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200";
+  const disabledInputClass =
+    "w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-500 placeholder:text-gray-400 cursor-not-allowed transition-all duration-200";
   const labelClass = "block text-sm font-semibold text-gray-800 mb-1.5";
   const requiredStar = <span className="text-red-600 ml-0.5">*</span>;
 
@@ -173,6 +462,47 @@ export default function AddEmployee() {
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-8">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6">
+            {/* Role selector — drives every field below it */}
+            <div className="lg:col-span-3">
+              <label className={labelClass}>Role {requiredStar}</label>
+              <FormDropdown
+                name="role"
+                className={inputClass}
+                options={ROLE_OPTIONS}
+                value={formData.roleType}
+                onValueChange={handleRoleChange}
+                placeholder="Select Role (Doctor / Nurse / Pharmacist)"
+                disabled={submitting}
+              />
+            </div>
+
+            {/* Row 0 - Username, Password */}
+            <div>
+              <label className={labelClass}>Username {requiredStar}</label>
+              <input
+                type="text"
+                name="username"
+                placeholder="Enter Username"
+                className={inputClass}
+                value={formData.username}
+                onChange={handleChange}
+                disabled={submitting}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Password {requiredStar}</label>
+              <input
+                type="password"
+                name="password"
+                placeholder="Enter Password"
+                className={inputClass}
+                value={formData.password}
+                onChange={handleChange}
+                disabled={submitting}
+              />
+            </div>
+            <div />
+
             {/* Row 1 - First Name, Middle Name, Last Name */}
             <div>
               <label className={labelClass}>First Name {requiredStar}</label>
@@ -213,7 +543,7 @@ export default function AddEmployee() {
 
             {/* Row 2 - Blood Group, Nationality, Marital Status */}
             <div>
-              <label className={labelClass}>Blood Group</label>
+              <label className={labelClass}>Blood Group {requiredStar}</label>
               <FormDropdown
                 name="bloodGroup"
                 className={inputClass}
@@ -227,7 +557,7 @@ export default function AddEmployee() {
               />
             </div>
             <div>
-              <label className={labelClass}>Nationality</label>
+              <label className={labelClass}>Nationality {requiredStar}</label>
               <input
                 type="text"
                 name="nationality"
@@ -239,7 +569,7 @@ export default function AddEmployee() {
               />
             </div>
             <div>
-              <label className={labelClass}>Marital Status</label>
+              <label className={labelClass}>Marital Status {requiredStar}</label>
               <FormDropdown
                 name="maritalStatus"
                 className={inputClass}
@@ -281,7 +611,7 @@ export default function AddEmployee() {
               />
             </div>
             <div>
-              <label className={labelClass}>Aadhaar No</label>
+              <label className={labelClass}>Aadhaar No {requiredStar}</label>
               <input
                 type="text"
                 name="aadhaarNo"
@@ -293,9 +623,9 @@ export default function AddEmployee() {
               />
             </div>
 
-            {/* Row 4 - PAN No, Passport No, Department */}
+            {/* Row 4 - PAN No, Passport No */}
             <div>
-              <label className={labelClass}>PAN No</label>
+              <label className={labelClass}>PAN No {requiredStar}</label>
               <input
                 type="text"
                 name="panNo"
@@ -318,70 +648,128 @@ export default function AddEmployee() {
                 disabled={submitting}
               />
             </div>
+            <div />
+
+            {/* --------------------------------------------------------- */}
+            {/* Role-based fields — labels, options, and the license      */}
+            {/* field all change depending on the selected Role.          */}
+            {/* --------------------------------------------------------- */}
+
+            {/* Row 5 - Department, Designation, Specialization */}
             <div>
-              <label className={labelClass}>Department {requiredStar}</label>
-              <input
-                type="text"
+              <label className={labelClass}>
+                {formData.roleType ? `${formData.roleType} Department` : "Department"}{" "}
+                {requiredStar}
+              </label>
+              <FormDropdown
                 name="department"
-                placeholder="Enter Department"
-                className={inputClass}
+                className={roleConfig ? inputClass : disabledInputClass}
+                options={roleConfig ? roleConfig.departments : []}
                 value={formData.department}
-                onChange={handleChange}
-                disabled={submitting}
+                onValueChange={(val) =>
+                  setFormData((prev) => ({ ...prev, department: val }))
+                }
+                placeholder={
+                  roleConfig ? "Select Department" : "Select a role first"
+                }
+                disabled={submitting || !roleConfig}
               />
             </div>
-
-            {/* Row 5 - Designation, Specialization, Qualification */}
             <div>
-              <label className={labelClass}>Designation {requiredStar}</label>
-              <input
-                type="text"
+              <label className={labelClass}>
+                {formData.roleType
+                  ? `${formData.roleType} Designation`
+                  : "Designation"}{" "}
+                {requiredStar}
+              </label>
+              <FormDropdown
                 name="designation"
-                placeholder="Enter Designation"
-                className={inputClass}
+                className={roleConfig ? inputClass : disabledInputClass}
+                options={roleConfig ? roleConfig.designations : []}
                 value={formData.designation}
-                onChange={handleChange}
-                disabled={submitting}
+                onValueChange={(val) =>
+                  setFormData((prev) => ({ ...prev, designation: val }))
+                }
+                placeholder={
+                  roleConfig ? "Select Designation" : "Select a role first"
+                }
+                disabled={submitting || !roleConfig}
               />
             </div>
-            <div>
-              <label className={labelClass}>Specialization</label>
-              <input
-                type="text"
-                name="specialization"
-                placeholder="Enter Specialization"
-                className={inputClass}
-                value={formData.specialization}
-                onChange={handleChange}
-                disabled={submitting}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Qualification</label>
-              <input
-                type="text"
-                name="qualification"
-                placeholder="Enter Qualification"
-                className={inputClass}
-                value={formData.qualification}
-                onChange={handleChange}
-                disabled={submitting}
-              />
-            </div>
+            {isMedicalRole ? (
+              <div>
+                <label className={labelClass}>
+                  {formData.roleType
+                    ? `${formData.roleType} Specialization`
+                    : "Specialization"}{" "}
+                  {requiredStar}
+                </label>
+                <FormDropdown
+                  name="specialization"
+                  className={roleConfig ? inputClass : disabledInputClass}
+                  options={roleConfig ? roleConfig.specializations : []}
+                  value={formData.specialization}
+                  onValueChange={(val) =>
+                    setFormData((prev) => ({ ...prev, specialization: val }))
+                  }
+                  placeholder={
+                    roleConfig ? "Select Specialization" : "Select a role first"
+                  }
+                  disabled={submitting || !roleConfig}
+                />
+              </div>
+            ) : (
+              <div />
+            )}
 
-            {/* Row 6 - Doc License No, Joining Date, Employee Status */}
-            <div>
-              <label className={labelClass}>Doctor License No</label>
-              <input
-                type="text"
-                name="docLicenseNo"
-                placeholder="Enter License Number"
-                className={inputClass}
-                value={formData.docLicenseNo}
-                onChange={handleChange}
-                disabled={submitting}
-              />
-            </div>
+            {/* Row 6 - Qualification, License/Registration No, Joining Date */}
+            {isMedicalRole ? (
+              <div>
+                <label className={labelClass}>
+                  {formData.roleType
+                    ? `${formData.roleType} Qualification`
+                    : "Qualification"}{" "}
+                  {requiredStar}
+                </label>
+                <FormDropdown
+                  name="qualification"
+                  className={roleConfig ? inputClass : disabledInputClass}
+                  options={roleConfig ? roleConfig.qualifications : []}
+                  value={formData.qualification}
+                  onValueChange={(val) =>
+                    setFormData((prev) => ({ ...prev, qualification: val }))
+                  }
+                  placeholder={
+                    roleConfig ? "Select Qualification" : "Select a role first"
+                  }
+                  disabled={submitting || !roleConfig}
+                />
+              </div>
+            ) : (
+              <div />
+            )}
+            {isMedicalRole ? (
+              <div>
+                <label className={labelClass}>
+                  {roleConfig ? roleConfig.licenseLabel : "License No"} {requiredStar}
+                </label>
+                <input
+                  type="text"
+                  name="docLicenseNo"
+                  placeholder={
+                    roleConfig
+                      ? roleConfig.licensePlaceholder
+                      : "Select a role first"
+                  }
+                  className={roleConfig ? inputClass : disabledInputClass}
+                  value={formData.docLicenseNo}
+                  onChange={handleChange}
+                  disabled={submitting || !roleConfig}
+                />
+              </div>
+            ) : (
+              <div />
+            )}
             <div>
               <label className={labelClass}>Joining Date {requiredStar}</label>
               <input
@@ -393,6 +781,8 @@ export default function AddEmployee() {
                 disabled={submitting}
               />
             </div>
+
+            {/* Row 7 - Employee Status, Branch */}
             <div>
               <label className={labelClass}>Employee Status {requiredStar}</label>
               <FormDropdown
@@ -407,48 +797,28 @@ export default function AddEmployee() {
                 disabled={submitting}
               />
             </div>
-
-            {/* Row 7 - BP, Sugar, Branch ID */}
             <div>
-              <label className={labelClass}>BP</label>
-              <input
-                type="text"
-                name="bp"
-                placeholder="e.g. 120/80"
-                className={inputClass}
-                value={formData.bp}
-                onChange={handleChange}
-                disabled={submitting}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Sugar</label>
-              <input
-                type="text"
-                name="sugar"
-                placeholder="Enter Sugar Level"
-                className={inputClass}
-                value={formData.sugar}
-                onChange={handleChange}
-                disabled={submitting}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Branch</label>
-              <input
-                type="text"
+              <label className={labelClass}>Branch {requiredStar}</label>
+              <FormDropdown
                 name="branchId"
-                placeholder="Enter Branch ID"
                 className={inputClass}
+                options={branches.map((b) => ({
+                  label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                  value: b.branch_id,
+                }))}
                 value={formData.branchId}
-                onChange={handleChange}
-                disabled={submitting}
+                onValueChange={(val) =>
+                  setFormData((prev) => ({ ...prev, branchId: val }))
+                }
+                placeholder={branches.length ? "Select Branch" : "No branches available"}
+                disabled={submitting || branches.length === 0}
               />
             </div>
+            <div />
 
-            {/* Row 8 - Emergency Contact Name, Relation, Number */}
+            {/* Row 9 - Emergency Contact Name, Relation, Number */}
             <div>
-              <label className={labelClass}>Emergency Contact Name</label>
+              <label className={labelClass}>Emergency Contact Name {requiredStar}</label>
               <input
                 type="text"
                 name="emergencyContactName"
@@ -460,7 +830,7 @@ export default function AddEmployee() {
               />
             </div>
             <div>
-              <label className={labelClass}>Emergency Contact Relation</label>
+              <label className={labelClass}>Emergency Contact Relation {requiredStar}</label>
               <input
                 type="text"
                 name="emergencyContactRelation"
@@ -472,7 +842,7 @@ export default function AddEmployee() {
               />
             </div>
             <div>
-              <label className={labelClass}>Emergency Contact Number</label>
+              <label className={labelClass}>Emergency Contact Number {requiredStar}</label>
               <input
                 type="text"
                 inputMode="numeric"
@@ -486,21 +856,9 @@ export default function AddEmployee() {
               />
             </div>
 
-            {/* Row 9 - Permanent Address, Current Address (full width each) */}
+            {/* Row 10 - Current Address, then "Same as Current" checkbox, then Permanent Address */}
             <div className="lg:col-span-3">
-              <label className={labelClass}>Permanent Address</label>
-              <input
-                type="text"
-                name="permanentAddress"
-                placeholder="Enter Permanent Address"
-                className={inputClass}
-                value={formData.permanentAddress}
-                onChange={handleChange}
-                disabled={submitting}
-              />
-            </div>
-            <div className="lg:col-span-3">
-              <label className={labelClass}>Current Address</label>
+              <label className={labelClass}>Current Address {requiredStar}</label>
               <input
                 type="text"
                 name="currentAddress"
@@ -512,45 +870,36 @@ export default function AddEmployee() {
               />
             </div>
 
-            {/* Row 10 - Allergies, Chronic Diseases (full width each) */}
-            <div className="lg:col-span-3">
-              <label className={labelClass}>Allergies</label>
-              <textarea
-                name="allergies"
-                rows={2}
-                placeholder="Enter Known Allergies"
-                className={`${inputClass} resize-none`}
-                value={formData.allergies}
-                onChange={handleChange}
+            <div className="lg:col-span-3 flex items-center gap-2 -mt-2">
+              <input
+                type="checkbox"
+                id="sameAsCurrent"
+                checked={sameAsCurrent}
+                onChange={handleSameAsCurrentToggle}
                 disabled={submitting}
+                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
               />
+              <label
+                htmlFor="sameAsCurrent"
+                className="text-sm font-medium text-gray-700 cursor-pointer select-none"
+              >
+                Same as Current Address
+              </label>
             </div>
+
             <div className="lg:col-span-3">
-              <label className={labelClass}>Chronic Diseases</label>
-              <textarea
-                name="chronicDiseases"
-                rows={2}
-                placeholder="Enter Chronic Diseases"
-                className={`${inputClass} resize-none`}
-                value={formData.chronicDiseases}
+              <label className={labelClass}>Permanent Address {requiredStar}</label>
+              <input
+                type="text"
+                name="permanentAddress"
+                placeholder="Enter Permanent Address"
+                className={sameAsCurrent ? disabledInputClass : inputClass}
+                value={formData.permanentAddress}
                 onChange={handleChange}
-                disabled={submitting}
+                disabled={submitting || sameAsCurrent}
               />
             </div>
 
-            {/* Row 11 - Medical History (full width) */}
-            <div className="lg:col-span-3">
-              <label className={labelClass}>Medical History</label>
-              <textarea
-                name="medicalHistory"
-                rows={3}
-                placeholder="Enter Medical History"
-                className={`${inputClass} resize-none`}
-                value={formData.medicalHistory}
-                onChange={handleChange}
-                disabled={submitting}
-              />
-            </div>
           </div>
 
           {/* Actions Footer */}
