@@ -103,6 +103,7 @@ model branch {
   employees           employees[]
   patient_history     patient_history[]
   user_branch_mapping user_branch_mapping[]
+  user_log            user_log[]
   user_table          user_table[]
 }
 
@@ -167,11 +168,6 @@ model employees {
   qualification                  String?               @db.VarChar(255)
   doc_license_no                 String?               @db.VarChar(100)
   joining_date                   DateTime?             @db.Date
-  bp                             String?               @db.VarChar(20)
-  sugar                          String?               @db.VarChar(30)
-  allergies                      String?
-  chronic_diseases               String?
-  medical_history                String?
   branch_id                      String?               @db.VarChar(10)
   emp_status                     Boolean?
   email                          String?               @db.VarChar(50)
@@ -443,10 +439,6 @@ model prescription {
   prescribed_at     DateTime            @default(now()) @db.Timestamptz(6)
   notes             String?
   encounter         encounter           @relation(fields: [encounter_id], references: [encounter_id], onDelete: Cascade, onUpdate: NoAction)
-<<<<<<< HEAD
-=======
-  doctor_profile    doctor_profile      @relation(fields: [prescribed_by], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
->>>>>>> 954f5936bd0e8aba20021f8cae4acd8b40ec2734
   prescription_item prescription_item[]
 }
 
@@ -464,14 +456,8 @@ model prescription_item {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model receptionist_profile {
-<<<<<<< HEAD
   employee_id BigInt  @id
   remarks     String?
-=======
-  employee_id BigInt   @id
-  remarks     String?
-  employee    employee @relation(fields: [employee_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction)
->>>>>>> 954f5936bd0e8aba20021f8cae4acd8b40ec2734
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -485,7 +471,6 @@ model role_id_config {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model user_branch_mapping {
-<<<<<<< HEAD
   user_id           String     @db.VarChar(20)
   branch_id         String     @db.VarChar(10)
   assigned_date     DateTime?  @default(now()) @db.Timestamp(6)
@@ -497,16 +482,20 @@ model user_branch_mapping {
   branch            branch     @relation(fields: [branch_id], references: [branch_id], onDelete: Cascade, map: "fk_mapping_branch")
   employees         employees? @relation(fields: [employee_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_mapping_employee")
   user_table        user_table @relation(fields: [user_id], references: [user_id], onDelete: Cascade, map: "fk_mapping_user")
-=======
-  user_id       String     @db.VarChar(20)
-  branch_id     String     @db.VarChar(10)
-  assigned_date DateTime?  @default(now()) @db.Timestamp(6)
-  status        Int?       @default(1) @db.SmallInt
-  id            BigInt     @id @default(autoincrement())
-  mapping_id    String?    @db.VarChar(20)
-  branch        branch     @relation(fields: [branch_id], references: [branch_id], onDelete: Cascade, map: "fk_mapping_branch")
-  user_table    user_table @relation(fields: [user_id], references: [user_id], onDelete: Cascade, map: "fk_mapping_user")
->>>>>>> 954f5936bd0e8aba20021f8cae4acd8b40ec2734
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model user_log {
+  id          BigInt     @id @default(autoincrement())
+  log_id      String     @unique(map: "uq_user_log_log_id") @db.VarChar(20)
+  user_id     String     @db.VarChar(20)
+  module_name String?    @db.VarChar(100)
+  action_type String     @db.VarChar(50)
+  action_time DateTime?  @default(now()) @db.Timestamp(6)
+  status      String?    @db.VarChar(20)
+  branch_id   String?    @db.VarChar(10)
+  branch      branch?    @relation(fields: [branch_id], references: [branch_id], onDelete: Cascade, map: "fk_user_log_branch")
+  user_table  user_table @relation(fields: [user_id], references: [user_id], onDelete: Cascade, map: "fk_user_log_user")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -524,5 +513,6 @@ model user_table {
   employees           employees?
   patient_history     patient_history[]
   user_branch_mapping user_branch_mapping[]
+  user_log            user_log[]
   branch              branch?               @relation(fields: [branch_id], references: [branch_id], onDelete: Cascade, map: "fk_user_branch")
 }
