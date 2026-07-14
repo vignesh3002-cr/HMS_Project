@@ -26,10 +26,10 @@
   @apply text-[#8C8D8F] font-semibold text-[10px] uppercase;
 }
    .hms-department-text {
-  @apply text-[10px] font-semibold; /* 10 */
+  @apply text-[11px] font-semibold; /* 10 */
 }
     .hms-content-text {
-  @apply font-medium text-[11px]; /* 11 */
+  @apply font-medium text-[13px]; /* 11 */
 }
     .hms-columnHeading-style {
   @apply sticky top-0 z-10 bg-slate-100;

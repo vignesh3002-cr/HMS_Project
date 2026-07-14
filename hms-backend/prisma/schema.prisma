@@ -4,7 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -106,6 +105,192 @@ model branch {
   user_branch_mapping user_branch_mapping[]
   user_log            user_log[]
   user_table          user_table[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model chemotherapy_master {
+  id                         BigInt    @id @default(autoincrement())
+  chemo_id                   String    @unique @db.VarChar(20)
+  regimen_name               String?   @db.VarChar(200)
+  regimen_code               String?   @db.VarChar(100)
+  protocol_name              String?   @db.VarChar(200)
+  protocol_version           String?   @db.VarChar(50)
+  treatment_type             String?   @db.VarChar(100)
+  treatment_intent           String?   @db.VarChar(100)
+  cancer_type                String?   @db.VarChar(200)
+  cancer_subtype             String?   @db.VarChar(200)
+  cancer_stage               String?   @db.VarChar(100)
+  diagnosis_code             String?   @db.VarChar(20)
+  department_id              String?   @db.VarChar(20)
+  branch_id                  String?   @db.VarChar(20)
+  active_status              Int?      @default(1) @db.SmallInt
+  drug_id                    String?   @db.VarChar(20)
+  drug_name                  String?   @db.VarChar(200)
+  generic_name               String?   @db.VarChar(200)
+  brand_name                 String?   @db.VarChar(200)
+  drug_class                 String?   @db.VarChar(150)
+  formulation                String?   @db.VarChar(100)
+  strength                   String?   @db.VarChar(100)
+  concentration              String?   @db.VarChar(100)
+  dosage                     Decimal?  @db.Decimal(10, 2)
+  dosage_unit                String?   @db.VarChar(30)
+  dosage_calculation_method  String?   @db.VarChar(50)
+  maximum_dose               Decimal?  @db.Decimal(10, 2)
+  minimum_dose               Decimal?  @db.Decimal(10, 2)
+  administration_route       String?   @db.VarChar(100)
+  infusion_type              String?   @db.VarChar(100)
+  infusion_duration          String?   @db.VarChar(100)
+  administration_day         String?   @db.VarChar(50)
+  cycle_day                  Int?
+  dilution_solution          String?   @db.VarChar(100)
+  dilution_volume            String?   @db.VarChar(100)
+  infusion_rate              String?   @db.VarChar(100)
+  storage_temperature        String?   @db.VarChar(100)
+  storage_condition          String?
+  expiry_period              String?   @db.VarChar(100)
+  total_cycles               Int?
+  completed_cycles           Int?      @default(0)
+  cycle_interval_days        Int?
+  frequency                  String?   @db.VarChar(100)
+  treatment_start_date       DateTime? @db.Date
+  treatment_end_date         DateTime? @db.Date
+  next_cycle_date            DateTime? @db.Date
+  planned_date               DateTime? @db.Date
+  actual_date                DateTime? @db.Date
+  treatment_status           String?   @db.VarChar(100)
+  delay_reason               String?
+  rescheduled_date           DateTime? @db.Date
+  patient_id                 String?   @db.VarChar(20)
+  age                        Int?
+  gender                     String?   @db.VarChar(20)
+  body_surface_area          Decimal?  @db.Decimal(5, 2)
+  ecog_performance_status    String?   @db.VarChar(50)
+  karnofsky_score            Int?
+  pregnancy_status           String?   @db.VarChar(50)
+  breastfeeding_status       String?   @db.VarChar(50)
+  infection_status           String?   @db.VarChar(100)
+  smoking_status             String?   @db.VarChar(50)
+  alcohol_history            String?   @db.VarChar(50)
+  hemoglobin                 Decimal?  @db.Decimal(5, 2)
+  rbc                        Decimal?  @db.Decimal(10, 2)
+  wbc                        Decimal?  @db.Decimal(10, 2)
+  platelet_count             Decimal?  @db.Decimal(10, 2)
+  neutrophil_count           Decimal?  @db.Decimal(10, 2)
+  anc                        Decimal?  @db.Decimal(10, 2)
+  creatinine                 Decimal?  @db.Decimal(5, 2)
+  creatinine_clearance       Decimal?  @db.Decimal(6, 2)
+  blood_urea                 Decimal?  @db.Decimal(6, 2)
+  sgot_ast                   Decimal?  @db.Decimal(6, 2)
+  sgpt_alt                   Decimal?  @db.Decimal(6, 2)
+  bilirubin                  Decimal?  @db.Decimal(6, 2)
+  alkaline_phosphatase       Decimal?  @db.Decimal(6, 2)
+  albumin                    Decimal?  @db.Decimal(6, 2)
+  sodium                     Decimal?  @db.Decimal(6, 2)
+  potassium                  Decimal?  @db.Decimal(6, 2)
+  calcium                    Decimal?  @db.Decimal(6, 2)
+  magnesium                  Decimal?  @db.Decimal(6, 2)
+  uric_acid                  Decimal?  @db.Decimal(6, 2)
+  coagulation_profile        String?
+  urine_test_result          String?
+  pregnancy_test             String?   @db.VarChar(100)
+  blood_pressure             String?   @db.VarChar(20)
+  pulse_rate                 Int?
+  pain_score                 Int?
+  weight_before_cycle        Decimal?  @db.Decimal(5, 2)
+  steroid_given              Boolean?  @default(false)
+  antihistamine_given        Boolean?  @default(false)
+  antiemetic_given           Boolean?  @default(false)
+  hydration_given            Boolean?  @default(false)
+  gastric_protection         Boolean?  @default(false)
+  premedication_details      String?
+  premedication_time         DateTime? @db.Timestamp(6)
+  administration_start_time  DateTime? @db.Timestamp(6)
+  administration_end_time    DateTime? @db.Timestamp(6)
+  administered_by            String?   @db.VarChar(20)
+  verified_by                String?   @db.VarChar(20)
+  iv_site                    String?   @db.VarChar(100)
+  iv_access_type             String?   @db.VarChar(100)
+  cannula_size               String?   @db.VarChar(50)
+  central_line               Boolean?  @default(false)
+  picc_line                  Boolean?  @default(false)
+  port_used                  Boolean?  @default(false)
+  pump_used                  Boolean?  @default(false)
+  infusion_completed         Boolean?  @default(false)
+  interruption_reason        String?
+  bp_monitoring              String?   @db.VarChar(100)
+  pulse_monitoring           String?   @db.VarChar(100)
+  oxygen_monitoring          String?   @db.VarChar(100)
+  temperature_monitoring     String?   @db.VarChar(100)
+  infusion_reaction          Boolean?  @default(false)
+  reaction_time              DateTime? @db.Timestamp(6)
+  reaction_severity          String?   @db.VarChar(100)
+  emergency_medication_given Boolean?  @default(false)
+  treatment_stopped          Boolean?  @default(false)
+  doctor_informed            Boolean?  @default(false)
+  nursing_notes              String?
+  nausea                     Boolean?  @default(false)
+  vomiting                   Boolean?  @default(false)
+  diarrhea                   Boolean?  @default(false)
+  constipation               Boolean?  @default(false)
+  mucositis                  Boolean?  @default(false)
+  fever                      Boolean?  @default(false)
+  fatigue                    Boolean?  @default(false)
+  neuropathy                 Boolean?  @default(false)
+  alopecia                   Boolean?  @default(false)
+  skin_rash                  Boolean?  @default(false)
+  anemia                     Boolean?  @default(false)
+  thrombocytopenia           Boolean?  @default(false)
+  neutropenia                Boolean?  @default(false)
+  infection                  Boolean?  @default(false)
+  bleeding                   Boolean?  @default(false)
+  pain                       Boolean?  @default(false)
+  toxicity_grade             String?   @db.VarChar(50)
+  ctcae_grade                String?   @db.VarChar(50)
+  dose_reduced               Boolean?  @default(false)
+  reduction_percentage       Decimal?  @db.Decimal(5, 2)
+  dose_delayed               Boolean?  @default(false)
+  delay_days                 Int?
+  dose_skipped               Boolean?  @default(false)
+  modification_reason        String?
+  physician_approval         String?   @db.VarChar(200)
+  gcsf_required              Boolean?  @default(false)
+  blood_transfusion          Boolean?  @default(false)
+  platelet_transfusion       Boolean?  @default(false)
+  antibiotics                String?
+  antifungal                 String?
+  antiviral                  String?
+  nutritional_support        String?
+  pain_management            String?
+  palliative_support         String?
+  treatment_response         String?   @db.VarChar(100)
+  response_category          String?   @db.VarChar(100)
+  disease_progression        String?   @db.VarChar(100)
+  remission_status           String?   @db.VarChar(100)
+  recurrence                 Boolean?  @default(false)
+  follow_up_date             DateTime? @db.Date
+  survival_status            String?   @db.VarChar(100)
+  completion_status          String?   @db.VarChar(100)
+  chemotherapy_charge        Decimal?  @db.Decimal(12, 2)
+  drug_charge                Decimal?  @db.Decimal(12, 2)
+  nursing_charge             Decimal?  @db.Decimal(12, 2)
+  consumable_charge          Decimal?  @db.Decimal(12, 2)
+  lab_charge                 Decimal?  @db.Decimal(12, 2)
+  pharmacy_charge            Decimal?  @db.Decimal(12, 2)
+  total_amount               Decimal?  @db.Decimal(12, 2)
+  insurance_covered          Decimal?  @db.Decimal(12, 2)
+  patient_payable            Decimal?  @db.Decimal(12, 2)
+  consent_taken              Boolean?  @default(false)
+  consent_date               DateTime? @db.Date
+  patient_education          String?
+  discharge_instruction      String?
+  remarks                    String?
+  attachment_path            String?
+  chemo_status               Int?      @default(1) @db.SmallInt
+  created_by                 String?   @db.VarChar(20)
+  created_at                 DateTime? @default(now()) @db.Timestamp(6)
+  approved_by                String?   @db.VarChar(20)
+  approved_date              DateTime? @db.Timestamp(6)
+  deleted_flag               Boolean?  @default(false)
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -224,6 +409,63 @@ model id_sequences {
   prefix         String    @db.VarChar(10)
   current_number Int       @default(0)
   updated_at     DateTime? @default(now()) @db.Timestamp(6)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model lab_history {
+  id                           BigInt    @id @default(autoincrement())
+  lab_history_id               String?   @unique @db.VarChar(20)
+  patient_id                   String?   @db.VarChar(20)
+  requested_id                 String?   @db.VarChar(20)
+  requested_by                 String?   @db.VarChar(100)
+  requested_datetime           DateTime? @db.Timestamp(6)
+  patient_full_name            String?   @db.VarChar(200)
+  patient_email                String?   @db.VarChar(150)
+  test_name                    String?   @db.VarChar(200)
+  sample_type                  String?   @db.VarChar(100)
+  priority                     String?   @db.VarChar(30)
+  lab_status                   String?   @db.VarChar(50)
+  reason_for_exclusion         String?
+  test_code                    String?   @db.VarChar(50)
+  barcode                      String?   @db.VarChar(100)
+  collection_id                String?   @db.VarChar(30)
+  collection_on                DateTime? @db.Timestamp(6)
+  requisition_no               String?   @db.VarChar(50)
+  ordered_test                 String?   @db.VarChar(200)
+  collection_datetime          DateTime? @db.Timestamp(6)
+  lab_technician_name          String?   @db.VarChar(150)
+  collection_site              String?   @db.VarChar(150)
+  collection_remarks           String?
+  required_volume              String?   @db.VarChar(50)
+  collected_volume             String?   @db.VarChar(50)
+  qr_code                      String?   @db.VarChar(255)
+  sample_id                    String?   @db.VarChar(50)
+  received_datetime            DateTime? @db.Timestamp(6)
+  received_by                  String?   @db.VarChar(150)
+  sample_verification_comments String?
+  parameter                    String?   @db.VarChar(200)
+  result                       String?   @db.VarChar(200)
+  unit                         String?   @db.VarChar(50)
+  reference_range              String?   @db.VarChar(100)
+  test_result_comment          String?
+  quality_action               String?   @db.VarChar(200)
+  quality_completed_date       DateTime? @db.Timestamp(6)
+  quality_completed_by         String?   @db.VarChar(150)
+  quality_check_comment        String?
+  completed_on                 DateTime? @db.Timestamp(6)
+  clinical_correlation         String?
+  approved_by                  String?   @db.VarChar(150)
+  approved_datetime            DateTime? @db.Timestamp(6)
+  digital_signature            String?
+  approve_result_remarks       String?
+  report_id                    String?   @db.VarChar(30)
+  delivered_to                 String?   @db.VarChar(150)
+  sent_on                      DateTime? @db.Timestamp(6)
+  delivered_on                 DateTime? @db.Timestamp(6)
+  temperature                  String?   @db.VarChar(50)
+  transport_medium             String?   @db.VarChar(100)
+  container_sealed             Boolean?
+  transport_time               DateTime? @db.Timestamp(6)
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -482,6 +724,20 @@ model user_branch_mapping {
   branch            branch     @relation(fields: [branch_id], references: [branch_id], onDelete: Cascade, map: "fk_mapping_branch")
   employees         employees? @relation(fields: [employee_id], references: [employee_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_mapping_employee")
   user_table        user_table @relation(fields: [user_id], references: [user_id], onDelete: Cascade, map: "fk_mapping_user")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model user_log {
+  id          BigInt     @id @default(autoincrement())
+  log_id      String     @unique(map: "uq_user_log_log_id") @db.VarChar(20)
+  user_id     String     @db.VarChar(20)
+  module_name String?    @db.VarChar(100)
+  action_type String     @db.VarChar(50)
+  action_time DateTime?  @default(now()) @db.Timestamp(6)
+  status      String?    @db.VarChar(20)
+  branch_id   String?    @db.VarChar(10)
+  branch      branch?    @relation(fields: [branch_id], references: [branch_id], onDelete: Cascade, map: "fk_user_log_branch")
+  user_table  user_table @relation(fields: [user_id], references: [user_id], onDelete: Cascade, map: "fk_user_log_user")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.

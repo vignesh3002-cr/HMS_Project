@@ -62,7 +62,9 @@ export interface CreateBranchResponse {
 // ✅ Make sure branchApi is exported with 'export const'
 export const branchApi = {
   // Get all branches
-  getAll: () => API.get<{ success: boolean; data: Branch[] }>("/branch"),
+  getAll: () => API.get<{
+    branches: any[]; success: boolean; data: Branch[] 
+}>("/branch"),
 
   // Create new branch (also creates its branch-admin user)
   create: (data: CreateBranchPayload) =>
