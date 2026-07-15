@@ -1,7 +1,7 @@
 import bcrypt from "bcrypt";
 import prisma from "../../config/prisma";
 import { EmployeeRepository } from "./employee.repository";
-import { CreateEmployeeDto } from "./employee.types";
+import { CreateEmployeeDto,GetEmployeesQuery } from "./employee.types";
 import { generateId } from "../../utils/idGenerator";
 
 const repository = new EmployeeRepository();
@@ -258,4 +258,26 @@ return {
 };
 
 });
-}}
+}
+  async getEmployees (
+
+    query: GetEmployeesQuery
+
+) {
+
+    return repository.getEmployees(query);
+
+};
+ async getEmployeeById(
+
+    employeeId: string
+
+){
+
+    return repository.getEmployeeById(
+        employeeId
+    );
+
+};
+
+}

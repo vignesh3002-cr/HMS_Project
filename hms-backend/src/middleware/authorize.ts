@@ -1,26 +1,23 @@
-import { Response, NextFunction } from "express";
+import { RequestHandler } from "express";
 import { AuthRequest } from "../modules/auth/auth.middleware";
 
-export const authorize = (...roles: string[]) => {
-  return (
-    req: AuthRequest,
-    res: Response,
-    next: NextFunction
-  ) => {
+export const authorize = (...roles: string[]): RequestHandler => {
+  return (req, res, next) => {
+    const authReq = req as AuthRequest;
 
     console.log("Allowed Roles:", roles);
-    console.log("User:", req.user);
-    console.log("User Role:", req.user?.role);
-    console.log("Hospital ID:", req.user?.hospital_id);
+    console.log("User:", authReq.user);
+    console.log("User Role:", authReq.user?.role);
+    console.log("Hospital ID:", authReq.user?.hospital_id);
 
-    if (!req.user) {
+    if (!authReq.user) {
       return res.status(401).json({
         success: false,
         message: "Unauthorized",
       });
     }
 
-    if (!roles.includes(req.user.role)) {
+    if (!roles.includes(authReq.user.role)) {
       console.log("Role Not Matched");
 
       return res.status(403).json({

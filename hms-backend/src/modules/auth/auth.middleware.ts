@@ -1,19 +1,16 @@
-import { Request, Response, NextFunction } from "express";
+import { Request, Response, NextFunction, RequestHandler } from "express";
 import jwt from "jsonwebtoken";
 
-export interface AuthRequest extends Request {
-  user?: any;
-}
+export type AuthRequest = Request & {
+  user: any;
+};
 
-export const authenticate = (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
+export const authenticate: RequestHandler = (req, res, next) => {
+  const authReq = req as AuthRequest;
 
   try {
 
-    const authHeader = req.headers.authorization;
+    const authHeader = authReq.headers.authorization;
 
     if (!authHeader) {
       return res.status(401).json({
@@ -37,7 +34,7 @@ export const authenticate = (
     );
     console.log(decoded);
 
-    req.user = decoded;
+    authReq.user = decoded;
 
     next();
 

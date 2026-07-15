@@ -1,4 +1,4 @@
-import { Router } from "express";
+{/*import { Router } from "express";
 
 import * as DoctorController from "./doctor.controller";
 
@@ -13,4 +13,4 @@ router.get(
     DoctorController.getDoctorByEmployeeId
 );
 
-export default router;
+export default router;*/}

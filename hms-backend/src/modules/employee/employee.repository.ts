@@ -1,4 +1,6 @@
+import { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma";
+import {GetEmployeesQuery} from "./employee.types";
 
 export class EmployeeRepository {
 
@@ -65,4 +67,290 @@ export class EmployeeRepository {
             }
         });
     }
+    async getEmployees(query: GetEmployeesQuery) {
+            const {
+
+        roleType,
+
+        branchId,
+
+        department,
+
+        status,
+
+        search,
+
+        page = 1,
+
+        limit = 10
+
+    } = query;
+
+    const where: Prisma.employeesWhereInput = {};
+    if (department) {
+
+    where.department_id = department;
+
+}
+if (branchId) {
+
+    where.branch_id = branchId;
+    
+}
+if (status !== undefined) {
+
+    where.emp_status = status;
+
+}
+if (search) {
+
+    where.OR = [
+
+        {
+
+            first_name: {
+
+                contains: search,
+
+                mode: "insensitive"
+
+            }
+
+        },
+
+        {
+
+            last_name: {
+
+                contains: search,
+
+                mode: "insensitive"
+
+            }
+
+        },
+
+        {
+
+            email: {
+
+                contains: search,
+
+                mode: "insensitive"
+
+            }
+
+        },
+
+        {
+
+            mobile_no: {
+
+                contains: search,
+
+                mode: "insensitive"
+
+            }
+
+        },
+
+        {
+
+            employee_id: {
+
+                contains: search,
+
+                mode: "insensitive"
+
+            }
+
+        }
+
+    ];
+
+}
+if (roleType) {
+
+    where.user_table = {
+
+        role_type: roleType
+
+    };
+
+}
+const employees = await prisma.employees.findMany({
+
+    where,
+
+    include: {
+
+        user_table: {
+
+            select: {
+
+                role_type: true,
+
+                user_status: true
+
+            }
+
+        },
+
+        branch: {
+
+            select: {
+
+                branch_name: true
+
+            }
+
+        }
+
+    },
+
+    skip: (page - 1) * limit,
+
+    take: limit,
+
+    orderBy: {
+
+        id: "desc"
+
+    }
+
+});
+const total = await prisma.employees.count({
+
+    where
+
+});
+return {
+
+    total,
+
+    page,
+
+    limit,
+
+    totalPages:
+
+        Math.ceil(total / limit),
+
+    employees
+
+};
+}
+async getEmployeeById(
+
+    employeeId: string
+
+){
+
+    const employee =
+        await prisma.employees.findUnique({
+
+            where: {
+
+                employee_id: employeeId
+
+            },
+
+            include: {
+
+                user_table: true,
+
+                branch: true
+
+            }
+
+        });
+
+    if (!employee) {
+
+        throw new Error(
+            "Employee not found"
+        );
+
+    }
+    const branches =
+await prisma.user_branch_mapping.findMany({
+
+    where:{
+
+        user_id: employee.user_id!
+
+    },
+
+    include:{
+
+        branch:true
+
+    }
+
+});
+const response:any={
+
+    employee,
+
+    user:employee.user_table,
+
+    branches:
+        branches.map(x=>({
+
+            branch_id:x.branch.branch_id,
+
+            branch_name:x.branch.branch_name
+
+        }))
+
+};
+switch(employee.user_table?.role_type){
+
+case "DOCTOR":
+    const doctorProfile =
+await prisma.doctor_profile.findUnique({
+
+    where:{
+
+        employee_id:employeeId
+
+    }
+
+});
+const doctorSchedules =
+await prisma.doctor_schedule.findMany({
+
+    where:{
+
+        employee_id:employeeId,
+
+        is_active:true
+
+    },
+
+    include:{
+
+        branch:{
+
+            select:{
+
+                branch_name:true
+
+            }
+
+        }
+
+    }
+
+});
+response.doctorProfile=
+doctorProfile;
+
+response.doctorSchedules=
+doctorSchedules;
+
+break;
+}
+return response;
+}
 }

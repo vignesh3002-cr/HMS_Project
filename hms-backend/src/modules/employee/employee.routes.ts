@@ -11,5 +11,10 @@ router.post(
     authenticate,
     controller.createEmployee.bind(controller)
 );
+router.get("/", controller.getEmployees.bind(controller));
+router.get(
+    "/:employeeId",
+    controller.getEmployeeById.bind(controller)
+);
 
 export default router;

@@ -78,3 +78,21 @@ export interface CreateEmployeeDto {
 
     working_hours?: WorkingHourDto[];
 }
+
+export interface GetEmployeesQuery {
+
+    roleType?: string;
+
+    branchId?: string;
+
+    department?: string;
+
+    status?: boolean;
+
+    search?: string;
+
+    page?: number;
+
+    limit?: number;
+
+}

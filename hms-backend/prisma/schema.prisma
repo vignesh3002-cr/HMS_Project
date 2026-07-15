@@ -303,7 +303,7 @@ model department_master {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model doctor_profile {
-  employee_id          String    @db.VarChar
+  employee_id          String    @unique @db.VarChar
   specialization       String    @db.VarChar(100)
   qualification        String?   @db.VarChar(150)
   license_no           String?   @unique @db.VarChar(50)
@@ -358,7 +358,7 @@ model employees {
   email                          String?               @db.VarChar(50)
   department_id                  String?               @db.VarChar(20)
   employee_id                    String?               @unique(map: "uq_employee_id") @db.VarChar(20)
-  doctor_profile                 doctor_profile[]
+  doctor_profile                 doctor_profile?
   doctor_schedule                doctor_schedule[]
   branch                         branch?               @relation(fields: [branch_id], references: [branch_id], onDelete: Cascade, map: "fk_employee_branch")
   department_master              department_master?    @relation(fields: [department_id], references: [department_id], onDelete: Cascade, map: "fk_employee_department")
