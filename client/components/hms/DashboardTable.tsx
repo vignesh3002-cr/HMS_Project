@@ -18,6 +18,7 @@ type TableViewProps = {
   sortDirection: "asc" | "desc";    // Current sort direction
   onSort: (field: string) => void;  // Callback function when sorting is triggered
   renderRow: (row: TableRow, index: number) => ReactNode; // Function to render each row's content
+  emptyMessage: string;             // Message shown when there are no rows
 };
 
 /**
@@ -40,21 +41,20 @@ function getRowId(row: TableRow) {
  * Base TableView component - a reusable, sortable table with customizable columns and rows
  * This is the core table component that handles rendering, sorting, and structure
  */
-export function TableView({ columns, rows, sortField, sortDirection, onSort, renderRow }: TableViewProps) {
+export function TableView({ columns, rows, sortField, sortDirection, onSort, renderRow, emptyMessage }: TableViewProps) {
   return (
-    <table className="w-full min-w-[640px]">
+    <table className="w-full min-w-[800px]">
       {/* Table Header Section */}
       <thead className="hms-columnHeading-style">
         <tr className="bg-[rgba(242,244,246,0.40)]">
-          {columns.map((column) => (
+          {columns.map((column, idx) => (
             <th
               key={column.key}
               // Click handler for sorting - only triggers if column is sortable
               onClick={() => column.sortable !== false && onSort(column.key)}
-              className={`px-5 py-2.5 hms-table-header ${
-                // Right-align non-sortable columns (like Actions), left-align others
-                column.sortable === false ? "text-right" : "text-left"
-              } ${column.sortable !== false ? "cursor-pointer select-none whitespace-nowrap" : "whitespace-nowrap"}`}
+              className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-8" : ""} ${
+                column.sortable !== false ? "cursor-pointer select-none whitespace-nowrap" : "whitespace-nowrap"
+              }`}
             >
               <span className="inline-flex items-center gap-1">
                 <span>{column.label}</span>
@@ -71,14 +71,22 @@ export function TableView({ columns, rows, sortField, sortDirection, onSort, ren
       </thead>
       {/* Table Body - Renders each row using the provided renderRow function */}
       <tbody>
-        {rows.map((row, index) => (
-          <tr 
-            key={`${String(row.id)}-${index}`}  // Unique key combining ID and index
-            className="border-t border-[rgba(194,198,212,0.05)] hover:bg-[#F7F9FB] transition-colors"
-          >
-            {renderRow(row, index)}
+        {rows.length > 0 ? (
+          rows.map((row, index) => (
+            <tr
+              key={`${String(row.id)}-${index}`}  // Unique key combining ID and index
+              className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F7F9FB] transition-colors group"
+            >
+              {renderRow(row, index)}
+            </tr>
+          ))
+        ) : (
+          <tr>
+            <td colSpan={columns.length} className="px-5 py-10 text-center text-[#6B7280] text-sm">
+              {emptyMessage}
+            </td>
           </tr>
-        ))}
+        )}
       </tbody>
     </table>
   );
@@ -93,7 +101,7 @@ export function TableView({ columns, rows, sortField, sortDirection, onSort, ren
  */
 export function ActionButtons({ onEdit, onView, id }: { onEdit: (id: number) => void; onView: (id: number) => void; id: number }) {
   return (
-    <div className="flex items-center justify-end gap-3">
+    <div className="flex items-center gap-1">
       {/* View Button - Dark themed, with hover effect */}
       <button 
         title="View" 
@@ -147,6 +155,7 @@ export function DoctorsTableView({ rows, sortField, sortDirection, onSort, onEdi
       sortField={sortField}
       sortDirection={sortDirection}
       onSort={onSort}
+      emptyMessage="No doctors found matching the current filters."
       // Custom render function for doctor rows
       renderRow={(row) => {
         const status = String(row.status);
@@ -154,7 +163,7 @@ export function DoctorsTableView({ rows, sortField, sortDirection, onSort, onEdi
         return (
           <>
             {/* Name column with avatar and ID */}
-            <td className="px-5 py-3">
+            <td className="px-5 py-4 pl-8">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: String(row.initBg), color: String(row.avatarColor) }}>
                   {String(row.avatar)}
@@ -166,22 +175,22 @@ export function DoctorsTableView({ rows, sortField, sortDirection, onSort, onEdi
               </div>
             </td>
             {/* Department column with colored badge */}
-            <td className="px-5 py-3">
+            <td className="px-5 py-4">
               <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: String(row.deptBg), color: String(row.deptColor) }}>
                 {String(row.dept)}
               </span>
             </td>
             {/* Branch column */}
-            <td className="px-5 py-3 text-[#191C1E] hms-content-text leading-4">{String(row.branch)}</td>
+            <td className="px-5 py-4 text-[#191C1E] hms-content-text leading-4">{String(row.branch)}</td>
             {/* Status column with dynamic styling based on active/inactive */}
-            <td className="px-5 py-3">
+            <td className="px-5 py-4">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />
                 {status}
               </span>
             </td>
             {/* Action buttons - Edit and View */}
-            <td className="px-5 py-3">
+            <td className="px-5 py-4">
               <ActionButtons onEdit={onEdit} onView={onView} id={getRowId(row)} />
             </td>
           </>
@@ -217,13 +226,14 @@ export function StaffTableView({ rows, sortField, sortDirection, onSort, onEdit,
       sortField={sortField}
       sortDirection={sortDirection}
       onSort={onSort}
+      emptyMessage="No staff found matching the current filters."
       // Similar render function to DoctorsTableView
       renderRow={(row) => {
         const status = String(row.status);
         const isActive = status === "Active";
         return (
           <>
-            <td className="px-5 py-3">
+            <td className="px-5 py-4 pl-8">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: String(row.initBg), color: String(row.avatarColor) }}>
                   {String(row.avatar)}
@@ -234,19 +244,19 @@ export function StaffTableView({ rows, sortField, sortDirection, onSort, onEdit,
                 </div>
               </div>
             </td>
-            <td className="px-5 py-3">
+            <td className="px-5 py-4">
               <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: String(row.deptBg), color: String(row.deptColor) }}>
                 {String(row.dept)}
               </span>
             </td>
-            <td className="px-5 py-3 text-[#191C1E] hms-content-text leading-4">{String(row.branch)}</td>
-            <td className="px-5 py-3">
+            <td className="px-5 py-4 text-[#191C1E] hms-content-text leading-4">{String(row.branch)}</td>
+            <td className="px-5 py-4">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />
                 {status}
               </span>
             </td>
-            <td className="px-5 py-3">
+            <td className="px-5 py-4">
               <ActionButtons onEdit={onEdit} onView={onView} id={getRowId(row)} />
             </td>
           </>
@@ -284,6 +294,7 @@ export function AppointmentsTableView({ rows, sortField, sortDirection, onSort, 
       sortField={sortField}
       sortDirection={sortDirection}
       onSort={onSort}
+      emptyMessage="No appointments found matching the current filters."
       // Complex render function for appointment rows
       renderRow={(row) => {
         const status = String(row.status);
@@ -292,7 +303,7 @@ export function AppointmentsTableView({ rows, sortField, sortDirection, onSort, 
         return (
           <>
             {/* Patient Name column with avatar and patient ID */}
-            <td className="px-5 py-3">
+            <td className="px-5 py-4 pl-8">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: String(row.avatarBg), color: String(row.avatarColor) }}>
                   {String(row.avatar)}
@@ -309,14 +320,14 @@ export function AppointmentsTableView({ rows, sortField, sortDirection, onSort, 
             </td>
 
             {/* Appointment Number with styled badge */}
-            <td className="px-5 py-3">
+            <td className="px-5 py-4">
               <span className="px-3 py-1 rounded-[20px] hms-content-text inline-block" style={{ background: "#EEF2FF", color: "#4F46E5" }}>
                 {String(row.appointmentNo)}
               </span>
             </td>
 
             {/* Assigned Doctor column with avatar and doctor ID */}
-            <td className="px-5 py-3">
+            <td className="px-5 py-4">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: String(row.doctorAvatarBg), color: String(row.doctorAvatarcolor) }}>
                   {String(row.doctorAvatar)}
@@ -333,12 +344,12 @@ export function AppointmentsTableView({ rows, sortField, sortDirection, onSort, 
             </td>
 
             {/* Reason for appointment */}
-            <td className="px-5 py-3 text-[#191C1E] hms-content-text leading-4">
+            <td className="px-5 py-4 text-[#191C1E] hms-content-text leading-4">
               {String(row.reason)}
             </td>
 
             {/* Date and Time column - shows both date and time in separate lines */}
-            <td className="px-5 py-3 text-[#191C1E] hms-content-text leading-4">
+            <td className="px-5 py-4 text-[#191C1E] hms-content-text leading-4">
               <div>{String(row.date)}</div>
               <div className="text-[#8C8D8F] hms-department-text">
                 {String(row.time)}
@@ -346,7 +357,7 @@ export function AppointmentsTableView({ rows, sortField, sortDirection, onSort, 
             </td>
 
             {/* Status column with active/inactive styling */}
-            <td className="px-5 py-3">
+            <td className="px-5 py-4">
               <span
                 className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
                 style={{
@@ -365,7 +376,7 @@ export function AppointmentsTableView({ rows, sortField, sortDirection, onSort, 
             </td>
 
             {/* Action buttons for appointment */}
-            <td className="px-5 py-3">
+            <td className="px-5 py-4">
               <ActionButtons
                 onEdit={onEdit}
                 onView={onView}

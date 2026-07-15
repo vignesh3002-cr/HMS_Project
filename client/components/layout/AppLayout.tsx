@@ -220,16 +220,6 @@ useEffect(() => {
             <div className="w-px h-6 bg-[rgba(194,198,212,0.30)]" />
 
 
-            {/* PROFILE */}
-            <div className="flex items-center gap-2">
-              <span className="hidden sm:block text-[#00488D] font-semibold text-xs">HMS</span>
-              <img
-                src="https://i.pravatar.cc/40"
-                alt="Profile"
-                className="w-8 h-8 rounded-full object-cover"
-              />
-            </div>
-
             {/* PROFILE DROPDOWN */}
             <UserProfileDropdown
               userName={hospitalData.hospital_name || "HMS"}
