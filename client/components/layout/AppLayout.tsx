@@ -68,7 +68,10 @@ const logout = () => {
     { label: "Support", to: "/support" },
   ];
 
-  const [hospitalData, setHospitalData] = useState({
+  const [userData, setUserData] = useState({
+  username: "",
+  user_id: "",
+  role: "",
   hospital_id: "",
   hospital_name: "",
   branch_id: "",
@@ -80,7 +83,10 @@ useEffect(() => {
   const syncUserData = () => {
     const user = getUser();
     if (user) {
-      setHospitalData({
+      setUserData({
+        username: user.username ?? "",
+        user_id: user.user_id ?? "",
+        role: user.role ?? "",
         hospital_id: user.hospital_id ?? "",
         hospital_name: user.hospital_name ?? "",
         branch_id: user.branch_id ?? "",
@@ -174,13 +180,13 @@ useEffect(() => {
             />
             <div>
               <div className="text-[#191C1E] font-bold text-[12px]">
-                {hospitalData.hospital_name || "HMS"}
+                {userData.username || "HMS Admin"}
               </div>
               <div className="text-[#64748B] text-[11px]">
-                {hospitalData.branch || "Admin user"}
+                {userData.user_id || "User"}
               </div>
               <div className="text-[#64748B] text-[10px]">
-                Branch Location: {hospitalData.branch_area || "N/A"}
+                Branch: {userData.branch || userData.branch_id || "N/A"}
               </div>
             </div>
           </div>
@@ -219,21 +225,10 @@ useEffect(() => {
 
             <div className="w-px h-6 bg-[rgba(194,198,212,0.30)]" />
 
-
-            {/* PROFILE */}
-            <div className="flex items-center gap-2">
-              <span className="hidden sm:block text-[#00488D] font-semibold text-xs">HMS</span>
-              <img
-                src="https://i.pravatar.cc/40"
-                alt="Profile"
-                className="w-8 h-8 rounded-full object-cover"
-              />
-            </div>
-
             {/* PROFILE DROPDOWN */}
             <UserProfileDropdown
-              userName={hospitalData.hospital_name || "HMS"}
-              userSubtext={hospitalData.branch || "Admin user"}
+              userName={userData.username || "HMS"}
+              userSubtext={userData.user_id || "Admin user"}
               onLogout={logout}
             />
 

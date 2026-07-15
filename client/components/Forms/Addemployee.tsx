@@ -3,8 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, UserRound, Loader2, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
-import { employeeApi } from "@/api/employee.api";
+import { MultiSelectDropdown } from "@/components/ui/multi-select-dropdown";
+import { TimeSelect12h } from "@/components/ui/time-select-12h";
+import { DayOfWeek, WorkingHourPayload, employeeApi } from "@/api/employee.api";
 import { branchApi, Branch } from "@/api/branch.api";
+import { departmentApi, Department } from "@/api/department.api";
 
 // ---------------------------------------------------------------------------
 // Role configuration
@@ -15,7 +18,6 @@ import { branchApi, Branch } from "@/api/branch.api";
 type RoleType = "Doctor" | "Nurse" | "Pharmacist" | "Staff" | "";
 
 interface RoleConfig {
-  departments: string[];
   designations: string[];
   specializations: string[];
   qualifications: string[];
@@ -25,20 +27,6 @@ interface RoleConfig {
 
 const ROLE_CONFIG: Record<Exclude<RoleType, "">, RoleConfig> = {
   Doctor: {
-    departments: [
-      "General Medicine",
-      "Cardiology",
-      "Orthopedics",
-      "Pediatrics",
-      "Neurology",
-      "Emergency",
-      "Surgery",
-      "Radiology",
-      "ENT",
-      "Dermatology",
-      "Gynecology",
-      "Psychiatry",
-    ],
     designations: [
       "Consultant",
       "Senior Consultant",
@@ -66,15 +54,6 @@ const ROLE_CONFIG: Record<Exclude<RoleType, "">, RoleConfig> = {
     licensePlaceholder: "Enter Doctor License Number",
   },
   Nurse: {
-    departments: [
-      "General Ward",
-      "ICU",
-      "OT",
-      "Emergency",
-      "Pediatric Ward",
-      "Maternity Ward",
-      "Outpatient",
-    ],
     designations: [
       "Staff Nurse",
       "Head Nurse",
@@ -102,12 +81,6 @@ const ROLE_CONFIG: Record<Exclude<RoleType, "">, RoleConfig> = {
     licensePlaceholder: "Enter Nursing Council Registration Number",
   },
   Pharmacist: {
-    departments: [
-      "Inpatient Pharmacy",
-      "Outpatient Pharmacy",
-      "Clinical Pharmacy",
-      "Central Store",
-    ],
     designations: [
       "Chief Pharmacist",
       "Senior Pharmacist",
@@ -126,7 +99,6 @@ const ROLE_CONFIG: Record<Exclude<RoleType, "">, RoleConfig> = {
   },
   // Non-medical staff — no specialization/qualification/license fields.
   Staff: {
-    departments: ["Administration"],
     designations: [
       "Receptionist",
       "Admin Executive",
@@ -146,34 +118,40 @@ const ROLE_CONFIG: Record<Exclude<RoleType, "">, RoleConfig> = {
 
 const ROLE_OPTIONS: Exclude<RoleType, "">[] = ["Doctor", "Nurse", "Pharmacist", "Staff"];
 
-// Maps each department name to its department_master ID.
-// NOTE: only "Administration" -> "DEP001" is a confirmed real row today;
-// the rest are placeholders and will need correcting once verified.
-const DEPARTMENT_MAP: Record<string, string> = {
-  "General Medicine": "DEPT001",
-  "Cardiology": "DEPT002",
-  "Orthopedics": "DEPT003",
-  "Pediatrics": "DEPT004",
-  "Neurology": "DEPT005",
-  "Emergency": "DEPT006",
-  "Surgery": "DEPT007",
-  "Radiology": "DEPT008",
-  "ENT": "DEPT009",
-  "Dermatology": "DEPT010",
-  "Gynecology": "DEPT011",
-  "Psychiatry": "DEPT012",
-  "General Ward": "DEPT013",
-  "ICU": "DEPT014",
-  "OT": "DEPT015",
-  "Pediatric Ward": "DEPT016",
-  "Maternity Ward": "DEPT017",
-  "Outpatient": "DEPT018",
-  "Inpatient Pharmacy": "DEPT019",
-  "Outpatient Pharmacy": "DEPT020",
-  "Clinical Pharmacy": "DEPT021",
-  "Central Store": "DEPT022",
-  "Administration": "DEP001",
-};
+// Doctor Schedule
+
+const DAYS_OF_WEEK: { value: DayOfWeek; label: string }[] = [
+  { value: "MONDAY", label: "Monday" },
+  { value: "TUESDAY", label: "Tuesday" },
+  { value: "WEDNESDAY", label: "Wednesday" },
+  { value: "THURSDAY", label: "Thursday" },
+  { value: "FRIDAY", label: "Friday" },
+  { value: "SATURDAY", label: "Saturday" },
+  { value: "SUNDAY", label: "Sunday" },
+];
+
+interface ScheduleRow {
+  day_of_week: DayOfWeek;
+  is_active: boolean;   // false = "no schedule made for this day"
+  start_time: string;
+  end_time: string;
+  branch_id: string;
+}
+
+const emptySchedule: ScheduleRow[] = DAYS_OF_WEEK.map((d) => ({
+  day_of_week: d.value,
+  is_active: false,
+  start_time: "09:00 Am",
+  end_time: "12:00 PM",
+  branch_id: "",
+}));
+
+// Shift name isn't entered manually — it's derived from the start time:
+// anything before noon is the Morning shift, otherwise Evening.
+function deriveShiftName(startTime: string): string {
+  const hour = Number(startTime.split(":")[0]);
+  return hour < 12 ? "Morning" : "Evening";
+}
 
 // Strongly typed interface for the form state.
 // Field names mirror the `employees` table columns (see hms-backend/prisma/schema.prisma)
@@ -198,14 +176,13 @@ interface EmployeeFormData {
   aadhaarNo: string;
   panNo: string;
   passportNo: string;
-  department: string;
   departmentId: string;
   designation: string;
   specialization: string;
   qualification: string;
   docLicenseNo: string;
   joiningDate: string;
-  branchId: string;
+  branchIds: string[];
   empStatus: string;
   email: string;
 }
@@ -230,14 +207,13 @@ const emptyFormData: EmployeeFormData = {
   aadhaarNo: "",
   panNo: "",
   passportNo: "",
-  department: "",
   departmentId: "",
   designation: "",
   specialization: "",
   qualification: "",
   docLicenseNo: "",
   joiningDate: "",
-  branchId: "",
+  branchIds: [],
   empStatus: "",
   email: "",
 };
@@ -247,6 +223,7 @@ export default function AddEmployee() {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
 
   // State initialized with the interface type
   const [formData, setFormData] = useState<EmployeeFormData>(emptyFormData);
@@ -262,8 +239,33 @@ export default function AddEmployee() {
       .catch(() => {});
   }, []);
 
+  // Fetch the real department list on mount for the department dropdown
+  useEffect(() => {
+    departmentApi
+      .getAll()
+      .then((res) => {
+        if (res.data?.data) setDepartments(res.data.data);
+        else if (Array.isArray(res.data)) setDepartments(res.data as unknown as Department[]);
+      })
+      .catch(() => {});
+  }, []);
+
   // Whether the Permanent Address should mirror the Current Address
   const [sameAsCurrent, setSameAsCurrent] = useState(false);
+
+  // Doctor weekly schedule — only relevant when roleType === "Doctor"
+  const [schedule, setSchedule] = useState<ScheduleRow[]>(emptySchedule);
+  const [consultationMinutes, setConsultationMinutes] = useState("20");
+
+  const handleScheduleChange = (
+    day: DayOfWeek,
+    field: keyof ScheduleRow,
+    value: string | boolean,
+  ) => {
+    setSchedule((prev) =>
+      prev.map((row) => (row.day_of_week === day ? { ...row, [field]: value } : row)),
+    );
+  };
 
   // Convenience lookup: the field presets for the currently selected role.
   // When no role is selected yet, dropdown-driven fields fall back to an
@@ -301,12 +303,15 @@ export default function AddEmployee() {
     setFormData((prev) => ({
       ...prev,
       roleType: newRole,
-      department: "",
       designation: "",
       specialization: "",
       qualification: "",
       docLicenseNo: "",
     }));
+    if (newRole !== "Doctor") {
+      setSchedule(emptySchedule);
+      setConsultationMinutes("20");
+    }
   };
 
   // Toggling the checkbox copies the current address into permanent
@@ -326,7 +331,7 @@ export default function AddEmployee() {
     e.preventDefault();
 
     // Every field is mandatory except Middle Name and Passport No.
-    const requiredFields: { key: keyof EmployeeFormData; label: string }[] = [
+    const requiredFields: { key: Exclude<keyof EmployeeFormData, "branchIds">; label: string }[] = [
       { key: "username", label: "Username" },
       { key: "password", label: "Password" },
       { key: "roleType", label: "Role" },
@@ -339,7 +344,7 @@ export default function AddEmployee() {
       { key: "email", label: "Email" },
       { key: "aadhaarNo", label: "Aadhaar No" },
       { key: "panNo", label: "PAN No" },
-      { key: "department", label: "Department" },
+      { key: "departmentId", label: "Department" },
       { key: "designation", label: "Designation" },
       ...(isMedicalRole
         ? [
@@ -350,7 +355,6 @@ export default function AddEmployee() {
         : []),
       { key: "joiningDate", label: "Joining Date" },
       { key: "empStatus", label: "Employee Status" },
-      { key: "branchId", label: "Branch" },
       { key: "emergencyContactName", label: "Emergency Contact Name" },
       { key: "emergencyContactRelation", label: "Emergency Contact Relation" },
       { key: "emergencyContactNumber", label: "Emergency Contact Number" },
@@ -367,6 +371,27 @@ export default function AddEmployee() {
       });
       return;
     }
+
+    if (formData.branchIds.length === 0) {
+      toast({
+        title: "Missing required field",
+        description: `Please select at least one "Branch".`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const workingHours: WorkingHourPayload[] = schedule
+      .filter((row) => row.is_active)
+      .map((row) => ({
+        branch_id: formData.branchIds.includes(row.branch_id)
+          ? row.branch_id
+          : formData.branchIds[0],
+        day_of_week: row.day_of_week,
+        shift_name: deriveShiftName(row.start_time),
+        start_time: row.start_time,
+        end_time: row.end_time,
+      }));
 
     setSubmitting(true);
 
@@ -391,15 +416,16 @@ export default function AddEmployee() {
         emergency_contact_name: formData.emergencyContactName,
         emergency_contact_relationship: formData.emergencyContactRelation,
         emergency_contact_number: formData.emergencyContactNumber,
-        department_id: DEPARTMENT_MAP[formData.department] ?? formData.department,
+        department_id: formData.departmentId,
         designation: formData.designation,
         specialization: isMedicalRole ? formData.specialization : undefined,
         qualification: isMedicalRole ? formData.qualification : undefined,
         doc_license_no: isMedicalRole ? formData.docLicenseNo : undefined,
         joining_date: formData.joiningDate,
         emp_status: formData.empStatus === "Active",
-        branch_ids: [formData.branchId],
-        consultation_minutes: 20,
+        branch_ids: formData.branchIds,
+        consultation_minutes: Number(consultationMinutes) || 20,
+        working_hours: formData.roleType === "Doctor" ? workingHours : undefined,
       });
 
       if (!response.data.success) {
@@ -427,6 +453,8 @@ export default function AddEmployee() {
   const handleReset = () => {
     setFormData(emptyFormData);
     setSameAsCurrent(false);
+    setSchedule(emptySchedule);
+    setConsultationMinutes("20");
   };
 
   // Shared input class for consistent styling
@@ -454,7 +482,7 @@ export default function AddEmployee() {
           <div className="p-2.5 bg-blue-50 rounded-xl flex items-center justify-center">
             <UserRound className="w-5 h-5 text-blue-600" />
           </div>
-          <h4 className="hms-heading text-gray-900 tracking-tight">
+          <h4 className="form-heading text-gray-900 tracking-tight">
             Add Employee
           </h4>
         </div>
@@ -510,6 +538,7 @@ export default function AddEmployee() {
                 type="text"
                 name="firstName"
                 placeholder="Enter First Name"
+                maxLength={50}
                 className={inputClass}
                 value={formData.firstName}
                 onChange={handleChange}
@@ -522,6 +551,7 @@ export default function AddEmployee() {
                 type="text"
                 name="middleName"
                 placeholder="Enter Middle Name"
+                maxLength={50}
                 className={inputClass}
                 value={formData.middleName}
                 onChange={handleChange}
@@ -534,6 +564,7 @@ export default function AddEmployee() {
                 type="text"
                 name="lastName"
                 placeholder="Enter Last Name"
+                maxLength={50}
                 className={inputClass}
                 value={formData.lastName}
                 onChange={handleChange}
@@ -562,6 +593,7 @@ export default function AddEmployee() {
                 type="text"
                 name="nationality"
                 placeholder="Enter Nationality"
+                maxLength={50}
                 className={inputClass}
                 value={formData.nationality}
                 onChange={handleChange}
@@ -592,6 +624,7 @@ export default function AddEmployee() {
                 pattern="[0-9]*"
                 name="mobileNo"
                 placeholder="Enter Mobile Number"
+                maxLength={15}
                 className={inputClass}
                 value={formData.mobileNo}
                 onChange={handleChange}
@@ -604,6 +637,7 @@ export default function AddEmployee() {
                 type="email"
                 name="email"
                 placeholder="Enter Email"
+                maxLength={50}
                 className={inputClass}
                 value={formData.email}
                 onChange={handleChange}
@@ -616,6 +650,7 @@ export default function AddEmployee() {
                 type="text"
                 name="aadhaarNo"
                 placeholder="Enter Aadhaar Number"
+                maxLength={20}
                 className={inputClass}
                 value={formData.aadhaarNo}
                 onChange={handleChange}
@@ -630,6 +665,7 @@ export default function AddEmployee() {
                 type="text"
                 name="panNo"
                 placeholder="Enter PAN Number"
+                maxLength={20}
                 className={inputClass}
                 value={formData.panNo}
                 onChange={handleChange}
@@ -642,6 +678,7 @@ export default function AddEmployee() {
                 type="text"
                 name="passportNo"
                 placeholder="Enter Passport Number"
+                maxLength={20}
                 className={inputClass}
                 value={formData.passportNo}
                 onChange={handleChange}
@@ -657,22 +694,20 @@ export default function AddEmployee() {
 
             {/* Row 5 - Department, Designation, Specialization */}
             <div>
-              <label className={labelClass}>
-                {formData.roleType ? `${formData.roleType} Department` : "Department"}{" "}
-                {requiredStar}
-              </label>
+              <label className={labelClass}>Department {requiredStar}</label>
               <FormDropdown
-                name="department"
-                className={roleConfig ? inputClass : disabledInputClass}
-                options={roleConfig ? roleConfig.departments : []}
-                value={formData.department}
+                name="departmentId"
+                className={inputClass}
+                options={departments.map((d) => ({
+                  label: d.department_name,
+                  value: d.department_id,
+                }))}
+                value={formData.departmentId}
                 onValueChange={(val) =>
-                  setFormData((prev) => ({ ...prev, department: val }))
+                  setFormData((prev) => ({ ...prev, departmentId: val }))
                 }
-                placeholder={
-                  roleConfig ? "Select Department" : "Select a role first"
-                }
-                disabled={submitting || !roleConfig}
+                placeholder={departments.length ? "Select Department" : "Loading departments..."}
+                disabled={submitting || departments.length === 0}
               />
             </div>
             <div>
@@ -756,6 +791,7 @@ export default function AddEmployee() {
                 <input
                   type="text"
                   name="docLicenseNo"
+                  maxLength={50}
                   placeholder={
                     roleConfig
                       ? roleConfig.licensePlaceholder
@@ -799,22 +835,114 @@ export default function AddEmployee() {
             </div>
             <div>
               <label className={labelClass}>Branch {requiredStar}</label>
-              <FormDropdown
-                name="branchId"
-                className={inputClass}
+              <MultiSelectDropdown
                 options={branches.map((b) => ({
                   label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
                   value: b.branch_id,
                 }))}
-                value={formData.branchId}
-                onValueChange={(val) =>
-                  setFormData((prev) => ({ ...prev, branchId: val }))
+                value={formData.branchIds}
+                onValueChange={(vals) =>
+                  setFormData((prev) => ({ ...prev, branchIds: vals }))
                 }
-                placeholder={branches.length ? "Select Branch" : "No branches available"}
+                placeholder={branches.length ? "Select Branch(es)" : "No branches available"}
                 disabled={submitting || branches.length === 0}
               />
             </div>
             <div />
+
+            {/* Doctor-only — weekly schedule / time slots, sourced from the
+                doctor_schedule table (day_of_week, shift_name, start_time,
+                end_time, is_active) plus branch_name from the branch table. */}
+            {formData.roleType === "Doctor" && (
+              <div className="lg:col-span-3">
+                <label className={labelClass}>Weekly Schedule</label>
+
+                <div className="mb-4 max-w-xs">
+                  <label className={labelClass}>Consultation Minutes {requiredStar}</label>
+                  <input
+                    type="number"
+                    min={1}
+                    className={inputClass}
+                    value={consultationMinutes}
+                    onChange={(e) => setConsultationMinutes(e.target.value)}
+                    disabled={submitting}
+                  />
+                </div>
+
+                <div className="hide-scrollbar rounded-xl border border-gray-200">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 text-left text-gray-600">
+                        <th className="px-4 py-2.5 font-semibold whitespace-nowrap">Day</th>
+                        <th className="px-4 py-2.5 font-semibold whitespace-nowrap">Active</th>
+                        <th className="px-4 py-2.5 font-semibold min-w-[190px]">Start Time</th>
+                        <th className="px-4 py-2.5 font-semibold min-w-[190px]">End Time</th>
+                        <th className="px-4 py-2.5 font-semibold min-w-[200px]">Branch</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {DAYS_OF_WEEK.map((day) => {
+                        const row = schedule.find((r) => r.day_of_week === day.value)!;
+                        return (
+                          <tr key={day.value}>
+                            <td className="px-4 py-2.5 font-medium text-gray-800 whitespace-nowrap">
+                              {day.label}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <input
+                                type="checkbox"
+                                checked={row.is_active}
+                                onChange={(e) =>
+                                  handleScheduleChange(day.value, "is_active", e.target.checked)
+                                }
+                                disabled={submitting}
+                                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                              />
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <TimeSelect12h
+                                value={row.start_time}
+                                onChange={(val) =>
+                                  handleScheduleChange(day.value, "start_time", val)
+                                }
+                                disabled={submitting || !row.is_active}
+                              />
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <TimeSelect12h
+                                value={row.end_time}
+                                onChange={(val) =>
+                                  handleScheduleChange(day.value, "end_time", val)
+                                }
+                                disabled={submitting || !row.is_active}
+                              />
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <FormDropdown
+                                name={`branch-${day.value}`}
+                                className={row.is_active ? inputClass : disabledInputClass}
+                                options={branches
+                                  .filter((b) => formData.branchIds.includes(b.branch_id))
+                                  .map((b) => ({
+                                    label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                                    value: b.branch_id,
+                                  }))}
+                                value={row.branch_id}
+                                onValueChange={(val) =>
+                                  handleScheduleChange(day.value, "branch_id", val)
+                                }
+                                placeholder="Select Branch"
+                                disabled={submitting || !row.is_active || branches.length === 0}
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* Row 9 - Emergency Contact Name, Relation, Number */}
             <div>
@@ -823,6 +951,7 @@ export default function AddEmployee() {
                 type="text"
                 name="emergencyContactName"
                 placeholder="Enter Contact Name"
+                maxLength={100}
                 className={inputClass}
                 value={formData.emergencyContactName}
                 onChange={handleChange}
@@ -835,6 +964,7 @@ export default function AddEmployee() {
                 type="text"
                 name="emergencyContactRelation"
                 placeholder="e.g. Spouse, Parent"
+                maxLength={50}
                 className={inputClass}
                 value={formData.emergencyContactRelation}
                 onChange={handleChange}
@@ -849,6 +979,7 @@ export default function AddEmployee() {
                 pattern="[0-9]*"
                 name="emergencyContactNumber"
                 placeholder="Enter Contact Number"
+                maxLength={15}
                 className={inputClass}
                 value={formData.emergencyContactNumber}
                 onChange={handleChange}
@@ -863,6 +994,7 @@ export default function AddEmployee() {
                 type="text"
                 name="currentAddress"
                 placeholder="Enter Current Address"
+                maxLength={255}
                 className={inputClass}
                 value={formData.currentAddress}
                 onChange={handleChange}
@@ -893,6 +1025,7 @@ export default function AddEmployee() {
                 type="text"
                 name="permanentAddress"
                 placeholder="Enter Permanent Address"
+                maxLength={255}
                 className={sameAsCurrent ? disabledInputClass : inputClass}
                 value={formData.permanentAddress}
                 onChange={handleChange}

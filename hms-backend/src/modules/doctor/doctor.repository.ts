@@ -11,7 +11,8 @@ export const getDoctors = async () => {
             user_table: true,
             doctor_profile: true,
             doctor_schedule: true,
-            branch: true
+            branch: true,
+            department_master: true
         },
         orderBy: {
             first_name: "asc"
@@ -33,6 +34,8 @@ export const getDoctorByEmployeeId = async (
             user_table: true,
 
             doctor_profile: true,
+
+            department_master: true,
 
             branch: true,
 

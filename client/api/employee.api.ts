@@ -31,6 +31,20 @@ export interface CreateEmployeePayload {
   emp_status: boolean;
   branch_ids: string[];
   consultation_minutes?: number;
+
+  // Working hours for the week
+  working_hours?:WorkingHourPayload[];
+}
+
+// Schedule for the week
+export type DayOfWeek = "MONDAY"|"TUESDAY"|"WEDNESDAY"|"THURSDAY"|"FRIDAY"|"SATURDAY"|"SUNDAY";
+
+export interface WorkingHourPayload {
+  branch_id: string;
+  day_of_week: DayOfWeek;
+  shift_name: string;
+  start_time: string; // "HH:MM" 24-hr
+  end_time: string;   // "HH:MM" 24-hr
 }
 
 export interface CreateEmployeeResponse {

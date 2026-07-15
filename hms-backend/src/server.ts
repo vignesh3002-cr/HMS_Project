@@ -29,7 +29,7 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/employees", employeeRoutes);
 app.use("/api/users", userRoutes);
-//app.use("/api/doctors", doctorRoutes);
+app.use("/api/doctors", doctorRoutes);
 app.use("/api/branch", branchRoutes);
 app.use("/api/departments", departmentRoutes);
 app.use("/api/hashpassword", async (req, res) => {
