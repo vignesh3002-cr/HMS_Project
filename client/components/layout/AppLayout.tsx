@@ -225,6 +225,7 @@ useEffect(() => {
 
             <div className="w-px h-6 bg-[rgba(194,198,212,0.30)]" />
 
+
             {/* PROFILE DROPDOWN */}
             <UserProfileDropdown
               userName={userData.username || "HMS"}

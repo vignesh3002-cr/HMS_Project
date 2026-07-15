@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+{/*import { Request, Response } from "express";
 import * as DoctorService from "./doctor.service";
 
 export const getDoctors = async (
@@ -74,4 +74,4 @@ export const getDoctorByEmployeeId = async (
 
     }
 
-}
+}*/}

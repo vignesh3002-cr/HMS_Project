@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import express from "express";
 import cors from "cors";
-import doctorRoutes from "./modules/doctor/doctor.routes";
+//import doctorRoutes from "./modules/doctor/doctor.routes";
 
 import authRoutes from "./modules/auth/auth.routes";
 import userRoutes from "./modules/auth/user/user.routes";
@@ -29,7 +29,7 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/employees", employeeRoutes);
 app.use("/api/users", userRoutes);
-app.use("/api/doctors", doctorRoutes);
+//app.use("/api/doctors", doctorRoutes);
 app.use("/api/branch", branchRoutes);
 app.use("/api/departments", departmentRoutes);
 app.use("/api/hashpassword", async (req, res) => {

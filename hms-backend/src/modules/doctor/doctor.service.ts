@@ -1,4 +1,4 @@
-import * as DoctorRepository from "./doctor.repository";
+{/*import * as DoctorRepository from "./doctor.repository";
 import prisma from "../../config/prisma";
 
 export const getDoctors = async () => {
@@ -172,4 +172,4 @@ if(!employee){
 });
 //nst role_type 
 
-});}
+});}*/}

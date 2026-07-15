@@ -19,6 +19,7 @@ import ProtectedRoute from "./routes/ProtectedRoute";
 import Doctor from "./pages/Doctor";
 import Staff from "./pages/Staff";
 
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -36,6 +37,8 @@ const protectedRoutes = [
   { path: "/doctor", element: <Doctor /> },
   { path: "/appointments", element: <Appointments /> },
   { path: "/departments", element: <Departments /> },
+  
+
 
    { path: "/Staff", element: <Staff /> },
 

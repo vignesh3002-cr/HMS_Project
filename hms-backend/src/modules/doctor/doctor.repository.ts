@@ -1,4 +1,4 @@
-import prisma from "../../config/prisma";
+{/*import prisma from "../../config/prisma";
 
 export const getDoctors = async () => {
     return prisma.employees.findMany({
@@ -51,4 +51,4 @@ export const getDoctorByEmployeeId = async (
 
     });
 
-};
+};*/}
