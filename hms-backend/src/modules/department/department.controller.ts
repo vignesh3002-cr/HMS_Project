@@ -1,14 +1,19 @@
 import { Request, Response } from "express";
-import {DepartmentService} from "./department.services";
+import { DepartmentService } from "./department.services";
+
 const departmentService = new DepartmentService();
+
 export class DepartmentController {
+
     async getAllDepartments(req: Request, res: Response) {
         try {
             const departments = await departmentService.getAllDepartments();
+
             return res.status(200).json({
                 success: true,
                 data: departments
             });
+
         } catch (error: any) {
             return res.status(400).json({
                 success: false,
@@ -16,4 +21,22 @@ export class DepartmentController {
             });
         }
     }
+
+    async createDepartment(req: Request, res: Response) {
+        try {
+            const department = await departmentService.createDepartment(req.body);
+
+            return res.status(201).json({
+                success: true,
+                data: department
+            });
+
+        } catch (error: any) {
+            return res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
 }
