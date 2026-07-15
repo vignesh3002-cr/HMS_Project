@@ -38,7 +38,6 @@ interface AdministrativeStaffRow {
   role: string;
   roleColor: "purple" | "indigo";
   branch: string;
-  branchLoc: string;
   access: string;
   accessColor: "purple" | "indigo";
   login: string;
@@ -271,8 +270,7 @@ const administrativeStaffData: AdministrativeStaffRow[] = [
     id: "ADM-9042",
     role: "Head Admin",
     roleColor: "purple",
-    branch: "Central Hospital",
-    branchLoc: "(Tambaram)",
+    branch: "Central Hospital Tambaram",
     access: "Super Admin",
     accessColor: "purple",
     login: "Today ,09:42 AM",
@@ -286,8 +284,7 @@ const administrativeStaffData: AdministrativeStaffRow[] = [
     id: "RC-9042",
     role: "Branch Admin",
     roleColor: "indigo",
-    branch: "Central Hospital",
-    branchLoc: "(Saidapet)",
+    branch: "Central Hospital Saidapet",
     access: "Admin",
     accessColor: "indigo",
     login: "Today, 10:30 AM",
@@ -301,8 +298,7 @@ const administrativeStaffData: AdministrativeStaffRow[] = [
     id: "ADM-9042",
     role: "Head Admin",
     roleColor: "purple",
-    branch: "Central Hospital",
-    branchLoc: "(Tambaram)",
+    branch: "Central Hospital Tambaram",
     access: "Super Admin",
     accessColor: "purple",
     login: "Today ,09:42 AM",
@@ -316,8 +312,7 @@ const administrativeStaffData: AdministrativeStaffRow[] = [
     id: "ADM-9043",
     role: "Branch Admin",
     roleColor: "indigo",
-    branch: "Central Hospital",
-    branchLoc: "(Chromepet)",
+    branch: "Central Hospital Chromepet",
     access: "Admin",
     accessColor: "indigo",
     login: "Today ,09:42 AM",
@@ -331,8 +326,7 @@ const administrativeStaffData: AdministrativeStaffRow[] = [
     id: "ADM-9042",
     role: "Head Admin",
     roleColor: "purple",
-    branch: "Central Hospital",
-    branchLoc: "(Tambaram)",
+    branch: "Central Hospital Tambaram",
     access: "Super Admin",
     accessColor: "purple",
     login: "Today ,09:42 AM",
@@ -346,8 +340,7 @@ const administrativeStaffData: AdministrativeStaffRow[] = [
     id: "ADM-9044",
     role: "Head Admin",
     roleColor: "purple",
-    branch: "Central Hospital",
-    branchLoc: "(Egmore)",
+    branch: "Central Hospital Egmore",
     access: "Super Admin",
     accessColor: "purple",
     login: "Yesterday ,08:20 PM",
@@ -361,8 +354,7 @@ const administrativeStaffData: AdministrativeStaffRow[] = [
     id: "ADM-9042",
     role: "Head Admin",
     roleColor: "purple",
-    branch: "Central Hospital",
-    branchLoc: "(Tambaram)",
+    branch: "Central Hospital Tambaram",
     access: "Super Admin",
     accessColor: "purple",
     login: "Today ,09:42 AM",
@@ -376,8 +368,7 @@ const administrativeStaffData: AdministrativeStaffRow[] = [
     id: "ADM-9045",
     role: "Branch Admin",
     roleColor: "indigo",
-    branch: "Central Hospital",
-    branchLoc: "(Triplicane)",
+    branch: "Central Hospital Triplicane",
     access: "Admin",
     accessColor: "indigo",
     login: "Today ,09:42 AM",
@@ -391,8 +382,7 @@ const administrativeStaffData: AdministrativeStaffRow[] = [
     id: "ADM-9042",
     role: "Head Admin",
     roleColor: "purple",
-    branch: "Central Hospital",
-    branchLoc: "(Tambaram)",
+    branch: "Central Hospital Tambaram",
     access: "Super Admin",
     accessColor: "purple",
     login: "Today ,09:42 AM",
@@ -406,8 +396,7 @@ const administrativeStaffData: AdministrativeStaffRow[] = [
     id: "ADM-9042",
     role: "Head Admin",
     roleColor: "purple",
-    branch: "Central Hospital",
-    branchLoc: "(Tambaram)",
+    branch: "Central Hospital Tambaram",
     access: "Super Admin",
     accessColor: "purple",
     login: "Today ,09:42 AM",
@@ -806,7 +795,7 @@ function AdministrativeTableView({
                 <span className="text-[#191C1E] hms-content-text">
                   {staff.branch}
                   <br />
-                  {staff.branchLoc}
+                
                 </span>
               </td>
 
@@ -1043,7 +1032,7 @@ export default function Staff() {
   }, [activeTab]);
 
   const staffFilterFields: FilterField[] = [
-    { id: "name", label: "Staff Name", type: "text", placeholder: "Search by name" },
+    
       { id: "id", label: "Staff ID", type: "text", placeholder: "Enter ID" },
     {
       id: "dept", label: "Department", type: "multiselect", options: [
@@ -1069,15 +1058,11 @@ export default function Staff() {
         { label: "Active", value: "active" },
         { label: "Leave", value: "leave" },
         { label: "Inactive", value: "inactive" },
+         { label: "Resigned", value: "Resigned" },
+      { label: "Suspended", value: "Suspended" },
       ],
     },
-    {
-      id: "id",
-      label: "Staff ID",
-      type: "combobox",
-      placeholder: "Search ID",
-      options: staffData.map((s) => ({ label: s.id, value: s.id })),
-    },
+    
     { id: "role", label: "Role", type: "multiselect", options: [
       { label: "Cardiologist", value: "Cardiologist" },
       { label: "Oncologist", value: "Oncologist" },
@@ -1087,25 +1072,7 @@ export default function Staff() {
       { label: "Radiologist", value: "Radiologist" },
       { label: "General Surgeon", value: "General Surgeon" },
     ]},
-    { id: "department", label: "Department", type: "multiselect", options: [
-      { label: "Cardiology", value: "Cardiology" },
-      { label: "Cancer", value: "Cancer" },
-      { label: "Pediatrics", value: "Pediatrics" },
-      { label: "Neurology", value: "Neurology" },
-      { label: "Emergency", value: "Emergency" },
-      { label: "Surgery", value: "Surgery" },
-    ]},
-    { id: "branch", label: "Branch", type: "multiselect", options: [
-      { label: "Central Hospital (Tambaram)", value: "Central Hospital (Tambaram)" },
-      { label: "Central Hospital (Saidapet)", value: "Central Hospital (Saidapet)" },
-      { label: "Central Hospital (Egmore)", value: "Central Hospital (Egmore)" },
-    ]},
-    { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "Active", value: "Active" },
-      { label: "Leave", value: "Leave" },
-      { label: "Resigned", value: "Resigned" },
-      { label: "Suspended", value: "Suspended" },
-    ]},
+    
   ];
 
   // ---- EXPORT DROPDOWN ----
@@ -1320,7 +1287,7 @@ export default function Staff() {
                   </button>
                   <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                     <PopoverTrigger asChild>
-                      <button className="flex items-center justify-center h-[27px] min-w-[58px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium drop-shadow-[0px_1px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:bg-[#F2F4F6]">
+                      <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium drop-shadow-[0px_1px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:bg-[#F2F4F6]">
                         {isToday(selectedDate)
                           ? "Today"
                           : isYesterday(selectedDate)
