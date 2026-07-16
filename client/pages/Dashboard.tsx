@@ -8,6 +8,8 @@ import CalendarPicker from "@/components/hms/Calender";
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
+import { useToast } from "@/hooks/use-toast";
+import { doctorApi } from "@/api/doctor.api";
 
 
 
@@ -448,6 +450,37 @@ const stats = [
   },
 ];
 
+// Cosmetic-only values the real /doctors endpoint doesn't return (avatar
+// initials/colors, department badge colors) — cycled per row so real data
+// still renders with the same visual style as the static fallback rows.
+const AVATAR_PALETTE = [
+  { avatarColor: "#00488D", initBg: "#D6E3FF" },
+  { avatarColor: "#7B3200", initBg: "#FFDBCB" },
+  { avatarColor: "#00C896", initBg: "rgba(0,200,150,0.12)" },
+  { avatarColor: "#475C7F", initBg: "#E6E8EA" },
+];
+
+function getInitials(name: string): string {
+  const words = name.replace(/^Dr\.?\s*/i, "").trim().split(/\s+/);
+  return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
+}
+
+function mapDoctorRecord(doc: import("@/api/doctor.api").DoctorRecord, index: number) {
+  const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
+  return {
+    avatar: getInitials(doc.doctor_name),
+    avatarColor: palette.avatarColor,
+    initBg: palette.initBg,
+    name: doc.doctor_name,
+    id: doc.employee_id,
+    dept: doc.department || "Unassigned",
+    deptBg: "#E6E8EA",
+    deptColor: "#475C7F",
+    branch: doc.branch_name || "—",
+    status: doc.status ? "Active" : "Inactive",
+  };
+}
+
 function parseStatValue(value: string): number {
   return Number(value.replace(/,/g, ""));
 }
@@ -544,7 +577,37 @@ function RowsPerPageSelect({ value, onChange, options = [5, 10, 20] }: { value: 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("doctors");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  
+  const { toast } = useToast();
+
+  // Real doctors fetched from the backend, replacing the static `doctors`
+  // array below once available. Stays null (falls back to static data) if
+  // the request fails or returns nothing.
+  const [realDoctors, setRealDoctors] = useState<TableRow[] | null>(null);
+
+  useEffect(() => {
+    doctorApi
+      .getAll()
+      .then((res) => {
+        const records = res.data?.data;
+        if (records && records.length > 0) {
+          setRealDoctors(records.map(mapDoctorRecord));
+        } else {
+          toast({
+            title: "Using fallback data",
+            description: "No doctor records returned yet — showing sample data.",
+            variant: "destructive",
+          });
+        }
+      })
+      .catch(() => {
+        toast({
+          title: "Using fallback data",
+          description: "Couldn't reach the doctors API — showing sample data.",
+          variant: "destructive",
+        });
+      });
+  }, []);
+
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -667,7 +730,7 @@ export default function Dashboard() {
       ? staff
       : activeTab === "appointments"
         ? appointments
-        : doctors ;
+        : (realDoctors ?? doctors);
 
   const searchableFields =
     activeTab === "appointments"

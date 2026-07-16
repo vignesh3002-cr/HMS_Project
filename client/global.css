@@ -10,7 +10,11 @@
   .hms-heading {
     @apply text-[#191C1E] font-extrabold text-2xl leading-8 tracking-[-0.6px];
   }
-  .hms-subheading {
+   .form-heading {
+    @apply text-[#111827] text-2xl font-bold leading-tight tracking-[-0.03em];
+    @apply text-[#111827] text-2xl font-bold leading-tight tracking-[-0.03em];
+   }
+   .hms-subheading {
     @apply text-[#424752] text-xs font-medium leading-4;
   }
   .hms-table-header {
@@ -47,7 +51,7 @@
   }
 
   .slim-scrollbar {
-    scrollbar-width: thin; /* Firefox */
+    scrollbar-width: thin; /* Firefox */  
     scrollbar-color: #CBD5E1 transparent;
   }
 

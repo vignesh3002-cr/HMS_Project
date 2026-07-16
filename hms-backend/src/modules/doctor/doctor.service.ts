@@ -22,7 +22,7 @@ export const getDoctors = async () => {
             doctor.doctor_profile[0]?.consultation_minutes,
 
         department:
-            doctor.department,
+            doctor.department_master,
 
         branch_name:
             doctor.branch?.branch_name,
@@ -69,7 +69,7 @@ export const getDoctorByEmployeeId = async (
 
             mobile_no: doctor.mobile_no,
 
-            department: doctor.department,
+            department: doctor.department_master,
 
             designation: doctor.designation,
 

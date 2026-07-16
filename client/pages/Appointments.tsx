@@ -1,65 +1,297 @@
-import { useMemo, useState } from "react";
-import { CalendarPlus, Clock3, Stethoscope, UserRound } from "lucide-react";
-
-import { DataPanel } from "@/components/hms/DataPanel";
-import { PageHeader } from "@/components/hms/PageHeader";
-import { StatusBadge } from "@/components/hms/StatusBadge";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import React, { useState, useEffect, useRef, useMemo } from "react";
+import {
+  Download,
+  Plus,
+  ChevronDown,
+  Check,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  MoreVertical,
+} from "lucide-react";
+import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import CalendarPicker from "@/components/hms/Calender";
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
 
-const appointmentFilters = ["All", "Confirmed", "Waiting", "Completed"] as const;
-type AppointmentFilter = (typeof appointmentFilters)[number];
 
-const statusTone = {
-  Confirmed: "green",
-  Waiting: "amber",
-  Completed: "blue",
-} as const;
+interface Appointment {
+  id: string;
+  patient: string;
+  patientId: string;
+  patientInitial: string;
+  avatarColor: string;
+  branch: string;
+  
+  doctor: string;
+  doctorId: string;
+  doctorInitial: string;
+  date: string;
+  time: string;
+  status: string;
+}
 
-const appointments = [
-  {
-    time: "09:00",
-    patient: "Nisha Patel",
-    doctor: "Dr. Iyer",
-    department: "Cardiology",
-    status: "Confirmed",
-  },
-  {
-    time: "09:30",
-    patient: "Dev Malhotra",
-    doctor: "Dr. Rao",
-    department: "Orthopedics",
-    status: "Waiting",
-  },
-  {
-    time: "10:15",
-    patient: "Anika Bose",
-    doctor: "Dr. Fernandez",
-    department: "Pediatrics",
-    status: "Confirmed",
-  },
-  {
-    time: "11:00",
-    patient: "Vikram Sethi",
-    doctor: "Dr. Kapoor",
-    department: "Neurology",
-    status: "Completed",
-  },
-  {
-    time: "12:20",
-    patient: "Leena Shah",
-    doctor: "Dr. Mehta",
-    department: "General Medicine",
-    status: "Waiting",
-  },
-] as const;
 
-export default function Appointments() {
-  const [filter, setFilter] = useState<AppointmentFilter>("All");
+const appointments: Appointment[] = [
+  {
+    id: "APT-2026-8842",
+    patient: "James Wilson",
+    patientId: "PAT-0025",
+    patientInitial: "JW",
+    avatarColor: "bg-blue-100 text-blue-600",
+    branch: "Central Hospital Tambaram",
+    doctor: "Dr. Sarah Johnson",
+    doctorId: "DOC-2210",
+    doctorInitial: "MR",
+    date: "05/20/2026",
+    time: "11:20 AM",
+    status: "Scheduled",
+  },
 
+  {
+    id: "APT-2026-8843",
+    patient: "Priya",
+    patientId: "PAT-0002",
+    patientInitial: "P",
+    avatarColor: "bg-green-100 text-green-600",
+    branch: "Central Hospital Tambaram",
+    doctor: "Dr. Emily Blunt",
+    doctorId: "DOC-0002",
+    doctorInitial: "EB",
+    date: "05/20/2026",
+    time: "11:40 AM",
+    status: "Conformed",
+  },
+
+  {
+    id: "APT-2026-8845",
+    patient: "Jane",
+    patientId: "PAT-0003",
+    patientInitial: "J",
+    avatarColor: "bg-blue-100 text-blue-600",
+    branch: "Central Hospital Egmore",
+    doctor: "Dr. Robert Fox",
+    doctorId: "DOC-0003",
+    doctorInitial: "RF",
+    date: "05/20/2026",
+    time: "01:30 PM",
+    status: "Scheduled",
+  },
+  {
+    id: "APT-2026-8846",
+    patient: "John Cena",
+    patientId: "PAT-0003",
+    patientInitial: "JC",
+    avatarColor: "bg-blue-100 text-blue-600",
+    branch: "Central Hospital Egmore",
+    doctor: "Dr. Robert Fox",
+    doctorId: "DOC-0003",
+    doctorInitial: "RF",
+    date: "05/20/2026",
+    time: "01:30 PM",
+    status: "Cancelled",
+  },
+  {
+    id: "APT-2026-8847",
+    patient: "Jaden Smith",
+    patientId: "PAT-0004",
+    patientInitial: "JS",
+    avatarColor: "bg-blue-100 text-blue-600",
+    branch: "Central Hospital Egmore",
+    doctor: "Dr. Robert Fox",
+    doctorId: "DOC-0003",
+    doctorInitial: "RF",
+    date: "05/20/2026",
+    time: "01:30 PM",
+    status: "Rescheduled",
+  },
+  {
+    id: "APT-2026-8848",
+    patient: "Tom Cruise",
+    patientId: "PAT-0005",
+    patientInitial: "TC",
+    avatarColor: "bg-blue-100 text-blue-600",
+    branch: "Central Hospital Egmore",
+    doctor: "Dr. Robert Fox",
+    doctorId: "DOC-0003",
+    doctorInitial: "RF",
+    date: "05/20/2026",
+    time: "01:30 PM",
+    status: "Scheduled",
+  },
+  {
+    id: "APT-2026-8847",
+    patient: "Robert Downey Jr.",
+    patientId: "PAT-0006",
+    patientInitial: "RDJ",
+    avatarColor: "bg-blue-100 text-blue-600",
+    branch: "Central Hospital Egmore",
+    doctor: "Dr. Robert Fox",
+    doctorId: "DOC-0003",
+    doctorInitial: "RF",
+    date: "05/20/2026",
+    time: "01:30 PM",
+    status: "Scheduled",
+  },
+  {
+    id: "APT-2026-8845",
+    patient: "Jane",
+    patientId: "PAT-0003",
+    patientInitial: "J",
+    avatarColor: "bg-blue-100 text-blue-600",
+    branch: "Central Hospital Egmore",
+    doctor: "Dr. Robert Fox",
+    doctorId: "DOC-0003",
+    doctorInitial: "RF",
+    date: "05/20/2026",
+    time: "01:30 PM",
+    status: "Scheduled",
+  },
+  {
+    id: "APT-2026-8845",
+    patient: "Jane",
+    patientId: "PAT-0003",
+    patientInitial: "J",
+    avatarColor: "bg-blue-100 text-blue-600",
+    branch: "Central Hospital Egmore",
+    doctor: "Dr. Robert Fox",
+    doctorId: "DOC-0003",
+    doctorInitial: "RF",
+    date: "05/20/2026",
+    time: "01:30 PM",
+    status: "Scheduled",
+  },
+  {
+    id: "APT-2026-8845",
+    patient: "Jane",
+    patientId: "PAT-0003",
+    patientInitial: "J",
+    avatarColor: "bg-blue-100 text-blue-600",
+    branch: "Central Hospital Egmore",
+    doctor: "Dr. Robert Fox",
+    doctorId: "DOC-0003",
+    doctorInitial: "RF",
+    date: "05/20/2026",
+    time: "01:30 PM",
+    status: "Scheduled",
+  },
+  {
+    id: "APT-2026-8845",
+    patient: "Jane",
+    patientId: "PAT-0003",
+    patientInitial: "J",
+    avatarColor: "bg-blue-100 text-blue-600",
+    branch: "Central Hospital Egmore",
+    doctor: "Dr. Robert Fox",
+    doctorId: "DOC-0003",
+    doctorInitial: "RF",
+    date: "05/20/2026",
+    time: "01:30 PM",
+    status: "Scheduled",
+  },
+  {
+    id: "APT-2026-8845",
+    patient: "Jane",
+    patientId: "PAT-0003",
+    patientInitial: "J",
+    avatarColor: "bg-blue-100 text-blue-600",
+    branch: "Central Hospital Egmore",
+    doctor: "Dr. Robert Fox",
+    doctorId: "DOC-0003",
+    doctorInitial: "RF",
+    date: "01/01/2026",
+    time: "01:30 PM",
+    status: "Scheduled",
+  },
+];
+
+
+const statusStyles: Record<string, string> = {
+  Scheduled: "bg-blue-50 text-blue-600",
+  Conformed: "bg-green-50 text-green-600",
+  Cancelled: "bg-red-50 text-red-600",
+  Rescheduled: "bg-amber-50 text-amber-600",
+};
+
+// Rows-per-page dropdown (matches Dashboard.tsx / Patients.tsx / Staff.tsx)
+function RowsPerPageSelect({
+  value,
+  onChange,
+  options = [5, 10, 20],
+}: {
+  value: number;
+  onChange: (val: number) => void;
+  options?: number[];
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative" ref={wrapperRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-1.5 text-xs font-semibold text-[#374151] bg-white border rounded-md pl-2.5 pr-2 py-1 transition-colors ${
+          open ? "border-[#00488D] ring-2 ring-[#D6E3FF]" : "border-[#E5E7EB] hover:border-[#00488D]"
+        }`}
+      >
+        {value}
+        <ChevronDown className={`w-3 h-3 text-[#6B7280] transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      <div
+        className={`absolute right-0 top-full mt-1 w-16 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
+          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
+        }`}
+      >
+        {options.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => { onChange(opt); setOpen(false); }}
+            className={`flex items-center justify-between w-full px-2.5 py-1.5 text-xs font-semibold text-left transition-colors ${
+              value === opt ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
+            }`}
+          >
+            {opt}
+            {value === opt && <Check className="w-3 h-3" />}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const AppointmentSchedule: React.FC = () => {
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+
+  // Sort state
+  const [sortField, setSortField] = useState("");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Date selection
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+
+  // Filters
   const {
     values: filterValues,
     appliedValues,
@@ -70,129 +302,661 @@ export default function Appointments() {
     handleClear: handleClearFilter,
   } = useFilterPanel();
 
+  const branchOptions = useMemo(
+    () =>
+      Array.from(new Set(appointments.map((item) => item.branch))).map((value) => ({
+        label: value,
+        value,
+      })),
+    [],
+  );
+
+  const statusOptions = useMemo(
+    () =>
+      Array.from(new Set(appointments.map((item) => item.status))).map((value) => ({
+        label: value,
+        value,
+      })),
+    [],
+  );
+
   const appointmentFilterFields: FilterField[] = [
     { id: "patient", label: "Patient Name", type: "text", placeholder: "Search by name" },
-    { id: "doctor", label: "Doctor", type: "text", placeholder: "Search by doctor" },
-    { id: "department", label: "Department", type: "multiselect", options: [
-      { label: "Cardiology", value: "Cardiology" },
-      { label: "Orthopedics", value: "Orthopedics" },
-      { label: "Pediatrics", value: "Pediatrics" },
-      { label: "Neurology", value: "Neurology" },
-      { label: "General Medicine", value: "General Medicine" },
-    ]},
-    { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "Confirmed", value: "Confirmed" },
-      { label: "Waiting", value: "Waiting" },
-      { label: "Completed", value: "Completed" },
-    ]},
+    { id: "patientId", label: "Patient ID", type: "text", placeholder: "Enter ID" },
+    { id: "date", label: "Appointment Date", type: "text", placeholder: "Enter date" },
+    { id: "branch", label: "Branch", type: "multiselect", options: branchOptions },
+    { id: "doctor", label: "Doctor Name", type: "text", placeholder: "Search by doctor" },
+    { id: "status", label: "Status", type: "multiselect", options: statusOptions },
   ];
 
-  const visibleAppointments = useMemo(() => {
-    let result = [...appointments];
+  // Search & filter
+  const searchableFields: (keyof Appointment)[] = [
+    "id",
+    "patient",
+    "patientId",
+    "branch",
+    "date",
+    "doctor",
+    "doctorId",
+    "status",
+  ];
 
-    if (filter !== "All") {
-      result = result.filter((appointment) => appointment.status === filter);
+  const filteredData = useMemo(() => {
+    let result: Appointment[] = [...appointments];
+
+    if (searchQuery) {
+      result = result.filter((item) =>
+        searchableFields.some((field) =>
+          String(item[field] ?? "")
+            .toLowerCase()
+            .includes(searchQuery.toLowerCase()),
+        ),
+      );
     }
 
-    result = filterDataByValues(result, appliedValues);
+    result = filterDataByValues(
+      result as unknown as Record<string, string | number>[],
+      appliedValues,
+    ) as unknown as Appointment[];
 
     return result;
-  }, [filter, appliedValues]);
+  }, [searchQuery, appliedValues]);
+
+  // ---- SORTING ----
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDirection("asc");
+    }
+  };
+
+  const sortedData = useMemo(() => {
+    if (!sortField) return filteredData;
+    return [...filteredData].sort((a, b) => {
+      const aValue = String(a[sortField as keyof Appointment] ?? "").toLowerCase();
+      const bValue = String(b[sortField as keyof Appointment] ?? "").toLowerCase();
+      if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
+      if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [filteredData, sortField, sortDirection]);
+
+  // ---- PAGINATION ----
+  const totalRecords = sortedData.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / rowsPerPage));
+  const startIndex = (currentPage - 1) * rowsPerPage;
+  const endIndex = startIndex + rowsPerPage;
+  const currentRows = sortedData.slice(startIndex, endIndex);
+  const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
+  const visibleEnd = Math.min(endIndex, totalRecords);
+
 
   return (
-    <>
-      <PageHeader
-        eyebrow="Schedule"
-        title="Appointments"
-        description="Coordinate outpatient visits and keep waiting-room flow clear for care teams."
-        actions={
-          <Button className="bg-clinical-blue hover:bg-clinical-blue-mid">
-            <CalendarPlus className="h-4 w-4" />
-            New appointment
-          </Button>
-        }
-      />
+    <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
+      <div className="flex flex-col flex-1 min-w-0">
+        <main className="flex flex-col gap-6">
 
-      <DataPanel
-        title="Today's Schedule"
-        description={`${visibleAppointments.length} appointments in view`}
-        action={
-          <div className="flex flex-wrap items-center gap-2">
-            {appointmentFilters.map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setFilter(item)}
-                className={cn(
-                  "rounded-md border px-3 py-2 text-sm font-bold transition",
-                  filter === item
-                    ? "border-clinical-blue bg-clinical-blue text-white"
-                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
-                )}
-              >
-                {item}
-              </button>
-            ))}
-            <FilterPopover
-              fields={appointmentFilterFields}
-              values={filterValues}
-              onChange={handleFilterChange}
-              onApply={handleApplyFilter}
-              onClear={handleClearFilter}
-              open={isFilterOpen}
-              onOpenChange={setIsFilterOpen}
-            />
-          </div>
-        }
-      >
-        <div className="space-y-3">
-          {visibleAppointments.map((appointment) => (
-            <div
-              key={`${appointment.time}-${appointment.patient}`}
-              className="grid gap-4 rounded-lg border border-slate-200 p-4 md:grid-cols-[120px_1fr_auto]"
-            >
-              <div className="flex items-center gap-2 font-extrabold text-slate-950">
-                <Clock3 className="h-4 w-4 text-clinical-blue" />
-                {appointment.time}
-              </div>
+          {/* ==================== HEADER ==================== */}
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 rounded-md bg-blue-50 p-2 text-blue-700">
-                    <UserRound className="h-4 w-4" />
-                  </span>
-                  <div>
-                    <p className="font-bold text-slate-950">
-                      {appointment.patient}
-                    </p>
-                    <p className="mt-1 text-sm text-slate-500">Patient</p>
-                  </div>
-                </div>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
 
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 rounded-md bg-emerald-50 p-2 text-emerald-700">
-                    <Stethoscope className="h-4 w-4" />
-                  </span>
-                  <div>
-                    <p className="font-bold text-slate-950">
-                      {appointment.doctor}
-                    </p>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {appointment.department}
-                    </p>
-                  </div>
-                </div>
-              </div>
+            <div>
+              <h1 className="hms-heading">
+                Appointment Schedule
+              </h1>
 
-              <div className="flex items-center md:justify-end">
-                <StatusBadge tone={statusTone[appointment.status]}>
-                  {appointment.status}
-                </StatusBadge>
-              </div>
+              <p className="hms-subheading mt-1">
+                Total Appointments: {appointments.length}
+              </p>
+
             </div>
-          ))}
-        </div>
-      </DataPanel>
-    </>
+
+
+            <div className="flex items-center gap-3">
+
+              <button
+                className="flex items-center gap-2 px-4 py-2 border border-[#E5E7EB] bg-white rounded-lg text-[#424752] text-xs font-semibold shadow-sm hover:bg-[#F2F4F6] transition-colors"
+              >
+
+                <Download className="w-4 h-4" />
+                Export report
+
+              </button>
+
+
+
+              <button
+                className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
+              >
+
+                <Plus className="w-4 h-4" />
+                Add patient
+
+              </button>
+
+
+            </div>
+
+
+          </div>
+
+          {/* ==================== MAIN CARD ==================== */}
+
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col min-h-[500px] transition-all duration-300 hover:shadow-md">
+
+
+            {/* ==================== TOOLBAR ==================== */}
+
+            <div className="px-5 py-4 border-b border-[#E5E7EB] flex flex-wrap items-center justify-between gap-4">
+
+
+              <div className="flex flex-wrap items-center gap-3">
+
+
+                
+
+
+
+                <button
+                  className="flex items-center gap-2 px-3 py-1.5 border border-[#E5E7EB] rounded-md text-xs font-semibold text-[#374151] hover:border-[#00488D] transition-colors"
+                >
+
+                  List View
+
+                  <ChevronDown className="w-3 h-3 text-[#6B7280]" />
+
+                </button>
+
+
+              </div>
+
+
+              <div className="flex items-center gap-3 flex-wrap">
+
+                {/* Search */}
+
+                <div className="relative">
+
+                  <input
+                    type="text"
+                    placeholder="Search"
+                    value={searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:w-[200px] sm:focus:w-[250px]"
+                  />
+
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
+
+                </div>
+
+
+
+                {/* Date nav */}
+
+                <div className="flex items-center">
+
+                  <button
+                    onClick={() => setSelectedDate((prev) => subDays(prev, 1))}
+                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                  >
+                    <ChevronLeft className="w-3 h-3 text-[#424752]" />
+                  </button>
+
+
+                  <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                    <PopoverTrigger asChild>
+                      <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
+                        {isToday(selectedDate)
+                          ? "Today"
+                          : isYesterday(selectedDate)
+                            ? "Yesterday"
+                            : isTomorrow(selectedDate)
+                              ? "Tomorrow"
+                              : format(selectedDate, "dd/MM/yyyy")}
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
+                      <CalendarPicker
+                        selected={selectedDate}
+                        hideThemePicker
+                        onSelect={(date) => {
+                          setSelectedDate(date);
+                          setIsCalendarOpen(false);
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
+
+
+                  <button
+                    onClick={() => setSelectedDate((prev) => addDays(prev, 1))}
+                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                  >
+                    <ChevronRight className="w-3 h-3 text-[#424752]" />
+                  </button>
+
+                </div>
+
+
+
+                {/* Filters */}
+
+                <FilterPopover
+                  title="Filters"
+                  fields={appointmentFilterFields}
+                  values={filterValues}
+                  onChange={handleFilterChange}
+                  onApply={() => {
+                    handleApplyFilter();
+                    setCurrentPage(1);
+                  }}
+                  onClear={() => {
+                    handleClearFilter();
+                    setCurrentPage(1);
+                  }}
+                  open={isFilterOpen}
+                  onOpenChange={setIsFilterOpen}
+                />
+
+
+              </div>
+
+
+            </div>
+
+            {/* ==================== APPOINTMENT TABLE ==================== */}
+
+            <div className="overflow-x-auto flex-1">
+
+              <table className="w-full min-w-[1100px]">
+
+
+                <thead className="hms-columnHeading-style">
+
+                  <tr className="bg-[rgba(242,244,246,0.40)]">
+
+                    {[
+                      { key: "id", label: "Token ID" },
+                      { key: "patient", label: "Patient" },
+                      { key: "branch", label: "Branch" },
+                      { key: "doctor", label: "Doctor" },
+                      { key: "date", label: "Appointment Date" },
+                      { key: "status", label: "Status" },
+                    ].map(({ key, label }, idx) => {
+                      const isSorted = sortField === key;
+                      return (
+                        <th
+                          key={key}
+                          className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-8" : ""}`}
+                        >
+                          <div
+                            className="flex items-center gap-1 cursor-pointer select-none"
+                            onClick={() => handleSort(key)}
+                          >
+                            <span>{label}</span>
+                            <span className="inline-flex h-3 w-3 items-center justify-center text-[7px] shrink-0">
+                              {isSorted ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                            </span>
+                          </div>
+                         
+                        </th>
+                      );
+                    })}
+
+
+                    <th className="px-5 py-3 hms-table-header text-right">
+                      Action
+                    </th>
+
+
+                  </tr>
+
+                </thead>
+
+
+
+                <tbody>
+
+
+                  {currentRows.length > 0 ? (
+
+                    currentRows.map((item, index)=>(
+
+                    <tr
+                      key={item.id + index}
+                      className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F7F9FB] transition-colors group"
+                    >
+
+
+                      {/* Appointment ID */}
+
+                      <td className="px-5 py-4 pl-8 hms-id-text font-bold text-black">
+
+                        {item.id}
+
+                      </td>
+
+
+
+
+
+                      {/* Patient */}
+
+                      <td className="px-5 py-4">
+
+
+                        <div className="flex items-center gap-3">
+
+
+                          <div
+                            className={`
+                            w-7 h-7
+                            rounded-xl
+                            flex items-center
+                            justify-center
+                            hms-avatar-text
+                            ${item.avatarColor}
+                            `}
+                          >
+
+                            {item.patientInitial}
+
+                          </div>
+
+
+
+                          <div>
+
+
+                            <p className="hms-name-text capitalize">
+
+                              {item.patient}
+
+                            </p>
+
+
+                            <p className="hms-id-text mt-1">
+
+                              {item.patientId}
+
+                            </p>
+
+
+                          </div>
+
+
+                        </div>
+
+
+                      </td>
+
+
+
+
+
+
+
+
+                      {/* Branch */}
+
+                      <td className="px-5 py-4">
+
+
+                        <p className="hms-content-text text-[#191C1E]">
+                          {item.branch}
+                        </p>
+
+
+    
+
+
+                      </td>
+
+
+
+
+
+
+
+
+                      {/* Doctor */}
+
+                      <td className="px-5 py-4">
+
+
+                        <div className="flex items-center gap-3">
+
+
+                          <div
+                            className="
+                            w-7 h-7
+                            rounded-xl
+                            bg-indigo-100
+                            text-indigo-600
+                            flex
+                            items-center
+                            justify-center
+                            hms-avatar-text
+                            "
+                          >
+
+                            {item.doctorInitial}
+
+                          </div>
+
+
+
+                          <div>
+
+
+                            <p className="hms-name-text capitalize">
+
+                              {item.doctor}
+
+                            </p>
+
+
+                            <p className="hms-id-text mt-1">
+
+                              {item.doctorId}
+
+                            </p>
+
+
+                          </div>
+
+
+                        </div>
+
+
+                      </td>
+
+
+
+
+
+
+
+
+                      {/* Date */}
+
+                      <td className="px-5 py-4">
+
+
+                        <p className="hms-content-text text-[#191C1E]">
+                          {item.date}
+                        </p>
+
+
+                        <p className="text-[11px] font-medium text-[#8C8D8F] mt-1">
+                          {item.time}
+                        </p>
+
+
+                      </td>
+
+
+
+
+
+
+
+
+
+                      {/* Status */}
+
+                      <td className="px-5 py-4">
+
+
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${statusStyles[item.status] ?? "bg-indigo-50 text-indigo-600"}`}
+                        >
+
+                          {item.status}
+
+                        </span>
+
+
+                      </td>
+
+
+
+
+
+
+
+
+                      {/* Action */}
+
+                      <td className="px-5 py-4 text-right">
+
+
+                        <button
+                          className="p-1.5 rounded hover:bg-[#F2F4F6] transition-colors"
+                        >
+
+                          <MoreVertical className="w-4 h-4 text-[#6B7280]" />
+
+                        </button>
+
+
+                      </td>
+
+
+                    </tr>
+
+
+                  ))
+
+                  ) : (
+
+                    <tr>
+                      <td colSpan={7} className="px-5 py-10 text-center text-[#6B7280] text-sm">
+                        No appointments found matching the current filters.
+                      </td>
+                    </tr>
+
+                  )}
+
+
+                </tbody>
+
+
+              </table>
+
+
+            </div>
+
+            {/* ==================== PAGINATION ==================== */}
+
+            <div className="mt-auto shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur gap-2">
+
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
+                  Showing {visibleStart}-{visibleEnd} of {totalRecords}
+                </span>
+                <RowsPerPageSelect
+                  value={rowsPerPage}
+                  onChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
+                  options={[5, 10, 20]}
+                />
+              </div>
+
+              <div className="flex items-center gap-1">
+
+                <button
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((prev) => prev - 1)}
+                  className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
+                >
+
+                  <ChevronLeft className="w-3 h-3 text-[#424752]" />
+
+                </button>
+
+
+
+                {Array.from({ length: Math.min(totalPages, 5) }, (_, index) => (
+
+                  <button
+                    key={index}
+                    onClick={()=>setCurrentPage(index + 1)}
+                    className={`
+                    w-6 h-6
+                    flex items-center justify-center
+                    rounded-md
+                    text-[10px]
+                    font-semibold
+                    transition-colors
+                    ${
+                      currentPage===index + 1
+                      ?
+                      "bg-[#004785] text-white"
+                      :
+                      "text-[#1D1A1A] hover:bg-[#F2F4F6]"
+                    }
+                    `}
+                  >
+
+                    {index + 1}
+
+                  </button>
+
+
+                ))}
+
+                {totalPages > 5 && <span className="text-[#6B7280] text-xs">...</span>}
+
+                <button
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage((prev) => prev + 1)}
+                  className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
+                >
+
+                  <ChevronRight className="w-3 h-3 text-[#424752]" />
+
+                </button>
+
+
+              </div>
+
+            </div>
+
+
+          </div>
+
+        </main>
+      </div>
+    </div>
+
   );
-}
+
+};
+
+
+export default AppointmentSchedule;

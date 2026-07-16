@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import express from "express";
 import cors from "cors";
+//import doctorRoutes from "./modules/doctor/doctor.routes";
 
 import authRoutes from "./modules/auth/auth.routes";
 import userRoutes from "./modules/auth/user/user.routes";

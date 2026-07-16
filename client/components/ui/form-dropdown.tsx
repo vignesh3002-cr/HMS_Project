@@ -1,6 +1,5 @@
 import * as React from "react";
 import { Check, ChevronDown, Search } from "lucide-react";
-
 import { cn } from "@/lib/utils";
 
 export interface FormDropdownOption {
@@ -152,7 +151,7 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
 
         <div
           className={cn(
-            "absolute left-0 right-0 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 text-gray-900 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] z-50 origin-top transition-all duration-200 ease-out",
+            "absolute left-0 right-0 mt-1 max-h-64 slim-scrollbar w-full overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 text-gray-900 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] z-50 origin-top transition-all duration-200 ease-out",
             open && !disabled
               ? "opacity-100 scale-100 translate-y-0 pointer-events-auto"
               : "opacity-0 scale-95 -translate-y-2 pointer-events-none",
