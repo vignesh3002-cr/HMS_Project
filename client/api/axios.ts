@@ -2,8 +2,7 @@ import axios from "axios";
 import { remove } from "../utils/token";
 
 const api = axios.create({
-
-    baseURL: "https://hms-backend-qjmr.onrender.com/api",
+    baseURL: import.meta.env.VITE_BACKEND_URL,
 });
 
 api.interceptors.request.use((config) => {
