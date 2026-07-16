@@ -3,7 +3,7 @@ import { remove } from "../utils/token";
 
 const api = axios.create({
 
-    baseURL: "https://hms-backend-qjmr.onrender.com",
+    baseURL: "https://hms-backend-qjmr.onrender.com/api",
 });
 
 api.interceptors.request.use((config) => {

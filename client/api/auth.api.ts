@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API = axios.create({
-  baseURL: "https://hms-backend-qjmr.onrender.com",
+  baseURL: "https://hms-backend-qjmr.onrender.com/api",
 });
 
 export interface LoginResponse {
