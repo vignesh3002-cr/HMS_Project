@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, ChevronDown, Check } from "lucide-react";
+import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, ChevronDown, Check, Loader2 } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import { AppointmentsTableView, DoctorsTableView, StaffTableView, type TableRow } from "@/components/hms/DashboardTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
@@ -465,11 +465,16 @@ function getInitials(name: string): string {
   return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
+function formatBranch(branch: EmployeeRecord["branch"]): string {
+  if (!branch?.branch_name) return "—";
+  return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
+}
+
 function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${doc.first_name} ${doc.middle_name ? doc.middle_name + " " : ""}${doc.last_name}`;
   const role = doc.user_table?.role_type || "DOCTOR";
-  const branchName = doc.branch?.branch_name || "—";
+  const branchName = formatBranch(doc.branch);
   const isActive = doc.emp_status === true || doc.user_table?.user_status === 1;
   return {
     avatar: getInitials(fullName),
@@ -477,7 +482,7 @@ function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
     initBg: palette.initBg,
     name: fullName,
     id: doc.employee_id,
-    dept: doc.specialization || doc.designation || "Unassigned",
+    dept: doc.department_master?.department_name || doc.specialization || "Unassigned",
     deptBg: "#E6E8EA",
     deptColor: "#475C7F",
     branch: branchName,
@@ -588,6 +593,7 @@ export default function Dashboard() {
   // the request fails or returns nothing.
   const [realDoctors, setRealDoctors] = useState<TableRow[] | null>(null);
   const [realStaff, setRealStaff] = useState<TableRow[] | null>(null);
+  const [isEmployeesLoading, setIsEmployeesLoading] = useState(true);
 
   useEffect(() => {
     console.log("[Dashboard] Fetching all employees from employeeApi...");
@@ -609,8 +615,16 @@ export default function Dashboard() {
             variant: "destructive",
           });
         }
-        // Store staff for staff tab
-        setRealStaff(staff.map(mapEmployeeRecord));
+        // Store staff for staff tab (leave null on empty so it falls back to dummy data)
+        if (staff.length > 0) {
+          setRealStaff(staff.map(mapEmployeeRecord));
+        } else {
+          toast({
+            title: "Using fallback data",
+            description: "No staff records returned yet — showing sample data.",
+            variant: "destructive",
+          });
+        }
       })
       .catch((err) => {
         console.error("[Dashboard] Error:", err);
@@ -621,6 +635,9 @@ export default function Dashboard() {
           description: "Couldn't reach the employees API — showing sample data.",
           variant: "destructive",
         });
+      })
+      .finally(() => {
+        setIsEmployeesLoading(false);
       });
   }, []);
 
@@ -1068,7 +1085,12 @@ useEffect(() => {
 
             {/* Table */}
             <div className="min-h-[320px] overflow-x-auto">
-              {activeTab === "doctors" ? (
+              {(activeTab === "doctors" || activeTab === "staff") && isEmployeesLoading ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
+                  <Loader2 size={24} className="animate-spin text-[#00488D]" />
+                  Loading {activeTab}...
+                </div>
+              ) : activeTab === "doctors" ? (
                 <DoctorsTableView
                   rows={currentRows as TableRow[]}
                   sortField={sortField[activeTab] ?? ""}

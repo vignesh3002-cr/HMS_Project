@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import CalendarPicker from "@/components/hms/Calender";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Search, FileText, File, ChevronDown, Check, Plus } from "lucide-react";
+import { Search, FileText, File, ChevronDown, Check, Plus, Loader2 } from "lucide-react";
 
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
@@ -995,6 +995,11 @@ function getInitials(name: string): string {
   return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
+function formatBranch(branch: EmployeeRecord["branch"]): string {
+  if (!branch?.branch_name) return "—";
+  return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
+}
+
 function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
@@ -1012,9 +1017,9 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
       name: fullName,
       phone: emp.mobile_no,
       id: emp.employee_id,
-      dept: emp.specialization || emp.designation || roleType,
+      dept: emp.department_master?.department_name || emp.specialization || roleType,
       deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-      branch: emp.branch?.branch_name ? [emp.branch.branch_name] : ["—"],
+      branch: [formatBranch(emp.branch)],
       status: status as "active" | "leave" | "inactive",
     };
   } else if (roleType === "STAFF") {
@@ -1031,8 +1036,8 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
       id: emp.employee_id,
       role: emp.designation || "Staff",
       roleColor: accessColors[avatarIdx],
-      branch: emp.branch?.branch_name || "—",
-      access: emp.department_id || "Standard",
+      branch: formatBranch(emp.branch),
+      access: emp.department_master?.department_name || "Standard",
       accessColor: accessColors[avatarIdx],
       login: new Date().toLocaleDateString(),
       loginDot: loginDots[avatarIdx],
@@ -1048,9 +1053,9 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
       name: fullName,
       phone: emp.mobile_no,
       id: emp.employee_id,
-      dept: emp.designation || "Support",
+      dept: emp.department_master?.department_name || emp.designation || "Support",
       deptClass: `bg-${deptColors[deptIdx]}-100 text-${deptColors[deptIdx]}-700` as const,
-      branch: emp.branch?.branch_name || "—",
+      branch: formatBranch(emp.branch),
       status: status as "active" | "leave",
     };
   }
@@ -1105,6 +1110,7 @@ export default function Staff() {
 
   // Fetch all employees from backend and filter by role_type (exclude DOCTOR for staff)
   const [realStaff, setRealStaff] = useState<EmployeeRecord[] | null>(null);
+  const [isStaffLoading, setIsStaffLoading] = useState(true);
 
   useEffect(() => {
     console.log("[Staff Page] Fetching all employees from employeeApi...");
@@ -1134,6 +1140,9 @@ export default function Staff() {
           description: "Couldn't reach the employees API — showing sample data.",
           variant: "destructive",
         });
+      })
+      .finally(() => {
+        setIsStaffLoading(false);
       });
   }, []);
 
@@ -1225,8 +1234,8 @@ export default function Staff() {
     const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
     const roleType = emp.user_table?.role_type || "STAFF";
     const isActive = emp.emp_status === true || emp.user_table?.user_status === 1;
-    const branchName = emp.branch?.branch_name || "—";
-    const deptName = emp.specialization || emp.designation || "Unassigned";
+    const branchName = formatBranch(emp.branch);
+    const deptName = emp.department_master?.department_name || emp.specialization || "Unassigned";
 
     // Determine which tab this employee belongs to
     if (roleType === "NURSE" || roleType === "PHARMACIST") {
@@ -1534,7 +1543,12 @@ export default function Staff() {
 
             {/* ==================== TABLE ==================== */}
             <div className="overflow-x-auto flex-1">
-              {isMedicalTab ? (
+              {isStaffLoading ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
+                  <Loader2 size={24} className="animate-spin text-[#00488D]" />
+                  Loading staff data...
+                </div>
+              ) : isMedicalTab ? (
                 <MedicalTableView
                   rows={currentRows as MedicalStaffRow[]}
                   sortField={sortField}

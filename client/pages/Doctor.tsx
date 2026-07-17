@@ -13,6 +13,7 @@ import {
   MoreVertical,
   User,
   Infinity,
+  Loader2,
 } from "lucide-react";
 
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
@@ -171,6 +172,11 @@ function getInitials(name: string): string {
   return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
+function formatBranch(branch: EmployeeRecord["branch"]): string {
+  if (!branch?.branch_name) return "—";
+  return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
+}
+
 function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
@@ -180,10 +186,11 @@ function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
     avatar: getInitials(fullName),
     avatarColor: palette.avatarColor,
     initBg: palette.initBg,
-    dept: emp.specialization || emp.designation || "Unassigned",
+    dept: emp.department_master?.department_name || emp.specialization || "Unassigned",
+
     deptBg: "#E6E8EA",
     deptColor: "#475C7F",
-    branch: emp.branch?.branch_name || "—",
+    branch: formatBranch(emp.branch),
     status: (emp.emp_status === true || emp.user_table?.user_status === 1) ? "Active" : "Leave",
     appointments: 0,
     total: 0,
@@ -267,6 +274,7 @@ export default function Doctor() {
 
   // Real doctors fetched from the backend
   const [realDoctors, setRealDoctors] = useState<EmployeeRecord[] | null>(null);
+  const [isDoctorsLoading, setIsDoctorsLoading] = useState(true);
 
   useEffect(() => {
     console.log("[Doctor Page] Fetching all employees from employeeApi...");
@@ -296,6 +304,9 @@ export default function Doctor() {
           description: "Couldn't reach the employees API — showing sample data.",
           variant: "destructive",
         });
+      })
+      .finally(() => {
+        setIsDoctorsLoading(false);
       });
   }, []);
 
@@ -509,7 +520,12 @@ export default function Doctor() {
             {/* ================================================================ */}
             {/* BODY: LIST VIEW (table design matches Patients.tsx list view)   */}
             {/* ================================================================ */}
-            {viewMode === "list" ? (
+            {isDoctorsLoading ? (
+              <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
+                <Loader2 size={24} className="animate-spin text-[#00488D]" />
+                Loading doctors...
+              </div>
+            ) : viewMode === "list" ? (
               <div className="overflow-x-auto flex-1">
                 <table className="w-full min-w-[900px]">
                   <thead className="hms-columnHeading-style">

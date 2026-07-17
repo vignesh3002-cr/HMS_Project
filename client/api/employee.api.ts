@@ -69,12 +69,15 @@ export interface EmployeeRecord {
   emp_status: boolean | null;
   email: string;
   department_id: string;
+  department_master?: 
+  { department_name: string } | null;
   user_table: {
     role_type: string;
     user_status: number;
   };
   branch: {
     branch_name: string;
+    branch_area?: string | null;
   } | null;
 }
 
