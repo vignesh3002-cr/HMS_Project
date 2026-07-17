@@ -16,6 +16,7 @@ import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
 import DayView from "./Day view";
+import WeekView from "./Week view";
 
 
 interface Appointment {
@@ -415,7 +416,11 @@ const AppointmentSchedule: React.FC = () => {
   const visibleEnd = Math.min(endIndex, totalRecords);
 
   if (viewType === "day") {
-    return <DayView />;
+    return <DayView onViewChange={setViewType} />;
+  }
+
+  if (viewType === "week") {
+    return <WeekView />;
   }
 
   return (
