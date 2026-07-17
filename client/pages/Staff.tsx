@@ -623,9 +623,9 @@ function MedicalTableView({
           {columns.map(({ key, label }, idx) => {
             const isSorted = sortField === key;
             return (
-              <th key={key} className={`px-5 py-3 hms-table-header text-center ${idx === 0 ? "pl-8" : ""}`}>
+              <th key={key} className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-8" : ""}`}>
                 <div
-                  className={`flex items-center justify-center gap-1 cursor-pointer select-none ${idx === 0 ? "-ml-3" : ""}`}
+                  className="flex items-center gap-1 cursor-pointer select-none"
                   onClick={key !== "actions" ? () => onSort(key) : undefined}
                 >
                   <span>{label}</span>
@@ -657,29 +657,29 @@ function MedicalTableView({
                 </div>
               </td>
 
-              <td className="px-5 py-4 text-center">
+              <td className="px-5 py-4">
                 <span className="text-[#191C1E] hms-content-text">{staff.phone}</span>
               </td>
 
-              <td className="px-5 py-4 text-center">
+              <td className="px-5 py-4">
                 <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize ${staff.deptClass}`}>
                   {staff.dept}
                 </span>
               </td>
 
-              <td className="px-5 py-4 text-center">
+              <td className="px-5 py-4">
                 <span className="text-[#191C1E] hms-content-text">{staff.branch}</span>
               </td>
 
-              <td className="px-5 py-4 text-center">
+              <td className="px-5 py-4">
                 <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${statusConfig[staff.status].className}`}>
                   <span className={`w-1.5 h-1.5 rounded-full ${statusConfig[staff.status].dot}`} />
                   {statusConfig[staff.status].label}
                 </span>
               </td>
 
-              <td className="px-5 py-4 text-center">
-                <div className="flex items-center justify-center gap-1">
+              <td className="px-5 py-4">
+                <div className="flex items-center gap-1">
                   <button title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
                       <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
@@ -751,9 +751,9 @@ function AdministrativeTableView({
           {columns.map(({ key, label }, idx) => {
             const isSorted = sortField === key;
             return (
-              <th key={key} className={`px-5 py-3 hms-table-header text-center ${idx === 0 ? "pl-8" : ""}`}>
+              <th key={key} className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-8" : ""}`}>
                 <div
-                  className={`flex items-center justify-center gap-1 cursor-pointer select-none ${idx === 0 ? "-ml-3" : ""}`}
+                  className="flex items-center gap-1 cursor-pointer select-none"
                   onClick={key !== "actions" ? () => onSort(key) : undefined}
                 >
                   <span>{label}</span>
@@ -785,42 +785,42 @@ function AdministrativeTableView({
                 </div>
               </td>
 
-              <td className="px-5 py-4 text-center">
+              <td className="px-5 py-4">
                 <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${badgeClass(staff.roleColor)}`}>
                   {staff.role}
                 </span>
               </td>
 
-              <td className="px-5 py-4 text-center">
+              <td className="px-5 py-4">
                 <span className="text-[#191C1E] hms-content-text">
                   {staff.branch}
                   <br />
-                
+
                 </span>
               </td>
 
-              <td className="px-5 py-4 text-center">
+              <td className="px-5 py-4">
                 <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${badgeClass(staff.accessColor)}`}>
                   {staff.access}
                 </span>
               </td>
 
-              <td className="px-5 py-4 text-center">
+              <td className="px-5 py-4">
                 <span className="inline-flex items-center gap-1.5">
                   <span className={`w-1.5 h-1.5 rounded-full ${staff.loginDot === "green" ? "bg-green-500" : "bg-orange-500"}`} />
                   <span className="text-[#191C1E] hms-content-text whitespace-nowrap">{staff.login}</span>
                 </span>
               </td>
 
-              <td className="px-5 py-4 text-center">
+              <td className="px-5 py-4">
                 <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${statusConfig[staff.status].className}`}>
                   <span className={`w-1.5 h-1.5 rounded-full ${statusConfig[staff.status].dot}`} />
                   {statusConfig[staff.status].label}
                 </span>
               </td>
 
-              <td className="px-5 py-4 text-center">
-                <div className="flex items-center justify-center gap-1">
+              <td className="px-5 py-4">
+                <div className="flex items-center gap-1">
                   <button title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
                       <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
@@ -886,9 +886,9 @@ function SupportTableView({
           {columns.map(({ key, label }, idx) => {
             const isSorted = sortField === key;
             return (
-              <th key={key} className={`px-5 py-3 hms-table-header text-center ${idx === 0 ? "pl-8" : ""}`}>
+              <th key={key} className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-8" : ""}`}>
                 <div
-                  className={`flex items-center justify-center gap-1 cursor-pointer select-none ${idx === 0 ? "-ml-3" : ""}`}
+                  className="flex items-center gap-1 cursor-pointer select-none"
                   onClick={key !== "actions" ? () => onSort(key) : undefined}
                 >
                   <span>{label}</span>
@@ -920,29 +920,29 @@ function SupportTableView({
                 </div>
               </td>
 
-              <td className="px-5 py-4 text-center">
+              <td className="px-5 py-4">
                 <span className="text-[#191C1E] hms-content-text">{staff.phone}</span>
               </td>
 
-              <td className="px-5 py-4 text-center">
+              <td className="px-5 py-4">
                 <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${supportBadgeColors[staff.deptClass]}`}>
                   {staff.dept}
                 </span>
               </td>
 
-              <td className="px-5 py-4 text-center">
+              <td className="px-5 py-4">
                 <span className="text-[#191C1E] hms-content-text">{staff.branch}</span>
               </td>
 
-              <td className="px-5 py-4 text-center">
+              <td className="px-5 py-4">
                 <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${statusConfig[staff.status].className}`}>
                   <span className={`w-1.5 h-1.5 rounded-full ${statusConfig[staff.status].dot}`} />
                   {statusConfig[staff.status].label}
                 </span>
               </td>
 
-              <td className="px-5 py-4 text-center">
-                <div className="flex items-center justify-center gap-1">
+              <td className="px-5 py-4">
+                <div className="flex items-center gap-1">
                   <button title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
                       <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
@@ -1364,10 +1364,10 @@ export default function Staff() {
                       return (
                         <th
                           key={key}
-                          className={`px-5 py-3 hms-table-header text-center ${idx === 0 ? "pl-8" : ""}`}
+                          className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-8" : ""}`}
                         >
                           <div
-                            className={`flex items-center justify-center gap-1 cursor-pointer select-none ${idx === 0 ? "-ml-8" : ""}`}
+                            className="flex items-center gap-1 cursor-pointer select-none"
                             onClick={key !== "actions" ? () => handleSort(key) : undefined}
                           >
                             <span>{label}</span>
@@ -1402,21 +1402,21 @@ export default function Staff() {
                         </td>
 
                         {/* PHONE */}
-                        <td className="px-5 py-4 text-center">
+                        <td className="px-5 py-4">
                           <span className="text-[#191C1E] hms-content-text">
                             {staff.phone}
                           </span>
                         </td>
 
                         {/* DEPARTMENT */}
-                        <td className="px-5 py-4 text-center">
+                        <td className="px-5 py-4">
                           <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize ${staff.deptClass}`}>
                             {staff.dept}
                           </span>
                         </td>
 
                         {/* BRANCH */}
-                        <td className="px-5 py-4 text-center">
+                        <td className="px-5 py-4">
                           <span className="text-[#191C1E] hms-content-text">
                             {staff.branch.map((b, i) => (
                               <Fragment key={b}>
@@ -1428,7 +1428,7 @@ export default function Staff() {
                         </td>
 
                         {/* STATUS */}
-                        <td className="px-5 py-4 text-center">
+                        <td className="px-5 py-4">
                           <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${statusConfig[staff.status].className}`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${statusConfig[staff.status].dot}`} />
                             {statusConfig[staff.status].label}
@@ -1436,8 +1436,8 @@ export default function Staff() {
                         </td>
 
                         {/* ACTIONS */}
-                        <td className="px-5 py-4 text-center">
-                          <div className="flex items-center justify-center gap-1">
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-1">
                             <button title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
                               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
                                 <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />

@@ -15,6 +15,7 @@ import CalendarPicker from "@/components/hms/Calender";
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
+import DayView from "./Day view";
 
 
 interface Appointment {
@@ -43,8 +44,8 @@ const appointments: Appointment[] = [
     avatarColor: "bg-blue-100 text-blue-600",
     branch: "Central Hospital Tambaram",
     doctor: "Dr. Sarah Johnson",
-    doctorId: "DOC-2210",
-    doctorInitial: "MR",
+    doctorId: "DOC-0001",
+    doctorInitial: "SJ",
     date: "05/20/2026",
     time: "11:20 AM",
     status: "Scheduled",
@@ -67,9 +68,9 @@ const appointments: Appointment[] = [
 
   {
     id: "APT-2026-8845",
-    patient: "Jane",
+    patient: "Ramesh",
     patientId: "PAT-0003",
-    patientInitial: "J",
+    patientInitial: "R",
     avatarColor: "bg-blue-100 text-blue-600",
     branch: "Central Hospital Egmore",
     doctor: "Dr. Robert Fox",
@@ -82,13 +83,13 @@ const appointments: Appointment[] = [
   {
     id: "APT-2026-8846",
     patient: "John Cena",
-    patientId: "PAT-0003",
+    patientId: "PAT-0004",
     patientInitial: "JC",
     avatarColor: "bg-blue-100 text-blue-600",
     branch: "Central Hospital Egmore",
-    doctor: "Dr. Robert Fox",
-    doctorId: "DOC-0003",
-    doctorInitial: "RF",
+    doctor: "Dr. Alan Walker",
+    doctorId: "DOC-0004",
+    doctorInitial: "AW",
     date: "05/20/2026",
     time: "01:30 PM",
     status: "Cancelled",
@@ -96,13 +97,13 @@ const appointments: Appointment[] = [
   {
     id: "APT-2026-8847",
     patient: "Jaden Smith",
-    patientId: "PAT-0004",
+    patientId: "PAT-0005",
     patientInitial: "JS",
     avatarColor: "bg-blue-100 text-blue-600",
     branch: "Central Hospital Egmore",
-    doctor: "Dr. Robert Fox",
-    doctorId: "DOC-0003",
-    doctorInitial: "RF",
+    doctor: "Dr. Suriya Sharma",
+    doctorId: "DOC-0005",
+    doctorInitial: "SS",
     date: "05/20/2026",
     time: "01:30 PM",
     status: "Rescheduled",
@@ -110,7 +111,7 @@ const appointments: Appointment[] = [
   {
     id: "APT-2026-8848",
     patient: "Tom Cruise",
-    patientId: "PAT-0005",
+    patientId: "PAT-0006",
     patientInitial: "TC",
     avatarColor: "bg-blue-100 text-blue-600",
     branch: "Central Hospital Egmore",
@@ -291,6 +292,27 @@ const AppointmentSchedule: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
+  // View type dropdown (List View / Day View / Week View)
+  const [viewType, setViewType] = useState<"list" | "day" | "week">("list");
+  const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
+  const viewMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (viewMenuRef.current && !viewMenuRef.current.contains(e.target as Node)) {
+        setIsViewMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const viewTypeOptions: { key: "list" | "day" | "week"; label: string }[] = [
+    { key: "list", label: "List View" },
+    { key: "day", label: "Day View" },
+    { key: "week", label: "Week View" },
+  ];
+
   // Filters
   const {
     values: filterValues,
@@ -392,6 +414,9 @@ const AppointmentSchedule: React.FC = () => {
   const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
   const visibleEnd = Math.min(endIndex, totalRecords);
 
+  if (viewType === "day") {
+    return <DayView />;
+  }
 
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
@@ -459,15 +484,44 @@ const AppointmentSchedule: React.FC = () => {
 
 
 
-                <button
-                  className="flex items-center gap-2 px-3 py-1.5 border border-[#E5E7EB] rounded-md text-xs font-semibold text-[#374151] hover:border-[#00488D] transition-colors"
-                >
+                <div className="relative" ref={viewMenuRef}>
 
-                  List View
+                  <button
+                    type="button"
+                    onClick={() => setIsViewMenuOpen((o) => !o)}
+                    className="flex items-center gap-2 px-3 py-1.5 border border-[#E5E7EB] rounded-md text-xs font-semibold text-[#374151] hover:border-[#00488D] transition-colors"
+                  >
 
-                  <ChevronDown className="w-3 h-3 text-[#6B7280]" />
+                    {viewTypeOptions.find((opt) => opt.key === viewType)?.label}
 
-                </button>
+                    <ChevronDown className={`w-3 h-3 text-[#6B7280] transition-transform duration-200 ${isViewMenuOpen ? "rotate-180" : ""}`} />
+
+                  </button>
+
+                  <div
+                    className={`absolute left-0 top-full mt-1 w-32 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
+                      isViewMenuOpen ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
+                    }`}
+                  >
+                    {viewTypeOptions.map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => {
+                          setViewType(opt.key);
+                          setIsViewMenuOpen(false);
+                        }}
+                        className={`flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors ${
+                          viewType === opt.key ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
+                        }`}
+                      >
+                        {opt.label}
+                        {viewType === opt.key && <Check className="w-3 h-3" />}
+                      </button>
+                    ))}
+                  </div>
+
+                </div>
 
 
               </div>
@@ -635,7 +689,7 @@ const AppointmentSchedule: React.FC = () => {
 
                       {/* Appointment ID */}
 
-                      <td className="px-5 py-4 pl-8 hms-id-text font-bold text-black">
+                      <td className="px-5 py-4 pl-8 hms-id-text font-bold !text-blue-600 !text-[13px]">
 
                         {item.id}
 
