@@ -15,12 +15,10 @@ import CalendarPicker from "@/components/hms/Calender";
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
-<<<<<<< HEAD
+
 import DayView from "./Day view";
 import WeekView from "./Week view";
-=======
 import ExportReport from "@/components/ui/ExportReport";
->>>>>>> 514569a9d48ebda9ec43c8277196d6946652b5e3
 
 
 interface Appointment {
