@@ -15,6 +15,7 @@ import CalendarPicker from "@/components/hms/Calender";
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
+import ExportReport from "@/components/ui/ExportReport";
 
 
 interface Appointment {
@@ -415,24 +416,16 @@ const AppointmentSchedule: React.FC = () => {
 
 
             <div className="flex items-center gap-3">
-
-              <button
-                className="flex items-center gap-2 px-4 py-2 border border-[#E5E7EB] bg-white rounded-lg text-[#424752] text-xs font-semibold shadow-sm hover:bg-[#F2F4F6] transition-colors"
-              >
-
-                <Download className="w-4 h-4" />
-                Export report
-
-              </button>
+              <ExportReport />
 
 
 
-              <button
+<button
                 className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
               >
 
                 <Plus className="w-4 h-4" />
-                Add patient
+                Add Appointment
 
               </button>
 

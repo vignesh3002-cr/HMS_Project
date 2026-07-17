@@ -22,8 +22,6 @@ export interface CreateEmployeePayload {
   emergency_contact_number?: string;
   department_id: string;
   designation: string;
-  // Only doctors/nurses/pharmacists send these — staff roles omit them
-  // (the employees table columns are nullable, see schema.prisma).
   specialization?: string;
   qualification?: string;
   doc_license_no?: string;
@@ -31,20 +29,53 @@ export interface CreateEmployeePayload {
   emp_status: boolean;
   branch_ids: string[];
   consultation_minutes?: number;
-
-  // Working hours for the week
-  working_hours?:WorkingHourPayload[];
+  working_hours?: WorkingHourPayload[];
 }
 
-// Schedule for the week
-export type DayOfWeek = "MONDAY"|"TUESDAY"|"WEDNESDAY"|"THURSDAY"|"FRIDAY"|"SATURDAY"|"SUNDAY";
+export type DayOfWeek = "MONDAY" | "TUESDAY" | "WEDNESDAY" | "THURSDAY" | "FRIDAY" | "SATURDAY" | "SUNDAY";
 
 export interface WorkingHourPayload {
   branch_id: string;
   day_of_week: DayOfWeek;
   shift_name: string;
-  start_time: string; // "HH:MM" 24-hr
-  end_time: string;   // "HH:MM" 24-hr
+  start_time: string;
+  end_time: string;
+}
+
+export interface EmployeeRecord {
+  employee_id: string;
+  user_id: string;
+  first_name: string;
+  middle_name: string | null;
+  last_name: string;
+  blood_group: string | null;
+  nationality: string | null;
+  marital_status: string | null;
+  mobile_no: string;
+  parmanant_address: string | null;
+  current_address: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_relationship: string | null;
+  emergency_contact_number: string | null;
+  aadhaar_no: string | null;
+  pan_no: string | null;
+  passport_no: string | null;
+  designation: string | null;
+  specialization: string | null;
+  qualification: string | null;
+  doc_license_no: string | null;
+  joining_date: string;
+  branch_id: string;
+  emp_status: boolean | null;
+  email: string;
+  department_id: string;
+  user_table: {
+    role_type: string;
+    user_status: number;
+  };
+  branch: {
+    branch_name: string;
+  } | null;
 }
 
 export interface CreateEmployeeResponse {
@@ -65,7 +96,17 @@ export interface CreateEmployeeResponse {
   };
 }
 
+export interface GetEmployeesParams {
+  role_type?: "DOCTOR" | "NURSE" | "PHARMACIST" | "STAFF";
+  branch_id?: string;
+  department_id?: string;
+  status?: boolean;
+}
+
 export const employeeApi = {
   create: (data: CreateEmployeePayload) =>
     API.post<CreateEmployeeResponse>("/employees/create", data),
+
+  getAll: (params?: GetEmployeesParams) =>
+    API.get<{ success: boolean; data: { employees: EmployeeRecord[]; total: number; page: number; limit: number } }>("/employees", { params }),
 };
