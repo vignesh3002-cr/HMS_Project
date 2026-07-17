@@ -9,7 +9,7 @@ import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
-import { doctorApi } from "@/api/doctor.api";
+import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 
 
 
@@ -450,7 +450,7 @@ const stats = [
   },
 ];
 
-// Cosmetic-only values the real /doctors endpoint doesn't return (avatar
+// Cosmetic-only values the real /employees endpoint doesn't return (avatar
 // initials/colors, department badge colors) — cycled per row so real data
 // still renders with the same visual style as the static fallback rows.
 const AVATAR_PALETTE = [
@@ -465,19 +465,23 @@ function getInitials(name: string): string {
   return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
-function mapDoctorRecord(doc: import("@/api/doctor.api").DoctorRecord, index: number) {
+function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
+  const fullName = `${doc.first_name} ${doc.middle_name ? doc.middle_name + " " : ""}${doc.last_name}`;
+  const role = doc.user_table?.role_type || "DOCTOR";
+  const branchName = doc.branch?.branch_name || "—";
+  const isActive = doc.emp_status === true || doc.user_table?.user_status === 1;
   return {
-    avatar: getInitials(doc.doctor_name),
+    avatar: getInitials(fullName),
     avatarColor: palette.avatarColor,
     initBg: palette.initBg,
-    name: doc.doctor_name,
+    name: fullName,
     id: doc.employee_id,
-    dept: doc.department || "Unassigned",
+    dept: doc.specialization || doc.designation || "Unassigned",
     deptBg: "#E6E8EA",
     deptColor: "#475C7F",
-    branch: doc.branch_name || "—",
-    status: doc.status ? "Active" : "Inactive",
+    branch: branchName,
+    status: isActive ? "Active" : "Inactive",
   };
 }
 
@@ -583,14 +587,21 @@ export default function Dashboard() {
   // array below once available. Stays null (falls back to static data) if
   // the request fails or returns nothing.
   const [realDoctors, setRealDoctors] = useState<TableRow[] | null>(null);
+  const [realStaff, setRealStaff] = useState<TableRow[] | null>(null);
 
   useEffect(() => {
-    doctorApi
+    console.log("[Dashboard] Fetching all employees from employeeApi...");
+    employeeApi
       .getAll()
       .then((res) => {
-        const records = res.data?.data;
-        if (records && records.length > 0) {
-          setRealDoctors(records.map(mapDoctorRecord));
+        console.log("[Dashboard] Response:", res.data);
+        const allEmployees = res.data?.data?.employees || [];
+        // Filter on frontend by user_table.role_type
+        const doctors = allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR");
+        const staff = allEmployees.filter((e) => e.user_table?.role_type !== "DOCTOR");
+        
+        if (doctors.length > 0) {
+          setRealDoctors(doctors.map(mapEmployeeRecord));
         } else {
           toast({
             title: "Using fallback data",
@@ -598,11 +609,16 @@ export default function Dashboard() {
             variant: "destructive",
           });
         }
+        // Store staff for staff tab
+        setRealStaff(staff.map(mapEmployeeRecord));
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error("[Dashboard] Error:", err);
+        console.error("[Dashboard] Error response:", err.response?.data);
+        console.error("[Dashboard] Error status:", err.response?.status);
         toast({
           title: "Using fallback data",
-          description: "Couldn't reach the doctors API — showing sample data.",
+          description: "Couldn't reach the employees API — showing sample data.",
           variant: "destructive",
         });
       });
@@ -727,7 +743,7 @@ export default function Dashboard() {
 
   const activeData =
     activeTab === "staff"
-      ? staff
+      ? (realStaff ?? staff)
       : activeTab === "appointments"
         ? appointments
         : (realDoctors ?? doctors);
@@ -895,9 +911,9 @@ useEffect(() => {
       {/* Main */}
       <div className="flex flex-col flex-1 min-w-0">
         {/* Content */}
-        <main className="flex flex-col gap-6">
+        <main className="flex flex-col gap-6 border-t border-[#E5E7EB] pt-6">
           {/* Stats Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-8 pt-10">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-8">
             {stats.map((stat) => (
               <div
                 key={stat.label}
@@ -932,19 +948,21 @@ useEffect(() => {
             ))}
           </div>
 
-          {/* Overview Header */}
-          <div className="flex items-end justify-between">
-            <div>
-              <h2 className="hms-heading">Admin Overview</h2>
-              <p className="hms-subheading">Real-time performance across all branches.</p>
-            </div>
-            <button className="flex items-center gap-1.5 px-5 py-2.5 bg-[#004785] rounded-[10px] text-white text-xs font-semibold whitespace-nowrap">
-              <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
-                <path d="M8 2V10M4 6H12" stroke="white" strokeWidth="2" strokeLinecap="round"/>
-              </svg>
-              New Appointment
-            </button>
-          </div>
+{/* Overview Header */}
+           <div className="flex items-end justify-between">
+             <div>
+               <h2 className="hms-heading">Admin Overview</h2>
+               <p className="hms-subheading">Real-time performance across all branches.</p>
+             </div>
+             <button
+               className="flex items-center gap-1.5 px-5 py-2.5 bg-[#004785] rounded-[10px] text-white text-xs font-semibold whitespace-nowrap hover:opacity-90 transition-opacity"
+             >
+               <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
+                 <path d="M8 2V10M4 6H12" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+               </svg>
+               Add Appointment
+             </button>
+           </div>
 
           {/* Table Card */}
           <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col min-h-[320px] transition-all duration-300 hover:shadow-md">

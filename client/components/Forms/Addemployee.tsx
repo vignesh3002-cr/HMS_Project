@@ -1,10 +1,9 @@
-import { useState, useEffect, ChangeEvent, FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft, UserRound, Loader2, Plus } from "lucide-react";
+import { useState, useEffect, useRef, ChangeEvent, FormEvent } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { ArrowLeft, UserRound, Loader2, Plus, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { MultiSelectDropdown } from "@/components/ui/multi-select-dropdown";
-import { TimeSelect12h } from "@/components/ui/time-select-12h";
 import { DayOfWeek, WorkingHourPayload, employeeApi } from "@/api/employee.api";
 import { branchApi, Branch } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
@@ -118,8 +117,13 @@ const ROLE_CONFIG: Record<Exclude<RoleType, "">, RoleConfig> = {
 
 const ROLE_OPTIONS: Exclude<RoleType, "">[] = ["Doctor", "Nurse", "Pharmacist", "Staff"];
 
-// Doctor Schedule
+// Sentinel departmentId value meaning "not in the list — user is typing a new one".
+const OTHER_DEPARTMENT_VALUE = "__OTHER__";
 
+// ---------------------------------------------------------------------------
+// Doctor schedule — a doctor can have any number of time slots (a day can
+// repeat, e.g. a morning shift at one branch and an evening shift at another).
+// ---------------------------------------------------------------------------
 const DAYS_OF_WEEK: { value: DayOfWeek; label: string }[] = [
   { value: "MONDAY", label: "Monday" },
   { value: "TUESDAY", label: "Tuesday" },
@@ -130,21 +134,28 @@ const DAYS_OF_WEEK: { value: DayOfWeek; label: string }[] = [
   { value: "SUNDAY", label: "Sunday" },
 ];
 
-interface ScheduleRow {
-  day_of_week: DayOfWeek;
-  is_active: boolean;   // false = "no schedule made for this day"
+// Single-box 12-hour time picker options (every 15 minutes), reusing the same
+// searchable FormDropdown used everywhere else instead of separate hh/mm/AM-PM inputs.
+const TIME_OPTIONS: { label: string; value: string }[] = (() => {
+  const options: { label: string; value: string }[] = [];
+  for (let h = 0; h < 24; h++) {
+    for (let m = 0; m < 60; m += 15) {
+      const value = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      const period = h < 12 ? "AM" : "PM";
+      const hour12 = h % 12 === 0 ? 12 : h % 12;
+      options.push({ label: `${hour12}:${String(m).padStart(2, "0")} ${period}`, value });
+    }
+  }
+  return options;
+})();
+
+interface ScheduleEntry {
+  id: string;
+  day_of_week: DayOfWeek | "";
   start_time: string;
   end_time: string;
   branch_id: string;
 }
-
-const emptySchedule: ScheduleRow[] = DAYS_OF_WEEK.map((d) => ({
-  day_of_week: d.value,
-  is_active: false,
-  start_time: "09:00 Am",
-  end_time: "12:00 PM",
-  branch_id: "",
-}));
 
 // Shift name isn't entered manually — it's derived from the start time:
 // anything before noon is the Morning shift, otherwise Evening.
@@ -183,7 +194,6 @@ interface EmployeeFormData {
   docLicenseNo: string;
   joiningDate: string;
   branchIds: string[];
-  empStatus: string;
   email: string;
 }
 
@@ -214,12 +224,12 @@ const emptyFormData: EmployeeFormData = {
   docLicenseNo: "",
   joiningDate: "",
   branchIds: [],
-  empStatus: "",
   email: "",
 };
 
 export default function AddEmployee() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -227,6 +237,21 @@ export default function AddEmployee() {
 
   // State initialized with the interface type
   const [formData, setFormData] = useState<EmployeeFormData>(emptyFormData);
+
+  // Read role from query param and pre-select on mount
+  useEffect(() => {
+    const roleParam = searchParams.get("role") as RoleType;
+    if (roleParam && ROLE_OPTIONS.includes(roleParam)) {
+      setFormData((prev) => ({ ...prev, roleType: roleParam }));
+    }
+  }, [searchParams]);
+
+  // Re-typed username/password — must match before submit is allowed.
+  const [confirmUsername, setConfirmUsername] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  // Free-typed department name, used only when departmentId === OTHER_DEPARTMENT_VALUE.
+  const [customDepartment, setCustomDepartment] = useState("");
 
   // Fetch branches on mount for the branch dropdown
   useEffect(() => {
@@ -253,17 +278,26 @@ export default function AddEmployee() {
   // Whether the Permanent Address should mirror the Current Address
   const [sameAsCurrent, setSameAsCurrent] = useState(false);
 
-  // Doctor weekly schedule — only relevant when roleType === "Doctor"
-  const [schedule, setSchedule] = useState<ScheduleRow[]>(emptySchedule);
+  // Doctor schedule — dynamic list of time slots, only relevant when roleType === "Doctor"
+  const [schedule, setSchedule] = useState<ScheduleEntry[]>([]);
   const [consultationMinutes, setConsultationMinutes] = useState("20");
+  const nextSlotId = useRef(0);
 
-  const handleScheduleChange = (
-    day: DayOfWeek,
-    field: keyof ScheduleRow,
-    value: string | boolean,
-  ) => {
+  const addScheduleEntry = () => {
+    const id = `slot-${nextSlotId.current++}`;
+    setSchedule((prev) => [
+      ...prev,
+      { id, day_of_week: "", start_time: "09:00", end_time: "17:00", branch_id: "" },
+    ]);
+  };
+
+  const removeScheduleEntry = (id: string) => {
+    setSchedule((prev) => prev.filter((entry) => entry.id !== id));
+  };
+
+  const updateScheduleEntry = (id: string, field: keyof ScheduleEntry, value: string) => {
     setSchedule((prev) =>
-      prev.map((row) => (row.day_of_week === day ? { ...row, [field]: value } : row)),
+      prev.map((entry) => (entry.id === id ? { ...entry, [field]: value } : entry)),
     );
   };
 
@@ -276,6 +310,9 @@ export default function AddEmployee() {
   // license fields. Everything else (including no role picked yet, so the
   // form still shows its normal "select a role first" placeholders) does.
   const isMedicalRole = formData.roleType !== "Staff";
+
+  // Divorced employees may not have (or want to list) an emergency contact.
+  const emergencyOptional = formData.maritalStatus === "Divorced";
 
   // Generic handle change with correct TypeScript typing
   const handleChange = (
@@ -298,6 +335,7 @@ export default function AddEmployee() {
 
   // Changing the role resets the role-specific fields so a stale
   // Doctor designation doesn't linger after switching to Nurse, etc.
+  // Multi-branch only makes sense for Doctors, so switching away trims to one.
   const handleRoleChange = (val: string) => {
     const newRole = val as RoleType;
     setFormData((prev) => ({
@@ -307,9 +345,10 @@ export default function AddEmployee() {
       specialization: "",
       qualification: "",
       docLicenseNo: "",
+      branchIds: newRole === "Doctor" ? prev.branchIds : prev.branchIds.slice(0, 1),
     }));
     if (newRole !== "Doctor") {
-      setSchedule(emptySchedule);
+      setSchedule([]);
       setConsultationMinutes("20");
     }
   };
@@ -330,7 +369,8 @@ export default function AddEmployee() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
-    // Every field is mandatory except Middle Name and Passport No.
+    // Every field is mandatory except Middle Name, Passport No, and (for
+    // Divorced employees) the emergency contact fields.
     const requiredFields: { key: Exclude<keyof EmployeeFormData, "branchIds">; label: string }[] = [
       { key: "username", label: "Username" },
       { key: "password", label: "Password" },
@@ -354,10 +394,13 @@ export default function AddEmployee() {
           ]
         : []),
       { key: "joiningDate", label: "Joining Date" },
-      { key: "empStatus", label: "Employee Status" },
-      { key: "emergencyContactName", label: "Emergency Contact Name" },
-      { key: "emergencyContactRelation", label: "Emergency Contact Relation" },
-      { key: "emergencyContactNumber", label: "Emergency Contact Number" },
+      ...(emergencyOptional
+        ? []
+        : [
+            { key: "emergencyContactName" as const, label: "Emergency Contact Name" },
+            { key: "emergencyContactRelation" as const, label: "Emergency Contact Relation" },
+            { key: "emergencyContactNumber" as const, label: "Emergency Contact Number" },
+          ]),
       { key: "currentAddress", label: "Current Address" },
       { key: "permanentAddress", label: "Permanent Address" },
     ];
@@ -381,21 +424,79 @@ export default function AddEmployee() {
       return;
     }
 
-    const workingHours: WorkingHourPayload[] = schedule
-      .filter((row) => row.is_active)
-      .map((row) => ({
-        branch_id: formData.branchIds.includes(row.branch_id)
-          ? row.branch_id
-          : formData.branchIds[0],
-        day_of_week: row.day_of_week,
-        shift_name: deriveShiftName(row.start_time),
-        start_time: row.start_time,
-        end_time: row.end_time,
-      }));
+    if (!confirmUsername.trim() || !confirmPassword.trim()) {
+      toast({
+        title: "Missing required field",
+        description: "Please confirm your Username and Password.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (formData.username !== confirmUsername) {
+      toast({
+        title: "Username mismatch",
+        description: "Username and Confirm Username do not match.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (formData.password !== confirmPassword) {
+      toast({
+        title: "Password mismatch",
+        description: "Password and Confirm Password do not match.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (formData.departmentId === OTHER_DEPARTMENT_VALUE && !customDepartment.trim()) {
+      toast({
+        title: "Missing required field",
+        description: 'Please type a department name for "Others".',
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (formData.roleType === "Doctor") {
+      const incompleteSlot = schedule.find((entry) => !entry.day_of_week);
+      if (incompleteSlot) {
+        toast({
+          title: "Incomplete schedule",
+          description: "Please select a day for every schedule time slot.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
 
     setSubmitting(true);
 
     try {
+      // "Others" has no real department_id yet — create it first (existing
+      // POST /departments endpoint) and use the id it returns.
+      let departmentId = formData.departmentId;
+      if (departmentId === OTHER_DEPARTMENT_VALUE) {
+        const deptResponse = await departmentApi.create({
+          department_name: customDepartment.trim(),
+        });
+        const created = deptResponse.data.data;
+        departmentId = created.department_id;
+        setDepartments((prev) => [...prev, created]);
+      }
+
+      const workingHours: WorkingHourPayload[] = schedule.map((entry) => ({
+        branch_id: formData.branchIds.includes(entry.branch_id)
+          ? entry.branch_id
+          : formData.branchIds[0],
+        day_of_week: entry.day_of_week as DayOfWeek,
+        shift_name: deriveShiftName(entry.start_time),
+        start_time: entry.start_time,
+        end_time: entry.end_time,
+      }));
+
       const response = await employeeApi.create({
         username: formData.username,
         password: formData.password,
@@ -413,16 +514,16 @@ export default function AddEmployee() {
         passport_no: formData.passportNo || undefined,
         permanent_address: formData.permanentAddress,
         current_address: formData.currentAddress,
-        emergency_contact_name: formData.emergencyContactName,
-        emergency_contact_relationship: formData.emergencyContactRelation,
-        emergency_contact_number: formData.emergencyContactNumber,
-        department_id: formData.departmentId,
+        emergency_contact_name: formData.emergencyContactName || undefined,
+        emergency_contact_relationship: formData.emergencyContactRelation || undefined,
+        emergency_contact_number: formData.emergencyContactNumber || undefined,
+        department_id: departmentId,
         designation: formData.designation,
         specialization: isMedicalRole ? formData.specialization : undefined,
         qualification: isMedicalRole ? formData.qualification : undefined,
         doc_license_no: isMedicalRole ? formData.docLicenseNo : undefined,
         joining_date: formData.joiningDate,
-        emp_status: formData.empStatus === "Active",
+        emp_status: true,
         branch_ids: formData.branchIds,
         consultation_minutes: Number(consultationMinutes) || 20,
         working_hours: formData.roleType === "Doctor" ? workingHours : undefined,
@@ -453,9 +554,15 @@ export default function AddEmployee() {
   const handleReset = () => {
     setFormData(emptyFormData);
     setSameAsCurrent(false);
-    setSchedule(emptySchedule);
+    setSchedule([]);
     setConsultationMinutes("20");
+    setConfirmUsername("");
+    setConfirmPassword("");
+    setCustomDepartment("");
   };
+
+  // Joining date can't be backdated — earliest selectable day is today.
+  const todayStr = new Date().toISOString().slice(0, 10);
 
   // Shared input class for consistent styling
   const inputClass =
@@ -464,6 +571,7 @@ export default function AddEmployee() {
     "w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-500 placeholder:text-gray-400 cursor-not-allowed transition-all duration-200";
   const labelClass = "block text-sm font-semibold text-gray-800 mb-1.5";
   const requiredStar = <span className="text-red-600 ml-0.5">*</span>;
+  const optionalTag = <span className="text-gray-400 text-xs font-normal">(optional)</span>;
 
   return (
     <div className="min-h-screen bg-[#FFFFF] p-6 flex items-start justify-center font-sans">
@@ -504,34 +612,7 @@ export default function AddEmployee() {
               />
             </div>
 
-            {/* Row 0 - Username, Password */}
-            <div>
-              <label className={labelClass}>Username {requiredStar}</label>
-              <input
-                type="text"
-                name="username"
-                placeholder="Enter Username"
-                className={inputClass}
-                value={formData.username}
-                onChange={handleChange}
-                disabled={submitting}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Password {requiredStar}</label>
-              <input
-                type="password"
-                name="password"
-                placeholder="Enter Password"
-                className={inputClass}
-                value={formData.password}
-                onChange={handleChange}
-                disabled={submitting}
-              />
-            </div>
-            <div />
-
-            {/* Row 1 - First Name, Middle Name, Last Name */}
+            {/* First Name, Middle Name, Last Name */}
             <div>
               <label className={labelClass}>First Name {requiredStar}</label>
               <input
@@ -572,7 +653,7 @@ export default function AddEmployee() {
               />
             </div>
 
-            {/* Row 2 - Blood Group, Nationality, Marital Status */}
+            {/* Blood Group, Nationality, Marital Status */}
             <div>
               <label className={labelClass}>Blood Group {requiredStar}</label>
               <FormDropdown
@@ -605,7 +686,7 @@ export default function AddEmployee() {
               <FormDropdown
                 name="maritalStatus"
                 className={inputClass}
-                options={["Single", "Married", "Divorced", "Widowed"]}
+                options={["Single", "Married", "Divorced"]}
                 value={formData.maritalStatus}
                 onValueChange={(val) =>
                   setFormData((prev) => ({ ...prev, maritalStatus: val }))
@@ -615,7 +696,7 @@ export default function AddEmployee() {
               />
             </div>
 
-            {/* Row 3 - Mobile No, Email, Aadhaar No */}
+            {/* Mobile No, Email, Aadhaar No */}
             <div>
               <label className={labelClass}>Mobile Number {requiredStar}</label>
               <input
@@ -658,7 +739,7 @@ export default function AddEmployee() {
               />
             </div>
 
-            {/* Row 4 - PAN No, Passport No */}
+            {/* PAN No, Passport No */}
             <div>
               <label className={labelClass}>PAN No {requiredStar}</label>
               <input
@@ -692,23 +773,38 @@ export default function AddEmployee() {
             {/* field all change depending on the selected Role.          */}
             {/* --------------------------------------------------------- */}
 
-            {/* Row 5 - Department, Designation, Specialization */}
+            {/* Department (with "Others" + free-text fallback), Designation, Specialization */}
             <div>
               <label className={labelClass}>Department {requiredStar}</label>
               <FormDropdown
                 name="departmentId"
                 className={inputClass}
-                options={departments.map((d) => ({
-                  label: d.department_name,
-                  value: d.department_id,
-                }))}
+                options={[
+                  ...departments.map((d) => ({
+                    label: d.department_name,
+                    value: d.department_id,
+                  })),
+                  { label: "Others", value: OTHER_DEPARTMENT_VALUE },
+                ]}
                 value={formData.departmentId}
-                onValueChange={(val) =>
-                  setFormData((prev) => ({ ...prev, departmentId: val }))
-                }
+                onValueChange={(val) => {
+                  setFormData((prev) => ({ ...prev, departmentId: val }));
+                  if (val !== OTHER_DEPARTMENT_VALUE) setCustomDepartment("");
+                }}
                 placeholder={departments.length ? "Select Department" : "Loading departments..."}
-                disabled={submitting || departments.length === 0}
+                disabled={submitting}
               />
+              {formData.departmentId === OTHER_DEPARTMENT_VALUE && (
+                <input
+                  type="text"
+                  placeholder="Type your department name"
+                  maxLength={100}
+                  className={inputClass + " mt-2"}
+                  value={customDepartment}
+                  onChange={(e) => setCustomDepartment(e.target.value)}
+                  disabled={submitting}
+                />
+              )}
             </div>
             <div>
               <label className={labelClass}>
@@ -757,7 +853,7 @@ export default function AddEmployee() {
               <div />
             )}
 
-            {/* Row 6 - Qualification, License/Registration No, Joining Date */}
+            {/* Qualification, License/Registration No, Joining Date */}
             {isMedicalRole ? (
               <div>
                 <label className={labelClass}>
@@ -811,6 +907,7 @@ export default function AddEmployee() {
               <input
                 type="date"
                 name="joiningDate"
+                min={todayStr}
                 className={inputClass + " text-gray-500"}
                 value={formData.joiningDate}
                 onChange={handleChange}
@@ -818,44 +915,48 @@ export default function AddEmployee() {
               />
             </div>
 
-            {/* Row 7 - Employee Status, Branch */}
-            <div>
-              <label className={labelClass}>Employee Status {requiredStar}</label>
-              <FormDropdown
-                name="empStatus"
-                className={inputClass}
-                options={["Active", "Inactive"]}
-                value={formData.empStatus}
-                onValueChange={(val) =>
-                  setFormData((prev) => ({ ...prev, empStatus: val }))
-                }
-                placeholder="Select Status"
-                disabled={submitting}
-              />
-            </div>
+            {/* Branch — multiple only makes sense for Doctors; every other role picks one */}
             <div>
               <label className={labelClass}>Branch {requiredStar}</label>
-              <MultiSelectDropdown
-                options={branches.map((b) => ({
-                  label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
-                  value: b.branch_id,
-                }))}
-                value={formData.branchIds}
-                onValueChange={(vals) =>
-                  setFormData((prev) => ({ ...prev, branchIds: vals }))
-                }
-                placeholder={branches.length ? "Select Branch(es)" : "No branches available"}
-                disabled={submitting || branches.length === 0}
-              />
+              {formData.roleType === "Doctor" ? (
+                <MultiSelectDropdown
+                  options={branches.map((b) => ({
+                    label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                    value: b.branch_id,
+                  }))}
+                  value={formData.branchIds}
+                  onValueChange={(vals) =>
+                    setFormData((prev) => ({ ...prev, branchIds: vals }))
+                  }
+                  placeholder={branches.length ? "Select Branch(es)" : "No branches available"}
+                  disabled={submitting || branches.length === 0}
+                />
+              ) : (
+                <FormDropdown
+                  name="branchId"
+                  className={inputClass}
+                  options={branches.map((b) => ({
+                    label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                    value: b.branch_id,
+                  }))}
+                  value={formData.branchIds[0] ?? ""}
+                  onValueChange={(val) =>
+                    setFormData((prev) => ({ ...prev, branchIds: val ? [val] : [] }))
+                  }
+                  placeholder={branches.length ? "Select Branch" : "No branches available"}
+                  disabled={submitting || branches.length === 0}
+                />
+              )}
             </div>
             <div />
+            <div />
 
-            {/* Doctor-only — weekly schedule / time slots, sourced from the
-                doctor_schedule table (day_of_week, shift_name, start_time,
-                end_time, is_active) plus branch_name from the branch table. */}
+            {/* Doctor-only — schedule / time slots. Any number of slots per day is
+                allowed (e.g. a morning slot at one branch, an evening slot at another).
+                A day with no slot simply has no doctor_schedule row (inactive). */}
             {formData.roleType === "Doctor" && (
               <div className="lg:col-span-3">
-                <label className={labelClass}>Weekly Schedule</label>
+                <label className={labelClass}>Schedule / Time Slots</label>
 
                 <div className="mb-4 max-w-xs">
                   <label className={labelClass}>Consultation Minutes {requiredStar}</label>
@@ -869,84 +970,114 @@ export default function AddEmployee() {
                   />
                 </div>
 
-                <div className="hide-scrollbar rounded-xl border border-gray-200">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-gray-50 text-left text-gray-600">
-                        <th className="px-4 py-2.5 font-semibold whitespace-nowrap">Day</th>
-                        <th className="px-4 py-2.5 font-semibold whitespace-nowrap">Active</th>
-                        <th className="px-4 py-2.5 font-semibold min-w-[190px]">Start Time</th>
-                        <th className="px-4 py-2.5 font-semibold min-w-[190px]">End Time</th>
-                        <th className="px-4 py-2.5 font-semibold min-w-[200px]">Branch</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {DAYS_OF_WEEK.map((day) => {
-                        const row = schedule.find((r) => r.day_of_week === day.value)!;
-                        return (
-                          <tr key={day.value}>
-                            <td className="px-4 py-2.5 font-medium text-gray-800 whitespace-nowrap">
-                              {day.label}
-                            </td>
-                            <td className="px-4 py-2.5">
-                              <input
-                                type="checkbox"
-                                checked={row.is_active}
-                                onChange={(e) =>
-                                  handleScheduleChange(day.value, "is_active", e.target.checked)
-                                }
-                                disabled={submitting}
-                                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              />
-                            </td>
-                            <td className="px-4 py-2.5">
-                              <TimeSelect12h
-                                value={row.start_time}
-                                onChange={(val) =>
-                                  handleScheduleChange(day.value, "start_time", val)
-                                }
-                                disabled={submitting || !row.is_active}
-                              />
-                            </td>
-                            <td className="px-4 py-2.5">
-                              <TimeSelect12h
-                                value={row.end_time}
-                                onChange={(val) =>
-                                  handleScheduleChange(day.value, "end_time", val)
-                                }
-                                disabled={submitting || !row.is_active}
-                              />
-                            </td>
-                            <td className="px-4 py-2.5">
-                              <FormDropdown
-                                name={`branch-${day.value}`}
-                                className={row.is_active ? inputClass : disabledInputClass}
-                                options={branches
-                                  .filter((b) => formData.branchIds.includes(b.branch_id))
-                                  .map((b) => ({
-                                    label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
-                                    value: b.branch_id,
-                                  }))}
-                                value={row.branch_id}
-                                onValueChange={(val) =>
-                                  handleScheduleChange(day.value, "branch_id", val)
-                                }
-                                placeholder="Select Branch"
-                                disabled={submitting || !row.is_active || branches.length === 0}
-                              />
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                {schedule.length === 0 && (
+                  <p className="text-sm text-gray-400 mb-3">No time slots added yet.</p>
+                )}
+
+                <div className="space-y-3">
+                  {schedule.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className="flex flex-wrap items-end gap-3 rounded-xl border border-gray-200 p-3"
+                    >
+                      <div className="w-40">
+                        <label className="block text-xs font-semibold text-gray-600 mb-1">
+                          Day
+                        </label>
+                        <FormDropdown
+                          name={`day-${entry.id}`}
+                          className={inputClass}
+                          options={DAYS_OF_WEEK}
+                          value={entry.day_of_week}
+                          onValueChange={(val) =>
+                            updateScheduleEntry(entry.id, "day_of_week", val)
+                          }
+                          placeholder="Select Day"
+                          disabled={submitting}
+                        />
+                      </div>
+                      <div className="w-36">
+                        <label className="block text-xs font-semibold text-gray-600 mb-1">
+                          Start Time
+                        </label>
+                        <FormDropdown
+                          name={`start-${entry.id}`}
+                          className={inputClass}
+                          options={TIME_OPTIONS}
+                          value={entry.start_time}
+                          onValueChange={(val) =>
+                            updateScheduleEntry(entry.id, "start_time", val)
+                          }
+                          placeholder="Start Time"
+                          disabled={submitting}
+                        />
+                      </div>
+                      <div className="w-36">
+                        <label className="block text-xs font-semibold text-gray-600 mb-1">
+                          End Time
+                        </label>
+                        <FormDropdown
+                          name={`end-${entry.id}`}
+                          className={inputClass}
+                          options={TIME_OPTIONS}
+                          value={entry.end_time}
+                          onValueChange={(val) =>
+                            updateScheduleEntry(entry.id, "end_time", val)
+                          }
+                          placeholder="End Time"
+                          disabled={submitting}
+                        />
+                      </div>
+                      <div className="w-56">
+                        <label className="block text-xs font-semibold text-gray-600 mb-1">
+                          Branch
+                        </label>
+                        <FormDropdown
+                          name={`branch-${entry.id}`}
+                          className={inputClass}
+                          options={branches
+                            .filter((b) => formData.branchIds.includes(b.branch_id))
+                            .map((b) => ({
+                              label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                              value: b.branch_id,
+                            }))}
+                          value={entry.branch_id}
+                          onValueChange={(val) =>
+                            updateScheduleEntry(entry.id, "branch_id", val)
+                          }
+                          placeholder="Select Branch"
+                          disabled={submitting || branches.length === 0}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeScheduleEntry(entry.id)}
+                        disabled={submitting}
+                        className="p-2.5 rounded-xl border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-200 transition-colors disabled:opacity-50"
+                        aria-label="Remove time slot"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={addScheduleEntry}
+                  disabled={submitting}
+                  className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-blue-600 border border-blue-200 rounded-xl hover:bg-blue-50 transition-colors disabled:opacity-50"
+                >
+                  <Plus className="w-4 h-4" /> Add Time Slot
+                </button>
               </div>
             )}
 
-            {/* Row 9 - Emergency Contact Name, Relation, Number */}
+            {/* Emergency Contact Name, Relation, Number — optional when Divorced */}
             <div>
-              <label className={labelClass}>Emergency Contact Name {requiredStar}</label>
+              <label className={labelClass}>
+                Emergency Contact Name {emergencyOptional ? optionalTag : requiredStar}
+              </label>
               <input
                 type="text"
                 name="emergencyContactName"
@@ -959,7 +1090,9 @@ export default function AddEmployee() {
               />
             </div>
             <div>
-              <label className={labelClass}>Emergency Contact Relation {requiredStar}</label>
+              <label className={labelClass}>
+                Emergency Contact Relation {emergencyOptional ? optionalTag : requiredStar}
+              </label>
               <input
                 type="text"
                 name="emergencyContactRelation"
@@ -972,7 +1105,9 @@ export default function AddEmployee() {
               />
             </div>
             <div>
-              <label className={labelClass}>Emergency Contact Number {requiredStar}</label>
+              <label className={labelClass}>
+                Emergency Contact Number {emergencyOptional ? optionalTag : requiredStar}
+              </label>
               <input
                 type="text"
                 inputMode="numeric"
@@ -987,7 +1122,7 @@ export default function AddEmployee() {
               />
             </div>
 
-            {/* Row 10 - Current Address, then "Same as Current" checkbox, then Permanent Address */}
+            {/* Current Address, then "Same as Current" checkbox, then Permanent Address */}
             <div className="lg:col-span-3">
               <label className={labelClass}>Current Address {requiredStar}</label>
               <input
@@ -1033,6 +1168,57 @@ export default function AddEmployee() {
               />
             </div>
 
+            {/* Login credentials — kept last on the form; confirm fields catch typos before submit */}
+            <div>
+              <label className={labelClass}>Username {requiredStar}</label>
+              <input
+                type="text"
+                name="username"
+                placeholder="Enter Username"
+                maxLength={50}
+                className={inputClass}
+                value={formData.username}
+                onChange={handleChange}
+                disabled={submitting}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Password {requiredStar}</label>
+              <input
+                type="password"
+                name="password"
+                placeholder="Enter Password"
+                className={inputClass}
+                value={formData.password}
+                onChange={handleChange}
+                disabled={submitting}
+              />
+            </div>
+            <div />
+            <div>
+              <label className={labelClass}>Confirm Username {requiredStar}</label>
+              <input
+                type="text"
+                placeholder="Re-enter Username"
+                maxLength={50}
+                className={inputClass}
+                value={confirmUsername}
+                onChange={(e) => setConfirmUsername(e.target.value)}
+                disabled={submitting}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Confirm Password {requiredStar}</label>
+              <input
+                type="password"
+                placeholder="Re-enter Password"
+                className={inputClass}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                disabled={submitting}
+              />
+            </div>
+            <div />
           </div>
 
           {/* Actions Footer */}

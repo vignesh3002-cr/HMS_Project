@@ -6,18 +6,17 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import {
   ChevronDown,
   Check,
-  FileText,
   Infinity,
-  Download,
   List,
   LayoutGrid,
   Plus,
-  FileSpreadsheet,
   MoreVertical,
   CalendarCheck,
   User,
   File,
 } from "lucide-react";
+
+import ExportReport from "@/components/ui/ExportReport";
 
 // Filter system
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
@@ -300,27 +299,6 @@ export default function PatientsManagement() {
 
   const patientFilterFields = viewMode === "grid" ? gridFilterFields : listFilterFields;
 
-  // ---- EXPORT DROPDOWN ----
-  const [exportOpen, setExportOpen] = useState(false);
-  const exportRef = useRef<HTMLDivElement>(null);
-  const exportOptions = [
-    { id: 'pdf', label: 'Export as PDF', icon: FileText },
-    { id: 'csv', label: 'Export as CSV', icon: FileSpreadsheet },
-  ];
-  const handleExport = (format: string) => {
-    console.log(`Exporting as ${format}`);
-    setExportOpen(false);
-  };
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
-        setExportOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
   // ---- SEARCH & FILTER ----
   const searchableFields = useMemo(
     () => viewMode === "grid"
@@ -426,33 +404,9 @@ export default function PatientsManagement() {
               <h1 className="hms-heading">Patients management</h1>
               <p className="hms-subheading">Real-time performance across all branches.</p>
             </div>
-            <div className="flex items-center gap-3">
-    <div className="relative" ref={exportRef}>
-      <button
-        onClick={() => setExportOpen(!exportOpen)}
-        className="flex items-center gap-2 px-4 py-2 border border-[#E5E7EB] bg-white rounded-lg text-[#424752] text-xs font-semibold shadow-sm hover:bg-[#F2F4F6] transition-colors"
-      >
-        <Download className="w-4 h-4" />
-        Export report
-        <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${exportOpen ? 'rotate-180' : ''}`} />
-      </button>
-
-      {exportOpen && (
-        <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-[#E5E7EB] py-1 z-10 animate-slideDown">
-          {exportOptions.map((option) => (
-            <button
-              key={option.id}
-              onClick={() => handleExport(option.id)}
-              className="flex items-center gap-2 w-full px-4 py-2 text-[#424752] text-xs font-medium hover:bg-[#F2F4F6] transition-colors"
-            >
-              <option.icon className="w-4 h-4" />
-              {option.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-              <button
+<div className="flex items-center gap-3">
+    <ExportReport />
+    <button
                 onClick={handleAddDoctor}
                 className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
               >

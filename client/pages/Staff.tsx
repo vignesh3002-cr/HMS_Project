@@ -7,6 +7,8 @@ import { Search, FileText, File, ChevronDown, Check, Plus } from "lucide-react";
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
+import { useToast } from "@/hooks/use-toast";
+import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 
 interface StaffMember {
   initials: string;
@@ -980,7 +982,82 @@ function SupportTableView({
   );
 }
 
+// Map EmployeeRecord (from API) to Staff format for UI compatibility
+const AVATAR_PALETTE = [
+  { avatarColor: "#00488D", initBg: "#D6E3FF" },
+  { avatarColor: "#7B3200", initBg: "#FFDBCB" },
+  { avatarColor: "#00C896", initBg: "rgba(0,200,150,0.12)" },
+  { avatarColor: "#475C7F", initBg: "#E6E8EA" },
+];
+
+function getInitials(name: string): string {
+  const words = name.replace(/^Dr\.?\s*/i, "").trim().split(/\s+/);
+  return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
+}
+
+function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
+  const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
+  const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
+  const roleType = emp.user_table?.role_type || "STAFF";
+  const isDoctor = roleType === "DOCTOR";
+  const isMedical = ["DOCTOR", "NURSE", "PHARMACIST"].includes(roleType);
+  
+  // Map role_type to dept/status
+  const status = (emp.emp_status === true || emp.user_table?.user_status === 1) ? "active" : "leave";
+  
+  if (isMedical) {
+    // Medical staff (Doctor, Nurse, Pharmacist)
+    return {
+      initials: getInitials(fullName),
+      name: fullName,
+      phone: emp.mobile_no,
+      id: emp.employee_id,
+      dept: emp.specialization || emp.designation || roleType,
+      deptClass: "bg-[#D6E3FF] text-[#475C7F]",
+      branch: emp.branch?.branch_name ? [emp.branch.branch_name] : ["—"],
+      status: status as "active" | "leave" | "inactive",
+    };
+  } else if (roleType === "STAFF") {
+    // Administrative staff
+    const avatars = ["purple", "indigo"] as const;
+    const accessColors = ["purple", "indigo"] as const;
+    const loginDots = ["green", "orange"] as const;
+    const avatarIdx = index % 2;
+    
+    return {
+      initials: getInitials(fullName),
+      avatar: avatars[avatarIdx],
+      name: fullName,
+      id: emp.employee_id,
+      role: emp.designation || "Staff",
+      roleColor: accessColors[avatarIdx],
+      branch: emp.branch?.branch_name || "—",
+      access: emp.department_id || "Standard",
+      accessColor: accessColors[avatarIdx],
+      login: new Date().toLocaleDateString(),
+      loginDot: loginDots[avatarIdx],
+      status: status as "active" | "leave",
+    };
+  } else {
+    // Support staff
+    const deptColors = ["blue", "purple", "yellow", "green", "red"] as const;
+    const deptIdx = index % 5;
+    
+    return {
+      initials: getInitials(fullName),
+      name: fullName,
+      phone: emp.mobile_no,
+      id: emp.employee_id,
+      dept: emp.designation || "Support",
+      deptClass: `bg-${deptColors[deptIdx]}-100 text-${deptColors[deptIdx]}-700` as const,
+      branch: emp.branch?.branch_name || "—",
+      status: status as "active" | "leave",
+    };
+  }
+}
+
 export default function Staff() {
+  const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
   const tabsMenuRef = useRef<HTMLElement>(null);
@@ -1025,6 +1102,40 @@ export default function Staff() {
   const isMedicalTab = activeTabName === "Medical";
   const isAdministrativeTab = activeTabName === "Administrative";
   const isSupportTab = activeTabName === "Support";
+
+  // Fetch all employees from backend and filter by role_type (exclude DOCTOR for staff)
+  const [realStaff, setRealStaff] = useState<EmployeeRecord[] | null>(null);
+
+  useEffect(() => {
+    console.log("[Staff Page] Fetching all employees from employeeApi...");
+    employeeApi
+      .getAll()
+      .then((res) => {
+        console.log("[Staff Page] Response:", res.data);
+        const allEmployees = res.data?.data?.employees || [];
+        // Filter on frontend: exclude DOCTOR role_type
+        const staff = allEmployees.filter((e) => e.user_table?.role_type !== "DOCTOR");
+        if (staff.length > 0) {
+          setRealStaff(staff);
+        } else {
+          toast({
+            title: "Using fallback data",
+            description: "No staff records returned yet — showing sample data.",
+            variant: "destructive",
+          });
+        }
+      })
+      .catch((err) => {
+        console.error("[Staff Page] Error:", err);
+        console.error("[Staff Page] Error response:", err.response?.data);
+        console.error("[Staff Page] Error status:", err.response?.status);
+        toast({
+          title: "Using fallback data",
+          description: "Couldn't reach the employees API — showing sample data.",
+          variant: "destructive",
+        });
+      });
+  }, []);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -1096,15 +1207,104 @@ export default function Staff() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Map EmployeeRecord to appropriate staff data format
+  const AVATAR_PALETTE = [
+    { avatarColor: "#00488D", initBg: "#D6E3FF" },
+    { avatarColor: "#7B3200", initBg: "#FFDBCB" },
+    { avatarColor: "#00C896", initBg: "rgba(0,200,150,0.12)" },
+    { avatarColor: "#475C7F", initBg: "#E6E8EA" },
+  ];
+
+  function getInitials(name: string): string {
+    const words = name.trim().split(/\s+/);
+    return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
+  }
+
+  function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
+    const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
+    const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
+    const roleType = emp.user_table?.role_type || "STAFF";
+    const isActive = emp.emp_status === true || emp.user_table?.user_status === 1;
+    const branchName = emp.branch?.branch_name || "—";
+    const deptName = emp.specialization || emp.designation || "Unassigned";
+
+    // Determine which tab this employee belongs to
+    if (roleType === "NURSE" || roleType === "PHARMACIST") {
+      // Medical tab
+      return {
+        initials: getInitials(fullName),
+        name: fullName,
+        phone: emp.mobile_no,
+        id: emp.employee_id,
+        dept: deptName,
+        deptClass: "bg-[#D6E3FF] text-[#475C7F]",
+        branch: branchName,
+        status: isActive ? "active" : "leave",
+      } as MedicalStaffRow;
+    } else if (roleType === "STAFF") {
+      // Administrative or Support tab - determine by designation
+      const designation = emp.designation?.toLowerCase() || "";
+      const isAdmin = ["admin", "executive", "accountant", "hr", "it", "manager", "receptionist"].some(d => designation.includes(d));
+      
+      if (isAdmin) {
+        return {
+          initials: getInitials(fullName),
+          avatar: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
+          name: fullName,
+          id: emp.employee_id,
+          role: emp.designation || "Staff",
+          roleColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
+          branch: branchName,
+          access: "Full Access",
+          accessColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
+          login: isActive ? "Online" : "Offline",
+          loginDot: isActive ? "green" : "orange",
+          status: isActive ? "active" : "leave",
+        } as AdministrativeStaffRow;
+      } else {
+        return {
+          initials: getInitials(fullName),
+          name: fullName,
+          phone: emp.mobile_no,
+          id: emp.employee_id,
+          dept: deptName,
+          deptClass: "blue",
+          branch: branchName,
+          status: isActive ? "active" : "leave",
+        } as SupportStaffRow;
+      }
+    }
+    // Default to medical staff
+    return {
+      initials: getInitials(fullName),
+      name: fullName,
+      phone: emp.mobile_no,
+      id: emp.employee_id,
+      dept: deptName,
+      deptClass: "bg-[#D6E3FF] text-[#475C7F]",
+      branch: branchName,
+      status: isActive ? "active" : "leave",
+    } as MedicalStaffRow;
+  }
+
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
-    let result: (StaffMember | MedicalStaffRow | AdministrativeStaffRow | SupportStaffRow)[] = isMedicalTab
-      ? [...medicalStaffData]
-      : isAdministrativeTab
-        ? [...administrativeStaffData]
-        : isSupportTab
-          ? [...supportStaffData]
-          : [...staffData];
+    // Use real data from API if available, otherwise fallback to static data
+    let sourceData: (StaffMember | MedicalStaffRow | AdministrativeStaffRow | SupportStaffRow)[] = [];
+    
+    if (realStaff && realStaff.length > 0) {
+      sourceData = realStaff.map(mapEmployeeToStaffData);
+    } else if (isMedicalTab) {
+      sourceData = [...medicalStaffData];
+    } else if (isAdministrativeTab) {
+      sourceData = [...administrativeStaffData];
+    } else if (isSupportTab) {
+      sourceData = [...supportStaffData];
+    } else {
+      sourceData = [...staffData];
+    }
+
+    let result = sourceData;
 
     if (searchQuery) {
       result = result.filter((staff) =>
@@ -1119,7 +1319,7 @@ export default function Staff() {
     result = filterDataByValues(result, appliedValues);
 
     return result;
-  }, [searchQuery, appliedValues, isMedicalTab, isAdministrativeTab, isSupportTab]);
+  }, [searchQuery, appliedValues, isMedicalTab, isAdministrativeTab, isSupportTab, realStaff]);
 
   // ---- SORTING ----
   const handleSort = (field: string) => {
@@ -1418,10 +1618,10 @@ export default function Staff() {
                         {/* BRANCH */}
                         <td className="px-5 py-4">
                           <span className="text-[#191C1E] hms-content-text">
-                            {staff.branch.map((b, i) => (
+                            {(Array.isArray(staff.branch) ? staff.branch : [staff.branch]).map((b, i) => (
                               <Fragment key={b}>
                                 {b}
-                                {i < staff.branch.length - 1 && <br />}
+                                {i < (Array.isArray(staff.branch) ? staff.branch.length : 1) - 1 && <br />}
                               </Fragment>
                             ))}
                           </span>

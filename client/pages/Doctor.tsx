@@ -8,8 +8,6 @@ import {
   List,
   LayoutGrid,
   Plus,
-  FileText,
-  File,
   ChevronDown,
   Check,
   MoreVertical,
@@ -20,6 +18,9 @@ import {
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
+import ExportReport from "@/components/ui/ExportReport";
+import { useToast } from "@/hooks/use-toast";
+import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 
 // ============================================================
 // DATA
@@ -157,11 +158,45 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
   );
 }
 
+// Map EmployeeRecord (from API) to doctorsData format for UI compatibility
+const AVATAR_PALETTE = [
+  { avatarColor: "#00488D", initBg: "#D6E3FF" },
+  { avatarColor: "#7B3200", initBg: "#FFDBCB" },
+  { avatarColor: "#00C896", initBg: "rgba(0,200,150,0.12)" },
+  { avatarColor: "#475C7F", initBg: "#E6E8EA" },
+];
+
+function getInitials(name: string): string {
+  const words = name.replace(/^Dr\.?\s*/i, "").trim().split(/\s+/);
+  return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
+}
+
+function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
+  const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
+  const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
+  return {
+    id: emp.employee_id,
+    name: fullName,
+    avatar: getInitials(fullName),
+    avatarColor: palette.avatarColor,
+    initBg: palette.initBg,
+    dept: emp.specialization || emp.designation || "Unassigned",
+    deptBg: "#E6E8EA",
+    deptColor: "#475C7F",
+    branch: emp.branch?.branch_name || "—",
+    status: (emp.emp_status === true || emp.user_table?.user_status === 1) ? "Active" : "Leave",
+    appointments: 0,
+    total: 0,
+    photo: "",
+  };
+}
+
 // ============================================================
 // MAIN COMPONENT (merged list + grid views)
 // ============================================================
 export default function Doctor() {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
 
   // Search state
@@ -230,30 +265,45 @@ export default function Doctor() {
     ]},
   ];
 
-  // ---- EXPORT DROPDOWN ----
-  const [exportOpen, setExportOpen] = useState(false);
-  const exportRef = useRef<HTMLDivElement>(null);
-  const exportOptions = [
-    { id: "pdf", label: "Export as PDF", icon: FileText },
-    { id: "csv", label: "Export as CSV", icon: File },
-  ];
-  const handleExport = (format: string) => {
-    console.log(`Exporting as ${format}`);
-    setExportOpen(false);
-  };
+  // Real doctors fetched from the backend
+  const [realDoctors, setRealDoctors] = useState<EmployeeRecord[] | null>(null);
+
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
-        setExportOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    console.log("[Doctor Page] Fetching all employees from employeeApi...");
+    employeeApi
+      .getAll()
+      .then((res) => {
+        console.log("[Doctor Page] Response:", res.data);
+        const allEmployees = res.data?.data?.employees || [];
+        // Filter on frontend by user_table.role_type === DOCTOR
+        const doctors = allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR");
+        if (doctors.length > 0) {
+          setRealDoctors(doctors);
+        } else {
+          toast({
+            title: "Using fallback data",
+            description: "No doctor records returned yet — showing sample data.",
+            variant: "destructive",
+          });
+        }
+      })
+      .catch((err) => {
+        console.error("[Doctor Page] Error:", err);
+        console.error("[Doctor Page] Error response:", err.response?.data);
+        console.error("[Doctor Page] Error status:", err.response?.status);
+        toast({
+          title: "Using fallback data",
+          description: "Couldn't reach the employees API — showing sample data.",
+          variant: "destructive",
+        });
+      });
   }, []);
 
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
-    let result: Record<string, string | number>[] = [...doctorsData];
+    // Use real data from API if available, otherwise fallback to static data
+    const sourceData = realDoctors ? realDoctors.map(mapEmployeeToDoctorData) : doctorsData;
+    let result: Record<string, string | number>[] = [...sourceData];
 
     if (searchQuery) {
       result = result.filter((doctor) =>
@@ -345,31 +395,7 @@ export default function Doctor() {
               <p className="hms-subheading">Real-time performance across all branches.</p>
             </div>
             <div className="flex items-center gap-3">
-              <div className="relative" ref={exportRef}>
-                <button
-                  onClick={() => setExportOpen(!exportOpen)}
-                  className="flex items-center gap-2 px-4 py-2 border border-[#E5E7EB] bg-white rounded-lg text-[#424752] text-xs font-semibold shadow-sm hover:bg-[#F2F4F6] transition-colors"
-                >
-                  <FileText className="w-4 h-4" />
-                  Export report
-                  <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${exportOpen ? "rotate-180" : ""}`} />
-                </button>
-
-                {exportOpen && (
-                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-[#E5E7EB] py-1 z-10 animate-slideDown">
-                    {exportOptions.map((option) => (
-                      <button
-                        key={option.id}
-                        onClick={() => handleExport(option.id)}
-                        className="flex items-center gap-2 w-full px-4 py-2 text-[#424752] text-xs font-medium hover:bg-[#F2F4F6] transition-colors"
-                      >
-                        <option.icon className="w-4 h-4" />
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <ExportReport />
               <button
                 onClick={handleAddDoctor}
                 className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"

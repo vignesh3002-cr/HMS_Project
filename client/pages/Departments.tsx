@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/hms/StatusBadge";
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
+import ExportReport from "@/components/ui/ExportReport";
 
 const departments = [
   {
