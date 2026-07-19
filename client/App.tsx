@@ -9,6 +9,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import AddBranch from "@/components/Forms/AddBranch";
 import AddEmployee from "@/components/Forms/Addemployee";
+import PatientRegistrationForm from "@/components/Forms/PatientRegistrationForm";
 import Appointments from "./pages/Appointments";
 import Dashboard from "./pages/Dashboard";
 import Departments from "./pages/Departments";
@@ -44,6 +45,7 @@ const protectedRoutes = [
 
   { path: "/branches/add", element: <AddBranch /> },
   { path: "/staff/add", element: <AddEmployee /> },
+  { path: "/patients/add", element: <PatientRegistrationForm /> },
 
 ];
 
