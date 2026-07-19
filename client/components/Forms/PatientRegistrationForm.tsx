@@ -1,9 +1,11 @@
-import { useState, ChangeEvent, FormEvent } from "react";
+import { useEffect, useState, ChangeEvent, FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, UserRound } from "lucide-react";
+import { ArrowLeft, Loader2, Plus, UserRound } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
+import { branchApi, Branch } from "@/api/branch.api";
+import { patientApi } from "@/api/patient.api";
 
 // Field names mirror the `patient_bio_data` table columns so every input
 // here has a real column to be saved into once the patients API exists.
@@ -20,19 +22,10 @@ interface FormData {
   patient_email: string;
   patient_marital_status: string;
   patient_nationality: string;
-  patient_type: string;
-  patient_current_address_1: string;
-  patient_current_address_2: string;
-  patient_current_city: string;
-  patient_current_state: string;
-  patient_current_postal_code: string;
-  patient_current_country: string;
-  patient_permanent_address_1: string;
-  patient_permanent_address_2: string;
-  patient_permanent_city: string;
-  patient_permanent_state: string;
-  patient_permanent_postal_code: string;
-  patient_permanent_country: string;
+  patient_current_address: string;
+  patient_permanent_address: string;
+  patient_username: string;
+  patient_password: string;
   patient_emergency_mobile: string;
   patient_emergency_name: string;
   patient_emergency_relation: string;
@@ -52,48 +45,15 @@ const emptyFormData: FormData = {
   patient_email: "",
   patient_marital_status: "",
   patient_nationality: "",
-  patient_type: "",
-  patient_current_address_1: "",
-  patient_current_address_2: "",
-  patient_current_city: "",
-  patient_current_state: "",
-  patient_current_postal_code: "",
-  patient_current_country: "",
-  patient_permanent_address_1: "",
-  patient_permanent_address_2: "",
-  patient_permanent_city: "",
-  patient_permanent_state: "",
-  patient_permanent_postal_code: "",
-  patient_permanent_country: "",
+  patient_current_address: "",
+  patient_permanent_address: "",
+  patient_username: "",
+  patient_password: "",
   patient_emergency_mobile: "",
   patient_emergency_name: "",
   patient_emergency_relation: "",
   patient_photo_url: null,
 };
-
-// A handful of major Indian cities/districts for the district dropdown.
-const INDIAN_DISTRICTS = [
-  "Chennai",
-  "Coimbatore",
-  "Madurai",
-  "Mumbai",
-  "Delhi",
-  "Bangalore",
-  "Hyderabad",
-  "Kolkata",
-  "Pune",
-  "Ahmedabad",
-  "Jaipur",
-  "Lucknow",
-  "Chandigarh",
-  "Nagpur",
-  "Indore",
-  "Bhopal",
-  "Patna",
-  "Surat",
-  "Kanpur",
-  "Visakhapatnam",
-];
 
 // Shared styling — matches AddBranch.tsx / Addemployee.tsx conventions.
 const inputClass =
@@ -109,7 +69,23 @@ export default function PatientRegistrationForm() {
   const { toast } = useToast();
 
   const [formData, setFormData] = useState<FormData>(emptyFormData);
-  const [copyAddressChecked, setCopyAddressChecked] = useState(false);
+  const [sameAsCurrent, setSameAsCurrent] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  // Re-typed username — must match before submit is allowed. Password has
+  // no confirm field; it's a single required field (matches Addemployee.tsx).
+  const [confirmUsername, setConfirmUsername] = useState("");
+
+  // Fetch the real branch list on mount for the Branch dropdown.
+  useEffect(() => {
+    branchApi
+      .getAll()
+      .then((res) => {
+        if (res.data?.data) setBranches(res.data.data);
+        else if (Array.isArray(res.data)) setBranches(res.data as unknown as Branch[]);
+      })
+      .catch(() => {});
+  }, []);
 
   const setField = (key: keyof FormData, value: string) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
@@ -119,69 +95,102 @@ export default function PatientRegistrationForm() {
     e: ChangeEvent<HTMLInputElement | HTMLSelectElement>,
     key: keyof FormData,
   ) => {
-    setField(key, e.target.value);
+    const value = e.target.value;
+
+    setFormData((prev) => {
+      const next = { ...prev, [key]: value };
+
+      // Keep Permanent Address mirrored to Current Address while the
+      // "Same as Current Address" checkbox is ticked.
+      if (key === "patient_current_address" && sameAsCurrent) {
+        next.patient_permanent_address = value;
+      }
+
+      return next;
+    });
   };
 
-  const handleCopyAddress = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleSameAsCurrentToggle = (e: ChangeEvent<HTMLInputElement>) => {
     const checked = e.target.checked;
-    setCopyAddressChecked(checked);
-
+    setSameAsCurrent(checked);
     if (checked) {
       setFormData((prev) => ({
         ...prev,
-        patient_permanent_address_1: prev.patient_current_address_1,
-        patient_permanent_address_2: prev.patient_current_address_2,
-        patient_permanent_city: prev.patient_current_city,
-        patient_permanent_state: prev.patient_current_state,
-        patient_permanent_postal_code: prev.patient_current_postal_code,
-        patient_permanent_country: prev.patient_current_country,
+        patient_permanent_address: prev.patient_current_address,
       }));
     }
   };
 
-  const handleAddressChange = (
-    e: ChangeEvent<HTMLInputElement>,
-    key: keyof FormData,
-  ) => {
-    const value = e.target.value;
-    setFormData((prev) => ({ ...prev, [key]: value }));
-
-    if (copyAddressChecked) {
-      const permanentKey = key.replace(
-        "current_",
-        "permanent_",
-      ) as keyof FormData;
-      setFormData((prev) => ({ ...prev, [permanentKey]: value }));
-    }
-  };
-
-  const handleAddressDropdownChange = (
-    key: keyof FormData,
-    value: string,
-  ) => {
-    setFormData((prev) => ({ ...prev, [key]: value }));
-
-    if (copyAddressChecked && key.includes("current_")) {
-      const permanentKey = key.replace(
-        "current_",
-        "permanent_",
-      ) as keyof FormData;
-      setFormData((prev) => ({ ...prev, [permanentKey]: value }));
-    }
-  };
-
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    console.log("POST /api/patients", formData);
-    toast({
-      title: "Patient saved (demo)",
-      description: "Check the browser console for the payload.",
-    });
+
+    if (!confirmUsername.trim()) {
+      toast({
+        title: "Missing required field",
+        description: "Please confirm your Username.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (formData.patient_username !== confirmUsername) {
+      toast({
+        title: "Username mismatch",
+        description: "Username and Confirm Username do not match.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      // Address and emergency-contact fields aren't sent — patient_bio_data
+      // has no columns for those yet.
+      const response = await patientApi.create({
+        username: formData.patient_username,
+        password: formData.patient_password,
+        branch_id: formData.branch_id,
+        patient_first_name: formData.patient_first_name,
+        patient_middle_name: formData.patient_middle_name || undefined,
+        patient_last_name: formData.patient_last_name || undefined,
+        patient_gender: formData.patient_gender || undefined,
+        patient_dob: formData.patient_dob || undefined,
+        patient_blood_group: formData.patient_blood_group || undefined,
+        patient_primary_mobile: formData.patient_primary_mobile,
+        patient_alternate_mobile: formData.patient_alternate_mobile || undefined,
+        patient_email: formData.patient_email || undefined,
+        patient_marital_status: formData.patient_marital_status || undefined,
+        patient_nationality: formData.patient_nationality || undefined,
+        patient_photo_url: formData.patient_photo_url || undefined,
+      });
+
+      if (!response.data.success) {
+        throw new Error(response.data.message);
+      }
+
+      toast({
+        title: "Patient added",
+        description: `${formData.patient_first_name} ${formData.patient_last_name} was added successfully.`,
+      });
+
+      navigate(-1);
+    } catch (error: any) {
+      toast({
+        title: "Failed to add patient",
+        description:
+          error.response?.data?.message ?? error.message ?? "Something went wrong.",
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleReset = () => {
     setFormData(emptyFormData);
-    setCopyAddressChecked(false);
+    setSameAsCurrent(false);
+    setConfirmUsername("");
   };
 
   return (
@@ -230,15 +239,15 @@ export default function PatientRegistrationForm() {
                       Branch {requiredStar}
                     </label>
                     <FormDropdown
-                      options={[
-                        { label: "Main Hospital — BR-001", value: "BR-001" },
-                        { label: "North Clinic — BR-002", value: "BR-002" },
-                        { label: "East Clinic — BR-003", value: "BR-003" },
-                      ]}
+                      options={branches.map((b) => ({
+                        label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                        value: b.branch_id,
+                      }))}
                       value={formData.branch_id}
                       onValueChange={(val) => setField("branch_id", val)}
-                      placeholder="Select branch"
+                      placeholder={branches.length ? "Select branch" : "No branches available"}
                       className={inputClass}
+                      disabled={submitting || branches.length === 0}
                     />
                   </div>
                 </div>
@@ -358,24 +367,6 @@ export default function PatientRegistrationForm() {
                     className={inputClass}
                   />
                 </div>
-                <div>
-                  <label className={labelClass}>
-                    Patient type {requiredStar}
-                  </label>
-                  <FormDropdown
-                    options={[
-                      "Outpatient (OPD)",
-                      "Inpatient (IPD)",
-                      "Emergency",
-                      "Corporate",
-                      "Insurance",
-                    ]}
-                    value={formData.patient_type}
-                    onValueChange={(val) => setField("patient_type", val)}
-                    placeholder="Select type"
-                    className={inputClass}
-                  />
-                </div>
               </div>
             </div>
 
@@ -468,206 +459,102 @@ export default function PatientRegistrationForm() {
                   />
                 </div>
 
-                <p className="lg:col-span-3 text-xs font-bold text-gray-400 uppercase tracking-wide mt-2">
-                  Current address
-                </p>
-
-                <div>
+                {/* Address — same simple single-field pattern as Addemployee.tsx */}
+                <div className="lg:col-span-3">
                   <label className={labelClass}>
-                    Address 1 {requiredStar}
+                    Current Address {requiredStar}
                   </label>
                   <input
                     type="text"
-                    placeholder="Street address"
+                    placeholder="Enter current address"
+                    maxLength={255}
                     className={inputClass}
-                    value={formData.patient_current_address_1}
+                    value={formData.patient_current_address}
                     onChange={(e) =>
-                      handleAddressChange(e, "patient_current_address_1")
-                    }
-                    required
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>Address 2 {requiredStar} </label>
-                  <input
-                    type="text"
-                    placeholder="Apartment, suite, etc."
-                    className={inputClass}
-                    value={formData.patient_current_address_2}
-                    onChange={(e) =>
-                      handleAddressChange(e, "patient_current_address_2")
+                      handleInputChange(e, "patient_current_address")
                     }
                     required
                   />
                 </div>
 
-                <div>
-                  <label className={labelClass}>
-                    District {requiredStar}
-                  </label>
-                  <FormDropdown
-                    options={INDIAN_DISTRICTS}
-                    value={formData.patient_current_city}
-                    onValueChange={(val) =>
-                      handleAddressDropdownChange("patient_current_city", val)
-                    }
-                    placeholder="e.g. Chennai"
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    State / Province {requiredStar}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Tamil Nadu"
-                    className={inputClass}
-                    value={formData.patient_current_state}
-                    onChange={(e) =>
-                      handleAddressChange(e, "patient_current_state")
-                    }
-                    required
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Postal code {requiredStar}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 600001"
-                    className={inputClass}
-                    value={formData.patient_current_postal_code}
-                    onChange={(e) =>
-                      handleAddressChange(e, "patient_current_postal_code")
-                    }
-                    required
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Country {requiredStar}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. India"
-                    className={inputClass}
-                    value={formData.patient_current_country}
-                    onChange={(e) =>
-                      handleAddressChange(e, "patient_current_country")
-                    }
-                    required
-                  />
-                </div>
-
-                <label className="lg:col-span-3 flex items-center gap-2.5 px-4 py-2.5 border border-gray-200 rounded-xl bg-white cursor-pointer select-none">
+                <div className="lg:col-span-3 flex items-center gap-2 -mt-2">
                   <input
                     type="checkbox"
-                    className="accent-blue-600"
-                    checked={copyAddressChecked}
-                    onChange={handleCopyAddress}
+                    id="sameAsCurrent"
+                    checked={sameAsCurrent}
+                    onChange={handleSameAsCurrentToggle}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                   />
-                  <span className="text-sm font-medium text-gray-700">
-                    Permanent address same as current
-                  </span>
-                </label>
-
-                <p className="lg:col-span-3 text-xs font-bold text-gray-400 uppercase tracking-wide mt-2">
-                  Permanent address
-                </p>
-
-                <div>
-                  <label className={labelClass}>
-                    Address 1 {requiredStar}
+                  <label
+                    htmlFor="sameAsCurrent"
+                    className="text-sm font-medium text-gray-700 cursor-pointer select-none"
+                  >
+                    Same as Current Address
                   </label>
-                  <input
-                    type="text"
-                    placeholder="Street address"
-                    className={inputClass}
-                    value={formData.patient_permanent_address_1}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_permanent_address_1")
-                    }
-                    disabled={copyAddressChecked}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>Address 2 {requiredStar} </label>
-                  <input
-                    type="text"
-                    placeholder="Apartment, suite, etc."
-                    className={inputClass}
-                    value={formData.patient_permanent_address_2}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_permanent_address_2")
-                    }
-                    required
-                    disabled={copyAddressChecked}
-                  />
                 </div>
 
-                <div>
+                <div className="lg:col-span-3">
                   <label className={labelClass}>
-                    District {requiredStar}
-                  </label>
-                  <FormDropdown
-                    options={INDIAN_DISTRICTS}
-                    value={formData.patient_permanent_city}
-                    onValueChange={(val) =>
-                      setField("patient_permanent_city", val)
-                    }
-                    placeholder="e.g. Chennai"
-                    className={inputClass}
-                    disabled={copyAddressChecked}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    State / Province {requiredStar}
+                    Permanent Address {requiredStar}
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. Tamil Nadu"
+                    placeholder="Enter permanent address"
+                    maxLength={255}
                     className={inputClass}
-                    value={formData.patient_permanent_state}
+                    value={formData.patient_permanent_address}
                     onChange={(e) =>
-                      handleInputChange(e, "patient_permanent_state")
+                      handleInputChange(e, "patient_permanent_address")
                     }
-                    disabled={copyAddressChecked}
+                    disabled={sameAsCurrent}
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* LOGIN CREDENTIALS */}
+            <div className={sectionClass}>
+              <h3 className={sectionTitleClass}>Login credentials</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6">
+                <div>
+                  <label className={labelClass}>Username {requiredStar}</label>
+                  <input
+                    type="text"
+                    placeholder="Enter username"
+                    maxLength={50}
+                    className={inputClass}
+                    value={formData.patient_username}
+                    onChange={(e) =>
+                      handleInputChange(e, "patient_username")
+                    }
+                    required
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Password {requiredStar}</label>
+                  <input
+                    type="password"
+                    placeholder="Enter password"
+                    className={inputClass}
+                    value={formData.patient_password}
+                    onChange={(e) =>
+                      handleInputChange(e, "patient_password")
+                    }
                     required
                   />
                 </div>
                 <div>
                   <label className={labelClass}>
-                    Postal code {requiredStar}
+                    Confirm Username {requiredStar}
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. 600001"
+                    placeholder="Re-enter username"
+                    maxLength={50}
                     className={inputClass}
-                    value={formData.patient_permanent_postal_code}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_permanent_postal_code")
-                    }
-                    disabled={copyAddressChecked}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Country {requiredStar}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. India"
-                    className={inputClass}
-                    value={formData.patient_permanent_country}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_permanent_country")
-                    }
-                    disabled={copyAddressChecked}
+                    value={confirmUsername}
+                    onChange={(e) => setConfirmUsername(e.target.value)}
                     required
                   />
                 </div>
@@ -679,16 +566,22 @@ export default function PatientRegistrationForm() {
               <button
                 type="button"
                 onClick={handleReset}
-                className="w-full sm:w-auto px-8 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm"
+                disabled={submitting}
+                className="w-full sm:w-auto px-8 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 Clear form
               </button>
               <button
                 type="submit"
-                className="w-full sm:w-auto px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 active:scale-[0.98] transition-all duration-200 shadow-[0_4px_14px_0_rgba(37,99,235,0.2)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.3)]"
+                disabled={submitting}
+                className="w-full sm:w-auto px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 active:scale-[0.98] transition-all duration-200 shadow-[0_4px_14px_0_rgba(37,99,235,0.2)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.3)] disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
               >
-                <Plus className="w-4 h-4" />
-                Save patient
+                {submitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Plus className="w-4 h-4" />
+                )}
+                {submitting ? "Saving..." : "Save patient"}
               </button>
             </div>
           </form>
