@@ -146,23 +146,26 @@ export default function PatientRegistrationForm() {
 
     try {
       // Address and emergency-contact fields aren't sent — patient_bio_data
-      // has no columns for those yet.
+      // has no columns for those yet. created_by is required by the backend
+      // validation even though the controller actually derives it from the
+      // logged-in user's auth token.
       const response = await patientApi.create({
         username: formData.patient_username,
         password: formData.patient_password,
         branch_id: formData.branch_id,
-        patient_first_name: formData.patient_first_name,
-        patient_middle_name: formData.patient_middle_name || undefined,
-        patient_last_name: formData.patient_last_name || undefined,
-        patient_gender: formData.patient_gender || undefined,
-        patient_dob: formData.patient_dob || undefined,
-        patient_blood_group: formData.patient_blood_group || undefined,
-        patient_primary_mobile: formData.patient_primary_mobile,
-        patient_alternate_mobile: formData.patient_alternate_mobile || undefined,
-        patient_email: formData.patient_email || undefined,
-        patient_marital_status: formData.patient_marital_status || undefined,
-        patient_nationality: formData.patient_nationality || undefined,
-        patient_photo_url: formData.patient_photo_url || undefined,
+        first_name: formData.patient_first_name,
+        middle_name: formData.patient_middle_name || undefined,
+        last_name: formData.patient_last_name || undefined,
+        gender: formData.patient_gender || undefined,
+        dob: formData.patient_dob || undefined,
+        blood_group: formData.patient_blood_group || undefined,
+        mobile: formData.patient_primary_mobile,
+        alternate_mobile: formData.patient_alternate_mobile || undefined,
+        email: formData.patient_email || undefined,
+        marital_status: formData.patient_marital_status || undefined,
+        nationality: formData.patient_nationality || undefined,
+        photo: formData.patient_photo_url || undefined,
+        created_by: "SYSTEM",
       });
 
       if (!response.data.success) {

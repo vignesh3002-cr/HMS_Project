@@ -1,25 +1,28 @@
 import API from "./axios";
 
-// Shape matches the real `patient_bio_data` Prisma model (patient_* columns) plus
-// username/password, which live on the shared `user_table` (same pattern as employees).
-// Address and emergency-contact fields are intentionally omitted — patient_bio_data
-// has no columns for those yet.
+// Matches the real backend `CreatePatientRequest`
+// (Backend/HMS_Backend/src/modules/patient/patient.types.ts) — plain field
+// names. The "patient_" prefix only exists on the patient_bio_data DB
+// columns; the service maps these plain names onto those columns itself.
 export interface CreatePatientPayload {
   username: string;
   password: string;
+  first_name: string;
+  middle_name?: string;
+  last_name?: string;
+  gender?: string;
+  dob?: string;
+  age?: number;
+  blood_group?: string;
+  mobile: string;
+  alternate_mobile?: string;
+  email?: string;
+  marital_status?: string;
+  nationality?: string;
+  patient_type?: string;
+  photo?: string;
   branch_id: string;
-  patient_first_name: string;
-  patient_middle_name?: string;
-  patient_last_name?: string;
-  patient_gender?: string;
-  patient_dob?: string;
-  patient_blood_group?: string;
-  patient_primary_mobile: string;
-  patient_alternate_mobile?: string;
-  patient_email?: string;
-  patient_marital_status?: string;
-  patient_nationality?: string;
-  patient_photo_url?: string;
+  created_by: string;
 }
 
 export interface CreatePatientResponse {
@@ -29,6 +32,7 @@ export interface CreatePatientResponse {
 }
 
 export const patientApi = {
+  // Real route is POST /api/patients/create (see patient.routes.ts).
   create: (data: CreatePatientPayload) =>
-    API.post<CreatePatientResponse>("/patients", data),
+    API.post<CreatePatientResponse>("/patients/create", data),
 };
