@@ -65,13 +65,58 @@ export interface UpdatePatientPayload {
   email?: string;
   marital_status?: string;
   nationality?: string;
+  patient_type?: string;
   photo?: string;
+}
+
+// Shape actually returned by GET /patients — matches the real `patient_bio_data`
+// columns plus the `branch`/`user_table` relations the repository includes
+// (see Backend/HMS_Backend patient.repository.ts getPatients). Note this does
+// NOT include diagnosis or assigned-doctor info — getPatients doesn't join
+// patient_history/appointment_history, so that data isn't available yet.
+export interface PatientRecord {
+  patient_id: string;
+  user_id: string | null;
+  branch_id: string | null;
+  patient_first_name: string;
+  patient_middle_name: string | null;
+  patient_last_name: string | null;
+  patient_gender: string | null;
+  patient_dob: string | null;
+  patient_age: number | null;
+  patient_blood_group: string | null;
+  patient_primary_mobile: string | null;
+  patient_alternate_mobile: string | null;
+  patient_email: string | null;
+  patient_marital_status: string | null;
+  patient_nationality: string | null;
+  patient_photo_url: string | null;
+  patient_type: string | null;
+  patient_active: string | null;
+  branch: { branch_name: string | null } | null;
+  user_table: { role_type: string | null; user_status: number | null } | null;
+}
+
+export interface GetPatientsParams {
+  branchId?: string;
+  patientType?: string;
+  status?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
 }
 
 export const patientApi = {
   // Real route is POST /api/patients/create (see patient.routes.ts).
   create: (data: CreatePatientPayload) =>
     API.post<{ success: boolean; message: string; data?: unknown }>("/patients/create", data),
+
+  getAll: (params?: GetPatientsParams) =>
+    API.get<{
+      success: boolean;
+      message: string;
+      data: { total: number; page: number; limit: number; totalPages: number; patients: PatientRecord[] };
+    }>("/patients", { params }),
 
   getById: (patientId: string) =>
     API.get<{ success: boolean; data: PatientResponse }>(`/patients/${patientId}`),

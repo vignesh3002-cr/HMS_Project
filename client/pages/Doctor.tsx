@@ -23,20 +23,6 @@ import ExportReport from "@/components/ui/ExportReport";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 
-// ============================================================
-// DATA
-// ============================================================
-const doctorsData = [
-  { id: "DOC-0001", name: "Dr. Emily Carter", avatar: "EC", avatarColor: "#00488D", initBg: "#D6E3FF", dept: "Cardiology", deptBg: "#D6E3FF", deptColor: "#475C7F", branch: "Apollo Hospital (Tambaram)", status: "Active", appointments: 24, total: 24, photo: "https://i.pravatar.cc/212?img=47" },
-  { id: "DOC-0002", name: "Dr. John Smith", avatar: "JS", avatarColor: "#475C7F", initBg: "#E6E8EA", dept: "Orthopedics", deptBg: "#E6E8EA", deptColor: "#475C7F", branch: "Government Hospital (Saidapet)", status: "Active", appointments: 17, total: 24, photo: "https://i.pravatar.cc/212?img=13" },
-  { id: "DOC-0003", name: "Dr. Hogan", avatar: "H", avatarColor: "#BE123C", initBg: "#FFE4E6", dept: "Neurology", deptBg: "#FFE4E6", deptColor: "#BE123C", branch: "Central Hospital (Guindy)", status: "Leave", appointments: 0, total: 24, photo: "https://i.pravatar.cc/212?img=68" },
-  { id: "DOC-0004", name: "Dr. Steve", avatar: "S", avatarColor: "#00C896", initBg: "rgba(0,200,150,0.12)", dept: "Pediatrics", deptBg: "rgba(0,200,150,0.12)", deptColor: "#00C896", branch: "Global Hospital (Triplicane)", status: "Active", appointments: 22, total: 24, photo: "https://i.pravatar.cc/212?img=59" },
-  { id: "DOC-0005", name: "Dr. Ramesh", avatar: "R", avatarColor: "#7B3200", initBg: "#FFDBCB", dept: "Oncology", deptBg: "#FFDBCB", deptColor: "#7B3200", branch: "Central Hospital (Tambaram)", status: "Active", appointments: 14, total: 24, photo: "https://i.pravatar.cc/212?img=51" },
-  { id: "DOC-0006", name: "Dr. Rose", avatar: "R", avatarColor: "#BE123C", initBg: "#FFE4E6", dept: "Neurology", deptBg: "#FFE4E6", deptColor: "#BE123C", branch: "Central Hospital (Tambaram)", status: "Active", appointments: 14, total: 24, photo: "https://i.pravatar.cc/212?img=25" },
-  { id: "DOC-0007", name: "Dr. Scott", avatar: "SC", avatarColor: "#00488D", initBg: "#D6E3FF", dept: "Pediatrician", deptBg: "#D6E3FF", deptColor: "#475C7F", branch: "Central Hospital (Tambaram)", status: "Active", appointments: 18, total: 24, photo: "https://i.pravatar.cc/212?img=44" },
-  { id: "DOC-0008", name: "Dr. Sarah", avatar: "SA", avatarColor: "#00C896", initBg: "rgba(0,200,150,0.12)", dept: "Pediatrician", deptBg: "rgba(0,200,150,0.12)", deptColor: "#00C896", branch: "Central Hospital (Tambaram)", status: "Active", appointments: 9, total: 24, photo: "https://i.pravatar.cc/212?img=30" },
-  { id: "DOC-0009", name: "Dr. Ben", avatar: "B", avatarColor: "#475C7F", initBg: "#E6E8EA", dept: "Pediatrician", deptBg: "#E6E8EA", deptColor: "#475C7F", branch: "Central Hospital (Tambaram)", status: "Active", appointments: 24, total: 24, photo: "https://i.pravatar.cc/212?img=15" },
-] as const;
 
 // ============================================================
 // SHARED SUB-COMPONENTS
@@ -159,7 +145,7 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
   );
 }
 
-// Map EmployeeRecord (from API) to doctorsData format for UI compatibility
+// Map EmployeeRecord (from API) to the row shape this page renders
 const AVATAR_PALETTE = [
   { avatarColor: "#00488D", initBg: "#D6E3FF" },
   { avatarColor: "#7B3200", initBg: "#FFDBCB" },
@@ -285,13 +271,11 @@ export default function Doctor() {
         const allEmployees = res.data?.data?.employees || [];
         // Filter on frontend by user_table.role_type === DOCTOR
         const doctors = allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR");
-        if (doctors.length > 0) {
-          setRealDoctors(doctors);
-        } else {
+        setRealDoctors(doctors);
+        if (doctors.length === 0) {
           toast({
-            title: "Using fallback data",
-            description: "No doctor records returned yet — showing sample data.",
-            variant: "destructive",
+            title: "No doctor records found",
+            description: "The employees API returned no doctor records.",
           });
         }
       })
@@ -300,8 +284,8 @@ export default function Doctor() {
         console.error("[Doctor Page] Error response:", err.response?.data);
         console.error("[Doctor Page] Error status:", err.response?.status);
         toast({
-          title: "Using fallback data",
-          description: "Couldn't reach the employees API — showing sample data.",
+          title: "Failed to load doctors",
+          description: "Couldn't reach the employees API.",
           variant: "destructive",
         });
       })
@@ -313,7 +297,7 @@ export default function Doctor() {
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
     // Use real data from API if available, otherwise fallback to static data
-    const sourceData = realDoctors ? realDoctors.map(mapEmployeeToDoctorData) : doctorsData;
+    const sourceData = realDoctors ? realDoctors.map(mapEmployeeToDoctorData) : [];
     let result: Record<string, string | number>[] = [...sourceData];
 
     if (searchQuery) {
@@ -329,7 +313,7 @@ export default function Doctor() {
     result = filterDataByValues(result, appliedValues);
 
     return result;
-  }, [searchQuery, appliedValues]);
+  }, [searchQuery, appliedValues, realDoctors]);
 
   // ---- SORTING (list only) ----
   const handleSort = (field: string) => {

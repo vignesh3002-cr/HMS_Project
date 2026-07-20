@@ -1,43 +1,32 @@
 import React from 'react';
 
-interface PatientPreviewProps {
-  firstName: string;
-  lastName: string;
-  gender: string;
-  dob: string;
-  primaryMobile: string;
-  email: string;
-  currentCity: string;
-  bloodGroup: string;
-  patientType: string;
-  emergencyName: string;
-  emergencyMobile: string;
+export interface ProfilePreviewDetail {
+  label: string;
+  value?: string | null;
+}
+
+export interface ProfilePreviewProps {
+  name: string;
+  emptyNameFallback?: string;
+  chips?: (string | null | undefined)[];
+  details: ProfilePreviewDetail[];
   photoDataUrl?: string;
 }
 
-const PatientPreview: React.FC<PatientPreviewProps> = ({
-  firstName,
-  lastName,
-  gender,
-  dob,
-  primaryMobile,
-  email,
-  currentCity,
-  bloodGroup,
-  patientType,
-  emergencyName,
-  emergencyMobile,
-  photoDataUrl
+// Generic side-panel preview — works for any person record (patient, doctor,
+// staff, ...). Callers pass a name, optional badge chips, and a label/value
+// list of whatever details are relevant to that entity.
+const ProfilePreview: React.FC<ProfilePreviewProps> = ({
+  name,
+  emptyNameFallback = 'New record',
+  chips = [],
+  details,
+  photoDataUrl,
 }) => {
-  const dash = (value: string): string => (value && value.trim() ? value : '—');
+  const dash = (value?: string | null): string => (value && value.trim() ? value : '—');
 
-  const fullName = [firstName, lastName]
-    .filter(Boolean)
-    .join(' ') || 'New patient';
-
-  const emergencyDisplay = emergencyName 
-    ? `${emergencyName}${emergencyMobile ? ' (' + emergencyMobile + ')' : ''}`
-    : '—';
+  const displayName = name && name.trim() ? name : emptyNameFallback;
+  const visibleChips = chips.filter((c): c is string => Boolean(c && c.trim()));
 
   const UserIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -47,7 +36,7 @@ const PatientPreview: React.FC<PatientPreviewProps> = ({
   );
 
   return (
-    <aside className="preview" aria-label="Patient preview">
+    <aside className="preview" aria-label="Profile preview">
       <style>{`
         .preview {
           position: sticky;
@@ -148,35 +137,27 @@ const PatientPreview: React.FC<PatientPreviewProps> = ({
       </div>
 
       <div className="body">
-        <h2>{fullName}</h2>
+        <h2>{displayName}</h2>
 
-        <div className="chips">
-          {bloodGroup && <span className="chip">{bloodGroup}</span>}
-          {patientType && <span className="chip">{patientType.split(' (')[0]}</span>}
-        </div>
+        {visibleChips.length > 0 && (
+          <div className="chips">
+            {visibleChips.map((chip, i) => (
+              <span key={i} className="chip">{chip}</span>
+            ))}
+          </div>
+        )}
 
         <dl>
-          <dt>Gender</dt>
-          <dd>{dash(gender)}</dd>
-
-          <dt>DOB</dt>
-          <dd>{dash(dob)}</dd>
-
-          <dt>Mobile</dt>
-          <dd>{dash(primaryMobile)}</dd>
-
-          <dt>Email</dt>
-          <dd>{dash(email)}</dd>
-
-          <dt>City</dt>
-          <dd>{dash(currentCity)}</dd>
-
-          <dt>Emergency</dt>
-          <dd>{emergencyDisplay}</dd>
+          {details.map((d, i) => (
+            <React.Fragment key={i}>
+              <dt>{d.label}</dt>
+              <dd>{dash(d.value)}</dd>
+            </React.Fragment>
+          ))}
         </dl>
       </div>
     </aside>
   );
 };
 
-export default PatientPreview;
+export default ProfilePreview;

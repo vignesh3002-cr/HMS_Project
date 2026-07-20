@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Download,
   Plus,
@@ -279,6 +280,7 @@ function RowsPerPageSelect({
 }
 
 const AppointmentSchedule: React.FC = () => {
+  const navigate = useNavigate();
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -452,6 +454,7 @@ const AppointmentSchedule: React.FC = () => {
 
 
 <button
+                onClick={() => navigate("/appointments/add")}
                 className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
               >
 

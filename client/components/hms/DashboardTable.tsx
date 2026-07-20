@@ -99,7 +99,7 @@ export function TableView({ columns, rows, sortField, sortDirection, onSort, ren
  * @param onView - Callback for view action, receives row ID
  * @param id - The row ID to pass to action callbacks
  */
-export function ActionButtons({ onEdit, onView, id }: { onEdit: (id: number) => void; onView: (id: number) => void; id: number }) {
+export function ActionButtons({ onEdit, onView, id }: { onEdit: (id: string | number) => void; onView: (id: string | number) => void; id: string | number }) {
   return (
     <div className="flex items-center gap-1">
       {/* View Button - Dark themed, with hover effect */}
@@ -134,13 +134,13 @@ export function ActionButtons({ onEdit, onView, id }: { onEdit: (id: number) => 
  * Extends the base TableView with doctor-specific columns and rendering
  * Features: Name with avatar, Department badge, Status indicator, Action buttons
  */
-export function DoctorsTableView({ rows, sortField, sortDirection, onSort, onEdit, onView }: { 
-  rows: TableRow[]; 
-  sortField: string; 
-  sortDirection: "asc" | "desc"; 
-  onSort: (field: string) => void; 
-  onEdit: (id: number) => void; 
-  onView: (id: number) => void 
+export function DoctorsTableView({ rows, sortField, sortDirection, onSort, onEdit, onView }: {
+  rows: TableRow[];
+  sortField: string;
+  sortDirection: "asc" | "desc";
+  onSort: (field: string) => void;
+  onEdit: (id: string | number) => void;
+  onView: (id: string | number) => void
 }) {
   return (
     <TableView
@@ -189,9 +189,12 @@ export function DoctorsTableView({ rows, sortField, sortDirection, onSort, onEdi
                 {status}
               </span>
             </td>
-            {/* Action buttons - Edit and View */}
+            {/* Action buttons - Edit and View. Doctor rows pass the real
+                employee_id (not the numeric-stripped getRowId) since the
+                Edit action navigates straight to /doctor/edit/:id, which
+                needs the actual id to look the record back up. */}
             <td className="px-5 py-4">
-              <ActionButtons onEdit={onEdit} onView={onView} id={getRowId(row)} />
+              <ActionButtons onEdit={onEdit} onView={onView} id={row.id} />
             </td>
           </>
         );
@@ -205,13 +208,13 @@ export function DoctorsTableView({ rows, sortField, sortDirection, onSort, onEdi
  * Similar structure to DoctorsTableView but for staff members
  * Features: Name with avatar, Department badge, Status indicator, Action buttons
  */
-export function StaffTableView({ rows, sortField, sortDirection, onSort, onEdit, onView }: { 
-  rows: TableRow[]; 
-  sortField: string; 
-  sortDirection: "asc" | "desc"; 
-  onSort: (field: string) => void; 
-  onEdit: (id: number) => void; 
-  onView: (id: number) => void 
+export function StaffTableView({ rows, sortField, sortDirection, onSort, onEdit, onView }: {
+  rows: TableRow[];
+  sortField: string;
+  sortDirection: "asc" | "desc";
+  onSort: (field: string) => void;
+  onEdit: (id: string | number) => void;
+  onView: (id: string | number) => void
 }) {
   return (
     <TableView
@@ -271,13 +274,13 @@ export function StaffTableView({ rows, sortField, sortDirection, onSort, onEdit,
  * Most complex view showing patient details, doctor assignment, timing, and status
  * Features: Patient info, Appointment number, Doctor info, Reason, Date/Time, Status
  */
-export function AppointmentsTableView({ rows, sortField, sortDirection, onSort, onEdit, onView }: { 
-  rows: TableRow[]; 
-  sortField: string; 
-  sortDirection: "asc" | "desc"; 
-  onSort: (field: string) => void; 
-  onEdit: (id: number) => void; 
-  onView: (id: number) => void 
+export function AppointmentsTableView({ rows, sortField, sortDirection, onSort, onEdit, onView }: {
+  rows: TableRow[];
+  sortField: string;
+  sortDirection: "asc" | "desc";
+  onSort: (field: string) => void;
+  onEdit: (id: string | number) => void;
+  onView: (id: string | number) => void
 }) {
   return (
     <TableView

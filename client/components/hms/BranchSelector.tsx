@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type MouseEvent } from "react";
 import {
   Popover,
   PopoverContent,
@@ -12,7 +12,7 @@ import {
   CommandEmpty,
   CommandGroup,
 } from "@/components/ui/command";
-import { ChevronDown, Building2, Loader2, RefreshCw } from "lucide-react";
+import { ChevronDown, Building2, Loader2, RefreshCw, SquarePen, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { saveUser, getUser } from "@/utils/token";
 import { branchApi } from "@/api/branch.api";
@@ -31,6 +31,7 @@ export function BranchSelector() {
   const [selected, setSelected] = useState<Branch | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const { toast } = useToast();
 
   const [hospitalData, setHospitalData] = useState({
@@ -169,6 +170,49 @@ export function BranchSelector() {
     setOpen(false);
   };
 
+  // No edit form exists for branches yet — this is a placeholder until one is built.
+  const handleEdit = (branch: Branch, e: MouseEvent) => {
+    e.stopPropagation();
+    toast({
+      title: "Edit branch isn't built yet",
+      description: `An edit form for "${branch.name}" doesn't exist yet.`,
+    });
+  };
+
+  const handleDelete = async (branch: Branch, e: MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm(`Delete "${branch.name}"? This cannot be undone.`)) {
+      return;
+    }
+
+    setDeletingId(branch.id);
+    try {
+      const response = await branchApi.remove(branch.id);
+      if (!response.data.success) {
+        throw new Error(response.data.message);
+      }
+
+      setBranches((prev) => prev.filter((b) => b.id !== branch.id));
+      if (selected?.id === branch.id) {
+        setSelected(null);
+      }
+
+      toast({
+        title: "Branch deleted",
+        description: `${branch.name} was removed.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Failed to delete branch",
+        description:
+          err.response?.data?.message ?? err.message ?? "Something went wrong.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   // Loading state with dropdown disabled
   if (loading) {
     return (
@@ -272,11 +316,29 @@ export function BranchSelector() {
                       {branch.hospital_name} · ID: {branch.id}
                     </span>
                   </div>
-                  {selected?.id === branch.id && (
-                    <span className="ml-auto text-[10px] font-semibold text-[#00488D] tracking-wide bg-[#00488D]/10 px-2 py-1 rounded-full">
-                      CURRENT
-                    </span>
-                  )}
+                  <div className="ml-auto flex items-center gap-0.5">
+                    <button
+                      onClick={(e) => handleEdit(branch, e)}
+                      title="Edit branch"
+                      aria-label={`Edit ${branch.name}`}
+                      className="p-1.5 rounded-md text-[#64748B] hover:bg-blue-50 hover:text-[#003EA8] transition-colors"
+                    >
+                      <SquarePen className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => handleDelete(branch, e)}
+                      disabled={deletingId === branch.id}
+                      title="Delete branch"
+                      aria-label={`Delete ${branch.name}`}
+                      className="p-1.5 rounded-md text-[#64748B] hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-50"
+                    >
+                      {deletingId === branch.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
                 </CommandItem>
               ))}
             </CommandGroup>

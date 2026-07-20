@@ -59,466 +59,6 @@ branch: string;
   status: "active" | "leave";
 }
 
-const staffData: StaffMember[] = [
-  {
-    initials: "SJ",
-    name: "Dr. Sarah Jenkins",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: ["Central Hospital Tambaram"],
-    status: "active",
-  },
-  {
-    initials: "AM",
-    name: "Dr. Ajay Mehta",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Cardiology",
-    deptClass: "bg-[#EDE9FE] text-[#475C7F]",
-    branch: ["Central Hospital Tambaram"],
-    status: "leave",
-  },
-  {
-    initials: "RL",
-    name: "Dr. Robert lee",
-    phone: "+1 (555) 234-5678",
-    id: "DOC-4431",
-    dept: "Pediatrics",
-    deptClass: "bg-[#FDE68A] text-[#CE6228]",
-    branch: ["Central Hospital Saidapet"],
-    status: "active",
-  },
-  {
-    initials: "MD",
-    name: "Mahesh Dhori",
-    phone: "+1 (555) 345-6789",
-    id: "NUR-0098",
-    dept: "Nursing",
-    deptClass: "bg-[#D1FAE5] text-[#0D9651]",
-    branch: ["Central Hospital Egmore"],
-    status: "leave",
-  },
-  {
-    initials: "DT",
-    name: "David Tan",
-    phone: "+1 (555) 456-7890",
-    id: "ADM-0032",
-    dept: "Admin",
-    deptClass: "bg-lime-100 text-lime-700",
-    branch: ["East wing"],
-    status: "inactive",
-  },
-  {
-    initials: "EW",
-    name: "Elena Wright",
-    phone: "+1 (555) 567-8901",
-    id: "DOC-1192",
-    dept: "Cardiology",
-    deptClass: "bg-[#FEE2E2] text-[#8C3789]",
-    branch: ["North wing"],
-    status: "active",
-  },
-  {
-    initials: "SS",
-    name: "Dr. Steven Strange",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: ["Central Hospital Tambaram"],
-    status: "active",
-  },
-  {
-    initials: "SR",
-    name: "Dr. Steve Rogers",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Cardiology",
-    deptClass: "bg-[#EDE9FE] text-[#475C7F]",
-    branch: ["Central Hospital Tambaram"],
-    status: "leave",
-  },
-  {
-    initials: "BB",
-    name: "Bruce Banner",
-    phone: "+1 (555) 456-7890",
-    id: "ADM-0032",
-    dept: "Admin",
-    deptClass: "bg-lime-100 text-lime-700",
-    branch: ["East wing"],
-    status: "inactive",
-  },
-  {
-    initials: "NR",
-    name: "Natasha Romanoff",
-    phone: "+1 (555) 567-8901",
-    id: "DOC-1192",
-    dept: "Cardiology",
-    deptClass: "bg-[#FEE2E2] text-[#8C3789]",
-    branch: ["North wing"],
-    status: "active",
-  },
-];
-
-const medicalStaffData: MedicalStaffRow[] = [
-  {
-    initials: "SJ",
-    name: "Dr. Sarah Jenkins",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: "Central Hospital Tambaram",
-    status: "active",
-  },
-  {
-    initials: "SJ",
-    name: "Dr. Sarah Jenkins",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: "Central Hospital Tambaram",
-    status: "active",
-  },
-  {
-    initials: "SJ",
-    name: "Dr. Sarah Jenkins",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: "Central Hospital Tambaram",
-    status: "active",
-  },
-  {
-    initials: "SJ",
-    name: "Dr. Sarah Jenkins",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: "Central Hospital Tambaram",
-    status: "active",
-  },
-  {
-    initials: "SJ",
-    name: "Dr. Sarah Jenkins",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: "Central Hospital Tambaram",
-    status: "active",
-  },
-  {
-    initials: "AM",
-    name: "Dr. Ajay Mehta",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9043",
-    dept: "Cardiology",
-    deptClass: "bg-[#EDE9FE] text-[#475C7F]",
-    branch: "Central Hospital Tambaram",
-    status: "leave",
-  },
-  {
-    initials: "RL",
-    name: "Dr. Robert Lee",
-    phone: "+1 (555) 234-5678",
-    id: "DOC-4431",
-    dept: "Pediatrics",
-    deptClass: "bg-[#FDE68A] text-[#CE6228]",
-    branch: "Central Hospital Saidapet",
-    status: "active",
-  },
-  {
-    initials: "AM",
-    name: "Angela Moore",
-    phone: "+1 (555) 345-6789",
-    id: "NUR-0098",
-    dept: "Nursing",
-    deptClass: "bg-[#D1FAE5] text-[#0D9651]",
-    branch: "Central Hospital Egmore",
-    status: "leave",
-  },
-  {
-    initials: "EW",
-    name: "Elena Wright",
-    phone: "+1 (555) 567-8901",
-    id: "DOC-1192",
-    dept: "Cardiology",
-    deptClass: "bg-[#FEE2E2] text-[#8C3789]",
-    branch: "North Wing",
-    status: "active",
-  },
-  {
-    initials: "SS",
-    name: "Dr. Steven Strange",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9044",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: "Central Hospital Tambaram",
-    status: "active",
-  },
-];
-
-const administrativeStaffData: AdministrativeStaffRow[] = [
-  {
-    initials: "SK",
-    avatar: "purple",
-    name: "Shankar Kumar",
-    id: "ADM-9042",
-    role: "Head Admin",
-    roleColor: "purple",
-    branch: "Central Hospital Tambaram",
-    access: "Super Admin",
-    accessColor: "purple",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-  {
-    initials: "D",
-    avatar: "indigo",
-    name: "David",
-    id: "RC-9042",
-    role: "Branch Admin",
-    roleColor: "indigo",
-    branch: "Central Hospital Saidapet",
-    access: "Admin",
-    accessColor: "indigo",
-    login: "Today, 10:30 AM",
-    loginDot: "green",
-    status: "active",
-  },
-   {
-    initials: "SK",
-    avatar: "purple",
-    name: "Shankar Kumar",
-    id: "ADM-9042",
-    role: "Head Admin",
-    roleColor: "purple",
-    branch: "Central Hospital Tambaram",
-    access: "Super Admin",
-    accessColor: "purple",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-  {
-    initials: "R",
-    avatar: "indigo",
-    name: "Rajesh",
-    id: "ADM-9043",
-    role: "Branch Admin",
-    roleColor: "indigo",
-    branch: "Central Hospital Chromepet",
-    access: "Admin",
-    accessColor: "indigo",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-   {
-    initials: "SK",
-    avatar: "purple",
-    name: "Shankar Kumar",
-    id: "ADM-9042",
-    role: "Head Admin",
-    roleColor: "purple",
-    branch: "Central Hospital Tambaram",
-    access: "Super Admin",
-    accessColor: "purple",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-  {
-    initials: "SK",
-    avatar: "purple",
-    name: "Shankar Kumar",
-    id: "ADM-9044",
-    role: "Head Admin",
-    roleColor: "purple",
-    branch: "Central Hospital Egmore",
-    access: "Super Admin",
-    accessColor: "purple",
-    login: "Yesterday ,08:20 PM",
-    loginDot: "orange",
-    status: "leave",
-  },
-   {
-    initials: "SK",
-    avatar: "purple",
-    name: "Shankar Kumar",
-    id: "ADM-9042",
-    role: "Head Admin",
-    roleColor: "purple",
-    branch: "Central Hospital Tambaram",
-    access: "Super Admin",
-    accessColor: "purple",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-  {
-    initials: "AK",
-    avatar: "indigo",
-    name: "Ajith Kumar",
-    id: "ADM-9045",
-    role: "Branch Admin",
-    roleColor: "indigo",
-    branch: "Central Hospital Triplicane",
-    access: "Admin",
-    accessColor: "indigo",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-   {
-    initials: "SK",
-    avatar: "purple",
-    name: "Shankar Kumar",
-    id: "ADM-9042",
-    role: "Head Admin",
-    roleColor: "purple",
-    branch: "Central Hospital Tambaram",
-    access: "Super Admin",
-    accessColor: "purple",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-   {
-    initials: "SK",
-    avatar: "purple",
-    name: "Shankar Kumar",
-    id: "ADM-9042",
-    role: "Head Admin",
-    roleColor: "purple",
-    branch: "Central Hospital Tambaram",
-    access: "Super Admin",
-    accessColor: "purple",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-];
-
-const supportBadgeColors: Record<string, string> = {
-  blue: "bg-blue-100 text-blue-700",
-  purple: "bg-purple-100 text-purple-700",
-  yellow: "bg-yellow-200 text-yellow-700",
-  green: "bg-green-100 text-green-700",
-  red: "bg-red-100 text-red-700",
-};
-
-const supportStaffData: SupportStaffRow[] = [
-  {
-    initials: "W",
-    name: "Watt",
-    phone: "+1 (555) 234-1001",
-    id: "REC-9042",
-    dept: "Receptionist",
-    deptClass: "blue",
-    branch: "Central Hospital",
-    status: "active",
-  },
-  {
-    initials: "W",
-    name: "Watt",
-    phone: "+1 (555) 234-1001",
-    id: "REC-9042",
-    dept: "Receptionist",
-    deptClass: "blue",
-    branch: "Central Hospital",
-    status: "active",
-  },
-  {
-    initials: "W",
-    name: "Watt",
-    phone: "+1 (555) 234-1001",
-    id: "REC-9042",
-    dept: "Receptionist",
-    deptClass: "blue",
-    branch: "Central Hospital",
-    status: "active",
-  },
-  {
-    initials: "W",
-    name: "Watt",
-    phone: "+1 (555) 234-1001",
-    id: "REC-9042",
-    dept: "Receptionist",
-    deptClass: "blue",
-    branch: "Central Hospital",
-    status: "active",
-  },
-  {
-    initials: "W",
-    name: "Watt",
-    phone: "+1 (555) 234-1001",
-    id: "REC-9042",
-    dept: "Receptionist",
-    deptClass: "blue",
-    branch: "Central Hospital",
-    status: "active",
-  },
-  {
-    initials: "W",
-    name: "Watt",
-    phone: "+1 (555) 234-1001",
-    id: "REC-9042",
-    dept: "Receptionist",
-    deptClass: "blue",
-    branch: "Central Hospital",
-    status: "active",
-  },
-  {
-    initials: "S",
-    name: "Sarah",
-    phone: "+1 (555) 234-1002",
-    id: "HK-9042",
-    dept: "House Keeping",
-    deptClass: "purple",
-    branch: "City Clinic",
-    status: "leave",
-  },
-  {
-    initials: "L",
-    name: "Lee",
-    phone: "+1 (555) 234-1003",
-    id: "LO-4431",
-    dept: "Lift Operator",
-    deptClass: "yellow",
-    branch: "North Beach",
-    status: "leave",
-  },
-  {
-    initials: "A",
-    name: "Angela",
-    phone: "+1 (555) 234-1004",
-    id: "REC-0098",
-    dept: "Receptionist",
-    deptClass: "green",
-    branch: "Central Hospital",
-    status: "active",
-  },
-  {
-    initials: "W",
-    name: "Wright",
-    phone: "+1 (555) 234-1005",
-    id: "SG-1192",
-    dept: "Security Guard",
-    deptClass: "red",
-    branch: "North Wing",
-    status: "leave",
-  },
-];
-
 const statusConfig = {
   active: {
     label: "Active",
@@ -861,6 +401,15 @@ function AdministrativeTableView({
   );
 }
 
+// Maps a SupportStaffRow.deptClass color name to its Tailwind badge classes.
+const supportBadgeColors: Record<SupportStaffRow["deptClass"], string> = {
+  blue: "bg-blue-100 text-blue-700",
+  purple: "bg-purple-100 text-purple-700",
+  yellow: "bg-yellow-100 text-yellow-700",
+  green: "bg-green-100 text-green-700",
+  red: "bg-red-100 text-red-700",
+};
+
 // Support staff table (rendered when the "Support" tab is active)
 function SupportTableView({
   rows,
@@ -1001,6 +550,28 @@ function formatBranch(branch: EmployeeRecord["branch"]): string {
   return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
 }
 
+// Explicit designation -> category mapping instead of guessing from
+// substrings in the designation text. The "Staff" role's designation is
+// always chosen from the fixed list in Addemployee.tsx's
+// ROLE_CONFIG.Staff.designations, so every possible value is covered here.
+// Unrecognized values (e.g. old data predating this list) default to
+// "administrative".
+const STAFF_DESIGNATION_CATEGORY: Record<string, "administrative" | "support"> = {
+  "receptionist": "administrative",
+  "admin executive": "administrative",
+  "accountant": "administrative",
+  "hr executive": "administrative",
+  "it support": "administrative",
+  "office manager": "administrative",
+  "security officer": "support",
+  "housekeeping staff": "support",
+};
+
+function classifyStaffDesignation(designation: string | null | undefined): "administrative" | "support" {
+  const key = designation?.toLowerCase().trim() || "";
+  return STAFF_DESIGNATION_CATEGORY[key] ?? "administrative";
+}
+
 function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
@@ -1127,13 +698,11 @@ export default function Staff() {
         const allEmployees = res.data?.data?.employees || [];
         // Filter on frontend: exclude DOCTOR role_type
         const staff = allEmployees.filter((e) => e.user_table?.role_type !== "DOCTOR");
-        if (staff.length > 0) {
-          setRealStaff(staff);
-        } else {
+        setRealStaff(staff);
+        if (staff.length === 0) {
           toast({
-            title: "Using fallback data",
-            description: "No staff records returned yet — showing sample data.",
-            variant: "destructive",
+            title: "No staff records found",
+            description: "The employees API returned no staff records.",
           });
         }
       })
@@ -1142,8 +711,8 @@ export default function Staff() {
         console.error("[Staff Page] Error response:", err.response?.data);
         console.error("[Staff Page] Error status:", err.response?.status);
         toast({
-          title: "Using fallback data",
-          description: "Couldn't reach the employees API — showing sample data.",
+          title: "Failed to load staff",
+          description: "Couldn't reach the employees API.",
           variant: "destructive",
         });
       })
@@ -1235,6 +804,15 @@ export default function Staff() {
     return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
   }
 
+  // Which of the three staff tabs an employee belongs to — keep this in
+  // sync with the branching inside mapEmployeeToStaffData below.
+  function getStaffCategory(emp: EmployeeRecord): "medical" | "administrative" | "support" {
+    const roleType = emp.user_table?.role_type || "STAFF";
+    if (roleType === "NURSE" || roleType === "PHARMACIST") return "medical";
+    if (roleType === "STAFF") return classifyStaffDesignation(emp.designation);
+    return "medical";
+  }
+
   function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
     const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
     const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
@@ -1258,9 +836,8 @@ export default function Staff() {
       } as MedicalStaffRow;
     } else if (roleType === "STAFF") {
       // Administrative or Support tab - determine by designation
-      const designation = emp.designation?.toLowerCase() || "";
-      const isAdmin = ["admin", "executive", "accountant", "hr", "it", "manager", "receptionist"].some(d => designation.includes(d));
-      
+      const isAdmin = classifyStaffDesignation(emp.designation) === "administrative";
+
       if (isAdmin) {
         return {
           initials: getInitials(fullName),
@@ -1304,20 +881,20 @@ export default function Staff() {
 
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
-    // Use real data from API if available, otherwise fallback to static data
-    let sourceData: (StaffMember | MedicalStaffRow | AdministrativeStaffRow | SupportStaffRow)[] = [];
-    
-    if (realStaff && realStaff.length > 0) {
-      sourceData = realStaff.map(mapEmployeeToStaffData);
-    } else if (isMedicalTab) {
-      sourceData = [...medicalStaffData];
-    } else if (isAdministrativeTab) {
-      sourceData = [...administrativeStaffData];
-    } else if (isSupportTab) {
-      sourceData = [...supportStaffData];
-    } else {
-      sourceData = [...staffData];
-    }
+    // Real data only — no dummy fallback. Each tab only shows employees in
+    // its own category; "All staff" (none of the three flags) shows everyone.
+    const employeesForTab = !realStaff
+      ? []
+      : isMedicalTab
+        ? realStaff.filter((e) => getStaffCategory(e) === "medical")
+        : isAdministrativeTab
+          ? realStaff.filter((e) => getStaffCategory(e) === "administrative")
+          : isSupportTab
+            ? realStaff.filter((e) => getStaffCategory(e) === "support")
+            : realStaff;
+
+    const sourceData: (StaffMember | MedicalStaffRow | AdministrativeStaffRow | SupportStaffRow)[] =
+      employeesForTab.map(mapEmployeeToStaffData);
 
     let result = sourceData;
 

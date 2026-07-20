@@ -104,6 +104,40 @@ export interface GetEmployeesParams {
   branch_id?: string;
   department_id?: string;
   status?: boolean;
+  page?: number;
+  limit?: number;
+}
+
+export interface UpdateEmployeePayload {
+  first_name?: string;
+  middle_name?: string;
+  last_name?: string;
+  email?: string;
+  mobile_no?: string;
+  blood_group?: string;
+  nationality?: string;
+  marital_status?: string;
+  aadhaar_no?: string;
+  pan_no?: string;
+  passport_no?: string;
+  permanent_address?: string;
+  current_address?: string;
+  emergency_contact_name?: string;
+  emergency_contact_relationship?: string;
+  emergency_contact_number?: string;
+  department_id?: string;
+  designation?: string;
+  specialization?: string;
+  qualification?: string;
+  doc_license_no?: string;
+  joining_date?: string;
+  emp_status?: boolean;
+  // Not yet persisted by PUT /employees/:employeeId (the backend's updateEmployee
+  // only maps the fields above) — sent anyway so the request already carries them
+  // once the backend adds support, without another frontend change.
+  branch_ids?: string[];
+  consultation_minutes?: number;
+  working_hours?: WorkingHourPayload[];
 }
 
 export const employeeApi = {
@@ -112,4 +146,7 @@ export const employeeApi = {
 
   getAll: (params?: GetEmployeesParams) =>
     API.get<{ success: boolean; data: { employees: EmployeeRecord[]; total: number; page: number; limit: number } }>("/employees", { params }),
+
+  update: (employeeId: string, data: UpdateEmployeePayload) =>
+    API.put<{ success: boolean; data: any; message?: string }>(`/employees/${employeeId}`, data),
 };

@@ -6,7 +6,7 @@ import { FormDropdown } from "@/components/ui/form-dropdown";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import { branchApi, Branch } from "@/api/branch.api";
 import { patientApi } from "@/api/patient.api";
-import PatientPreview from "@/components/ui/Patient-preview";
+import ProfilePreview from "@/components/ui/Patient-preview";
 
 interface FormData {
   branch_id: string;
@@ -20,6 +20,7 @@ interface FormData {
   patient_alternate_mobile: string;
   patient_email: string;
   patient_marital_status: string;
+  patient_type: string;
   patient_nationality: string;
   patient_current_address: string;
   patient_permanent_address: string;
@@ -41,6 +42,7 @@ const emptyFormData: FormData = {
   patient_alternate_mobile: "",
   patient_email: "",
   patient_marital_status: "",
+  patient_type: "",
   patient_nationality: "",
   patient_current_address: "",
   patient_permanent_address: "",
@@ -118,6 +120,7 @@ export default function EditPatientForm() {
           patient_alternate_mobile: patient.alternate_mobile || "",
           patient_email: patient.email || "",
           patient_marital_status: patient.marital_status || "",
+          patient_type: patient.patient_type || "",
           patient_nationality: patient.nationality || "",
           patient_current_address: patient.current_address || "",
           patient_permanent_address: patient.permanent_address || "",
@@ -176,6 +179,7 @@ export default function EditPatientForm() {
         alternate_mobile: formData.patient_alternate_mobile || undefined,
         email: formData.patient_email || undefined,
         marital_status: formData.patient_marital_status || undefined,
+        patient_type: formData.patient_type || undefined,
         nationality: formData.patient_nationality || undefined,
         photo: formData.patient_photo_url || undefined,
       });
@@ -380,6 +384,25 @@ export default function EditPatientForm() {
                         disabled={submitting}
                       />
                     </div>
+                    <div>
+                      <label className={labelClass}>Patient type {requiredStar}</label>
+                      <FormDropdown
+                        options={[
+                          "Outpatient (OPD)",
+                          "Inpatient (IPD)",
+                          "Emergency",
+                          "Day-care",
+                          "Corporate",
+                          "Insurance",
+                          "Referral",
+                        ]}
+                        value={formData.patient_type}
+                        onValueChange={(val) => setField("patient_type", val)}
+                        placeholder="Select patient type"
+                        className={inputClass}
+                        disabled={submitting}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -548,19 +571,24 @@ export default function EditPatientForm() {
 
           <div className="lg:col-span-4">
             <div className="sticky top-6 h-[calc(100vh-2rem)]">
-              <PatientPreview
-                firstName={firstName}
-                lastName={lastName}
-                gender={gender}
-                dob={dob}
-                primaryMobile={primaryMobile}
-                email={email}
-                currentCity={currentCity}
-                bloodGroup={bloodGroup}
-                patientType=""
-                emergencyName={emergencyName}
-                emergencyMobile={emergencyMobile}
+              <ProfilePreview
+                name={[firstName, lastName].filter(Boolean).join(" ")}
+                emptyNameFallback="New patient"
+                chips={[bloodGroup]}
                 photoDataUrl={formData.patient_photo_url || undefined}
+                details={[
+                  { label: "Gender", value: gender },
+                  { label: "DOB", value: dob },
+                  { label: "Mobile", value: primaryMobile },
+                  { label: "Email", value: email },
+                  { label: "City", value: currentCity },
+                  {
+                    label: "Emergency",
+                    value: emergencyName
+                      ? `${emergencyName}${emergencyMobile ? " (" + emergencyMobile + ")" : ""}`
+                      : undefined,
+                  },
+                ]}
               />
             </div>
           </div>

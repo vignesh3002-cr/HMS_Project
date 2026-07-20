@@ -63,10 +63,20 @@ export interface CreateBranchResponse {
 export const branchApi = {
   // Get all branches
   getAll: () => API.get<{
-    branches: any[]; success: boolean; data: Branch[] 
+    branches: any[]; success: boolean; data: Branch[]
 }>("/branch"),
 
   // Create new branch (also creates its branch-admin user)
   create: (data: CreateBranchPayload) =>
     API.post<CreateBranchResponse>("/branch", data),
+
+  // Update an existing branch. NOTE: no PUT /branch/:id route exists on the
+  // backend yet — this will 404 until that's added.
+  update: (branchId: string, data: Partial<CreateBranchPayload>) =>
+    API.put<{ success: boolean; message: string; data?: unknown }>(`/branch/${branchId}`, data),
+
+  // Delete a branch. NOTE: no DELETE /branch/:id route exists on the
+  // backend yet — this will 404 until that's added.
+  remove: (branchId: string) =>
+    API.delete<{ success: boolean; message: string }>(`/branch/${branchId}`),
 };
