@@ -246,9 +246,9 @@ export default function AddEmployee() {
     }
   }, [searchParams]);
 
-  // Re-typed username — must match before submit is allowed. Password has
+  // Re-typed password — must match before submit is allowed. Username has
   // no confirm field; it's a single required field.
-  const [confirmUsername, setConfirmUsername] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   // Free-typed department name, used only when departmentId === OTHER_DEPARTMENT_VALUE.
   const [customDepartment, setCustomDepartment] = useState("");
@@ -424,19 +424,19 @@ export default function AddEmployee() {
       return;
     }
 
-    if (!confirmUsername.trim()) {
+    if (!confirmPassword.trim()) {
       toast({
         title: "Missing required field",
-        description: "Please confirm your Username.",
+        description: "Please confirm your Password.",
         variant: "destructive",
       });
       return;
     }
 
-    if (formData.username !== confirmUsername) {
+    if (formData.password !== confirmPassword) {
       toast({
-        title: "Username mismatch",
-        description: "Username and Confirm Username do not match.",
+        title: "Password mismatch",
+        description: "Password and Confirm Password do not match.",
         variant: "destructive",
       });
       return;
@@ -547,7 +547,7 @@ export default function AddEmployee() {
     setSameAsCurrent(false);
     setSchedule([]);
     setConsultationMinutes("20");
-    setConfirmUsername("");
+    setConfirmPassword("");
     setCustomDepartment("");
   };
 
@@ -1185,14 +1185,13 @@ export default function AddEmployee() {
               />
             </div>
             <div>
-              <label className={labelClass}>Confirm Username {requiredStar}</label>
+              <label className={labelClass}>Confirm Password {requiredStar}</label>
               <input
-                type="text"
-                placeholder="Re-enter Username"
-                maxLength={50}
+                type="password"
+                placeholder="Re-enter Password"
                 className={inputClass}
-                value={confirmUsername}
-                onChange={(e) => setConfirmUsername(e.target.value)}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
                 disabled={submitting}
               />
             </div>

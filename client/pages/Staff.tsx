@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import CalendarPicker from "@/components/hms/Calender";
+import { useNavigate } from "react-router-dom";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Search, FileText, File, ChevronDown, Check, Plus, Loader2 } from "lucide-react";
@@ -54,7 +55,7 @@ interface SupportStaffRow {
   id: string;
   dept: string;
   deptClass: "blue" | "purple" | "yellow" | "green" | "red";
-  branch: string;
+branch: string;
   status: "active" | "leave";
 }
 
@@ -1062,10 +1063,15 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
 }
 
 export default function Staff() {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
   const tabsMenuRef = useRef<HTMLElement>(null);
+
+  const handleAddStaff = () => {
+    navigate("/STAFF/add?role=staff");
+  };
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -1406,7 +1412,10 @@ export default function Staff() {
                 )}
               </div>
 
-              <button className="flex items-center gap-[6px] h-[34px] px-[20px] py-[10px] bg-[#004785] rounded-[10px] text-white text-[12px] font-semibold hover:bg-[#003a6b] transition-colors">
+              <button
+                onClick={handleAddStaff}
+                className="flex items-center gap-[6px] h-[34px] px-[20px] py-[10px] bg-[#004785] rounded-[10px] text-white text-[12px] font-semibold hover:bg-[#003a6b] transition-colors"
+              >
                 <Plus className="w-4 h-4" />
                 Add new staff
               </button>
@@ -1744,6 +1753,13 @@ export default function Staff() {
           </div>
         </main>
       </div>
+            {/* FAB */}
+            <button
+              onClick={handleAddStaff}
+              className="fixed bottom-6 right-6 w-12 h-12 bg-[#00488D] rounded-2xl flex items-center justify-center shadow-lg z-10 hover:bg-[#003a6b] transition-colors"
+            >
+              <Plus className="w-5 h-5 text-white" />
+            </button>
     </div>
   );
 }

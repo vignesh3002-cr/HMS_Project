@@ -72,9 +72,9 @@ export default function PatientRegistrationForm() {
   const [sameAsCurrent, setSameAsCurrent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
-  // Re-typed username — must match before submit is allowed. Password has
+  // Re-typed password — must match before submit is allowed. Username has
   // no confirm field; it's a single required field (matches Addemployee.tsx).
-  const [confirmUsername, setConfirmUsername] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   // Fetch the real branch list on mount for the Branch dropdown.
   useEffect(() => {
@@ -124,19 +124,19 @@ export default function PatientRegistrationForm() {
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (!confirmUsername.trim()) {
+    if (!confirmPassword.trim()) {
       toast({
         title: "Missing required field",
-        description: "Please confirm your Username.",
+        description: "Please confirm your Password.",
         variant: "destructive",
       });
       return;
     }
 
-    if (formData.patient_username !== confirmUsername) {
+    if (formData.patient_password !== confirmPassword) {
       toast({
-        title: "Username mismatch",
-        description: "Username and Confirm Username do not match.",
+        title: "Password mismatch",
+        description: "Password and Confirm Password do not match.",
         variant: "destructive",
       });
       return;
@@ -193,7 +193,7 @@ export default function PatientRegistrationForm() {
   const handleReset = () => {
     setFormData(emptyFormData);
     setSameAsCurrent(false);
-    setConfirmUsername("");
+    setConfirmPassword("");
   };
 
   return (
@@ -549,15 +549,14 @@ export default function PatientRegistrationForm() {
                 </div>
                 <div>
                   <label className={labelClass}>
-                    Confirm Username {requiredStar}
+                    Confirm Password {requiredStar}
                   </label>
                   <input
-                    type="text"
-                    placeholder="Re-enter username"
-                    maxLength={50}
+                    type="password"
+                    placeholder="Re-enter password"
                     className={inputClass}
-                    value={confirmUsername}
-                    onChange={(e) => setConfirmUsername(e.target.value)}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
                     required
                   />
                 </div>

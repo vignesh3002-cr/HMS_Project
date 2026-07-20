@@ -227,7 +227,7 @@ export default function Doctor() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   const handleAddDoctor = () => {
-    navigate("/doctor/add");
+    navigate("/STAFF/add?role=Doctor");
   };
 
   const handleViewToggle = (mode: "list" | "grid") => {

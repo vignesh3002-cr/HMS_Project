@@ -11,6 +11,46 @@ export interface AvatarUploadProps {
   className?: string;
 }
 
+// Uploaded photos are resized/compressed client-side before being turned
+// into a data URL — an unresized phone photo can be several MB, which
+// balloons past the server's request size limit once base64-encoded.
+const MAX_DIMENSION = 480;
+const JPEG_QUALITY = 0.75;
+
+function resizeImageFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Could not read image"));
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > height && width > MAX_DIMENSION) {
+          height = Math.round((height * MAX_DIMENSION) / width);
+          width = MAX_DIMENSION;
+        } else if (height > MAX_DIMENSION) {
+          width = Math.round((width * MAX_DIMENSION) / height);
+          height = MAX_DIMENSION;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(reader.result as string);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", JPEG_QUALITY));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export function AvatarUpload({
   value,
   onChange,
@@ -24,11 +64,9 @@ export function AvatarUpload({
 
   const readFile = (file: File) => {
     if (!file.type.startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      onChange((event.target?.result as string) ?? null);
-    };
-    reader.readAsDataURL(file);
+    resizeImageFile(file)
+      .then((dataUrl) => onChange(dataUrl))
+      .catch(() => {});
   };
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
