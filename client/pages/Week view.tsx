@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Plus,
 } from "lucide-react";
+import ExportReport from "@/components/ui/ExportReport";
 
 interface Schedule {
   patients: number;
@@ -258,18 +259,59 @@ const colorStyles = {
 };
 
 const AppointmentSchedule = () => {
+  const totalAppointments = doctors.reduce(
+    (total, doctor) => total + doctor.schedule.filter((item) => !item.off).length,
+    0,
+  );
+
   return (
-    <div className="mx-auto max-w-7xl bg-white p-6">
+    <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
+      <div className="flex flex-col flex-1 min-w-0">
+        <main className="flex flex-col gap-6">
 
-      {/* Header */}
+          {/* ==================== HEADER ==================== */}
 
-      <h1 className="text-3xl font-bold text-gray-900">
-        Appointment Schedule
-      </h1>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
 
-      {/* Toolbar */}
+        <div>
+          <h1 className="hms-heading">
+            Appointment Schedule
+          </h1>
 
-      <div className="mt-8 flex flex-wrap items-end gap-4">
+          <p className="hms-subheading mt-1">
+            Total Appointments: {totalAppointments}
+          </p>
+
+        </div>
+
+
+        <div className="flex items-center gap-3">
+          <ExportReport />
+
+
+
+          <button
+            className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
+          >
+
+            <Plus className="w-4 h-4" />
+            Add Appointment
+
+          </button>
+
+
+        </div>
+
+
+          </div>
+
+          {/* ==================== MAIN CARD ==================== */}
+
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col min-h-[500px] overflow-hidden transition-all duration-300 hover:shadow-md">
+
+          {/* Toolbar */}
+
+          <div className="px-5 py-4 border-b border-[#E5E7EB] flex flex-wrap items-end gap-4">
 
         <div>
           <p className="mb-2 text-xs font-semibold uppercase text-gray-500">
@@ -305,19 +347,19 @@ const AppointmentSchedule = () => {
           New Appointment
         </button>
 
-      </div>
+          </div>
 
-      {/* Table */}
+          {/* Table */}
 
-      <div className="mt-8 overflow-auto rounded-xl border border-gray-300">
+          <div className="overflow-auto flex-1">
 
-        <table className="min-w-full border-collapse">
+            <table className="min-w-full border-collapse">
 
           <thead>
 
-            <tr className="bg-gray-100">
+            <tr className="bg-[#f2f4f6] border-b border-[#c3c6d7]">
 
-              <th className="border px-4 py-4 text-left text-xs font-bold uppercase">
+              <th className="border-r border-[#c3c6d7] px-4 py-3 text-left font-['Manrope',sans-serif] text-[10px] font-bold uppercase leading-[15px] text-[#515f74]">
                 Specialist
               </th>
 
@@ -332,7 +374,7 @@ const AppointmentSchedule = () => {
               ].map((day) => (
                 <th
                   key={day}
-                  className="border px-4 py-4 text-center text-xs font-bold uppercase"
+                  className="border-r border-[#c3c6d7] last:border-r-0 px-4 py-3 text-center font-['Manrope',sans-serif] text-[10px] font-bold uppercase leading-[15px] text-[#515f74]"
                 >
                   {day}
                 </th>
@@ -345,14 +387,14 @@ const AppointmentSchedule = () => {
           <tbody>
 
             {doctors.map((doctor) => (
-              <tr key={doctor.name}>
-                <td className="border px-4 py-4 align-top">
+              <tr key={doctor.name} className="border-b border-[#c3c6d7] last:border-b-0">
+                <td className="border-r border-[#c3c6d7] bg-[rgba(242,244,246,0.5)] px-4 py-3 align-top">
 
-                  <h3 className="font-semibold text-gray-900">
+                  <h3 className="font-['Manrope',sans-serif] text-[10px] font-bold leading-[15px] text-[#004ac6]">
                     {doctor.name}
                   </h3>
 
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">
+                  <p className="mt-1 font-['Manrope',sans-serif] text-[8px] font-bold uppercase leading-3 tracking-wide text-[#515f74]">
                     {doctor.department}
                   </p>
 
@@ -363,9 +405,13 @@ const AppointmentSchedule = () => {
                     return (
                       <td
                         key={index}
-                        className="border bg-gray-50 text-center text-xs font-bold text-gray-500"
+                        className="border-r border-[#c3c6d7] last:border-r-0 p-1 align-middle"
                       >
-                        OFF
+                        <div className="flex h-[52px] w-full items-center justify-center rounded border border-dashed border-[#c3c6d7]">
+                          <span className="font-['Manrope',sans-serif] text-[9px] font-bold uppercase tracking-wide text-[#9aa1ad]">
+                            OFF
+                          </span>
+                        </div>
                       </td>
                     );
                   }
@@ -373,17 +419,17 @@ const AppointmentSchedule = () => {
                   const style = colorStyles[item.color];
 
                   return (
-                    <td key={index} className="border p-2">
+                    <td key={index} className="border-r border-[#c3c6d7] last:border-r-0 p-1">
                       <div
-                        className={`${style.bg} border-l-4 ${style.border} rounded px-3 py-2`}
+                        className={`flex h-[52px] w-full flex-col justify-between rounded-[2px] border-l-2 p-1 pl-1.5 ${style.bg} ${style.border}`}
                       >
-                        <p className={`text-xs font-bold ${style.text}`}>
+                        <p className={`font-['Manrope',sans-serif] text-[10px] font-bold leading-[15px] ${style.text}`}>
                           {item.patients} Patients
                         </p>
 
-                        <div className="mt-2 h-1 rounded-full bg-gray-300">
+                        <div className="relative block h-1 w-full overflow-hidden rounded-xl bg-[#e0e3e5]">
                           <div
-                            className={`${style.fill} h-1 rounded-full`}
+                            className={`absolute inset-0 rounded-xl ${style.fill}`}
                             style={{ width: `${item.progress}%` }}
                           />
                         </div>
@@ -400,6 +446,9 @@ const AppointmentSchedule = () => {
 
       </div>
 
+          </div>
+        </main>
+      </div>
     </div>
   );
 };

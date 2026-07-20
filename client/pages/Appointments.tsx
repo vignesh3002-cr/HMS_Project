@@ -278,6 +278,70 @@ function RowsPerPageSelect({
   );
 }
 
+// Action menu for the three-dot button on each appointment row
+function ActionMenu({
+  onView,
+  onEdit,
+  onCancel,
+}: {
+  onView: () => void;
+  onEdit: () => void;
+  onCancel: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative inline-block text-left" ref={wrapperRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center justify-center p-1.5 border border-[#E5E7EB] rounded-md hover:border-[#00488D] transition-colors"
+      >
+        <MoreVertical className="w-4 h-4 text-[#6B7280]" />
+      </button>
+
+      <div
+        className={`absolute right-0 top-full mt-1 w-44 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
+          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => { setOpen(false); onView(); }}
+          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
+        >
+          View Appointment
+        </button>
+        <button
+          type="button"
+          onClick={() => { setOpen(false); onEdit(); }}
+          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
+        >
+          Edit Appointment
+        </button>
+        <button
+          type="button"
+          onClick={() => { setOpen(false); onCancel(); }}
+          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-red-600 hover:bg-red-50"
+        >
+          Cancel Appointment
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const AppointmentSchedule: React.FC = () => {
 
   // Pagination state
@@ -624,7 +688,7 @@ const AppointmentSchedule: React.FC = () => {
 
             {/* ==================== APPOINTMENT TABLE ==================== */}
 
-            <div className="overflow-x-auto flex-1">
+            <div className="overflow-x-auto flex-1 hide-scrollbar">
 
               <table className="w-full min-w-[1100px]">
 
@@ -889,13 +953,11 @@ const AppointmentSchedule: React.FC = () => {
                       <td className="px-5 py-4 text-right">
 
 
-                        <button
-                          className="p-1.5 rounded hover:bg-[#F2F4F6] transition-colors"
-                        >
-
-                          <MoreVertical className="w-4 h-4 text-[#6B7280]" />
-
-                        </button>
+                        <ActionMenu
+                          onView={() => alert(`Viewing appointment ${item.id}`)}
+                          onEdit={() => alert(`Editing appointment ${item.id}`)}
+                          onCancel={() => alert(`Cancelling appointment ${item.id}`)}
+                        />
 
 
                       </td>

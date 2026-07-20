@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from "react";
+import { Plus } from "lucide-react";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
+import ExportReport from "@/components/ui/ExportReport";
 import { useToast } from "@/hooks/use-toast";
 import { doctorApi, type DoctorRecord } from "@/api/doctor.api";
 
@@ -92,6 +94,14 @@ function DotIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth={1.5} className={className}>
       <path d="M5 1v8M1 5h8" />
+    </svg>
+  );
+}
+
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
+      <path d="M20 6L9 17l-5-5" />
     </svg>
   );
 }
@@ -297,8 +307,8 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   }, []);
 
   const viewOptions: { key: ScheduleViewType; label: string }[] = [
-    { key: "list", label: "List View" },
-    { key: "day", label: "Day View" },
+     { key: "day", label: "Day View" },
+     { key: "list", label: "List View" },
     { key: "week", label: "Week View" },
   ];
 
@@ -346,21 +356,60 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         ? "Tomorrow"
         : format(selectedDate, "dd/MM/yyyy");
 
-  return (
-    <div className="w-full bg-white px-4 pt-4 pb-8 md:px-5 md:pt-[18px] md:pb-10">
-      {/* Header */}
-      <header className="mb-[30px]">
-        <h1 className="m-0 font-['Manrope',sans-serif] text-xl font-bold leading-7 tracking-[-0.48px] text-[#191c1e] md:text-2xl md:leading-8">
-          Appointment Schedule
-        </h1>
-      </header>
+  const totalAppointments = scheduleRows.reduce(
+    (total, row) => total + row.slots.filter((cell) => cell !== null).length,
+    0,
+  );
 
-      {/* Toolbar */}
-      <div
-        role="toolbar"
-        aria-label="Schedule filters and actions"
-        className="mb-6 flex flex-nowrap items-center gap-2 md:gap-2.5"
-      >
+  return (
+    <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
+      <div className="flex flex-col flex-1 min-w-0">
+        <main className="flex flex-col gap-6">
+
+          {/* ==================== HEADER ==================== */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+
+            <div>
+              <h1 className="hms-heading">
+                Appointment Schedule
+              </h1>
+
+              <p className="hms-subheading mt-1">
+                Total Appointments: {totalAppointments}
+              </p>
+
+            </div>
+
+
+            <div className="flex items-center gap-3">
+              <ExportReport />
+
+
+
+              <button
+                className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
+              >
+
+                <Plus className="w-4 h-4" />
+                Add Appointment
+
+              </button>
+
+
+            </div>
+
+
+          </div>
+
+          {/* ==================== MAIN CARD ==================== */}
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col min-h-[500px] transition-all duration-300 hover:shadow-md">
+
+          {/* Toolbar */}
+          <div
+            role="toolbar"
+            aria-label="Schedule filters and actions"
+            className="px-5 py-4 border-b border-[#E5E7EB] flex flex-nowrap items-center gap-2 md:gap-2.5"
+          >
 
 
         {/* View Type - Day View */}
@@ -369,18 +418,18 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           <button
             type="button"
             onClick={() => setIsViewMenuOpen((o) => !o)}
-            className="flex h-[34px] w-fit items-center gap-2 whitespace-nowrap rounded-lg border border-[#e5e7eb] bg-white px-[13px] py-[9px] font-['Inter',sans-serif] text-[10px] font-medium leading-4 text-black shadow-[0_1px_1px_rgba(0,0,0,0.05)]"
+            className="flex items-center gap-2 px-3 py-1.5 border border-[#e5e7eb] rounded-md text-xs font-semibold text-[#374151] hover:border-[#00488D] transition-colors"
           >
 
             <span>Day View</span>
             <ChevronDownIcon
-              className={`h-[18px] w-[18px] flex-none text-[#6b7280] transition-transform duration-200 ${isViewMenuOpen ? "" : "rotate-180"}`}
+              className={`w-3 h-3 flex-none text-[#6b7280] transition-transform duration-200 ${isViewMenuOpen ? "rotate-180" : ""}`}
             />
           </button>
 
           <div
-            className={`absolute left-0 top-full z-10 mt-1 w-[151px] overflow-hidden rounded-md border border-[#e5e7eb] bg-white shadow-lg transition-all duration-150 ${
-              isViewMenuOpen ? "scale-100 opacity-100" : "pointer-events-none scale-95 opacity-0"
+            className={`absolute left-0 top-full mt-1 w-32 bg-white border border-[#e5e7eb] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
+              isViewMenuOpen ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
             }`}
           >
             {viewOptions.map((opt) => (
@@ -388,11 +437,12 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                 key={opt.key}
                 type="button"
                 onClick={() => handleViewSelect(opt.key)}
-                className={`flex w-full items-center justify-between px-[13px] py-2 text-left font-['Inter',sans-serif] text-[10px] font-medium transition-colors ${
-                  opt.key === "day" ? "bg-[#e6f0ff] text-[#00488d]" : "text-black hover:bg-[#f2f4f6]"
+                className={`flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors ${
+                  opt.key === "day" ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
                 }`}
               >
                 {opt.label}
+                {opt.key === "day" && <CheckIcon className="w-3 h-3" />}
               </button>
             ))}
           </div>
@@ -439,25 +489,14 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
             <ChevronRightIcon className="h-4 w-4 text-[#6b7280]" />
           </button>
         </div>
-
-
-        {/* New Appointment */}
-        <a
-          href="#"
-          role="button"
-          className="ml-0 flex h-9 w-[167px] items-center justify-center gap-1.5 rounded-[10px] bg-[#004785] px-5 py-2.5 text-center font-['Manrope',sans-serif] text-[10px] font-bold text-white md:justify-start lg:ml-auto"
-        >
-          <PlusIcon className="h-3 w-4 flex-none" />
-          <span>New Appointment</span>
-        </a>
       </div>
 
-      {/* Content */}
-      <div className="flex flex-col items-start gap-[29px] lg:flex-row">
+          {/* Content */}
+          <div className="p-5 flex flex-col items-start gap-[29px] lg:flex-row">
         {/* Schedule grid */}
         <section
           aria-label="Doctor appointment schedule grid"
-          className="min-w-0 flex-1 overflow-x-auto rounded-lg border border-[#c3c6d7] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+          className="min-w-0 flex-1 overflow-x-auto rounded-xl border border-[#E5E7EB] bg-white shadow-sm"
         >
           <div role="table" className="w-full min-w-[620px] md:min-w-[691px]">
             {/* Header row */}
@@ -579,6 +618,9 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
             </ul>
           </div>
         </aside>
+          </div>
+          </div>
+        </main>
       </div>
     </div>
   );
