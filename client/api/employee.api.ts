@@ -79,6 +79,7 @@ export interface EmployeeRecord {
     branch_name: string;
     branch_area?: string | null;
   } | null;
+  photo?: string | null;
 }
 
 export interface CreateEmployeeResponse {
@@ -138,6 +139,7 @@ export interface UpdateEmployeePayload {
   branch_ids?: string[];
   consultation_minutes?: number;
   working_hours?: WorkingHourPayload[];
+  photo?: string;
 }
 
 export const employeeApi = {

@@ -4,6 +4,7 @@ import { ArrowLeft, UserRound, Loader2, Plus, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { MultiSelectDropdown } from "@/components/ui/multi-select-dropdown";
+import { AvatarUpload } from "@/components/ui/avatar-upload";
 import { DayOfWeek, WorkingHourPayload, employeeApi } from "@/api/employee.api";
 import { branchApi, Branch } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
@@ -195,6 +196,7 @@ interface EmployeeFormData {
   joiningDate: string;
   branchIds: string[];
   email: string;
+  photoUrl: string | null;
 }
 
 const emptyFormData: EmployeeFormData = {
@@ -225,6 +227,7 @@ const emptyFormData: EmployeeFormData = {
   joiningDate: "",
   branchIds: [],
   email: "",
+  photoUrl: null,
 };
 
 export default function AddEmployee() {
@@ -588,18 +591,30 @@ export default function AddEmployee() {
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-8">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6">
-            {/* Role selector — drives every field below it */}
-            <div className="lg:col-span-3">
-              <label className={labelClass}>Role {requiredStar}</label>
-              <FormDropdown
-                name="role"
-                className={inputClass}
-                options={ROLE_OPTIONS}
-                value={formData.roleType}
-                onValueChange={handleRoleChange}
-                placeholder="Select Role (Doctor / Nurse / Pharmacist)"
-                disabled={submitting}
+            <div className="lg:col-span-3 flex flex-col sm:flex-row items-center sm:items-start gap-14 pb-2">
+              <AvatarUpload
+                value={formData.photoUrl}
+                onChange={(url) => setFormData((prev) => ({ ...prev, photoUrl: url }))}
+                label="Employee photo"
+                hint="Click or drag an image to upload (Max 1MB)"
+                size={128}
               />
+              <div
+                aria-hidden="true"
+                className="hidden sm:block w-px self-stretch bg-gray-200"
+              />
+              <div className="w-full sm:w-72">
+                <label className={labelClass}>Role {requiredStar}</label>
+                <FormDropdown
+                  name="role"
+                  className={inputClass}
+                  options={ROLE_OPTIONS}
+                  value={formData.roleType}
+                  onValueChange={handleRoleChange}
+                  placeholder="Select Role (Doctor / Nurse / Pharmacist)"
+                  disabled={submitting}
+                />
+              </div>
             </div>
 
             {/* First Name, Middle Name, Last Name */}

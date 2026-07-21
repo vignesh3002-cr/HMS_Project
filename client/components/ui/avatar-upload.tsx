@@ -9,6 +9,7 @@ export interface AvatarUploadProps {
   hint?: string;
   size?: number;
   className?: string;
+  maxSizeMB?: number;
 }
 
 // Uploaded photos are resized/compressed client-side before being turned
@@ -16,6 +17,7 @@ export interface AvatarUploadProps {
 // balloons past the server's request size limit once base64-encoded.
 const MAX_DIMENSION = 480;
 const JPEG_QUALITY = 0.75;
+const DEFAULT_MAX_SIZE_MB = 1;
 
 function resizeImageFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -58,12 +60,23 @@ export function AvatarUpload({
   hint,
   size = 128,
   className,
+  maxSizeMB = DEFAULT_MAX_SIZE_MB,
 }: AvatarUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const readFile = (file: File) => {
     if (!file.type.startsWith("image/")) return;
+    
+    // Check file size
+    const maxSizeBytes = maxSizeMB * 1024 * 1024;
+    if (file.size > maxSizeBytes) {
+      setError(`File size must be less than ${maxSizeMB}MB`);
+      return;
+    }
+    setError(null);
+    
     resizeImageFile(file)
       .then((dataUrl) => onChange(dataUrl))
       .catch(() => {});
@@ -80,6 +93,8 @@ export function AvatarUpload({
     const file = e.dataTransfer.files?.[0];
     if (file) readFile(file);
   };
+
+  const sizeHint = `Max ${maxSizeMB}MB`;
 
   return (
     <div className={cn("flex flex-col items-center text-center", className)}>
@@ -136,6 +151,8 @@ export function AvatarUpload({
 
       {label && <p className="mt-3 text-sm font-bold text-gray-800">{label}</p>}
       {hint && <p className="text-xs text-gray-400 mt-0.5">{hint}</p>}
+      <p className="text-xs text-gray-400 mt-0.5">{sizeHint}</p>
+      {error && <p className="text-xs text-red-500 mt-0.5">{error}</p>}
     </div>
   );
 }
