@@ -561,7 +561,12 @@ export default function Doctor() {
                                   {String(row.avatar)}
                                 </div>
                                 <div>
-                                  <p className="hms-name-text">{String(row.name)}</p>
+                                  <p
+                                    onClick={() => handleView(row.id)}
+                                    className="hms-name-text cursor-pointer hover:underline hover:text-[#00488D]"
+                                  >
+                                    {String(row.name)}
+                                  </p>
                                   <p className="hms-id-text">{String(row.id)}</p>
                                 </div>
                               </div>
@@ -650,7 +655,12 @@ export default function Doctor() {
                         <DoctorPhoto photo={doctor.photo} name={doctor.name} />
 
                         <div className="flex-1 min-w-0">
-                          <p className="hms-name-text truncate">{doctor.name}</p>
+                          <p
+                            onClick={() => handleView(doctor.id)}
+                            className="hms-name-text truncate cursor-pointer hover:underline hover:text-[#00488D]"
+                          >
+                            {doctor.name}
+                          </p>
                           <p className="hms-id-text">{doctor.id}</p>
                           <span
                             className="inline-block px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize mt-1"

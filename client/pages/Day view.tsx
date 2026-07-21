@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Plus } from "lucide-react";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
 import { useToast } from "@/hooks/use-toast";
@@ -11,6 +12,7 @@ import { doctorApi, type DoctorRecord } from "@/api/doctor.api";
 
 interface Doctor {
   name: string;
+  id: number;
   spec: string;
 }
 
@@ -109,15 +111,16 @@ function CheckIcon({ className }: { className?: string }) {
 /* ============================= Data ============================= */
 
 const doctors: Doctor[] = [
-  { name: "Sarah", spec: "Oncology" },
-  { name: "Jones", spec: "RAD" },
-  { name: "Lee", spec: "SURG" },
-  { name: "Adams", spec: "HEM" },
-  { name: "Baker", spec: "GYN" },
-  { name: "Carter", spec: "NEURO" },
-  { name: "Davis", spec: "PED" },
-  { name: "Evans", spec: "URO" },
-  { name: "Foster", spec: "RADL" },
+  { name: "Sarah", id: 1, spec: "Oncology" },
+  { name: "Jones", id: 2, spec: "RAD" },
+  { name: "Lee", id: 3, spec: "SURG" },
+  { name: "Adams", id: 4, spec: "HEM" },
+  { name: "Baker", id: 5, spec: "GYN" },
+  { name: "Carter", id: 6, spec: "NEURO" },
+  { name: "Davis", id: 7, spec: "PED" },
+  { name: "Evans", id: 8, spec: "URO" },
+  { name: "Foster", id: 9, spec: "RADL" },
+  
 ];
 
 function slot(count: number, label: string, fill: number, dark = false): AppointmentSlot {
@@ -126,46 +129,62 @@ function slot(count: number, label: string, fill: number, dark = false): Appoint
 
 const EMPTY = null;
 
-const scheduleRows: ScheduleRow[] = [
+const initialScheduleRows: ScheduleRow[] = [
   {
     time: "09:00 AM",
     slots: [
       slot(2, "2 Patients", 66, false),
       slot(1, "1 Patient", 33, false),
+       slot(2, "2 Patients", 66, false),
       slot(3, "3 Patients", 100, false),
       slot(1, "1 Patient", 33, false),
-      EMPTY,
+
       slot(2, "2 Patients", 66, false),
-      EMPTY,
+      slot(2, "2 Patients", 66, false),
       slot(3, "3 Patients", 100, false),
-      slot(1, "1 Patient", 33, true),
+       slot(2, "2 Patients", 66, false),
     ],
   },
   {
     time: "10:00 AM",
     slots: [
-      EMPTY,
+      slot(2, "2 Patients", 66, false),
+      slot(2, "2 Patients", 66, false),
+      slot(3, "3 Patients", 100, false),
+      slot(1, "1 Patient", 33, false),
+       slot(2, "2 Patients", 66, false),
+      slot(2, "2 Patients", 66, false),
+      
+      slot(3, "3 Patients", 100, false),
+      slot(1, "1 Patient", 33, true),
+      slot(2, "2 Patients", 66, false),
+    ],
+  },
+  {
+    time: "11:00 AM",
+    slots: [
+       slot(2, "2 Patients", 66, false),
       slot(2, "2 Patients", 66, false),
       slot(3, "3 Patients", 100, false),
       slot(1, "1 Patient", 33, false),
       slot(2, "2 Patients", 66, false),
-      EMPTY,
+       slot(2, "2 Patients", 66, false),
       slot(3, "3 Patients", 100, false),
       slot(1, "1 Patient", 33, true),
-      EMPTY,
+       slot(2, "2 Patients", 66, false),
     ],
   },
   {
     time: "12:00 PM",
     slots: [
-      slot(2, "2 Patients", 66, false),
       EMPTY,
-      slot(3, "3 Patients", 100, false),
       EMPTY,
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
       EMPTY,
-      slot(3, "3 Patients", 100, false),
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
       EMPTY,
     ],
   },
@@ -173,65 +192,90 @@ const scheduleRows: ScheduleRow[] = [
     time: "01:00 PM",
     slots: [
       slot(1, "1 Patients", 66, false),
-      EMPTY,
+      slot(2, "2 Patients", 66, false),
       slot(3, "3 Patients", 100, false),
-      EMPTY,
+      slot(2, "2 Patients", 66, false),
       slot(1, "1 Patient", 33, false),
       slot(2, "2 Patients", 66, false),
-      EMPTY,
+      slot(2, "2 Patients", 66, false),
       slot(3, "3 Patients", 100, false),
-      EMPTY,
+      slot(2, "2 Patients", 66, false),
     ],
   },
   {
     time: "02:00 PM",
     slots: [
       slot(1, "1 Patient", 33, false),
-      EMPTY,
+      slot(2, "2 Patients", 66, false),
       slot(2, "2 Patients", 66, false),
       slot(3, "3 Patients", 100, false),
       slot(1, "1 Patient", 33, false),
-      EMPTY,
+      slot(2, "2 Patients", 66, false),
       slot(2, "2 Patients", 66, false),
       slot(3, "3 Patients", 100, false),
+      slot(2, "2 Patients", 66, false),
+    ],
+  },
+  {
+    time: "03:00 PM",
+    slots: [
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
       EMPTY,
     ],
   },
   {
     time: "04:00 PM",
     slots: [
-      EMPTY,
       slot(1, "1 Patient", 33, false),
       slot(2, "2 Patients", 66, false),
-      EMPTY,
-      slot(3, "3 Patients", 100, false),
       slot(1, "1 Patient", 33, false),
-      EMPTY,
+      slot(2, "2 Patients", 66, false),
+      slot(2, "2 Patients", 66, false),
+      slot(3, "3 Patients", 100, false),
       slot(2, "2 Patients", 66, true),
-      EMPTY,
+      slot(1, "1 Patient", 33, false),
     ],
   },
+  
 ];
 
-const doctorDirectory: DoctorDirectoryEntry[] = [
-  { initials: "SJ", color: "rgba(10, 92, 58, 0.7)", name: "Dr. Sarah Johnson", spec: "Cardiologist" },
-  { initials: "MB", color: "#f87171", name: "Dr. Michael Brown", spec: "Neurologist" },
-  { initials: "ED", color: "#4a8fe8", name: "Dr. Emily Davis", spec: "Pediatrician" },
-  { initials: "DW", color: "#a78bfa", name: "Dr. David Wilson", spec: "Orthopedic" },
-  { initials: "JL", color: "rgba(255, 107, 53, 0.7)", name: "Dr. Jessica Lee", spec: "Dermatologist" },
-];
 
 /* ============================= Sub-components ============================= */
 
-function EmptySlot() {
+function EmptySlot({ onClick }: { onClick?: () => void }) {
   return (
-    <div className="flex h-[52px] w-full items-center justify-center rounded border border-dashed border-[#c3c6d7]">
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex h-[52px] w-full items-center justify-center rounded border border-dashed border-[#c3c6d7] transition-colors hover:border-[#00488D] hover:bg-[#F7F9FB]"
+    >
       <DotIcon className="h-[10px] w-[10px] text-[#c3c6d7]" />
-    </div>
+    </button>
   );
 }
 
-function AppointmentCard({ cell }: { cell: AppointmentSlot }) {
+function AppointmentCard({ cell, onCancel }: { cell: AppointmentSlot; onCancel?: () => void }) {
+  if (cell.count === 0) {
+    return (
+      <button
+        type="button"
+        onClick={onCancel}
+        className="flex h-[52px] w-full items-center justify-center rounded-[2px] border-l-2 border-l-[#004ac6] bg-[rgba(0,74,198,0.05)] p-1 text-center transition-colors hover:bg-[rgba(0,74,198,0.1)]"
+      >
+        <span className="font-['Manrope',sans-serif] text-[9px] font-bold leading-[13px] text-[#004ac6]">
+          New slot available
+        </span>
+      </button>
+    );
+  }
+
   const variant = cell.fill >= 100 ? "orange" : cell.dark ? "green-dark" : "green";
 
   const cardClass =
@@ -288,6 +332,8 @@ function mapDoctorRecord(doc: DoctorRecord, index: number): DoctorDirectoryEntry
 
 const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) => {
   const [searchTerm, setSearchTerm] = useState("");
+  const [toolbarSearchTerm, setToolbarSearchTerm] = useState("");
+  const [selectedDoctorName, setSelectedDoctorName] = useState<string | null>(null);
   const { toast } = useToast();
 
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -295,6 +341,60 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
+
+  const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>(initialScheduleRows);
+  const [isAddSlotOpen, setIsAddSlotOpen] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState<{ rowIdx: number; colIdx: number } | null>(null);
+
+  const handleAddSlot = () => {
+    if (selectedSlot) {
+      setScheduleRows((prev) =>
+        prev.map((row, rowIdx) =>
+          rowIdx !== selectedSlot.rowIdx
+            ? row
+            : {
+                ...row,
+                slots: row.slots.map((cell, colIdx) =>
+                  colIdx !== selectedSlot.colIdx
+                    ? cell
+                    : { count: 0, label: "Available", fill: 0, dark: false },
+                ),
+              },
+        ),
+      );
+    }
+    setIsAddSlotOpen(false);
+    setSelectedSlot(null);
+  };
+
+  const handleCancelAddSlot = () => {
+    setIsAddSlotOpen(false);
+    setSelectedSlot(null);
+  };
+
+  const [isCancelSlotOpen, setIsCancelSlotOpen] = useState(false);
+
+  const handleConfirmCancelSlot = () => {
+    if (selectedSlot) {
+      setScheduleRows((prev) =>
+        prev.map((row, rowIdx) =>
+          rowIdx !== selectedSlot.rowIdx
+            ? row
+            : {
+                ...row,
+                slots: row.slots.map((cell, colIdx) => (colIdx !== selectedSlot.colIdx ? cell : EMPTY)),
+              },
+        ),
+      );
+    }
+    setIsCancelSlotOpen(false);
+    setSelectedSlot(null);
+  };
+
+  const handleBackFromCancelSlot = () => {
+    setIsCancelSlotOpen(false);
+    setSelectedSlot(null);
+  };
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -343,7 +443,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       });
   }, []);
 
-  const activeDoctorDirectory = realDoctorDirectory ?? doctorDirectory;
+  const activeDoctorDirectory = realDoctorDirectory ?? [];
   const filteredDoctorDirectory = activeDoctorDirectory.filter((doc) =>
     doc.name.toLowerCase().includes(searchTerm.toLowerCase()),
   );
@@ -360,6 +460,22 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     (total, row) => total + row.slots.filter((cell) => cell !== null).length,
     0,
   );
+
+  const isDoctorDimmed = (gridDoctorName: string) => {
+    const gridName = gridDoctorName.toLowerCase();
+
+    if (toolbarSearchTerm && !gridName.includes(toolbarSearchTerm.toLowerCase())) {
+      return true;
+    }
+
+    if (selectedDoctorName) {
+      const pickedName = selectedDoctorName.toLowerCase();
+      const matches = pickedName.includes(gridName) || gridName.includes(pickedName);
+      if (!matches) return true;
+    }
+
+    return false;
+  };
 
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
@@ -448,6 +564,19 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           </div>
         </div>
 
+        {/* Search doctors */}
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Search"
+            value={toolbarSearchTerm}
+            onChange={(e) => setToolbarSearchTerm(e.target.value)}
+            aria-label="Search doctors in schedule"
+            className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:w-[200px] sm:focus:w-[250px]"
+          />
+          <SearchIcon className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#424752]" />
+        </div>
+
         {/* Date navigation */}
         <div role="group" aria-label="Date navigation" className="flex items-center">
           <button
@@ -515,9 +644,9 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                   <div
                     key={doc.name}
                     role="columnheader"
-                    className={`flex flex-col items-center justify-center pb-1.5 pl-1.5 pr-[7px] pt-1.5 text-center ${
+                    className={`flex flex-col items-center justify-center pb-1.5 pl-1.5 pr-[7px] pt-1.5 text-center transition-opacity ${
                       i !== doctors.length - 1 ? "border-r border-[#c3c6d7]" : ""
-                    }`}
+                    } ${isDoctorDimmed(doc.name) ? "opacity-30" : ""}`}
                   >
                     <span className="whitespace-nowrap font-['Manrope',sans-serif] text-[10px] font-bold leading-[15px] text-[#004ac6]">
                       {doc.name}
@@ -550,11 +679,30 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                     <div
                       key={i}
                       role="cell"
-                      className={`h-[60px] pb-1 pl-1 pr-[5px] pt-1 ${
+                      className={`h-[60px] pb-1 pl-1 pr-[5px] pt-1 transition-opacity ${
                         i !== row.slots.length - 1 ? "border-r border-[#c3c6d7]" : ""
-                      }`}
+                      } ${isDoctorDimmed(doctors[i].name) ? "opacity-30" : ""}`}
                     >
-                      {cell ? <AppointmentCard cell={cell} /> : <EmptySlot />}
+                      {cell ? (
+                        <AppointmentCard
+                          cell={cell}
+                          onCancel={
+                            cell.count === 0
+                              ? () => {
+                                  setSelectedSlot({ rowIdx, colIdx: i });
+                                  setIsCancelSlotOpen(true);
+                                }
+                              : undefined
+                          }
+                        />
+                      ) : (
+                        <EmptySlot
+                          onClick={() => {
+                            setSelectedSlot({ rowIdx, colIdx: i });
+                            setIsAddSlotOpen(true);
+                          }}
+                        />
+                      )}
                     </div>
                   ))}
                 </div>
@@ -562,66 +710,70 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
             ))}
           </div>
         </section>
-
-        {/* Aside */}
-        <aside
-          aria-label="Calendar and doctor directory"
-          className="flex w-full flex-1 flex-col gap-4 md:flex-row lg:w-[288px] lg:flex-none lg:flex-col lg:gap-[50px]"
-        >
-
-          {/* Select doctor */}
-          <div className="flex w-full flex-1 flex-col gap-4 rounded-xl border border-[#e5e7eb] bg-white p-[21px] shadow-[0_1px_1px_rgba(0,0,0,0.05)] lg:flex-none">
-            <span className="font-['Manrope',sans-serif] text-[10px] font-bold leading-[15px] text-[#1f2937]">
-              Select Doctor
-            </span>
-
-            <div className="relative w-full">
-              <SearchIcon className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#6b7280]" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search doctor..."
-                aria-label="Search doctor"
-                className="w-full rounded-md border border-[#e5e7eb] bg-[#f9fafb] py-[13px] pl-[37px] pr-[13px] font-['Inter',sans-serif] text-[10px] text-[#1f2937] placeholder:text-[#6b7280]"
-              />
-            </div>
-
-            <ul className="flex max-h-[300px] w-full flex-col gap-3 overflow-y-auto pr-1">
-              {filteredDoctorDirectory.length > 0 ? (
-                filteredDoctorDirectory.map((doc) => (
-                  <li
-                    key={doc.name}
-                    className="flex w-full cursor-pointer items-center gap-3 rounded-lg p-2 hover:bg-[#f9fafb]"
-                  >
-                    <span
-                      className="flex h-8 w-8 flex-none items-center justify-center rounded-[16px] font-['DM_Sans',sans-serif] text-[11px] font-bold text-[#dee8ff]"
-                      style={{ background: doc.color }}
-                    >
-                      {doc.initials}
-                    </span>
-                    <span className="flex flex-col text-left">
-                      <span className="font-['Manrope',sans-serif] text-[10px] font-bold leading-[15px] text-[#1f2937]">
-                        {doc.name}
-                      </span>
-                      <span className="font-['Manrope',sans-serif] text-[10px] leading-[15px] text-[#9ca3af]">
-                        {doc.spec}
-                      </span>
-                    </span>
-                  </li>
-                ))
-              ) : (
-                <li className="py-4 text-center font-['Manrope',sans-serif] text-[10px] text-[#9ca3af]">
-                  No doctors found.
-                </li>
-              )}
-            </ul>
-          </div>
-        </aside>
           </div>
           </div>
         </main>
       </div>
+
+      <Dialog
+        open={isAddSlotOpen}
+        onOpenChange={(open) => {
+          setIsAddSlotOpen(open);
+          if (!open) setSelectedSlot(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-[360px]">
+          <DialogHeader>
+            <DialogTitle>Add Slot</DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleAddSlot}
+              className="flex-1 rounded-lg bg-[#004785] px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#003a6b]"
+            >
+              Add Slot
+            </button>
+            <button
+              type="button"
+              onClick={handleCancelAddSlot}
+              className="flex-1 rounded-lg border border-[#E5E7EB] px-4 py-2 text-xs font-semibold text-[#374151] transition-colors hover:bg-[#F2F4F6]"
+            >
+              Cancel
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isCancelSlotOpen}
+        onOpenChange={(open) => {
+          setIsCancelSlotOpen(open);
+          if (!open) setSelectedSlot(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-[360px]">
+          <DialogHeader>
+            <DialogTitle className="text-black">Cancel Slot</DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleConfirmCancelSlot}
+              className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
+            >
+              Cancel Slot
+            </button>
+            <button
+              type="button"
+              onClick={handleBackFromCancelSlot}
+              className="flex-1 rounded-lg border border-[#E5E7EB] px-4 py-2 text-xs font-semibold text-[#374151] transition-colors hover:bg-[#F2F4F6]"
+            >
+              Back
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

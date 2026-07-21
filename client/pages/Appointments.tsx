@@ -38,7 +38,7 @@ interface Appointment {
 }
 
 
-const appointments: Appointment[] = [
+const initialAppointments: Appointment[] = [
   {
     id: "APT-2026-8842",
     patient: "James Wilson",
@@ -319,14 +319,14 @@ function ActionMenu({
         <button
           type="button"
           onClick={() => { setOpen(false); onView(); }}
-          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
+          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-green-400 hover:bg-[#F2F4F6]"
         >
           View Appointment
         </button>
         <button
           type="button"
           onClick={() => { setOpen(false); onEdit(); }}
-          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
+          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-indigo-600 hover:bg-[#F2F4F6]"
         >
           Edit Appointment
         </button>
@@ -343,6 +343,15 @@ function ActionMenu({
 }
 
 const AppointmentSchedule: React.FC = () => {
+
+  // Appointment data (mutable so status changes like cancellation can be reflected)
+  const [appointments, setAppointments] = useState<Appointment[]>(initialAppointments);
+
+  const handleCancelAppointment = (target: Appointment) => {
+    setAppointments((prev) =>
+      prev.map((appt) => (appt === target ? { ...appt, status: "Cancelled" } : appt)),
+    );
+  };
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -449,7 +458,7 @@ const AppointmentSchedule: React.FC = () => {
     ) as unknown as Appointment[];
 
     return result;
-  }, [searchQuery, appliedValues]);
+  }, [searchQuery, appliedValues, appointments]);
 
   // ---- SORTING ----
   const handleSort = (field: string) => {
@@ -956,7 +965,7 @@ const AppointmentSchedule: React.FC = () => {
                         <ActionMenu
                           onView={() => alert(`Viewing appointment ${item.id}`)}
                           onEdit={() => alert(`Editing appointment ${item.id}`)}
-                          onCancel={() => alert(`Cancelling appointment ${item.id}`)}
+                          onCancel={() => handleCancelAppointment(item)}
                         />
 
 

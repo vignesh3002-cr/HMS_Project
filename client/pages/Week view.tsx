@@ -1,10 +1,11 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
   Plus,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ExportReport from "@/components/ui/ExportReport";
 
 interface Schedule {
@@ -20,7 +21,7 @@ interface Doctor {
   schedule: Schedule[];
 }
 
-const doctors: Doctor[] = [
+const initialDoctors: Doctor[] = [
   {
     name: "Dr. Sarah Johnson",
     department: "HEMATOLOGY",
@@ -259,6 +260,64 @@ const colorStyles = {
 };
 
 const AppointmentSchedule = () => {
+  const [doctors, setDoctors] = useState<Doctor[]>(initialDoctors);
+  const [isAddSlotOpen, setIsAddSlotOpen] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState<{ doctorIdx: number; colIdx: number } | null>(null);
+
+  const handleAddSlot = () => {
+    if (selectedSlot) {
+      setDoctors((prev) =>
+        prev.map((doctor, doctorIdx) =>
+          doctorIdx !== selectedSlot.doctorIdx
+            ? doctor
+            : {
+                ...doctor,
+                schedule: doctor.schedule.map((item, colIdx) =>
+                  colIdx !== selectedSlot.colIdx
+                    ? item
+                    : { patients: 0, progress: 0, color: "blue", off: false },
+                ),
+              },
+        ),
+      );
+    }
+    setIsAddSlotOpen(false);
+    setSelectedSlot(null);
+  };
+
+  const handleCancelAddSlot = () => {
+    setIsAddSlotOpen(false);
+    setSelectedSlot(null);
+  };
+
+  const [isCancelSlotOpen, setIsCancelSlotOpen] = useState(false);
+
+  const handleConfirmCancelSlot = () => {
+    if (selectedSlot) {
+      setDoctors((prev) =>
+        prev.map((doctor, doctorIdx) =>
+          doctorIdx !== selectedSlot.doctorIdx
+            ? doctor
+            : {
+                ...doctor,
+                schedule: doctor.schedule.map((item, colIdx) =>
+                  colIdx !== selectedSlot.colIdx
+                    ? item
+                    : { patients: 0, progress: 0, color: "gray", off: true },
+                ),
+              },
+        ),
+      );
+    }
+    setIsCancelSlotOpen(false);
+    setSelectedSlot(null);
+  };
+
+  const handleBackFromCancelSlot = () => {
+    setIsCancelSlotOpen(false);
+    setSelectedSlot(null);
+  };
+
   const totalAppointments = doctors.reduce(
     (total, doctor) => total + doctor.schedule.filter((item) => !item.off).length,
     0,
@@ -386,8 +445,8 @@ const AppointmentSchedule = () => {
 
           <tbody>
 
-            {doctors.map((doctor) => (
-              <tr key={doctor.name} className="border-b border-[#c3c6d7] last:border-b-0">
+            {doctors.map((doctor, doctorIdx) => (
+              <tr key={doctor.name + doctorIdx} className="border-b border-[#c3c6d7] last:border-b-0">
                 <td className="border-r border-[#c3c6d7] bg-[rgba(242,244,246,0.5)] px-4 py-3 align-top">
 
                   <h3 className="font-['Manrope',sans-serif] text-[10px] font-bold leading-[15px] text-[#004ac6]">
@@ -407,11 +466,37 @@ const AppointmentSchedule = () => {
                         key={index}
                         className="border-r border-[#c3c6d7] last:border-r-0 p-1 align-middle"
                       >
-                        <div className="flex h-[52px] w-full items-center justify-center rounded border border-dashed border-[#c3c6d7]">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedSlot({ doctorIdx, colIdx: index });
+                            setIsAddSlotOpen(true);
+                          }}
+                          className="flex h-[52px] w-full items-center justify-center rounded border border-dashed border-[#c3c6d7] transition-colors hover:border-[#00488D] hover:bg-[#F7F9FB]"
+                        >
                           <span className="font-['Manrope',sans-serif] text-[9px] font-bold uppercase tracking-wide text-[#9aa1ad]">
                             OFF
                           </span>
-                        </div>
+                        </button>
+                      </td>
+                    );
+                  }
+
+                  if (item.patients === 0) {
+                    return (
+                      <td key={index} className="border-r border-[#c3c6d7] last:border-r-0 p-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedSlot({ doctorIdx, colIdx: index });
+                            setIsCancelSlotOpen(true);
+                          }}
+                          className="flex h-[52px] w-full items-center justify-center rounded-[2px] border-l-2 border-l-[#004ac6] bg-[rgba(0,74,198,0.05)] p-1 text-center transition-colors hover:bg-[rgba(0,74,198,0.1)]"
+                        >
+                          <span className="font-['Manrope',sans-serif] text-[9px] font-bold leading-[13px] text-[#004ac6]">
+                            New slot available
+                          </span>
+                        </button>
                       </td>
                     );
                   }
@@ -449,6 +534,66 @@ const AppointmentSchedule = () => {
           </div>
         </main>
       </div>
+
+      <Dialog
+        open={isAddSlotOpen}
+        onOpenChange={(open) => {
+          setIsAddSlotOpen(open);
+          if (!open) setSelectedSlot(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-[360px]">
+          <DialogHeader>
+            <DialogTitle>Add Slot</DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleAddSlot}
+              className="flex-1 rounded-lg bg-[#004785] px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#003a6b]"
+            >
+              Add Slot
+            </button>
+            <button
+              type="button"
+              onClick={handleCancelAddSlot}
+              className="flex-1 rounded-lg border border-[#E5E7EB] px-4 py-2 text-xs font-semibold text-[#374151] transition-colors hover:bg-[#F2F4F6]"
+            >
+              Cancel
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isCancelSlotOpen}
+        onOpenChange={(open) => {
+          setIsCancelSlotOpen(open);
+          if (!open) setSelectedSlot(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-[360px]">
+          <DialogHeader>
+            <DialogTitle className="text-black">Cancel Slot</DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleConfirmCancelSlot}
+              className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
+            >
+              Cancel Slot
+            </button>
+            <button
+              type="button"
+              onClick={handleBackFromCancelSlot}
+              className="flex-1 rounded-lg border border-[#E5E7EB] px-4 py-2 text-xs font-semibold text-[#374151] transition-colors hover:bg-[#F2F4F6]"
+            >
+              Back
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
