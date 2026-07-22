@@ -135,7 +135,7 @@ export default function DoctorProfile() {
     const to = form.get("to");
     const reason = form.get("reason");
 
-    if (!from || !to || !reason.trim()) {
+    if (!from || !to || !(reason as string).trim()) {
       alert("Please fill in all leave details.");
       return;
     }
