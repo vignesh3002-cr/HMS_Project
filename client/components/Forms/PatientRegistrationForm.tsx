@@ -30,6 +30,19 @@ interface FormData {
   patient_emergency_name: string;
   patient_emergency_relation: string;
   patient_photo_url: string | null;
+  // Insurance
+  insurance_patient: string;
+  insurance_provider: string;
+  insurance_plan: string;
+  policy_number: string;
+  policy_holder_name: string;
+  policy_holder_relation: string;
+  validity_date: string;
+  // // Diagnosis
+  // diagnosed: string;
+  // department: string;
+  // primary_doctor: string;
+  // diagnosis_notes: string;
 }
 
 const emptyFormData: FormData = {
@@ -53,6 +66,17 @@ const emptyFormData: FormData = {
   patient_emergency_name: "",
   patient_emergency_relation: "",
   patient_photo_url: null,
+  insurance_patient: "no",
+  insurance_provider: "",
+  insurance_plan: "",
+  policy_number: "",
+  policy_holder_name: "",
+  policy_holder_relation: "",
+  validity_date: "",
+  // diagnosed: "no",
+  // department: "",
+  // primary_doctor: "",
+  // diagnosis_notes: "",
 };
 
 // Shared styling — matches AddBranch.tsx / Addemployee.tsx conventions.
@@ -72,9 +96,24 @@ export default function PatientRegistrationForm() {
   const [sameAsCurrent, setSameAsCurrent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [insuranceFiles, setInsuranceFiles] = useState<File[]>([]);
   // Re-typed password — must match before submit is allowed. Username has
   // no confirm field; it's a single required field (matches Addemployee.tsx).
   const [confirmPassword, setConfirmPassword] = useState("");
+
+  const addInsuranceFiles = (files: FileList | File[]) => {
+    const arr = Array.from(files).filter(
+      (f) => f.type.startsWith("image/") || f.type === "application/pdf"
+    );
+    setInsuranceFiles((prev) => {
+      const combined = [...prev, ...arr];
+      return combined.slice(0, 5);
+    });
+  };
+
+  const removeInsuranceFile = (index: number) => {
+    setInsuranceFiles((prev) => prev.filter((_, i) => i !== index));
+  };
 
   // Fetch the real branch list on mount for the Branch dropdown.
   useEffect(() => {
@@ -142,6 +181,32 @@ export default function PatientRegistrationForm() {
       return;
     }
 
+    if (formData.insurance_patient === "yes") {
+      const missingInsurance = [
+        { key: "insurance_provider" as const, label: "Insurance provider" },
+        { key: "insurance_plan" as const, label: "Insurance plan" },
+        { key: "policy_number" as const, label: "Policy number" },
+        { key: "policy_holder_name" as const, label: "Policy holder name" },
+        { key: "policy_holder_relation" as const, label: "Relation" },
+        { key: "validity_date" as const, label: "Validity date" },
+      ].find((f) => !formData[f.key].trim());
+      if (missingInsurance) {
+        toast({ title: "Missing required field", description: `Please fill in "${missingInsurance.label}".`, variant: "destructive" });
+        return;
+      }
+      if (insuranceFiles.length === 0) {
+        toast({ title: "Missing required field", description: "Please upload at least one insurance document.", variant: "destructive" });
+        return;
+      }
+    }
+
+    // if (formData.diagnosed === "yes") {
+    //   if (!formData.department.trim() || !formData.primary_doctor.trim()) {
+    //     toast({ title: "Missing required field", description: "Department and Primary doctor are required when Diagnosed is Yes.", variant: "destructive" });
+    //     return;
+    //   }
+    // }
+
     setSubmitting(true);
 
     try {
@@ -194,6 +259,7 @@ export default function PatientRegistrationForm() {
     setFormData(emptyFormData);
     setSameAsCurrent(false);
     setConfirmPassword("");
+    setInsuranceFiles([]);
   };
 
   return (
@@ -359,16 +425,205 @@ export default function PatientRegistrationForm() {
                   />
                 </div>
                 <div>
-                  <label className={labelClass}>Marital status</label>
+                  <label className={labelClass}>
+                    Marital status {requiredStar}
+                  </label>
                   <FormDropdown
-                    options={["Single", "Married", "Divorced", "Widowed"]}
+                    options={["Single", "Married", "Divorced",]}
                     value={formData.patient_marital_status}
                     onValueChange={(val) =>
                       setField("patient_marital_status", val)
                     }
                     placeholder="Select"
                     className={inputClass}
+                    required
                   />
+                </div>
+              </div>
+            </div>
+
+            {/* INSURANCE DETAILS */}
+            <div className={sectionClass}>
+              <h3 className={sectionTitleClass}>Insurance details</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-6">
+                <div>
+                  <label className={labelClass}>
+                    Insurance patient {requiredStar}
+                  </label>
+                  <div className="flex gap-6">
+                    <label className="flex items-center gap-2 text-sm text-gray-900 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="insurance_patient"
+                        value="no"
+                        checked={formData.insurance_patient === "no"}
+                        onChange={(e) => setField("insurance_patient", e.target.value)}
+                        className="w-4 h-4 accent-blue-600"
+                      />{" "}
+                      No
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-900 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="insurance_patient"
+                        value="yes"
+                        checked={formData.insurance_patient === "yes"}
+                        onChange={(e) => setField("insurance_patient", e.target.value)}
+                        className="w-4 h-4 accent-blue-600"
+                      />{" "}
+                      Yes
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div
+                className={
+                  "mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6" +
+                  (formData.insurance_patient === "yes" ? "" : " hidden")
+                }
+              >
+                <div>
+                  <label className={labelClass}>
+                    Insurance provider {requiredStar}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter provider name"
+                    className={inputClass}
+                    value={formData.insurance_provider}
+                    onChange={(e) => setField("insurance_provider", e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>
+                    Insurance plan {requiredStar}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter plan name"
+                    className={inputClass}
+                    value={formData.insurance_plan}
+                    onChange={(e) => setField("insurance_plan", e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>
+                    Policy number {requiredStar}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter policy number"
+                    className={inputClass}
+                    value={formData.policy_number}
+                    onChange={(e) => setField("policy_number", e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>
+                    Policy holder name {requiredStar}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter holder name"
+                    className={inputClass}
+                    value={formData.policy_holder_name}
+                    onChange={(e) => setField("policy_holder_name", e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>
+                    Relation {requiredStar}
+                  </label>
+                  <FormDropdown
+                    options={["Self", "Spouse", "Parent", "Child", "Sibling", "Other"]}
+                    value={formData.policy_holder_relation}
+                    onValueChange={(val) => setField("policy_holder_relation", val)}
+                    placeholder="Select relation"
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>
+                    Validity date {requiredStar}
+                  </label>
+                  <input
+                    type="date"
+                    className={inputClass + " text-gray-500"}
+                    value={formData.validity_date}
+                    onChange={(e) => setField("validity_date", e.target.value)}
+                  />
+                </div>
+                <div className="lg:col-span-3">
+                  <label className={labelClass}>
+                    Insurance documents {insuranceFiles.length === 0 && requiredStar}
+                  </label>
+                  <div
+                    className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center bg-gradient-to-b from-white to-gray-50/60 hover:border-blue-500 hover:bg-blue-50/30 transition-all duration-200 cursor-pointer relative"
+                    tabIndex={0}
+                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("!border-blue-500", "!bg-blue-50/30"); }}
+                    onDragLeave={(e) => { e.currentTarget.classList.remove("!border-blue-500", "!bg-blue-50/30"); }}
+                    onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove("!border-blue-500", "!bg-blue-50/30"); addInsuranceFiles(e.dataTransfer.files); }}
+                    onClick={(e) => {
+                      if (!(e.target as HTMLElement).closest(".file-remove-btn")) {
+                        document.getElementById("insurance-file-input")?.click();
+                      }
+                    }}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); document.getElementById("insurance-file-input")?.click(); } }}
+                  >
+                    <input
+                      id="insurance-file-input"
+                      type="file"
+                      accept="image/*,application/pdf"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => { if (e.target.files) addInsuranceFiles(e.target.files); }}
+                    />
+                    {insuranceFiles.length === 0 ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+                        <span className="text-sm text-gray-500">Drop insurance documents here</span>
+                        <span className="text-xs text-gray-400">Images, PDF • Max 5 files</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-3">
+                        {insuranceFiles.map((file, i) => (
+                          <div key={i} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm animate-[slideUp_0.2s_ease]">
+                            {file.type.startsWith("image/") ? (
+                              <img
+                                src={URL.createObjectURL(file)}
+                                alt=""
+                                className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
+                              </div>
+                            )}
+                            <div className="text-left min-w-0 max-w-[180px]">
+                              <p className="text-xs font-medium truncate">{file.name}</p>
+                              <p className="text-xs text-gray-400">{(file.size / 1024).toFixed(1)} KB</p>
+                            </div>
+                            <button
+                              type="button"
+                              className="file-remove-btn p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors flex-shrink-0"
+                              onClick={() => removeInsuranceFile(i)}
+                              aria-label={`Remove ${file.name}`}
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => document.getElementById("insurance-file-input")?.click()}
+                          className="flex items-center gap-2 px-4 py-2 border border-dashed border-gray-300 rounded-xl text-sm text-gray-500 hover:text-blue-600 hover:border-blue-400 transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+                          Add more
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -515,6 +770,12 @@ export default function PatientRegistrationForm() {
                 </div>
               </div>
             </div>
+
+            {/* DIAGNOSIS DETAILS — hidden until DB columns exist
+            <div className={sectionClass}>
+              ...
+            </div>
+            */}
 
             {/* LOGIN CREDENTIALS */}
             <div className={sectionClass}>

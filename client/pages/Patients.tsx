@@ -4,19 +4,16 @@ import CalendarPicker from "@/components/hms/Calender";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
-  ChevronDown,
-  Check,
-  Infinity,
   List,
   LayoutGrid,
   Plus,
   MoreVertical,
   CalendarCheck,
   User,
-  File,
   Loader2,
 } from "lucide-react";
 
+import HmsTable from "@/components/hms/HmsTable";
 import ExportReport from "@/components/ui/ExportReport";
 
 // Filter system
@@ -36,15 +33,43 @@ function getPatientStatus(p: PatientRecord): "Active" | "Inactive" {
   return p.patient_active === "Active" ? "Active" : "Inactive";
 }
 
+function calculateAge(dob: string | null): number | string {
+  if (!dob) return "—";
+  const birthDate = new Date(dob);
+  if (isNaN(birthDate.getTime())) return "—";
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
+}
+
+function formatGender(gender: string | null): string {
+  if (!gender) return "—";
+  if (gender === "Male") return "M";
+  if (gender === "Female") return "F";
+  return gender;
+}
+
+function formatMobile(mobile: string | null, nationality: string | null): string {
+  if (!mobile) return "—";
+  if (nationality && nationality.toLowerCase().includes("india")) {
+    return `+91 ${mobile}`;
+  }
+  return mobile;
+}
+
 // Grid view needs: id, name, age, gender, mobile, bloodGroup, photo, status —
 // all real patient_bio_data columns.
 function mapToGridPatient(p: PatientRecord) {
   return {
     id: p.patient_id,
     name: getPatientFullName(p),
-    age: p.patient_age ?? "—",
-    gender: p.patient_gender ?? "—",
-    mobile: p.patient_primary_mobile ?? "—",
+    age: calculateAge(p.patient_dob),
+    gender: formatGender(p.patient_gender),
+    mobile: formatMobile(p.patient_primary_mobile, p.patient_nationality),
     bloodGroup: p.patient_blood_group ?? "—",
     photo: p.patient_photo_url ?? "",
     status: getPatientStatus(p),
@@ -58,9 +83,9 @@ function mapToListPatient(p: PatientRecord) {
   return {
     id: p.patient_id,
     name: getPatientFullName(p),
-    age: p.patient_age ?? "—",
-    gender: p.patient_gender ?? "—",
-    mobile: p.patient_primary_mobile ?? "—",
+    age: calculateAge(p.patient_dob),
+    gender: formatGender(p.patient_gender),
+    mobile: formatMobile(p.patient_primary_mobile, p.patient_nationality),
     diagnose: "Not recorded",
     diagnoseBg: "#F3F4F6",
     diagnoseColor: "#6B7280",
@@ -83,80 +108,6 @@ const Avatar = ({ text, color, bg }: { text: string; color: string; bg: string }
     {text}
   </div>
 );
-
-// 2. Rows Per Page Select with infinite scroll option
-function RowsPerPageSelect({
-  value,
-  onChange,
-  onInfiniteScroll,
-  showInfiniteScroll = true,
-  options = [12],
-}: {
-  value: number;
-  onChange: (val: number) => void;
-  onInfiniteScroll?: () => void;
-  showInfiniteScroll?: boolean;
-  options?: number[];
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  return (
-    <div className="relative" ref={wrapperRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-1.5 text-xs font-semibold text-[#374151] bg-white border rounded-md pl-2.5 pr-2 py-1 transition-colors ${
-          open ? "border-[#00488D] ring-2 ring-[#D6E3FF]" : "border-[#E5E7EB] hover:border-[#00488D]"
-        }`}
-      >
-        {value}
-        <ChevronDown className={`w-3 h-3 text-[#6B7280] transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
-      </button>
-
-      <div className={`absolute right-0 top-full mt-1 w-16 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
-          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
-        }`}
-      >
-        {options.map((opt) => (
-          <button
-            key={opt}
-            type="button"
-            onClick={() => { onChange(opt); setOpen(false); }}
-            className={`flex items-center justify-between w-full px-2.5 py-1.5 text-xs font-semibold text-left transition-colors ${
-              value === opt ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
-            }`}
-          >
-            {opt}
-            {value === opt && <Check className="w-3 h-3" />}
-          </button>
-        ))}
-        {showInfiniteScroll && (
-          <>
-            <div className="border-t border-[#E5E7EB]" />
-            <button
-              type="button"
-              onClick={() => { onInfiniteScroll?.(); setOpen(false); }}
-              className="flex items-center gap-2 w-full px-2.5 py-1.5 text-xs font-semibold text-left text-[#374151] hover:bg-[#F2F4F6] transition-colors"
-            >
-              <Infinity className="w-3.5 h-3.5" />
-            </button>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ============================================================
 // GRID-VIEW SUB-COMPONENTS
@@ -445,7 +396,7 @@ export default function PatientsManagement() {
           </div>
 
           {/* ==================== MAIN CARD ==================== */}
-          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col min-h-[500px] transition-all duration-300 hover:shadow-md">
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col transition-all duration-300 hover:shadow-md">
 
             {/* ==================== TOOLBAR ==================== */}
             <div className="px-5 py-4 border-b border-[#E5E7EB] flex flex-wrap items-center justify-between gap-4">
@@ -555,140 +506,78 @@ export default function PatientsManagement() {
                 Loading patients...
               </div>
             ) : viewMode === "list" ? (
-              <div className="overflow-x-auto flex-1">
-                <table className="w-full min-w-[800px]">
-                  <thead className="hms-columnHeading-style">
-                    <tr className="bg-[rgba(242,244,246,0.40)]">
-                      {["Name", "Age/Gender", "Mobile", "Diagnose", "Assigned Doctor", "Status", "Actions"].map((header, idx) => {
-                        const sortKey = header.toLowerCase().replace(/[ /]/g, '');
-                        const isSorted = sortField === sortKey;
-                        return (
-                          <th
-                            key={header}
-                            className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? 'pl-8' : ''}`}
-                          >
-                            <div className="flex items-center gap-1 cursor-pointer select-none" onClick={sortKey !== 'actions' ? () => handleSort(sortKey) : undefined}>
-                              <span>{header}</span>
-                              {sortKey !== 'actions' && (
-                                <span className="inline-flex h-3 w-3 items-center justify-center text-[7px] shrink-0">
-                                  {isSorted ? (sortDirection === "asc" ? "\u2191" : "\u2193") : "\u2195"}
-                                </span>
-                              )}
-                            </div>
-                          </th>
-                        );
-                      })}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {currentRows.length > 0 ? (
-                      currentRows.map((patient, index) => (
-                        <tr key={String(patient.id) + index} className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F7F9FB] transition-colors group">
-                          {/* Name & ID */}
-                          <td className="px-5 py-4 pl-8">
-                            <div className="flex items-center gap-3">
-                              <Avatar text={String(patient.name)[0]} color="#00488D" bg="#D6E3FF" />
-                              <div>
-                                <p className="hms-name-text">{String(patient.name)}</p>
-                                <p className="hms-id-text">{String(patient.id)}</p>
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Age/Gender */}
-                          <td className="px-5 py-4 text-[#191C1E] hms-content-text">
-                            {patient.age} / {String(patient.gender)}
-                          </td>
-
-                          {/* Mobile */}
-                          <td className="px-5 py-4 text-[#191C1E] hms-content-text">
-                            {String(patient.mobile)}
-                          </td>
-
-                          {/* Diagnose */}
-                          <td className="px-5 py-4">
-                            <span
-                              className="px-3 py-1 rounded-full text-[10px] font-bold uppercase"
-                              style={{
-                                backgroundColor: String(patient.diagnoseBg ?? "#F3F4F6"),
-                                color: String(patient.diagnoseColor ?? "#6B7280"),
-                              }}
-                            >
-                              {String(patient.diagnose ?? "")}
-                            </span>
-                          </td>
-
-                          {/* Assigned Doctor */}
-                          <td className="px-5 py-4">
-                            <div className="flex items-center gap-3">
-                              <Avatar
-                                text={String(patient.doctorAvatar ?? "?")}
-                                color={String(patient.doctorColor ?? "#00488D")}
-                                bg={String(patient.doctorBg ?? "#D6E3FF")}
-                              />
-                              <div>
-                                <p className="hms-name-text">{String(patient.doctor ?? "")}</p>
-                                <p className="hms-id-text">{String(patient.doctorId ?? "")}</p>
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Status */}
-                          <td className="px-5 py-4">
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{
-                              background: String(patient.status) === "Active" ? "#F0FDF4" : "#F3F4F6",
-                              color: String(patient.status) === "Active" ? "#16A34A" : "#6B7280",
-                            }}>
-                              <span className="w-1.5 h-1.5 rounded-full" style={{
-                                background: String(patient.status) === "Active" ? "#22C55E" : "#9CA3AF",
-                              }} />
-                              {String(patient.status)}
-                            </span>
-                          </td>
-
-                          {/* Actions */}
-                          <td className="px-5 py-4">
-                            <div className="flex items-center gap-1">
-                              <button onClick={() => handleView(String(patient.id))} title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
-                                  <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-                                  <circle cx="12" cy="12" r="3" />
-                                </svg>
-                              </button>
-                              <button onClick={() => handleEdit(String(patient.id))} title="Edit" className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
-                                  <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                  <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
-                                </svg>
-                              </button>
-                              <button onClick={() => handleDelete(String(patient.id))} title="Delete" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
-                                  <path d="M10 11v6"/>
-                                  <path d="M14 11v6"/>
-                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
-                                  <path d="M3 6h18"/>
-                                  <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                                </svg>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={7} className="px-5 py-10 text-center text-[#6B7280] text-sm">
-                          No patients found matching the current filters.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <HmsTable
+                columns={[
+                  { key: "name", label: "Name", render: (r: any) => (
+                    <div className="flex items-center gap-2">
+                      <Avatar text={String(r.name)[0]} color="#00488D" bg="#D6E3FF" />
+                      <div><div className="hms-name-text">{String(r.name)}</div><div className="hms-id-text">{String(r.id)}</div></div>
+                    </div>
+                  )},
+                  { key: "age/gender", label: "Age/Gender", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.age} / {String(r.gender)}</span> },
+                  { key: "mobile", label: "Mobile", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{String(r.mobile)}</span> },
+                  { key: "diagnose", label: "Diagnose", render: (r: any) => (
+                    <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase" style={{ backgroundColor: String(r.diagnoseBg ?? "#F3F4F6"), color: String(r.diagnoseColor ?? "#6B7280") }}>
+                      {String(r.diagnose ?? "")}
+                    </span>
+                  )},
+                  { key: "doctor", label: "Assigned Doctor", render: (r: any) => (
+                    <div className="flex items-center gap-2">
+                      <Avatar text={String(r.doctorAvatar ?? "?")} color={String(r.doctorColor ?? "#00488D")} bg={String(r.doctorBg ?? "#D6E3FF")} />
+                      <div><div className="hms-name-text">{String(r.doctor ?? "")}</div><div className="hms-id-text">{String(r.doctorId ?? "")}</div></div>
+                    </div>
+                  )},
+                  { key: "status", label: "Status", render: (r: any) => {
+                    const s = String(r.status);
+                    const isActive = s === "Active";
+                    return (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#F3F4F6", color: isActive ? "#16A34A" : "#6B7280" }}>
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#9CA3AF" }} />
+                        {s}
+                      </span>
+                    );
+                  }},
+                  { key: "actions", label: "Actions", sortable: false, render: (r: any) => (
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => handleView(String(r.id))} title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
+                          <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                      </button>
+                      <button onClick={() => handleEdit(String(r.id))} title="Edit" className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
+                          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
+                        </svg>
+                      </button>
+                      <button onClick={() => handleDelete(String(r.id))} title="Delete" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
+                          <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                      </button>
+                    </div>
+                  )},
+                ]}
+                data={currentRows}
+                sortField={sortField}
+                sortDirection={sortDirection}
+                onSort={handleSort}
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalRecords={totalRecords}
+                rowsPerPage={rowsPerPage}
+                visibleStart={visibleStart}
+                visibleEnd={visibleEnd}
+                onPageChange={setCurrentPage}
+                onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
+                rowsPerPageOptions={[5, 10, 20]}
+                emptyMessage="No patients found matching the current filters."
+                rowKey={(r: any, i: number) => String(r.id) + i}
+              />
             ) : (
-              /* ================================================================ */
-              /* BODY: GRID VIEW (cards with photo, blood group, infinite scroll) */
-              /* ================================================================ */
-              <div className={`flex-1 p-5 hide-scrollbar max-h-[450px] ${infiniteScroll ? " overflow-y-auto max-h-[500px]":"" }`}>
+              <>
+              <div className="flex-1 p-5 hide-scrollbar max-h-[450px]">
                 {displayCards.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     {displayCards.map((patient: any) => (
@@ -741,64 +630,31 @@ export default function PatientsManagement() {
                   </div>
                 )}
               </div>
-            )}
-
-            {/* ==================== PAGINATION ==================== */}
-            <div className="mt-auto shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur gap-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
-                  {infiniteScroll
-                    ? `Showing ${Math.min(visibleCount, totalRecords)} of ${totalRecords} patients`
-                    : `Showing ${visibleStart} to ${visibleEnd} of ${totalRecords} patients`}
-                </span>
-                <RowsPerPageSelect
-                  value={rowsPerPage}
-                  onChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
-                  onInfiniteScroll={() => { setInfiniteScroll(true); setVisibleCount(rowsPerPage); }}
-                  showInfiniteScroll={viewMode === "grid"}
-                  options={viewMode === "grid" ? [10, 12, 20, 50] : [5, 10, 20]}
-                />
-              </div>
-
-              <div className="flex items-center gap-1">
-                <button
-                  disabled={currentPage <= 1}
-                  onClick={() => setCurrentPage((prev) => prev - 1)}
-                  className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
-                >
-                  <svg width="5" height="8" viewBox="0 0 5 8" fill="none">
-                    <path d="M4 8L0 4L4 0L4.93333.933333L1.86667 4L4.93333 7.06667L4 8Z" fill="#424752"/>
-                  </svg>
-                </button>
-
-                {Array.from({ length: Math.min(totalPages, 5) }, (_, index) => {
-                  return (
-                    <button
-                      key={index}
-                      onClick={() => setCurrentPage(index + 1)}
-                      className={`w-6 h-6 flex items-center justify-center rounded-md text-[10px] font-semibold transition-colors ${
-                        currentPage === index + 1
-                          ? "bg-[#004785] text-white"
-                          : "text-[#1D1A1A] hover:bg-[#F2F4F6]"
-                      }`}
-                    >
+              <div className="mt-auto shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
+                    {infiniteScroll
+                      ? `Showing ${Math.min(visibleCount, totalRecords)} of ${totalRecords} patients`
+                      : `Showing ${visibleStart} to ${visibleEnd} of ${totalRecords} patients`}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button disabled={currentPage <= 1} onClick={() => setCurrentPage((prev) => prev - 1)} className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors">
+                    <svg width="5" height="8" viewBox="0 0 5 8" fill="none"><path d="M4 8L0 4L4 0L4.93333.933333L1.86667 4L4.93333 7.06667L4 8Z" fill="#424752"/></svg>
+                  </button>
+                  {Array.from({ length: Math.min(totalPages, 5) }, (_, index) => (
+                    <button key={index} onClick={() => setCurrentPage(index + 1)} className={`w-6 h-6 flex items-center justify-center rounded-md text-[10px] font-semibold transition-colors ${currentPage === index + 1 ? "bg-[#004785] text-white" : "text-[#1D1A1A] hover:bg-[#F2F4F6]"}`}>
                       {index + 1}
                     </button>
-                  );
-                })}
-                {totalPages > 5 && <span className="text-[#6B7280] text-xs">...</span>}
-
-                <button
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setCurrentPage((prev) => prev + 1)}
-                  className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
-                >
-                  <svg width="5" height="8" viewBox="0 0 5 8" fill="none">
-                    <path d="M1 8L5 4L1 0L.0666656.933333L3.13333 4L.0666656 7.06667L1 8Z" fill="#424752"/>
-                  </svg>
-                </button>
+                  ))}
+                  {totalPages > 5 && <span className="text-[#6B7280] text-xs">...</span>}
+                  <button disabled={currentPage >= totalPages} onClick={() => setCurrentPage((prev) => prev + 1)} className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors">
+                    <svg width="5" height="8" viewBox="0 0 5 8" fill="none"><path d="M1 8L5 4L1 0L.0666656.933333L3.13333 4L.0666656 7.06667L1 8Z" fill="#424752"/></svg>
+                  </button>
+                </div>
               </div>
-            </div>
+              </>
+            )}
           </div>
         </main>
       </div>

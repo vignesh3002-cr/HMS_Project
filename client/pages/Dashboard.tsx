@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, ChevronDown, Check, Loader2 } from "lucide-react";
+import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2 } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
-import { AppointmentsTableView, DoctorsTableView, StaffTableView, type TableRow } from "@/components/hms/DashboardTable";
+import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
@@ -311,67 +311,6 @@ function CountUp({ target, duration = 1800 }: { target: number; duration?: numbe
   return <>{formatStatValue(count)}</>;
 }
 
-function RowsPerPageSelect({ value, onChange, options = [5, 10, 20] }: { value: number; onChange: (val: number) => void; options?: number[] }) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  return (
-    <div className="relative" ref={wrapperRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        // rows-per-page dropdown
-        className={`flex items-center gap-1.5 text-xs font-semibold text-[#374151] bg-white border rounded-md pl-2.5 pr-2 py-1 transition-colors ${
-          open ? "border-[#00488D] ring-2 ring-[#D6E3FF]" : "border-[#E5E7EB] hover:border-[#0c63b4]"
-        }`}
-      >
-        {value}
-        <ChevronDown
-          className={`w-3 h-3 text-[#6B7280] transition-transform duration-200 ${open ? "rotate-180" : ""}`}
-        />
-      </button>
-
-      <div
-        role="listbox"
-        className={`absolute right-0 top-full mt-1 w-16 origin-top-right bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
-          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
-        }`}
-      >
-        {options.map((opt) => (
-          <button
-            key={opt}
-            type="button"
-            role="option"
-            aria-selected={value === opt}
-            onClick={() => {
-              onChange(opt);
-              setOpen(false);
-            }}
-            className={`flex items-center justify-between w-full px-2.5 py-1.5 text-xs font-semibold text-left transition-colors ${
-              value === opt ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
-            }`}
-          >
-            {opt}
-            {value === opt && <Check className="w-3 h-3" />}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("doctors");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -379,8 +318,8 @@ export default function Dashboard() {
 
   // Real doctors/staff fetched from the backend. No dummy fallback — an
   // empty/failed fetch just leaves these null and the tab shows no rows.
-  const [realDoctors, setRealDoctors] = useState<TableRow[] | null>(null);
-  const [realStaff, setRealStaff] = useState<TableRow[] | null>(null);
+  const [realDoctors, setRealDoctors] = useState<Record<string, unknown>[] | null>(null);
+  const [realStaff, setRealStaff] = useState<Record<string, unknown>[] | null>(null);
   const [isEmployeesLoading, setIsEmployeesLoading] = useState(true);
 
   useEffect(() => {
@@ -774,8 +713,8 @@ useEffect(() => {
            </div>
 
           {/* Table Card */}
-          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col min-h-[320px] transition-all duration-300 hover:shadow-md">
-            <div className="overflow-hidden">
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col transition-all duration-300 hover:shadow-md">
+            <div>
               {/* Table Header */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-[rgba(194,198,212,0.10)]">
               <div className="relative flex items-center gap-6" ref={tabsContainerRef}>
@@ -875,94 +814,113 @@ useEffect(() => {
               </div>
             </div>
 
-            {/* Table */}
-            <div className="min-h-[320px] overflow-x-auto">
-              {(activeTab === "doctors" || activeTab === "staff") && isEmployeesLoading ? (
-                <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
-                  <Loader2 size={24} className="animate-spin text-[#00488D]" />
-                  Loading {activeTab}...
-                </div>
-              ) : activeTab === "doctors" ? (
-                <DoctorsTableView
-                  rows={currentRows as TableRow[]}
-                  sortField={sortField[activeTab] ?? ""}
-                  sortDirection={sortDirection[activeTab] ?? "asc"}
-                  onSort={handleSort}
-                  onEdit={handleEditDoctor}
-                  onView={handleView}
-                />
-              ) : activeTab === "staff" ? (
-                <StaffTableView
-                  rows={currentRows as TableRow[]}
-                  sortField={sortField[activeTab] ?? ""}
-                  sortDirection={sortDirection[activeTab] ?? "asc"}
-                  onSort={handleSort}
-                  onEdit={handleEdit}
-                  onView={handleView}
-                />
-              ) : activeTab === "appointments" ? (
-                <AppointmentsTableView
-                  rows={currentRows as TableRow[]}
-                  sortField={sortField[activeTab] ?? ""}
-                  sortDirection={sortDirection[activeTab] ?? "asc"}
-                  onSort={handleSort}
-                  onEdit={handleEdit}
-                  onView={handleView}
-                />
-              ) : null}
-            </div>
-
-            </div>
-
-            {/* Pagination */}
-            <div className="mt-auto shrink-0 flex items-center justify-between px-5 py-2 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
-                  Showing {visibleStart}-{visibleEnd} of {totalRecords}
-                </span>
-                <RowsPerPageSelect
-                  value={rowsPerPage}
-                  onChange={(val) => {
-                    setRowsPerPage(val);
-                    setCurrentPage(1);
-                  }}
-                />
+            {/* Table / Loading */}
+            {(activeTab === "doctors" || activeTab === "staff") && isEmployeesLoading ? (
+              <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
+                <Loader2 size={24} className="animate-spin text-[#00488D]" />
+                Loading {activeTab}...
               </div>
-              <div className="flex items-center gap-1">
-                <button
-                  disabled={currentPage <= 1}
-                  onClick={() => setCurrentPage((prev) => prev - 1)}
-                  className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30"
-                  title="Previous page"
-                >
-                  <svg width="5" height="8" viewBox="0 0 5 8" fill="none">
-                    <path d="M4 8L0 4L4 0L4.93333.933333L1.86667 4L4.93333 7.06667L4 8Z" fill="#424752"/>
-                  </svg>
-                </button>
-                {Array.from({ length: totalPages }, (_, index) => (
-                  <button
-                    key={index}
-                    onClick={() => setCurrentPage(index + 1)}
-                    className={`w-6 h-6 flex items-center justify-center rounded-md text-[10px] font-semibold ${
-                      currentPage === index + 1
-                        ? "bg-[#004785] text-white"
-                        : "text-[#1D1A1A]"
-                    }`}
-                  >
-                    {index + 1}
-                  </button>
-                ))}
-                <button
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setCurrentPage((prev) => prev + 1)}
-                  className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30"
-                  title="Next page"
-                >
-                  <svg width="5" height="8" viewBox="0 0 5 8" fill="none">
-                    <path d="M1 8L5 4L1 0L.0666656.933333L3.13333 4L.0666656 7.06667L1 8Z" fill="#424752"/>
-                  </svg>
-                </button>
-              </div>
+            ) : (
+              <HmsTable
+                columns={activeTab === "appointments" ? [
+                  { key: "patientName", label: "Patient Name", render: (r: any) => (
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.avatarBg, color: r.avatarColor }}>{r.avatar}</div>
+                      <div><div className="hms-name-text">{r.patientName}</div><div className="hms-id-text">{r.patientId}</div></div>
+                    </div>
+                  )},
+                  { key: "appointmentNo", label: "Appointment No", render: (r: any) => (
+                    <span className="px-3 py-1 rounded-[20px] hms-content-text inline-block" style={{ background: "#EEF2FF", color: "#4F46E5" }}>{r.appointmentNo}</span>
+                  )},
+                  { key: "doctorName", label: "Assigned Doctor", render: (r: any) => (
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.doctorAvatarBg, color: r.doctorAvatarcolor }}>{r.doctorAvatar}</div>
+                      <div><div className="hms-name-text">{r.doctorName}</div><div className="hms-id-text">{r.doctorId}</div></div>
+                    </div>
+                  )},
+                  { key: "reason", label: "Reason", render: (r: any) => <span className="text-[#191C1E] hms-content-text leading-4">{r.reason}</span> },
+                  { key: "date", label: "Timing", render: (r: any) => (
+                    <div className="text-[#191C1E] hms-content-text leading-4"><div>{r.date}</div><div className="text-[#8C8D8F] hms-department-text">{r.time}</div></div>
+                  )},
+                  { key: "status", label: "Status", render: (r: any) => {
+                    const isActive = String(r.status) === "Active";
+                    return (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />
+                        {r.status}
+                      </span>
+                    );
+                  }},
+                  { key: "actions", label: "Action", sortable: false, render: (r: any) => (
+                    <div className="flex items-center gap-1">
+                      <button title="View" onClick={() => handleView(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] group-hover:stroke-[#505F76]">
+                          <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                      </button>
+                      <button title="Edit" onClick={() => handleEdit(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] group-hover:stroke-[#5E87CF]">
+                          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
+                        </svg>
+                      </button>
+                    </div>
+                  )},
+                ] : [
+                  { key: "name", label: "Name", render: (r: any) => (
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.initBg, color: r.avatarColor }}>{r.avatar}</div>
+                      <div><div className="hms-name-text">{r.name}</div><div className="hms-id-text">{r.id}</div></div>
+                    </div>
+                  )},
+                  { key: "dept", label: "Department", render: (r: any) => (
+                    <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: r.deptBg, color: r.deptColor }}>{r.dept}</span>
+                  )},
+                  { key: "branch", label: "Branch", render: (r: any) => <span className="text-[#191C1E] hms-content-text leading-4">{r.branch}</span> },
+                  { key: "status", label: "Status", render: (r: any) => {
+                    const isActive = String(r.status) === "Active";
+                    return (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />
+                        {r.status}
+                      </span>
+                    );
+                  }},
+                  { key: "actions", label: "Actions", sortable: false, render: (r: any) => (
+                    <div className="flex items-center gap-1">
+                      <button title="View" onClick={() => handleView(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] group-hover:stroke-[#505F76]">
+                          <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                      </button>
+                      <button title="Edit" onClick={() => (activeTab === "doctors" ? handleEditDoctor : handleEdit)(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] group-hover:stroke-[#5E87CF]">
+                          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
+                        </svg>
+                      </button>
+                    </div>
+                  )},
+                ]}
+                data={currentRows}
+                sortField={sortField[activeTab] ?? ""}
+                sortDirection={sortDirection[activeTab] ?? "asc"}
+                onSort={handleSort}
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalRecords={totalRecords}
+                rowsPerPage={rowsPerPage}
+                visibleStart={visibleStart}
+                visibleEnd={visibleEnd}
+                onPageChange={setCurrentPage}
+                onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
+                rowsPerPageOptions={[5, 10, 20]}
+                emptyMessage={`No ${activeTab} found matching the current filters.`}
+                rowKey={(r) => String((r as any).id)}
+              />
+            )}
             </div>
           </div>
 

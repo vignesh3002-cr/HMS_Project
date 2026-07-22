@@ -12,9 +12,35 @@ const menuItems = [
 
 export function QuickAddFab() {
   const [open, setOpen] = useState(false);
+  const [openUpward, setOpenUpward] = useState(true);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
+
+  const [maxDropdownHeight, setMaxDropdownHeight] = useState(500);
+  useEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      if (!buttonRef.current || !dropdownRef.current) return;
+      const btnRect = buttonRef.current.getBoundingClientRect();
+      const dropdownHeight = dropdownRef.current.scrollHeight;
+      const spaceAbove = btnRect.top;
+      const spaceBelow = window.innerHeight - btnRect.bottom;
+      if (spaceAbove >= dropdownHeight) {
+        setOpenUpward(true);
+      } else if (spaceBelow >= dropdownHeight) {
+        setOpenUpward(false);
+      } else {
+        setOpenUpward(spaceAbove >= spaceBelow);
+      }
+      setMaxDropdownHeight(Math.max(spaceAbove - 12, spaceBelow - 12, 120));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [open]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -52,9 +78,16 @@ export function QuickAddFab() {
   };
 
   return (
-    <div ref={wrapperRef} className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-3">
+    <div
+      ref={wrapperRef}
+      className={`fixed bottom-6 right-6 z-50 flex items-end gap-3 ${openUpward ? "flex-col" : "flex-col-reverse"}`}
+    >
       {open && (
-        <div className="w-52 bg-white border border-[#E5E7EB] rounded-xl shadow-lg overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-150">
+        <div
+          ref={dropdownRef}
+          className="w-52 bg-white border border-[#E5E7EB] rounded-xl shadow-lg overflow-y-auto animate-in fade-in duration-150"
+          style={{ maxHeight: maxDropdownHeight }}
+        >
           {menuItems.map(({ key, label, icon: Icon }) => (
             <button
               key={key}
@@ -71,6 +104,7 @@ export function QuickAddFab() {
       )}
 
       <button
+        ref={buttonRef}
         onClick={() => setOpen((o) => !o)}
         className="w-12 h-12 bg-[#00488D] rounded-2xl flex items-center justify-center shadow-lg hover:bg-[#003a6b] transition-all duration-200"
         aria-label={open ? "Close quick add menu" : "Open quick add menu"}

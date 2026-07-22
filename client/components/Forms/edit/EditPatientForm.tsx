@@ -20,7 +20,6 @@ interface FormData {
   patient_alternate_mobile: string;
   patient_email: string;
   patient_marital_status: string;
-  patient_type: string;
   patient_nationality: string;
   patient_current_address: string;
   patient_permanent_address: string;
@@ -42,7 +41,6 @@ const emptyFormData: FormData = {
   patient_alternate_mobile: "",
   patient_email: "",
   patient_marital_status: "",
-  patient_type: "",
   patient_nationality: "",
   patient_current_address: "",
   patient_permanent_address: "",
@@ -102,6 +100,13 @@ export default function EditPatientForm() {
     }
   };
 
+  const toDateInputValue = (val: string | null | undefined): string => {
+    if (!val) return "";
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return val;
+    return d.toISOString().split("T")[0];
+  };
+
   const fetchPatient = async () => {
     if (!id) return;
     try {
@@ -110,26 +115,25 @@ export default function EditPatientForm() {
       if (patient) {
         setFormData({
           branch_id: patient.branch_id || "",
-          patient_first_name: patient.first_name || "",
-          patient_middle_name: patient.middle_name || "",
-          patient_last_name: patient.last_name || "",
-          patient_gender: patient.gender || "",
-          patient_dob: patient.dob || "",
-          patient_blood_group: patient.blood_group || "",
-          patient_primary_mobile: patient.mobile || "",
-          patient_alternate_mobile: patient.alternate_mobile || "",
-          patient_email: patient.email || "",
-          patient_marital_status: patient.marital_status || "",
-          patient_type: patient.patient_type || "",
-          patient_nationality: patient.nationality || "",
-          patient_current_address: patient.current_address || "",
-          patient_permanent_address: patient.permanent_address || "",
-          patient_emergency_mobile: patient.emergency_mobile || "",
-          patient_emergency_name: patient.emergency_name || "",
-          patient_emergency_relation: patient.emergency_relation || "",
-          patient_photo_url: patient.photo || null,
+          patient_first_name: patient.patient_first_name || "",
+          patient_middle_name: patient.patient_middle_name || "",
+          patient_last_name: patient.patient_last_name || "",
+          patient_gender: patient.patient_gender || "",
+          patient_dob: toDateInputValue(patient.patient_dob),
+          patient_blood_group: patient.patient_blood_group || "",
+          patient_primary_mobile: patient.patient_primary_mobile || "",
+          patient_alternate_mobile: patient.patient_alternate_mobile || "",
+          patient_email: patient.patient_email || "",
+          patient_marital_status: patient.patient_marital_status || "",
+          patient_nationality: patient.patient_nationality || "",
+          patient_current_address: (patient as any).patient_current_address || "",
+          patient_permanent_address: (patient as any).patient_permanent_address || "",
+          patient_emergency_mobile: (patient as any).patient_emergency_mobile || "",
+          patient_emergency_name: (patient as any).patient_emergency_name || "",
+          patient_emergency_relation: (patient as any).patient_emergency_relation || "",
+          patient_photo_url: patient.patient_photo_url || null,
         });
-        if (patient.current_address && !patient.permanent_address) {
+        if ((patient as any).patient_current_address && !(patient as any).patient_permanent_address) {
           setSameAsCurrent(true);
         }
       }
@@ -179,7 +183,6 @@ export default function EditPatientForm() {
         alternate_mobile: formData.patient_alternate_mobile || undefined,
         email: formData.patient_email || undefined,
         marital_status: formData.patient_marital_status || undefined,
-        patient_type: formData.patient_type || undefined,
         nationality: formData.patient_nationality || undefined,
         photo: formData.patient_photo_url || undefined,
       });
@@ -370,36 +373,6 @@ export default function EditPatientForm() {
                         value={formData.patient_nationality}
                         onChange={(e) => handleInputChange(e, "patient_nationality")}
                         required
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Marital status</label>
-                      <FormDropdown
-                        options={["Single", "Married", "Divorced", "Widowed"]}
-                        value={formData.patient_marital_status}
-                        onValueChange={(val) => setField("patient_marital_status", val)}
-                        placeholder="Select"
-                        className={inputClass}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Patient type {requiredStar}</label>
-                      <FormDropdown
-                        options={[
-                          "Outpatient (OPD)",
-                          "Inpatient (IPD)",
-                          "Emergency",
-                          "Day-care",
-                          "Corporate",
-                          "Insurance",
-                          "Referral",
-                        ]}
-                        value={formData.patient_type}
-                        onValueChange={(val) => setField("patient_type", val)}
-                        placeholder="Select patient type"
-                        className={inputClass}
                         disabled={submitting}
                       />
                     </div>
