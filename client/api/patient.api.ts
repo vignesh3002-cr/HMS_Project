@@ -119,7 +119,7 @@ export const patientApi = {
     }>("/patients", { params }),
 
   getById: (patientId: string) =>
-    API.get<{ success: boolean; data: PatientResponse }>(`/patients/${patientId}`),
+    API.get<{ success: boolean; data: PatientRecord }>(`/patients/${patientId}`),
 
   update: (patientId: string, data: UpdatePatientPayload) =>
     API.put<{ success: boolean; message: string; data?: unknown }>(`/patients/${patientId}`, data),

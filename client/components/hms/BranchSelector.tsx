@@ -12,6 +12,13 @@ import {
   CommandEmpty,
   CommandGroup,
 } from "@/components/ui/command";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { ChevronDown, Building2, Loader2, RefreshCw, SquarePen, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { saveUser, getUser } from "@/utils/token";
@@ -32,6 +39,9 @@ export function BranchSelector() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editBranch, setEditBranch] = useState<Branch | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", area: "" });
+  const [saving, setSaving] = useState(false);
   const { toast } = useToast();
 
   const [hospitalData, setHospitalData] = useState({
@@ -170,13 +180,42 @@ export function BranchSelector() {
     setOpen(false);
   };
 
-  // No edit form exists for branches yet — this is a placeholder until one is built.
   const handleEdit = (branch: Branch, e: MouseEvent) => {
     e.stopPropagation();
-    toast({
-      title: "Edit branch isn't built yet",
-      description: `An edit form for "${branch.name}" doesn't exist yet.`,
-    });
+    setEditForm({ name: branch.name, area: branch.area });
+    setEditBranch(branch);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editBranch) return;
+
+    setSaving(true);
+    try {
+      const response = await branchApi.update(editBranch.id, {
+        branch_name: editForm.name,
+        area: editForm.area,
+      });
+      if (!response.data.success) {
+        throw new Error(response.data.message);
+      }
+
+      toast({
+        title: "Branch updated",
+        description: `${editForm.name} has been updated.`,
+      });
+
+      setEditBranch(null);
+      fetchBranches();
+    } catch (err: any) {
+      toast({
+        title: "Failed to update branch",
+        description:
+          err.response?.data?.message ?? err.message ?? "Something went wrong.",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async (branch: Branch, e: MouseEvent) => {
@@ -245,6 +284,7 @@ export function BranchSelector() {
 
   // Main dropdown render
   return (
+    <>
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button className="flex items-center gap-1.5 text-[#334155] font-semibold text-sm hover:text-[#00488D] transition-colors">
@@ -353,5 +393,47 @@ export function BranchSelector() {
         </Command>
       </PopoverContent>
     </Popover>
+
+      <Dialog open={!!editBranch} onOpenChange={(open) => { if (!open) setEditBranch(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Branch</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <label className="text-sm font-medium text-[#1E293B]">Branch Name</label>
+              <input
+                value={editForm.name}
+                onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                className="w-full rounded-md border border-[#CBD5E1] px-3 py-2 text-sm outline-none focus:border-[#00488D] focus:ring-1 focus:ring-[#00488D]/20"
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium text-[#1E293B]">Area</label>
+              <input
+                value={editForm.area}
+                onChange={(e) => setEditForm((f) => ({ ...f, area: e.target.value }))}
+                className="w-full rounded-md border border-[#CBD5E1] px-3 py-2 text-sm outline-none focus:border-[#00488D] focus:ring-1 focus:ring-[#00488D]/20"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setEditBranch(null)}
+              className="rounded-md border border-[#CBD5E1] px-4 py-2 text-sm text-[#64748B] hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveEdit}
+              disabled={saving || !editForm.name.trim()}
+              className="rounded-md bg-[#00488D] px-4 py-2 text-sm text-white hover:bg-[#003A6B] transition-colors disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

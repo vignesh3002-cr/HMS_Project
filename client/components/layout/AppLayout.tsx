@@ -107,7 +107,7 @@ useEffect(() => {
 }, []);
 
   return (
-    <div className="flex h-screen overflow-hidden font-[Manrope,sans-serif] bg-[#F7F9FB]">
+    <div className="flex h-screen font-[Manrope,sans-serif] bg-[#F7F9FB]">
 
       {/* Mobile overlay */}
       {sidebarOpen && (

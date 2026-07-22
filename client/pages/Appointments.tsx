@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+﻿import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Download,
   Plus,
-  ChevronDown,
-  Check,
   Search,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  Check,
   MoreVertical,
 } from "lucide-react";
+import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
@@ -220,65 +221,6 @@ const statusStyles: Record<string, string> = {
   Rescheduled: "bg-amber-50 text-amber-600",
 };
 
-// Rows-per-page dropdown (matches Dashboard.tsx / Patients.tsx / Staff.tsx)
-function RowsPerPageSelect({
-  value,
-  onChange,
-  options = [5, 10, 20],
-}: {
-  value: number;
-  onChange: (val: number) => void;
-  options?: number[];
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  return (
-    <div className="relative" ref={wrapperRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-1.5 text-xs font-semibold text-[#374151] bg-white border rounded-md pl-2.5 pr-2 py-1 transition-colors ${
-          open ? "border-[#00488D] ring-2 ring-[#D6E3FF]" : "border-[#E5E7EB] hover:border-[#00488D]"
-        }`}
-      >
-        {value}
-        <ChevronDown className={`w-3 h-3 text-[#6B7280] transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
-      </button>
-
-      <div
-        className={`absolute right-0 top-full mt-1 w-16 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
-          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
-        }`}
-      >
-        {options.map((opt) => (
-          <button
-            key={opt}
-            type="button"
-            onClick={() => { onChange(opt); setOpen(false); }}
-            className={`flex items-center justify-between w-full px-2.5 py-1.5 text-xs font-semibold text-left transition-colors ${
-              value === opt ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
-            }`}
-          >
-            {opt}
-            {value === opt && <Check className="w-3 h-3" />}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // Action menu for the three-dot button on each appointment row
 function ActionMenu({
   onView,
@@ -313,7 +255,7 @@ function ActionMenu({
       </button>
 
       <div
-        className={`absolute right-0 top-full mt-1 w-44 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
+        className={`absolute right-0 top-full mt-1 w-44 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-40 transition-all duration-150 ${
           open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
         }`}
       >
@@ -535,7 +477,7 @@ const AppointmentSchedule: React.FC = () => {
 
           {/* ==================== MAIN CARD ==================== */}
 
-          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col min-h-[500px] transition-all duration-300 hover:shadow-md">
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col transition-all duration-300 hover:shadow-md">
 
 
             {/* ==================== TOOLBAR ==================== */}
@@ -565,7 +507,7 @@ const AppointmentSchedule: React.FC = () => {
                   </button>
 
                   <div
-                    className={`absolute left-0 top-full mt-1 w-32 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
+                    className={`absolute left-0 top-full mt-1 w-32 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-40 transition-all duration-150 ${
                       isViewMenuOpen ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
                     }`}
                   >
@@ -689,384 +631,57 @@ const AppointmentSchedule: React.FC = () => {
 
             </div>
 
-            {/* ==================== APPOINTMENT TABLE ==================== */}
-
-            <div className="overflow-x-auto flex-1 hide-scrollbar">
-
-              <table className="w-full min-w-[1100px]">
-
-
-                <thead className="hms-columnHeading-style">
-
-                  <tr className="bg-[rgba(242,244,246,0.40)]">
-
-                    {[
-                      { key: "id", label: "Token ID" },
-                      { key: "patient", label: "Patient" },
-                      { key: "branch", label: "Branch" },
-                      { key: "doctor", label: "Doctor" },
-                      { key: "date", label: "Appointment Date" },
-                      { key: "status", label: "Status" },
-                    ].map(({ key, label }, idx) => {
-                      const isSorted = sortField === key;
-                      return (
-                        <th
-                          key={key}
-                          className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-8" : ""}`}
-                        >
-                          <div
-                            className="flex items-center gap-1 cursor-pointer select-none"
-                            onClick={() => handleSort(key)}
-                          >
-                            <span>{label}</span>
-                            <span className="inline-flex h-3 w-3 items-center justify-center text-[7px] shrink-0">
-                              {isSorted ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
-                            </span>
-                          </div>
-                         
-                        </th>
-                      );
-                    })}
-
-
-                    <th className="px-5 py-3 hms-table-header text-right">
-                      Action
-                    </th>
-
-
-                  </tr>
-
-                </thead>
-
-
-
-                <tbody>
-
-
-                  {currentRows.length > 0 ? (
-
-                    currentRows.map((item, index)=>(
-
-                    <tr
-                      key={item.id + index}
-                      className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F7F9FB] transition-colors group"
-                    >
-
-
-                      {/* Appointment ID */}
-
-                      <td className="px-5 py-4 pl-8 hms-id-text font-bold !text-blue-600 !text-[13px]">
-
-                        {item.id}
-
-                      </td>
-
-
-
-
-
-                      {/* Patient */}
-
-                      <td className="px-5 py-4">
-
-
-                        <div className="flex items-center gap-3">
-
-
-                          <div
-                            className={`
-                            w-7 h-7
-                            rounded-xl
-                            flex items-center
-                            justify-center
-                            hms-avatar-text
-                            ${item.avatarColor}
-                            `}
-                          >
-
-                            {item.patientInitial}
-
-                          </div>
-
-
-
-                          <div>
-
-
-                            <p className="hms-name-text capitalize">
-
-                              {item.patient}
-
-                            </p>
-
-
-                            <p className="hms-id-text mt-1">
-
-                              {item.patientId}
-
-                            </p>
-
-
-                          </div>
-
-
-                        </div>
-
-
-                      </td>
-
-
-
-
-
-
-
-
-                      {/* Branch */}
-
-                      <td className="px-5 py-4">
-
-
-                        <p className="hms-content-text text-[#191C1E]">
-                          {item.branch}
-                        </p>
-
-
-    
-
-
-                      </td>
-
-
-
-
-
-
-
-
-                      {/* Doctor */}
-
-                      <td className="px-5 py-4">
-
-
-                        <div className="flex items-center gap-3">
-
-
-                          <div
-                            className="
-                            w-7 h-7
-                            rounded-xl
-                            bg-indigo-100
-                            text-indigo-600
-                            flex
-                            items-center
-                            justify-center
-                            hms-avatar-text
-                            "
-                          >
-
-                            {item.doctorInitial}
-
-                          </div>
-
-
-
-                          <div>
-
-
-                            <p className="hms-name-text capitalize">
-
-                              {item.doctor}
-
-                            </p>
-
-
-                            <p className="hms-id-text mt-1">
-
-                              {item.doctorId}
-
-                            </p>
-
-
-                          </div>
-
-
-                        </div>
-
-
-                      </td>
-
-
-
-
-
-
-
-
-                      {/* Date */}
-
-                      <td className="px-5 py-4">
-
-
-                        <p className="hms-content-text text-[#191C1E]">
-                          {item.date}
-                        </p>
-
-
-                        <p className="text-[11px] font-medium text-[#8C8D8F] mt-1">
-                          {item.time}
-                        </p>
-
-
-                      </td>
-
-
-
-
-
-
-
-
-
-                      {/* Status */}
-
-                      <td className="px-5 py-4">
-
-
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${statusStyles[item.status] ?? "bg-indigo-50 text-indigo-600"}`}
-                        >
-
-                          {item.status}
-
-                        </span>
-
-
-                      </td>
-
-
-
-
-
-
-
-
-                      {/* Action */}
-
-                      <td className="px-5 py-4 text-right">
-
-
-                        <ActionMenu
-                          onView={() => alert(`Viewing appointment ${item.id}`)}
-                          onEdit={() => alert(`Editing appointment ${item.id}`)}
-                          onCancel={() => alert(`Cancelling appointment ${item.id}`)}
-                        />
-
-
-                      </td>
-
-
-                    </tr>
-
-
-                  ))
-
-                  ) : (
-
-                    <tr>
-                      <td colSpan={7} className="px-5 py-10 text-center text-[#6B7280] text-sm">
-                        No appointments found matching the current filters.
-                      </td>
-                    </tr>
-
-                  )}
-
-
-                </tbody>
-
-
-              </table>
-
-
-            </div>
-
-            {/* ==================== PAGINATION ==================== */}
-
-            <div className="mt-auto shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur gap-2">
-
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
-                  Showing {visibleStart}-{visibleEnd} of {totalRecords}
-                </span>
-                <RowsPerPageSelect
-                  value={rowsPerPage}
-                  onChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
-                  options={[5, 10, 20]}
-                />
-              </div>
-
-              <div className="flex items-center gap-1">
-
-                <button
-                  disabled={currentPage <= 1}
-                  onClick={() => setCurrentPage((prev) => prev - 1)}
-                  className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
-                >
-
-                  <ChevronLeft className="w-3 h-3 text-[#424752]" />
-
-                </button>
-
-
-
-                {Array.from({ length: Math.min(totalPages, 5) }, (_, index) => (
-
-                  <button
-                    key={index}
-                    onClick={()=>setCurrentPage(index + 1)}
-                    className={`
-                    w-6 h-6
-                    flex items-center justify-center
-                    rounded-md
-                    text-[10px]
-                    font-semibold
-                    transition-colors
-                    ${
-                      currentPage===index + 1
-                      ?
-                      "bg-[#004785] text-white"
-                      :
-                      "text-[#1D1A1A] hover:bg-[#F2F4F6]"
-                    }
-                    `}
-                  >
-
-                    {index + 1}
-
-                  </button>
-
-
-                ))}
-
-                {totalPages > 5 && <span className="text-[#6B7280] text-xs">...</span>}
-
-                <button
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setCurrentPage((prev) => prev + 1)}
-                  className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
-                >
-
-                  <ChevronRight className="w-3 h-3 text-[#424752]" />
-
-                </button>
-
-
-              </div>
-
-            </div>
-
+            <HmsTable
+              columns={[
+                { key: "id", label: "Token ID", render: (r: Appointment) => (
+                  <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.id}</span>
+                )},
+                { key: "patient", label: "Patient", render: (r: Appointment) => (
+                  <div className="flex items-center gap-2">
+                    <div className={`w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text ${r.avatarColor}`}>{r.patientInitial}</div>
+                    <div><div className="hms-name-text capitalize">{r.patient}</div><div className="hms-id-text">{r.patientId}</div></div>
+                  </div>
+                )},
+                { key: "branch", label: "Branch", render: (r: Appointment) => <span className="hms-content-text text-[#191C1E]">{r.branch}</span> },
+                { key: "doctor", label: "Doctor", render: (r: Appointment) => (
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center hms-avatar-text">{r.doctorInitial}</div>
+                    <div><div className="hms-name-text capitalize">{r.doctor}</div><div className="hms-id-text">{r.doctorId}</div></div>
+                  </div>
+                )},
+                { key: "date", label: "Appointment Date", render: (r: Appointment) => (
+                  <div className="hms-content-text text-[#191C1E] leading-4"><div>{r.date}</div><div className="text-[11px] font-medium text-[#8C8D8F] mt-1">{r.time}</div></div>
+                )},
+                { key: "status", label: "Status", render: (r: Appointment) => (
+                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${statusStyles[r.status] ?? "bg-indigo-50 text-indigo-600"}`}>{r.status}</span>
+                )},
+                { key: "actions", label: "Action", sortable: false, render: (r: Appointment) => (
+                  <ActionMenu
+                    onView={() => alert(`Viewing appointment ${r.id}`)}
+                    onEdit={() => alert(`Editing appointment ${r.id}`)}
+                    onCancel={() => alert(`Cancelling appointment ${r.id}`)}
+                  />
+                )},
+              ]}
+              data={currentRows}
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalRecords={totalRecords}
+              rowsPerPage={rowsPerPage}
+              visibleStart={visibleStart}
+              visibleEnd={visibleEnd}
+              onPageChange={setCurrentPage}
+              onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
+              rowsPerPageOptions={[5, 10, 20]}
+              emptyMessage="No appointments found matching the current filters."
+              rowKey={(r: Appointment, i: number) => r.id + i}
+            />
 
           </div>
+
 
         </main>
       </div>
@@ -1075,6 +690,5 @@ const AppointmentSchedule: React.FC = () => {
   );
 
 };
-
 
 export default AppointmentSchedule;

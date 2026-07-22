@@ -92,8 +92,10 @@ export default function AddBranch() {
       { key: "branchCode", label: "Branch Code" },
       { key: "branchName", label: "Branch Name" },
       { key: "branchType", label: "Branch Type" },
+      { key: "area", label: "Area" },
       { key: "state", label: "State" },
       { key: "district", label: "District" },
+      { key: "country", label: "Country" },
       { key: "licenseNumber", label: "License Number" },
       { key: "emergencyNumber", label: "Emergency Number" },
       { key: "dateOfEstablish", label: "Date of Establish" },
@@ -239,15 +241,15 @@ export default function AddBranch() {
               />
             </div>
 
-            {/* Row 2 - Area, State, District */}
+            {/* Row 2 - Country, State, District */}
             <div>
-              <label className={labelClass}>Area</label>
+              <label className={labelClass}>Country {requiredStar}</label>
               <input
                 type="text"
-                name="area"
-                placeholder="Enter Area"
+                name="country"
+                placeholder="Enter Country"
                 className={inputClass}
-                value={formData.area}
+                value={formData.country}
                 onChange={handleChange}
                 disabled={submitting}
               />
@@ -281,15 +283,15 @@ export default function AddBranch() {
               />
             </div>
 
-            {/* Row 3 - Country, License Number, Emergency Number */}
+            {/* Row 3 - Area, License Number, Emergency Number */}
             <div>
-              <label className={labelClass}>Country</label>
+              <label className={labelClass}>Area {requiredStar}</label>
               <input
                 type="text"
-                name="country"
-                placeholder="Enter Country"
+                name="area"
+                placeholder="Enter Area"
                 className={inputClass}
-                value={formData.country}
+                value={formData.area}
                 onChange={handleChange}
                 disabled={submitting}
               />

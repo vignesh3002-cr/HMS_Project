@@ -11,6 +11,7 @@ interface AppointmentFormData {
   patientNumber: string;
   patientId: string;
   patientName: string;
+  patientType: string;
   branchId: string;
   departmentId: string;
   doctorId: string;
@@ -26,6 +27,7 @@ const emptyFormData: AppointmentFormData = {
   patientNumber: "",
   patientId: "",
   patientName: "",
+  patientType: "",
   branchId: "",
   departmentId: "",
   doctorId: "",
@@ -263,6 +265,26 @@ export default function AddAppointment() {
                   value={formData.doctorId}
                   onValueChange={(val) => setFormData((prev) => ({ ...prev, doctorId: val }))}
                   placeholder={doctors.length ? "Select Doctor" : "Loading doctors..."}
+                />
+              </div>
+
+              {/* Patient Type */}
+              <div>
+                <label className={labelClass}>Patient Type {requiredStar}</label>
+                <FormDropdown
+                  className={inputClass}
+                  options={[
+                    "Outpatient (OPD)",
+                    "Inpatient (IPD)",
+                    "Emergency",
+                    "Day-care",
+                    "Corporate",
+                    "Insurance",
+                    "Referral",
+                  ]}
+                  value={formData.patientType}
+                  onValueChange={(val) => setFormData((prev) => ({ ...prev, patientType: val }))}
+                  placeholder="Select patient type"
                 />
               </div>
 

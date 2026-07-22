@@ -8,13 +8,11 @@ import {
   List,
   LayoutGrid,
   Plus,
-  ChevronDown,
-  Check,
   MoreVertical,
   User,
-  Infinity,
   Loader2,
 } from "lucide-react";
+import HmsTable from "@/components/hms/HmsTable";
 
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
@@ -27,80 +25,6 @@ import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 // ============================================================
 // SHARED SUB-COMPONENTS
 // ============================================================
-
-// Rows-per-page dropdown with an optional infinite-scroll option (grid only)
-function RowsPerPageSelect({
-  value,
-  onChange,
-  onInfiniteScroll,
-  showInfiniteScroll = true,
-  options = [12],
-}: {
-  value: number;
-  onChange: (val: number) => void;
-  onInfiniteScroll?: () => void;
-  showInfiniteScroll?: boolean;
-  options?: number[];
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  return (
-    <div className="relative" ref={wrapperRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-1.5 text-xs font-semibold text-[#374151] bg-white border rounded-md pl-2.5 pr-2 py-1 transition-colors ${
-          open ? "border-[#00488D] ring-2 ring-[#D6E3FF]" : "border-[#E5E7EB] hover:border-[#00488D]"
-        }`}
-      >
-        {value}
-        <ChevronDown className={`w-3 h-3 text-[#6B7280] transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
-      </button>
-
-      <div className={`absolute right-0 top-full mt-1 w-16 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
-          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
-        }`}
-      >
-        {options.map((opt) => (
-          <button
-            key={opt}
-            type="button"
-            onClick={() => { onChange(opt); setOpen(false); }}
-            className={`flex items-center justify-between w-full px-2.5 py-1.5 text-xs font-semibold text-left transition-colors ${
-              value === opt ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
-            }`}
-          >
-            {opt}
-            {value === opt && <Check className="w-3 h-3" />}
-          </button>
-        ))}
-        {showInfiniteScroll && (
-          <>
-            <div className="border-t border-[#E5E7EB]" />
-            <button
-              type="button"
-              onClick={() => { onInfiniteScroll?.(); setOpen(false); }}
-              className="flex items-center gap-2 w-full px-2.5 py-1.5 text-xs font-semibold text-left text-[#374151] hover:bg-[#F2F4F6] transition-colors"
-            >
-              <Infinity className="w-3.5 h-3.5" />
-            </button>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // Photo avatar with fallback (grid only)
 const DoctorPhoto = ({ photo, name }: { photo: string; name: string }) => (
@@ -159,7 +83,7 @@ function getInitials(name: string): string {
 }
 
 function formatBranch(branch: EmployeeRecord["branch"]): string {
-  if (!branch?.branch_name) return "—";
+  if (!branch?.branch_name) return "\u2014";
   return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
 }
 
@@ -402,7 +326,7 @@ export default function Doctor() {
           </div>
 
           {/* ==================== MAIN CARD ==================== */}
-          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col min-h-[500px] transition-all duration-300 hover:shadow-md">
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col transition-all duration-300 hover:shadow-md">
 
             {/* ==================== TOOLBAR ==================== */}
             <div className="px-5 py-4 border-b border-[#E5E7EB] flex flex-wrap items-center justify-between gap-4">
@@ -502,7 +426,7 @@ export default function Doctor() {
             </div>
 
             {/* ================================================================ */}
-            {/* BODY: LIST VIEW (table design matches Patients.tsx list view)   */}
+            {/* BODY: LIST VIEW (table via HmsTable)                            */}
             {/* ================================================================ */}
             {isDoctorsLoading ? (
               <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
@@ -510,135 +434,84 @@ export default function Doctor() {
                 Loading doctors...
               </div>
             ) : viewMode === "list" ? (
-              <div className="overflow-x-auto flex-1">
-                <table className="w-full min-w-[900px]">
-                  <thead className="hms-columnHeading-style">
-                    <tr className="bg-[rgba(242,244,246,0.40)]">
-                      {[
-                        { key: "name", label: "Name" },
-                        { key: "dept", label: "Department" },
-                        { key: "status", label: "Status" },
-                        { key: "appointments", label: "Appointment" },
-                        { key: "actions", label: "Actions" },
-                      ].map(({ key, label }, idx) => {
-                        const isSorted = sortField === key;
-                        return (
-                          <th
-                            key={key}
-                            className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-8" : ""}`}
-                          >
-                            <div
-                              className="flex items-center gap-1 cursor-pointer select-none"
-                              onClick={key !== "actions" ? () => handleSort(key) : undefined}
-                            >
-                              <span>{label}</span>
-                              {key !== "actions" && (
-                                <span className="inline-flex h-3 w-3 items-center justify-center text-[7px] shrink-0">
-                                  {isSorted ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
-                                </span>
-                              )}
-                            </div>
-                          </th>
-                        );
-                      })}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {currentRows.length > 0 ? (
-                      currentRows.map((row, index) => {
-                        const status = String(row.status);
-                        const isActive = status === "Active";
-                        const appts = Number(row.appointments);
-                        const total = Number(row.total);
-                        const pct = total > 0 ? (appts / total) * 100 : 0;
-                        const slotsLabel = appts === 0 ? "slots unavailable" : appts >= total ? "slots full" : "slots booked";
-                        return (
-                          <tr key={String(row.id) + index} className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F7F9FB] transition-colors group">
-                            {/* Name & ID */}
-                            <td className="px-5 py-4 pl-8">
-                              <div className="flex items-center gap-3">
-                                <div className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: String(row.initBg), color: String(row.avatarColor) }}>
-                                  {String(row.avatar)}
-                                </div>
-                                <div>
-                                  <p className="hms-name-text">{String(row.name)}</p>
-                                  <p className="hms-id-text">{String(row.id)}</p>
-                                </div>
-                              </div>
-                            </td>
-
-                            {/* Department */}
-                            <td className="px-5 py-4">
-                              <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: String(row.deptBg), color: String(row.deptColor) }}>
-                                {String(row.dept)}
-                              </span>
-                            </td>
-
-                            {/* Status */}
-                            <td className="px-5 py-4">
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
-                                <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />
-                                {status}
-                              </span>
-                            </td>
-
-                            {/* Appointment */}
-                            <td className="px-5 py-4 min-w-[200px]">
-                              <div className="flex items-center justify-between gap-2 text-xs font-semibold mb-2">
-                                <span className="text-[#191C1E]">{appts}/{total}</span>
-                                <span className={appts >= total ? "text-red-500" : "text-gray-400"}>{slotsLabel}</span>
-                              </div>
-                              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                <div
-                                  className="h-full rounded-full bg-gradient-to-r from-red-500 via-yellow-400 to-green-500"
-                                  style={{ width: `${pct}%` }}
-                                />
-                              </div>
-                            </td>
-
-                            {/* Actions */}
-                            <td className="px-5 py-4">
-                              <div className="flex items-center gap-1">
-                                <button onClick={() => handleView(row.id)} title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
-                                    <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-                                    <circle cx="12" cy="12" r="3" />
-                                  </svg>
-                                </button>
-                                <button onClick={() => handleEdit(row.id)} title="Edit" className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
-                                    <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                    <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
-                                  </svg>
-                                </button>
-                                <button onClick={() => handleDelete(row.id)} title="Delete" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
-                                    <path d="M10 11v6"/>
-                                    <path d="M14 11v6"/>
-                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
-                                    <path d="M3 6h18"/>
-                                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                                  </svg>
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    ) : (
-                      <tr>
-                        <td colSpan={5} className="px-5 py-10 text-center text-[#6B7280] text-sm">
-                          No doctors found matching the current filters.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <HmsTable
+                columns={[
+                  { key: "name", label: "Name", render: (r: any) => (
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: String(r.initBg), color: String(r.avatarColor) }}>{String(r.avatar)}</div>
+                      <div><div className="hms-name-text">{String(r.name)}</div><div className="hms-id-text">{String(r.id)}</div></div>
+                    </div>
+                  )},
+                  { key: "dept", label: "Department", render: (r: any) => (
+                    <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: String(r.deptBg), color: String(r.deptColor) }}>{String(r.dept)}</span>
+                  )},
+                  { key: "status", label: "Status", render: (r: any) => {
+                    const s = String(r.status);
+                    const isActive = s === "Active";
+                    return (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />
+                        {s}
+                      </span>
+                    );
+                  }},
+                  { key: "appointments", label: "Appointment", render: (r: any) => {
+                    const appts = Number(r.appointments);
+                    const total = Number(r.total);
+                    const pct = total > 0 ? (appts / total) * 100 : 0;
+                    const slotsLabel = appts === 0 ? "slots unavailable" : appts >= total ? "slots full" : "slots booked";
+                    return (
+                      <div className="min-w-[200px]">
+                        <div className="flex items-center justify-between gap-2 text-xs font-semibold mb-2">
+                          <span className="text-[#191C1E]">{appts}/{total}</span>
+                          <span className={appts >= total ? "text-red-500" : "text-gray-400"}>{slotsLabel}</span>
+                        </div>
+                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full bg-gradient-to-r from-red-500 via-yellow-400 to-green-500" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  }},
+                  { key: "actions", label: "Actions", sortable: false, render: (r: any) => (
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => handleView(r.id)} title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
+                          <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                      </button>
+                      <button onClick={() => handleEdit(r.id)} title="Edit" className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
+                          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
+                        </svg>
+                      </button>
+                      <button onClick={() => handleDelete(r.id)} title="Delete" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
+                          <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                      </button>
+                    </div>
+                  )},
+                ]}
+                data={currentRows}
+                sortField={sortField}
+                sortDirection={sortDirection}
+                onSort={handleSort}
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalRecords={totalRecords}
+                rowsPerPage={rowsPerPage}
+                visibleStart={visibleStart}
+                visibleEnd={visibleEnd}
+                onPageChange={setCurrentPage}
+                onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
+                rowsPerPageOptions={[5, 10, 20]}
+                emptyMessage="No doctors found matching the current filters."
+                rowKey={(r: any, i: number) => String(r.id) + i}
+              />
             ) : (
-              /* ================================================================ */
-              /* BODY: GRID VIEW (cards with photo, department, status)          */
-              /* ================================================================ */
+              <>
               <div className={`flex-1 p-5 hide-scrollbar max-h-[450px] ${infiniteScroll ? " overflow-y-auto max-h-[500px]" : ""}`}>
                 {displayCards.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -648,117 +521,41 @@ export default function Doctor() {
                         className="relative flex items-start gap-4 p-4 border border-[#E5E7EB] rounded-xl hover:shadow-md hover:border-[#D6E3FF] transition-all duration-200 group"
                       >
                         <DoctorPhoto photo={doctor.photo} name={doctor.name} />
-
                         <div className="flex-1 min-w-0">
                           <p className="hms-name-text truncate">{doctor.name}</p>
                           <p className="hms-id-text">{doctor.id}</p>
-                          <span
-                            className="inline-block px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize mt-1"
-                            style={{ background: doctor.deptBg, color: doctor.deptColor }}
-                          >
-                            {doctor.dept}
-                          </span>
+                          <span className="inline-block px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize mt-1" style={{ background: doctor.deptBg, color: doctor.deptColor }}>{doctor.dept}</span>
                           <p className="hms-content-text text-[#191C1E] mt-1.5">
                             <span className="font-semibold">Status</span>{" : "}
-                            <span className={doctor.status === "Active" ? "font-bold text-[#16A34A]" : "font-bold text-[#F97316]"}>
-                              {doctor.status}
-                            </span>
+                            <span className={doctor.status === "Active" ? "font-bold text-[#16A34A]" : "font-bold text-[#F97316]"}>{doctor.status}</span>
                           </p>
                           <p className="hms-content-text text-[#191C1E] mt-1 truncate">{doctor.branch}</p>
                         </div>
-
                         <div className="absolute top-3 right-3">
-                          <CardMenu
-                            onView={() => handleView(doctor.id)}
-                            onEdit={() => handleEdit(doctor.id)}
-                            onDelete={() => handleDelete(doctor.id)}
-                          />
+                          <CardMenu onView={() => handleView(doctor.id)} onEdit={() => handleEdit(doctor.id)} onDelete={() => handleDelete(doctor.id)} />
                         </div>
                       </div>
                     ))}
                     {infiniteScroll && (
                       <div ref={sentinelRef} className="col-span-full flex justify-center py-4">
-                        {visibleCount < filteredData.length ? (
-                          <span className="text-xs text-[#6B7280]">Loading more...</span>
-                        ) : (
-                          <span className="text-xs text-[#6B7280]">All doctors loaded</span>
-                        )}
+                        {visibleCount < filteredData.length ? (<span className="text-xs text-[#6B7280]">Loading more...</span>) : (<span className="text-xs text-[#6B7280]">All doctors loaded</span>)}
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div className="flex items-center justify-center h-full py-16 text-center text-[#6B7280] text-sm">
-                    No doctors found matching the current filters.
-                  </div>
+                  <div className="flex items-center justify-center h-full py-16 text-center text-[#6B7280] text-sm">No doctors found matching the current filters.</div>
                 )}
               </div>
-            )}
-
-            {/* ==================== PAGINATION ==================== */}
-            <div className="mt-auto shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur gap-2">
-              <div className="flex items-center gap-2">
+              <div className="mt-auto shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur gap-2">
                 <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
-                  {infiniteScroll
-                    ? `Showing ${Math.min(visibleCount, totalRecords)} of ${totalRecords} doctors`
-                    : `Showing ${visibleStart} to ${visibleEnd} of ${totalRecords} doctors`}
+                  {infiniteScroll ? `Showing ${Math.min(visibleCount, totalRecords)} of ${totalRecords} doctors` : `Showing ${visibleStart} to ${visibleEnd} of ${totalRecords} doctors`}
                 </span>
-                <RowsPerPageSelect
-                  value={rowsPerPage}
-                  onChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
-                  onInfiniteScroll={() => { setInfiniteScroll(true); setVisibleCount(rowsPerPage); }}
-                  showInfiniteScroll={viewMode === "grid"}
-                  options={viewMode === "grid" ? [6, 9, 12, 24] : [5, 10, 20]}
-                />
               </div>
-
-              <div className="flex items-center gap-1">
-                <button
-                  disabled={currentPage <= 1}
-                  onClick={() => setCurrentPage((prev) => prev - 1)}
-                  className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
-                >
-                  <svg width="5" height="8" viewBox="0 0 5 8" fill="none">
-                    <path d="M4 8L0 4L4 0L4.93333.933333L1.86667 4L4.93333 7.06667L4 8Z" fill="#424752"/>
-                  </svg>
-                </button>
-
-                {Array.from({ length: Math.min(totalPages, 5) }, (_, index) => (
-                  <button
-                    key={index}
-                    onClick={() => setCurrentPage(index + 1)}
-                    className={`w-6 h-6 flex items-center justify-center rounded-md text-[10px] font-semibold transition-colors ${
-                      currentPage === index + 1
-                        ? "bg-[#004785] text-white"
-                        : "text-[#1D1A1A] hover:bg-[#F2F4F6]"
-                    }`}
-                  >
-                    {index + 1}
-                  </button>
-                ))}
-                {totalPages > 5 && <span className="text-[#6B7280] text-xs">...</span>}
-
-                <button
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setCurrentPage((prev) => prev + 1)}
-                  className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
-                >
-                  <svg width="5" height="8" viewBox="0 0 5 8" fill="none">
-                    <path d="M1 8L5 4L1 0L.0666656.933333L3.13333 4L.0666656 7.06667L1 8Z" fill="#424752"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
+              </>
+            )}
           </div>
         </main>
       </div>
-
-      {/* FAB */}
-      <button
-        onClick={handleAddDoctor}
-        className="fixed bottom-6 right-6 w-12 h-12 bg-[#00488D] rounded-2xl flex items-center justify-center shadow-lg z-10 hover:bg-[#003a6b] transition-colors"
-      >
-        <Plus className="w-5 h-5 text-white" />
-      </button>
     </div>
   );
 }
