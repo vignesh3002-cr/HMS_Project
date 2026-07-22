@@ -4,6 +4,7 @@ import { ArrowLeft, Loader2, Plus, Stethoscope, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { MultiSelectDropdown } from "@/components/ui/multi-select-dropdown";
+import { AvatarUpload } from "@/components/ui/avatar-upload";
 import { branchApi, Branch } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
 import { DayOfWeek, WorkingHourPayload, employeeApi } from "@/api/employee.api";
@@ -106,6 +107,7 @@ interface EditDoctorFormData {
   joiningDate: string;
   branchIds: string[];
   status: "Active" | "Inactive" | "";
+  photoUrl: string | null;
 }
 
 const emptyFormData: EditDoctorFormData = {
@@ -133,6 +135,7 @@ const emptyFormData: EditDoctorFormData = {
   joiningDate: "",
   branchIds: [],
   status: "",
+  photoUrl: null,
 };
 
 const inputClass =
@@ -273,6 +276,7 @@ export default function EditDoctorForm() {
           joiningDate: found.joining_date ? String(found.joining_date).slice(0, 10) : "",
           branchIds: found.branch_id ? [found.branch_id] : [],
           status: found.emp_status === false ? "Inactive" : "Active",
+          photoUrl: found.photo || null,
         });
         if (found.current_address && found.current_address === found.parmanant_address) {
           setSameAsCurrent(true);
@@ -406,6 +410,7 @@ export default function EditDoctorForm() {
         branch_ids: formData.branchIds,
         consultation_minutes: Number(consultationMinutes) || 20,
         working_hours: workingHours,
+        photo: formData.photoUrl || undefined,
       });
 
       if (!response.data.success) {
@@ -477,16 +482,27 @@ export default function EditDoctorForm() {
                 <div className={sectionClass}>
                   <h3 className={sectionTitleClass}>Personal details</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6">
-                    <div>
-                      <label className={labelClass}>First name {requiredStar}</label>
-                      <input
-                        type="text"
-                        className={inputClass}
-                        value={formData.firstName}
-                        onChange={(e) => handleChange(e, "firstName")}
-                        disabled={submitting}
+                    <div className="lg:col-span-3 flex flex-col sm:flex-row items-center sm:items-start gap-14 pb-2">
+                      <AvatarUpload
+                        value={formData.photoUrl}
+                        onChange={(url) => setField("photoUrl", url ?? "")}
+                        label="Doctor photo"
+                        hint="Click or drag an image to upload (Max 1MB)"
+                        size={128}
                       />
+                      <div aria-hidden="true" className="hidden sm:block w-px self-stretch bg-gray-200" />
+                      <div className="w-full sm:w-72">
+                        <label className={labelClass}>First name {requiredStar}</label>
+                        <input
+                          type="text"
+                          className={inputClass}
+                          value={formData.firstName}
+                          onChange={(e) => handleChange(e, "firstName")}
+                          disabled={submitting}
+                        />
+                      </div>
                     </div>
+
                     <div>
                       <label className={labelClass}>Middle name</label>
                       <input
