@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -119,7 +120,13 @@ const doctors: Doctor[] = [
   { name: "Davis", id: 7, spec: "PED" },
   { name: "Evans", id: 8, spec: "URO" },
   { name: "Foster", id: 9, spec: "RADL" },
-  
+  { name: "Kim", id: 10, spec: "CARD" },
+  { name: "Nguyen", id: 11, spec: "PULM" },
+  { name: "Patel", id: 12, spec: "ENDO" },
+  { name: "Brooks", id: 13, spec: "DERM" },
+  { name: "Reed", id: 14, spec: "OPHT" },
+  { name: "Turner", id: 15, spec: "PSYC" },
+
 ];
 
 function slot(count: number, label: string, fill: number, dark = false): AppointmentSlot {
@@ -142,6 +149,12 @@ const initialScheduleRows: ScheduleRow[] = [
       slot(2, "2 Patients", 66, false),
       slot(3, "3 Patients", 100, false),
        slot(2, "2 Patients", 66, false),
+      slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
+      slot(3, "3 Patients", 100, false),
+      slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
     ],
   },
   {
@@ -153,9 +166,15 @@ const initialScheduleRows: ScheduleRow[] = [
       slot(1, "1 Patient", 33, false),
        slot(2, "2 Patients", 66, false),
       slot(2, "2 Patients", 66, false),
-      
+
       slot(3, "3 Patients", 100, false),
       slot(1, "1 Patient", 33, true),
+      slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
+      slot(3, "3 Patients", 100, false),
+      slot(2, "2 Patients", 66, true),
+      slot(1, "1 Patient", 33, false),
       slot(2, "2 Patients", 66, false),
     ],
   },
@@ -171,11 +190,23 @@ const initialScheduleRows: ScheduleRow[] = [
       slot(3, "3 Patients", 100, false),
       slot(1, "1 Patient", 33, true),
        slot(2, "2 Patients", 66, false),
+      slot(2, "2 Patients", 66, false),
+      slot(3, "3 Patients", 100, false),
+      slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
+      slot(2, "2 Patients", 66, true),
+      slot(1, "1 Patient", 33, false),
     ],
   },
   {
     time: "12:00 PM",
     slots: [
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
       EMPTY,
       EMPTY,
       EMPTY,
@@ -199,6 +230,12 @@ const initialScheduleRows: ScheduleRow[] = [
       slot(2, "2 Patients", 66, false),
       slot(3, "3 Patients", 100, false),
       slot(2, "2 Patients", 66, false),
+      slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
+      slot(3, "3 Patients", 100, false),
+      slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
     ],
   },
   {
@@ -213,11 +250,23 @@ const initialScheduleRows: ScheduleRow[] = [
       slot(2, "2 Patients", 66, false),
       slot(3, "3 Patients", 100, false),
       slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
+      slot(2, "2 Patients", 66, false),
+      slot(3, "3 Patients", 100, false),
+      slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
     ],
   },
   {
     time: "03:00 PM",
     slots: [
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
       EMPTY,
       EMPTY,
       EMPTY,
@@ -240,9 +289,16 @@ const initialScheduleRows: ScheduleRow[] = [
       slot(3, "3 Patients", 100, false),
       slot(2, "2 Patients", 66, true),
       slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
+      slot(3, "3 Patients", 100, false),
+      slot(1, "1 Patient", 33, true),
+      slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
     ],
   },
-  
+
 ];
 
 
@@ -330,6 +386,7 @@ function mapDoctorRecord(doc: DoctorRecord, index: number): DoctorDirectoryEntry
 /* ============================= Main component ============================= */
 
 const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) => {
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
   const [toolbarSearchTerm, setToolbarSearchTerm] = useState("");
   const [selectedDoctorName, setSelectedDoctorName] = useState<string | null>(null);
@@ -361,7 +418,11 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   const handleViewSelect = (view: ScheduleViewType) => {
     setIsViewMenuOpen(false);
-    onViewChange?.(view);
+    if (view === "week") {
+      navigate("/appointments/week-view");
+    } else {
+      onViewChange?.(view);
+    }
   };
 
   const [realDoctorDirectory, setRealDoctorDirectory] = useState<DoctorDirectoryEntry[] | null>(null);
@@ -576,11 +637,15 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         >
           <div role="table" className="w-full min-w-[620px] md:min-w-[691px]">
             {/* Header row */}
-            <div className="border-b border-[#c3c6d7] bg-[#f2f4f6]">
-              <div role="row" className="grid min-h-[39px] grid-cols-[70px_repeat(9,minmax(65px,1fr))]">
+            <div className="border-b border-[#c3c6d7] bg-white">
+              <div
+                role="row"
+                className="grid min-h-[39px]"
+                style={{ gridTemplateColumns: `70px repeat(${doctors.length}, 90px)` }}
+              >
                 <div
                   role="columnheader"
-                  className="flex items-center justify-center border-r border-[#c3c6d7] bg-[#f2f4f6] pb-[12.75px] pl-2 pr-[9px] pt-[12.75px]"
+                  className="sticky left-0 z-10 flex items-center justify-center border-r border-[#c3c6d7] bg-white pb-[12.75px] pl-2 pr-[9px] pt-[12.75px]"
                 >
                   <span className="whitespace-nowrap text-center font-['Manrope',sans-serif] text-[9px] font-bold leading-[13.5px] text-[#515f74]">
                     {format(selectedDate, "dd-MM-yyyy")}
@@ -612,10 +677,14 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                 key={row.time}
                 className={rowIdx !== scheduleRows.length - 1 ? "border-b border-[#c3c6d7]" : ""}
               >
-                <div role="row" className="grid grid-cols-[70px_repeat(9,minmax(65px,1fr))]">
+                <div
+                  role="row"
+                  className="grid"
+                  style={{ gridTemplateColumns: `70px repeat(${doctors.length}, 90px)` }}
+                >
                   <div
                     role="rowheader"
-                    className="flex h-[60px] items-center justify-center border-r border-[#c3c6d7] bg-[rgba(242,244,246,0.5)] pb-2 pl-2 pr-[9px] pt-2"
+                    className="sticky left-0 z-10 flex h-[60px] items-center justify-center border-r border-[#c3c6d7] bg-[#f2f4f6] pb-2 pl-2 pr-[9px] pt-2"
                   >
                     <span className="whitespace-nowrap font-['Manrope',sans-serif] text-[10px] leading-[10px] text-[#515f74]">
                       {row.time}
