@@ -569,7 +569,7 @@ export default function Staff() {
           <div className="bg-white rounded-[16px] border border-[#E2E8F0] shadow-[0px_4px_6px_-1px_rgba(0,0,0,0.05),0px_2px_4px_-1px_rgba(0,0,0,0.03)] flex flex-col">
 
             {/* ==================== TOOLBAR ==================== */}
-            <div className="min-h-[52px] px-[24px] py-3 border-b border-[#F1F5F9] flex flex-wrap items-center justify-between gap-4">
+            <div className="sticky top-0 z-10 bg-white min-h-[52px] px-[24px] py-3 border-b border-[#F1F5F9] flex flex-wrap items-center justify-between gap-4">
 
               {/* TABS */}
               <nav

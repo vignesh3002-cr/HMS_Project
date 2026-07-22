@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Download,
@@ -40,7 +40,7 @@ interface Appointment {
 }
 
 
-const appointments: Appointment[] = [
+const initialAppointments: Appointment[] = [
   {
     id: "APT-2026-8842",
     patient: "James Wilson",
@@ -262,14 +262,14 @@ function ActionMenu({
         <button
           type="button"
           onClick={() => { setOpen(false); onView(); }}
-          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
+          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-green-400 hover:bg-[#F2F4F6]"
         >
           View Appointment
         </button>
         <button
           type="button"
           onClick={() => { setOpen(false); onEdit(); }}
-          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
+          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-indigo-600 hover:bg-[#F2F4F6]"
         >
           Edit Appointment
         </button>
@@ -287,6 +287,15 @@ function ActionMenu({
 
 const AppointmentSchedule: React.FC = () => {
   const navigate = useNavigate();
+
+  // Appointment data (mutable so status changes like cancellation can be reflected)
+  const [appointments, setAppointments] = useState<Appointment[]>(initialAppointments);
+
+  const handleCancelAppointment = (target: Appointment) => {
+    setAppointments((prev) =>
+      prev.map((appt) => (appt === target ? { ...appt, status: "Cancelled" } : appt)),
+    );
+  };
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -393,7 +402,7 @@ const AppointmentSchedule: React.FC = () => {
     ) as unknown as Appointment[];
 
     return result;
-  }, [searchQuery, appliedValues]);
+  }, [searchQuery, appliedValues, appointments]);
 
   // ---- SORTING ----
   const handleSort = (field: string) => {
@@ -679,10 +688,7 @@ const AppointmentSchedule: React.FC = () => {
               emptyMessage="No appointments found matching the current filters."
               rowKey={(r: Appointment, i: number) => r.id + i}
             />
-
           </div>
-
-
         </main>
       </div>
     </div>

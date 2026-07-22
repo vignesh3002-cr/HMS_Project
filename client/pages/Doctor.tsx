@@ -511,7 +511,7 @@ export default function Doctor() {
                 rowKey={(r: any, i: number) => String(r.id) + i}
               />
             ) : (
-              <>
+              
               <div className={`flex-1 p-5 hide-scrollbar max-h-[450px] ${infiniteScroll ? " overflow-y-auto max-h-[500px]" : ""}`}>
                 {displayCards.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -522,7 +522,12 @@ export default function Doctor() {
                       >
                         <DoctorPhoto photo={doctor.photo} name={doctor.name} />
                         <div className="flex-1 min-w-0">
-                          <p className="hms-name-text truncate">{doctor.name}</p>
+                          <p
+                            onClick={() => handleView(doctor.id)}
+                            className="hms-name-text truncate cursor-pointer hover:underline hover:text-[#00488D]"
+                          >
+                            {doctor.name}
+                          </p>
                           <p className="hms-id-text">{doctor.id}</p>
                           <span className="inline-block px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize mt-1" style={{ background: doctor.deptBg, color: doctor.deptColor }}>{doctor.dept}</span>
                           <p className="hms-content-text text-[#191C1E] mt-1.5">
