@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Download,
   Plus,
@@ -343,6 +344,7 @@ function ActionMenu({
 }
 
 const AppointmentSchedule: React.FC = () => {
+  const navigate = useNavigate();
 
   // Appointment data (mutable so status changes like cancellation can be reflected)
   const [appointments, setAppointments] = useState<Appointment[]>(initialAppointments);
@@ -525,6 +527,7 @@ const AppointmentSchedule: React.FC = () => {
 
 
 <button
+                onClick={() => navigate("/appointments/add")}
                 className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
               >
 

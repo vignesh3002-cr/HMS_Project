@@ -246,8 +246,8 @@ export default function AddEmployee() {
     }
   }, [searchParams]);
 
-  // Re-typed username/password — must match before submit is allowed.
-  const [confirmUsername, setConfirmUsername] = useState("");
+  // Re-typed password — must match before submit is allowed. Username has
+  // no confirm field; it's a single required field.
   const [confirmPassword, setConfirmPassword] = useState("");
 
   // Free-typed department name, used only when departmentId === OTHER_DEPARTMENT_VALUE.
@@ -424,19 +424,10 @@ export default function AddEmployee() {
       return;
     }
 
-    if (!confirmUsername.trim() || !confirmPassword.trim()) {
+    if (!confirmPassword.trim()) {
       toast({
         title: "Missing required field",
-        description: "Please confirm your Username and Password.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (formData.username !== confirmUsername) {
-      toast({
-        title: "Username mismatch",
-        description: "Username and Confirm Username do not match.",
+        description: "Please confirm your Password.",
         variant: "destructive",
       });
       return;
@@ -556,7 +547,6 @@ export default function AddEmployee() {
     setSameAsCurrent(false);
     setSchedule([]);
     setConsultationMinutes("20");
-    setConfirmUsername("");
     setConfirmPassword("");
     setCustomDepartment("");
   };
@@ -1194,19 +1184,6 @@ export default function AddEmployee() {
                 disabled={submitting}
               />
             </div>
-            <div />
-            <div>
-              <label className={labelClass}>Confirm Username {requiredStar}</label>
-              <input
-                type="text"
-                placeholder="Re-enter Username"
-                maxLength={50}
-                className={inputClass}
-                value={confirmUsername}
-                onChange={(e) => setConfirmUsername(e.target.value)}
-                disabled={submitting}
-              />
-            </div>
             <div>
               <label className={labelClass}>Confirm Password {requiredStar}</label>
               <input
@@ -1218,7 +1195,6 @@ export default function AddEmployee() {
                 disabled={submitting}
               />
             </div>
-            <div />
           </div>
 
           {/* Actions Footer */}

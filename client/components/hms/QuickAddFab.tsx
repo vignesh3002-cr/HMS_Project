@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Building2, Plus, UserRound, Users, X } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
 
-const HIDDEN_ON = ["/branches/add", "/staff/add"];
+const HIDDEN_ON = ["/branches/add", "/staff/add", "/patients/add"];
 
 const menuItems = [
   { key: "patient", label: "Add Patient", icon: UserRound },
@@ -16,7 +15,6 @@ export function QuickAddFab() {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { toast } = useToast();
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -47,14 +45,10 @@ export function QuickAddFab() {
       navigate("/staff/add");
       return;
     }
-
-    toast({
-      title: "Coming soon",
-      description:
-        key === "patient"
-          ? "Add Patient isn't wired up yet."
-          : "Add Staff isn't wired up yet.",
-    });
+    if (key === "patient") {
+      navigate("/patients/add");
+      return;
+    }
   };
 
   return (

@@ -13,6 +13,13 @@ api.interceptors.request.use((config) => {
         config.headers.Authorization = `Bearer ${token}`;
     }
 
+    // Bust the browser's HTTP cache so GET requests always hit the server
+    // instead of getting a cached/304 response with stale data.
+    if (config.method === "get") {
+        config.params = { ...(config.params || {}), _: Date.now() };
+        config.headers["Cache-Control"] = "no-cache";
+    }
+
     return config;
 });
 

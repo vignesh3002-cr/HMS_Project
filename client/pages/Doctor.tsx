@@ -13,6 +13,7 @@ import {
   MoreVertical,
   User,
   Infinity,
+  Loader2,
 } from "lucide-react";
 
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
@@ -22,20 +23,6 @@ import ExportReport from "@/components/ui/ExportReport";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 
-// ============================================================
-// DATA
-// ============================================================
-const doctorsData = [
-  { id: "DOC-0001", name: "Dr. Emily Carter", avatar: "EC", avatarColor: "#00488D", initBg: "#D6E3FF", dept: "Cardiology", deptBg: "#D6E3FF", deptColor: "#475C7F", branch: "Apollo Hospital (Tambaram)", status: "Active", appointments: 24, total: 24, photo: "https://i.pravatar.cc/212?img=47" },
-  { id: "DOC-0002", name: "Dr. John Smith", avatar: "JS", avatarColor: "#475C7F", initBg: "#E6E8EA", dept: "Orthopedics", deptBg: "#E6E8EA", deptColor: "#475C7F", branch: "Government Hospital (Saidapet)", status: "Active", appointments: 17, total: 24, photo: "https://i.pravatar.cc/212?img=13" },
-  { id: "DOC-0003", name: "Dr. Hogan", avatar: "H", avatarColor: "#BE123C", initBg: "#FFE4E6", dept: "Neurology", deptBg: "#FFE4E6", deptColor: "#BE123C", branch: "Central Hospital (Guindy)", status: "Leave", appointments: 0, total: 24, photo: "https://i.pravatar.cc/212?img=68" },
-  { id: "DOC-0004", name: "Dr. Steve", avatar: "S", avatarColor: "#00C896", initBg: "rgba(0,200,150,0.12)", dept: "Pediatrics", deptBg: "rgba(0,200,150,0.12)", deptColor: "#00C896", branch: "Global Hospital (Triplicane)", status: "Active", appointments: 22, total: 24, photo: "https://i.pravatar.cc/212?img=59" },
-  { id: "DOC-0005", name: "Dr. Ramesh", avatar: "R", avatarColor: "#7B3200", initBg: "#FFDBCB", dept: "Oncology", deptBg: "#FFDBCB", deptColor: "#7B3200", branch: "Central Hospital (Tambaram)", status: "Active", appointments: 14, total: 24, photo: "https://i.pravatar.cc/212?img=51" },
-  { id: "DOC-0006", name: "Dr. Rose", avatar: "R", avatarColor: "#BE123C", initBg: "#FFE4E6", dept: "Neurology", deptBg: "#FFE4E6", deptColor: "#BE123C", branch: "Central Hospital (Tambaram)", status: "Active", appointments: 14, total: 24, photo: "https://i.pravatar.cc/212?img=25" },
-  { id: "DOC-0007", name: "Dr. Scott", avatar: "SC", avatarColor: "#00488D", initBg: "#D6E3FF", dept: "Pediatrician", deptBg: "#D6E3FF", deptColor: "#475C7F", branch: "Central Hospital (Tambaram)", status: "Active", appointments: 18, total: 24, photo: "https://i.pravatar.cc/212?img=44" },
-  { id: "DOC-0008", name: "Dr. Sarah", avatar: "SA", avatarColor: "#00C896", initBg: "rgba(0,200,150,0.12)", dept: "Pediatrician", deptBg: "rgba(0,200,150,0.12)", deptColor: "#00C896", branch: "Central Hospital (Tambaram)", status: "Active", appointments: 9, total: 24, photo: "https://i.pravatar.cc/212?img=30" },
-  { id: "DOC-0009", name: "Dr. Ben", avatar: "B", avatarColor: "#475C7F", initBg: "#E6E8EA", dept: "Pediatrician", deptBg: "#E6E8EA", deptColor: "#475C7F", branch: "Central Hospital (Tambaram)", status: "Active", appointments: 24, total: 24, photo: "https://i.pravatar.cc/212?img=15" },
-] as const;
 
 // ============================================================
 // SHARED SUB-COMPONENTS
@@ -158,7 +145,7 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
   );
 }
 
-// Map EmployeeRecord (from API) to doctorsData format for UI compatibility
+// Map EmployeeRecord (from API) to the row shape this page renders
 const AVATAR_PALETTE = [
   { avatarColor: "#00488D", initBg: "#D6E3FF" },
   { avatarColor: "#7B3200", initBg: "#FFDBCB" },
@@ -171,6 +158,11 @@ function getInitials(name: string): string {
   return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
+function formatBranch(branch: EmployeeRecord["branch"]): string {
+  if (!branch?.branch_name) return "—";
+  return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
+}
+
 function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
@@ -180,10 +172,11 @@ function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
     avatar: getInitials(fullName),
     avatarColor: palette.avatarColor,
     initBg: palette.initBg,
-    dept: emp.specialization || emp.designation || "Unassigned",
+    dept: emp.department_master?.department_name || emp.specialization || "Unassigned",
+
     deptBg: "#E6E8EA",
     deptColor: "#475C7F",
-    branch: emp.branch?.branch_name || "—",
+    branch: formatBranch(emp.branch),
     status: (emp.emp_status === true || emp.user_table?.user_status === 1) ? "Active" : "Leave",
     appointments: 0,
     total: 0,
@@ -220,7 +213,7 @@ export default function Doctor() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   const handleAddDoctor = () => {
-    navigate("/doctor/add");
+    navigate("/STAFF/add?role=Doctor");
   };
 
   const handleViewToggle = (mode: "list" | "grid") => {
@@ -267,6 +260,7 @@ export default function Doctor() {
 
   // Real doctors fetched from the backend
   const [realDoctors, setRealDoctors] = useState<EmployeeRecord[] | null>(null);
+  const [isDoctorsLoading, setIsDoctorsLoading] = useState(true);
 
   useEffect(() => {
     console.log("[Doctor Page] Fetching all employees from employeeApi...");
@@ -277,13 +271,11 @@ export default function Doctor() {
         const allEmployees = res.data?.data?.employees || [];
         // Filter on frontend by user_table.role_type === DOCTOR
         const doctors = allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR");
-        if (doctors.length > 0) {
-          setRealDoctors(doctors);
-        } else {
+        setRealDoctors(doctors);
+        if (doctors.length === 0) {
           toast({
-            title: "Using fallback data",
-            description: "No doctor records returned yet — showing sample data.",
-            variant: "destructive",
+            title: "No doctor records found",
+            description: "The employees API returned no doctor records.",
           });
         }
       })
@@ -292,17 +284,20 @@ export default function Doctor() {
         console.error("[Doctor Page] Error response:", err.response?.data);
         console.error("[Doctor Page] Error status:", err.response?.status);
         toast({
-          title: "Using fallback data",
-          description: "Couldn't reach the employees API — showing sample data.",
+          title: "Failed to load doctors",
+          description: "Couldn't reach the employees API.",
           variant: "destructive",
         });
+      })
+      .finally(() => {
+        setIsDoctorsLoading(false);
       });
   }, []);
 
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
     // Use real data from API if available, otherwise fallback to static data
-    const sourceData = realDoctors ? realDoctors.map(mapEmployeeToDoctorData) : doctorsData;
+    const sourceData = realDoctors ? realDoctors.map(mapEmployeeToDoctorData) : [];
     let result: Record<string, string | number>[] = [...sourceData];
 
     if (searchQuery) {
@@ -318,7 +313,7 @@ export default function Doctor() {
     result = filterDataByValues(result, appliedValues);
 
     return result;
-  }, [searchQuery, appliedValues]);
+  }, [searchQuery, appliedValues, realDoctors]);
 
   // ---- SORTING (list only) ----
   const handleSort = (field: string) => {
@@ -509,7 +504,12 @@ export default function Doctor() {
             {/* ================================================================ */}
             {/* BODY: LIST VIEW (table design matches Patients.tsx list view)   */}
             {/* ================================================================ */}
-            {viewMode === "list" ? (
+            {isDoctorsLoading ? (
+              <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
+                <Loader2 size={24} className="animate-spin text-[#00488D]" />
+                Loading doctors...
+              </div>
+            ) : viewMode === "list" ? (
               <div className="overflow-x-auto flex-1">
                 <table className="w-full min-w-[900px]">
                   <thead className="hms-columnHeading-style">

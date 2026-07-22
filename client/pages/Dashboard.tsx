@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, ChevronDown, Check } from "lucide-react";
+import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, ChevronDown, Check, Loader2 } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import { AppointmentsTableView, DoctorsTableView, StaffTableView, type TableRow } from "@/components/hms/DashboardTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
@@ -12,217 +12,6 @@ import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 
 
-
-const doctors = [
-  {
-    avatar: "JS",
-    avatarColor: "#00488D",
-    initBg: "#D6E3FF",
-    name: "Dr. John Smith",
-    id: "DOC-9042",
-    dept: "Cardiology",
-    deptBg: "#D6E3FF",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Tambaram)",
-    status: "Active",
-  },
-  {
-    avatar: "EM",
-    avatarColor: "#7B3200",
-    initBg: "#FFDBCB",
-    name: "Dr. Emily Moore",
-    id: "DOC-9043",
-    dept: "Neurology",
-    deptBg: "#FFE4E6",
-    deptColor: "#BE123C",
-    branch: "Central Hospital (Saidapet)",
-    status: "Active",
-  },
-  {
-    avatar: "DW",
-    avatarColor: "#00488D",
-    initBg: "#D6E3FF",
-    name: "Dr. David Wilson",
-    id: "DOC-9044",
-    dept: "Orthopedics",
-    deptBg: "#D6E3FF",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Egmore)",
-    status: "Active",
-  },
-  {
-    avatar: "OL",
-    avatarColor: "#00C896",
-    initBg: "rgba(0,200,150,0.12)",
-    name: "Dr. Olivia Lewis",
-    id: "DOC-9045",
-    dept: "Dermatology",
-    deptBg: "rgba(0,200,150,0.12)",
-    deptColor: "#00C896",
-    branch: "Central Hospital (Tambaram)",
-    status: "Leave",
-  },
-  {
-    avatar: "JM",
-    avatarColor: "#475C7F",
-    initBg: "#E6E8EA",
-    name: "Dr. James Miller",
-    id: "DOC-9046",
-    dept: "ENT",
-    deptBg: "#E6E8EA",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Saidapet)",
-    status: "Active",
-  },
-  {
-    avatar: "SC",
-    avatarColor: "#00488D",
-    initBg: "#D6E3FF",
-    name: "Dr. Sophia Clark",
-    id: "DOC-9047",
-    dept: "Gynecology",
-    deptBg: "#FCE7F3",
-    deptColor: "#BE185D",
-    branch: "Central Hospital (Egmore)",
-    status: "Active",
-  },
-  {
-    avatar: "BN",
-    avatarColor: "#7B3200",
-    initBg: "#FFDBCB",
-    name: "Dr. Benjamin Nelson",
-    id: "DOC-9048",
-    dept: "Urology",
-    deptBg: "#DBEAFE",
-    deptColor: "#1E40AF",
-    branch: "Central Hospital (Tambaram)",
-    status: "Active",
-  },
-  {
-    avatar: "AG",
-    avatarColor: "#00C896",
-    initBg: "rgba(0,200,150,0.12)",
-    name: "Dr. Amelia Green",
-    id: "DOC-9049",
-    dept: "Oncology",
-    deptBg: "rgba(0,200,150,0.12)",
-    deptColor: "#00C896",
-    branch: "Central Hospital (Saidapet)",
-    status: "Leave",
-  },
-  {
-    avatar: "MK",
-    avatarColor: "#475C7F",
-    initBg: "#E6E8EA",
-    name: "Dr. Marcus Kincaid",
-    id: "DOC-4431",
-    dept: "Cancer",
-    deptBg: "#E6E8EA",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Tambaram)",
-    status: "Leave",
-  },
-  {
-    avatar: "RL",
-    avatarColor: "#4A5F83",
-    initBg: "#D6E3FF",
-    name: "Dr. Robert Lee",
-    id: "DOC-4431",
-    dept: "Pediatrics",
-    deptBg: "#D6E3FF",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Saidapet)",
-    status: "Active",
-  },
-  {
-    avatar: "AK",
-    avatarColor: "#00C896",
-    initBg: "rgba(0,200,150,0.12)",
-    name: "Dr. Arun Kumar",
-    id: "DOC-4432",
-    dept: "Orthology",
-    deptBg: "rgba(0,200,150,0.12)",
-    deptColor: "#00C896",
-    branch: "Central Hospital (Egmore)",
-    status: "Active",
-  },
-];
-
-const staff = [
-  {
-    avatar: "AV",
-    avatarColor: "#00488D",
-    initBg: "#D6E3FF",
-    name: "Anita Verma",
-    id: "STF-1006",
-    dept: "Emergency",
-    deptBg: "#FFE4E6",
-    deptColor: "#BE123C",
-    branch: "Central Hospital (Tambaram)",
-    status: "Active",
-  },
-  {
-    avatar: "SJ",
-    avatarColor: "#00C896",
-    initBg: "rgba(0,200,150,0.12)",
-    name: "Dr. Sarah Joseph",
-    id: "STF-1008",
-    dept: "Surgery",
-    deptBg: "#D6E3FF",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Egmore)",
-    status: "Active",
-  },
-
-  {
-    avatar: "MN",
-    avatarColor: "#00488D",
-    initBg: "#D6E3FF",
-    name: "Dr. Meera Nair",
-    id: "STF-1010",
-    dept: "Maternity",
-    deptBg: "#FCE7F3",
-    deptColor: "#BE185D",
-    branch: "Central Hospital (Tambaram)",
-    status: "Active",
-  },
-  {
-    avatar: "KR",
-    avatarColor: "#475C7F",
-    initBg: "#E6E8EA",
-    name: "Karthik Rajan",
-    id: "STF-1011",
-    dept: "Pharmacy",
-    deptBg: "#D6E3FF",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Saidapet)",
-    status: "Active",
-  },
-  {
-    avatar: "SG",
-    avatarColor: "#7B3200",
-    initBg: "#FFDBCB",
-    name: "Dr. Sunil Gupta",
-    id: "STF-1012",
-    dept: "Pulmonology",
-    deptBg: "#DBEAFE",
-    deptColor: "#1E40AF",
-    branch: "Central Hospital (Egmore)",
-    status: "Leave",
-  },
-  {
-    avatar: "PS",
-    avatarColor: "#00C896",
-    initBg: "rgba(0,200,150,0.12)",
-    name: "Dr. Priya Sharma",
-    id: "STF-1005",
-    dept: "Neurology",
-    deptBg: "#D6E3FF",
-    deptColor: "#475C7F",
-    branch: "Central Hospital (Tambaram)",
-    status: "Active",
-  },
-];
 
 const appointments = [
   {
@@ -465,11 +254,16 @@ function getInitials(name: string): string {
   return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
+function formatBranch(branch: EmployeeRecord["branch"]): string {
+  if (!branch?.branch_name) return "—";
+  return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
+}
+
 function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${doc.first_name} ${doc.middle_name ? doc.middle_name + " " : ""}${doc.last_name}`;
   const role = doc.user_table?.role_type || "DOCTOR";
-  const branchName = doc.branch?.branch_name || "—";
+  const branchName = formatBranch(doc.branch);
   const isActive = doc.emp_status === true || doc.user_table?.user_status === 1;
   return {
     avatar: getInitials(fullName),
@@ -477,7 +271,7 @@ function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
     initBg: palette.initBg,
     name: fullName,
     id: doc.employee_id,
-    dept: doc.specialization || doc.designation || "Unassigned",
+    dept: doc.department_master?.department_name || doc.specialization || "Unassigned",
     deptBg: "#E6E8EA",
     deptColor: "#475C7F",
     branch: branchName,
@@ -583,11 +377,11 @@ export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { toast } = useToast();
 
-  // Real doctors fetched from the backend, replacing the static `doctors`
-  // array below once available. Stays null (falls back to static data) if
-  // the request fails or returns nothing.
+  // Real doctors/staff fetched from the backend. No dummy fallback — an
+  // empty/failed fetch just leaves these null and the tab shows no rows.
   const [realDoctors, setRealDoctors] = useState<TableRow[] | null>(null);
   const [realStaff, setRealStaff] = useState<TableRow[] | null>(null);
+  const [isEmployeesLoading, setIsEmployeesLoading] = useState(true);
 
   useEffect(() => {
     console.log("[Dashboard] Fetching all employees from employeeApi...");
@@ -599,28 +393,35 @@ export default function Dashboard() {
         // Filter on frontend by user_table.role_type
         const doctors = allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR");
         const staff = allEmployees.filter((e) => e.user_table?.role_type !== "DOCTOR");
-        
-        if (doctors.length > 0) {
-          setRealDoctors(doctors.map(mapEmployeeRecord));
-        } else {
+
+        setRealDoctors(doctors.map(mapEmployeeRecord));
+        setRealStaff(staff.map(mapEmployeeRecord));
+
+        if (doctors.length === 0) {
           toast({
-            title: "Using fallback data",
-            description: "No doctor records returned yet — showing sample data.",
-            variant: "destructive",
+            title: "No doctor records found",
+            description: "The employees API returned no doctor records.",
           });
         }
-        // Store staff for staff tab
-        setRealStaff(staff.map(mapEmployeeRecord));
+        if (staff.length === 0) {
+          toast({
+            title: "No staff records found",
+            description: "The employees API returned no staff records.",
+          });
+        }
       })
       .catch((err) => {
         console.error("[Dashboard] Error:", err);
         console.error("[Dashboard] Error response:", err.response?.data);
         console.error("[Dashboard] Error status:", err.response?.status);
         toast({
-          title: "Using fallback data",
-          description: "Couldn't reach the employees API — showing sample data.",
+          title: "Failed to load employees",
+          description: "Couldn't reach the employees API.",
           variant: "destructive",
         });
+      })
+      .finally(() => {
+        setIsEmployeesLoading(false);
       });
   }, []);
 
@@ -743,10 +544,10 @@ export default function Dashboard() {
 
   const activeData =
     activeTab === "staff"
-      ? (realStaff ?? staff)
+      ? (realStaff ?? [])
       : activeTab === "appointments"
         ? appointments
-        : (realDoctors ?? doctors);
+        : (realDoctors ?? []);
 
   const searchableFields =
     activeTab === "appointments"
@@ -769,7 +570,7 @@ export default function Dashboard() {
     result = filterDataByValues(result, appliedValues);
 
     return result;
-  }, [searchQuery, activeTab, appliedValues]);
+  }, [searchQuery, activeTab, appliedValues, realDoctors, realStaff]);
 
   const currentSortField = sortField[activeTab];
   const currentSortDirection = sortDirection[activeTab];
@@ -888,11 +689,18 @@ useEffect(() => {
 
   const navigate = useNavigate();
 
-  const handleEdit = (id: number) => {
+  const handleEdit = (id: string | number) => {
     navigate(`/destination-edit/${id}`);
   };
 
-  const handleView = (id: number) => {
+  // Doctor rows always route to the real Edit Doctor page, regardless of
+  // which page/tab they're clicked from — role drives the destination, not
+  // the page. (Staff/Appointments keep the placeholder handler above.)
+  const handleEditDoctor = (id: string | number) => {
+    navigate(`/doctor/edit/${id}`);
+  };
+
+  const handleView = (id: string | number) => {
     navigate(`/destination-view/${id}`);
   };
 
@@ -955,6 +763,7 @@ useEffect(() => {
                <p className="hms-subheading">Real-time performance across all branches.</p>
              </div>
              <button
+               onClick={() => navigate("/appointments/add")}
                className="flex items-center gap-1.5 px-5 py-2.5 bg-[#004785] rounded-[10px] text-white text-xs font-semibold whitespace-nowrap hover:opacity-90 transition-opacity"
              >
                <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
@@ -1068,13 +877,18 @@ useEffect(() => {
 
             {/* Table */}
             <div className="min-h-[320px] overflow-x-auto">
-              {activeTab === "doctors" ? (
+              {(activeTab === "doctors" || activeTab === "staff") && isEmployeesLoading ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
+                  <Loader2 size={24} className="animate-spin text-[#00488D]" />
+                  Loading {activeTab}...
+                </div>
+              ) : activeTab === "doctors" ? (
                 <DoctorsTableView
                   rows={currentRows as TableRow[]}
                   sortField={sortField[activeTab] ?? ""}
                   sortDirection={sortDirection[activeTab] ?? "asc"}
                   onSort={handleSort}
-                  onEdit={handleEdit}
+                  onEdit={handleEditDoctor}
                   onView={handleView}
                 />
               ) : activeTab === "staff" ? (

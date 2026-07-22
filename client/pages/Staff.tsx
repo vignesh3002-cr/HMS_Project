@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import CalendarPicker from "@/components/hms/Calender";
+import { useNavigate } from "react-router-dom";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Search, FileText, File, ChevronDown, Check, Plus } from "lucide-react";
+import { Search, FileText, File, ChevronDown, Check, Plus, Loader2 } from "lucide-react";
 
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
@@ -17,7 +18,7 @@ interface StaffMember {
   id: string;
   dept: string;
   deptClass: string;
-  branch: string[];
+  branch: string;
   status: "active" | "leave" | "inactive";
 }
 
@@ -54,469 +55,9 @@ interface SupportStaffRow {
   id: string;
   dept: string;
   deptClass: "blue" | "purple" | "yellow" | "green" | "red";
-  branch: string;
+branch: string;
   status: "active" | "leave";
 }
-
-const staffData: StaffMember[] = [
-  {
-    initials: "SJ",
-    name: "Dr. Sarah Jenkins",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: ["Central Hospital Tambaram"],
-    status: "active",
-  },
-  {
-    initials: "AM",
-    name: "Dr. Ajay Mehta",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Cardiology",
-    deptClass: "bg-[#EDE9FE] text-[#475C7F]",
-    branch: ["Central Hospital Tambaram"],
-    status: "leave",
-  },
-  {
-    initials: "RL",
-    name: "Dr. Robert lee",
-    phone: "+1 (555) 234-5678",
-    id: "DOC-4431",
-    dept: "Pediatrics",
-    deptClass: "bg-[#FDE68A] text-[#CE6228]",
-    branch: ["Central Hospital Saidapet"],
-    status: "active",
-  },
-  {
-    initials: "MD",
-    name: "Mahesh Dhori",
-    phone: "+1 (555) 345-6789",
-    id: "NUR-0098",
-    dept: "Nursing",
-    deptClass: "bg-[#D1FAE5] text-[#0D9651]",
-    branch: ["Central Hospital Egmore"],
-    status: "leave",
-  },
-  {
-    initials: "DT",
-    name: "David Tan",
-    phone: "+1 (555) 456-7890",
-    id: "ADM-0032",
-    dept: "Admin",
-    deptClass: "bg-lime-100 text-lime-700",
-    branch: ["East wing"],
-    status: "inactive",
-  },
-  {
-    initials: "EW",
-    name: "Elena Wright",
-    phone: "+1 (555) 567-8901",
-    id: "DOC-1192",
-    dept: "Cardiology",
-    deptClass: "bg-[#FEE2E2] text-[#8C3789]",
-    branch: ["North wing"],
-    status: "active",
-  },
-  {
-    initials: "SS",
-    name: "Dr. Steven Strange",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: ["Central Hospital Tambaram"],
-    status: "active",
-  },
-  {
-    initials: "SR",
-    name: "Dr. Steve Rogers",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Cardiology",
-    deptClass: "bg-[#EDE9FE] text-[#475C7F]",
-    branch: ["Central Hospital Tambaram"],
-    status: "leave",
-  },
-  {
-    initials: "BB",
-    name: "Bruce Banner",
-    phone: "+1 (555) 456-7890",
-    id: "ADM-0032",
-    dept: "Admin",
-    deptClass: "bg-lime-100 text-lime-700",
-    branch: ["East wing"],
-    status: "inactive",
-  },
-  {
-    initials: "NR",
-    name: "Natasha Romanoff",
-    phone: "+1 (555) 567-8901",
-    id: "DOC-1192",
-    dept: "Cardiology",
-    deptClass: "bg-[#FEE2E2] text-[#8C3789]",
-    branch: ["North wing"],
-    status: "active",
-  },
-];
-
-const medicalStaffData: MedicalStaffRow[] = [
-  {
-    initials: "SJ",
-    name: "Dr. Sarah Jenkins",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: "Central Hospital Tambaram",
-    status: "active",
-  },
-  {
-    initials: "SJ",
-    name: "Dr. Sarah Jenkins",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: "Central Hospital Tambaram",
-    status: "active",
-  },
-  {
-    initials: "SJ",
-    name: "Dr. Sarah Jenkins",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: "Central Hospital Tambaram",
-    status: "active",
-  },
-  {
-    initials: "SJ",
-    name: "Dr. Sarah Jenkins",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: "Central Hospital Tambaram",
-    status: "active",
-  },
-  {
-    initials: "SJ",
-    name: "Dr. Sarah Jenkins",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9042",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: "Central Hospital Tambaram",
-    status: "active",
-  },
-  {
-    initials: "AM",
-    name: "Dr. Ajay Mehta",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9043",
-    dept: "Cardiology",
-    deptClass: "bg-[#EDE9FE] text-[#475C7F]",
-    branch: "Central Hospital Tambaram",
-    status: "leave",
-  },
-  {
-    initials: "RL",
-    name: "Dr. Robert Lee",
-    phone: "+1 (555) 234-5678",
-    id: "DOC-4431",
-    dept: "Pediatrics",
-    deptClass: "bg-[#FDE68A] text-[#CE6228]",
-    branch: "Central Hospital Saidapet",
-    status: "active",
-  },
-  {
-    initials: "AM",
-    name: "Angela Moore",
-    phone: "+1 (555) 345-6789",
-    id: "NUR-0098",
-    dept: "Nursing",
-    deptClass: "bg-[#D1FAE5] text-[#0D9651]",
-    branch: "Central Hospital Egmore",
-    status: "leave",
-  },
-  {
-    initials: "EW",
-    name: "Elena Wright",
-    phone: "+1 (555) 567-8901",
-    id: "DOC-1192",
-    dept: "Cardiology",
-    deptClass: "bg-[#FEE2E2] text-[#8C3789]",
-    branch: "North Wing",
-    status: "active",
-  },
-  {
-    initials: "SS",
-    name: "Dr. Steven Strange",
-    phone: "+1 (555) 123-4567",
-    id: "DOC-9044",
-    dept: "Neuroscience",
-    deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-    branch: "Central Hospital Tambaram",
-    status: "active",
-  },
-];
-
-const administrativeStaffData: AdministrativeStaffRow[] = [
-  {
-    initials: "SK",
-    avatar: "purple",
-    name: "Shankar Kumar",
-    id: "ADM-9042",
-    role: "Head Admin",
-    roleColor: "purple",
-    branch: "Central Hospital Tambaram",
-    access: "Super Admin",
-    accessColor: "purple",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-  {
-    initials: "D",
-    avatar: "indigo",
-    name: "David",
-    id: "RC-9042",
-    role: "Branch Admin",
-    roleColor: "indigo",
-    branch: "Central Hospital Saidapet",
-    access: "Admin",
-    accessColor: "indigo",
-    login: "Today, 10:30 AM",
-    loginDot: "green",
-    status: "active",
-  },
-   {
-    initials: "SK",
-    avatar: "purple",
-    name: "Shankar Kumar",
-    id: "ADM-9042",
-    role: "Head Admin",
-    roleColor: "purple",
-    branch: "Central Hospital Tambaram",
-    access: "Super Admin",
-    accessColor: "purple",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-  {
-    initials: "R",
-    avatar: "indigo",
-    name: "Rajesh",
-    id: "ADM-9043",
-    role: "Branch Admin",
-    roleColor: "indigo",
-    branch: "Central Hospital Chromepet",
-    access: "Admin",
-    accessColor: "indigo",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-   {
-    initials: "SK",
-    avatar: "purple",
-    name: "Shankar Kumar",
-    id: "ADM-9042",
-    role: "Head Admin",
-    roleColor: "purple",
-    branch: "Central Hospital Tambaram",
-    access: "Super Admin",
-    accessColor: "purple",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-  {
-    initials: "SK",
-    avatar: "purple",
-    name: "Shankar Kumar",
-    id: "ADM-9044",
-    role: "Head Admin",
-    roleColor: "purple",
-    branch: "Central Hospital Egmore",
-    access: "Super Admin",
-    accessColor: "purple",
-    login: "Yesterday ,08:20 PM",
-    loginDot: "orange",
-    status: "leave",
-  },
-   {
-    initials: "SK",
-    avatar: "purple",
-    name: "Shankar Kumar",
-    id: "ADM-9042",
-    role: "Head Admin",
-    roleColor: "purple",
-    branch: "Central Hospital Tambaram",
-    access: "Super Admin",
-    accessColor: "purple",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-  {
-    initials: "AK",
-    avatar: "indigo",
-    name: "Ajith Kumar",
-    id: "ADM-9045",
-    role: "Branch Admin",
-    roleColor: "indigo",
-    branch: "Central Hospital Triplicane",
-    access: "Admin",
-    accessColor: "indigo",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-   {
-    initials: "SK",
-    avatar: "purple",
-    name: "Shankar Kumar",
-    id: "ADM-9042",
-    role: "Head Admin",
-    roleColor: "purple",
-    branch: "Central Hospital Tambaram",
-    access: "Super Admin",
-    accessColor: "purple",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-   {
-    initials: "SK",
-    avatar: "purple",
-    name: "Shankar Kumar",
-    id: "ADM-9042",
-    role: "Head Admin",
-    roleColor: "purple",
-    branch: "Central Hospital Tambaram",
-    access: "Super Admin",
-    accessColor: "purple",
-    login: "Today ,09:42 AM",
-    loginDot: "green",
-    status: "active",
-  },
-];
-
-const supportBadgeColors: Record<string, string> = {
-  blue: "bg-blue-100 text-blue-700",
-  purple: "bg-purple-100 text-purple-700",
-  yellow: "bg-yellow-200 text-yellow-700",
-  green: "bg-green-100 text-green-700",
-  red: "bg-red-100 text-red-700",
-};
-
-const supportStaffData: SupportStaffRow[] = [
-  {
-    initials: "W",
-    name: "Watt",
-    phone: "+1 (555) 234-1001",
-    id: "REC-9042",
-    dept: "Receptionist",
-    deptClass: "blue",
-    branch: "Central Hospital",
-    status: "active",
-  },
-  {
-    initials: "W",
-    name: "Watt",
-    phone: "+1 (555) 234-1001",
-    id: "REC-9042",
-    dept: "Receptionist",
-    deptClass: "blue",
-    branch: "Central Hospital",
-    status: "active",
-  },
-  {
-    initials: "W",
-    name: "Watt",
-    phone: "+1 (555) 234-1001",
-    id: "REC-9042",
-    dept: "Receptionist",
-    deptClass: "blue",
-    branch: "Central Hospital",
-    status: "active",
-  },
-  {
-    initials: "W",
-    name: "Watt",
-    phone: "+1 (555) 234-1001",
-    id: "REC-9042",
-    dept: "Receptionist",
-    deptClass: "blue",
-    branch: "Central Hospital",
-    status: "active",
-  },
-  {
-    initials: "W",
-    name: "Watt",
-    phone: "+1 (555) 234-1001",
-    id: "REC-9042",
-    dept: "Receptionist",
-    deptClass: "blue",
-    branch: "Central Hospital",
-    status: "active",
-  },
-  {
-    initials: "W",
-    name: "Watt",
-    phone: "+1 (555) 234-1001",
-    id: "REC-9042",
-    dept: "Receptionist",
-    deptClass: "blue",
-    branch: "Central Hospital",
-    status: "active",
-  },
-  {
-    initials: "S",
-    name: "Sarah",
-    phone: "+1 (555) 234-1002",
-    id: "HK-9042",
-    dept: "House Keeping",
-    deptClass: "purple",
-    branch: "City Clinic",
-    status: "leave",
-  },
-  {
-    initials: "L",
-    name: "Lee",
-    phone: "+1 (555) 234-1003",
-    id: "LO-4431",
-    dept: "Lift Operator",
-    deptClass: "yellow",
-    branch: "North Beach",
-    status: "leave",
-  },
-  {
-    initials: "A",
-    name: "Angela",
-    phone: "+1 (555) 234-1004",
-    id: "REC-0098",
-    dept: "Receptionist",
-    deptClass: "green",
-    branch: "Central Hospital",
-    status: "active",
-  },
-  {
-    initials: "W",
-    name: "Wright",
-    phone: "+1 (555) 234-1005",
-    id: "SG-1192",
-    dept: "Security Guard",
-    deptClass: "red",
-    branch: "North Wing",
-    status: "leave",
-  },
-];
 
 const statusConfig = {
   active: {
@@ -860,6 +401,15 @@ function AdministrativeTableView({
   );
 }
 
+// Maps a SupportStaffRow.deptClass color name to its Tailwind badge classes.
+const supportBadgeColors: Record<SupportStaffRow["deptClass"], string> = {
+  blue: "bg-blue-100 text-blue-700",
+  purple: "bg-purple-100 text-purple-700",
+  yellow: "bg-yellow-100 text-yellow-700",
+  green: "bg-green-100 text-green-700",
+  red: "bg-red-100 text-red-700",
+};
+
 // Support staff table (rendered when the "Support" tab is active)
 function SupportTableView({
   rows,
@@ -995,16 +545,38 @@ function getInitials(name: string): string {
   return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
+function formatBranch(branch: EmployeeRecord["branch"]): string {
+  if (!branch?.branch_name) return "—";
+  return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
+}
+
+
+const STAFF_DESIGNATION_CATEGORY: Record<string, "administrative" | "support"> = {
+  "receptionist": "administrative",
+  "admin executive": "administrative",
+  "accountant": "administrative",
+  "hr executive": "administrative",
+  "it support": "administrative",
+  "office manager": "administrative",
+  "security officer": "support",
+  "housekeeping staff": "support",
+};
+
+function classifyStaffDesignation(designation: string | null | undefined): "administrative" | "support" {
+  const key = designation?.toLowerCase().trim() || "";
+  return STAFF_DESIGNATION_CATEGORY[key] ?? "administrative";
+}
+
 function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
   const roleType = emp.user_table?.role_type || "STAFF";
   const isDoctor = roleType === "DOCTOR";
   const isMedical = ["DOCTOR", "NURSE", "PHARMACIST"].includes(roleType);
-  
+
   // Map role_type to dept/status
   const status = (emp.emp_status === true || emp.user_table?.user_status === 1) ? "active" : "leave";
-  
+
   if (isMedical) {
     // Medical staff (Doctor, Nurse, Pharmacist)
     return {
@@ -1012,9 +584,9 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
       name: fullName,
       phone: emp.mobile_no,
       id: emp.employee_id,
-      dept: emp.specialization || emp.designation || roleType,
+      dept: emp.department_master?.department_name || emp.specialization || roleType,
       deptClass: "bg-[#D6E3FF] text-[#475C7F]",
-      branch: emp.branch?.branch_name ? [emp.branch.branch_name] : ["—"],
+      branch: [formatBranch(emp.branch)],
       status: status as "active" | "leave" | "inactive",
     };
   } else if (roleType === "STAFF") {
@@ -1023,7 +595,7 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
     const accessColors = ["purple", "indigo"] as const;
     const loginDots = ["green", "orange"] as const;
     const avatarIdx = index % 2;
-    
+
     return {
       initials: getInitials(fullName),
       avatar: avatars[avatarIdx],
@@ -1031,8 +603,8 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
       id: emp.employee_id,
       role: emp.designation || "Staff",
       roleColor: accessColors[avatarIdx],
-      branch: emp.branch?.branch_name || "—",
-      access: emp.department_id || "Standard",
+      branch: formatBranch(emp.branch),
+      access: emp.department_master?.department_name || "Standard",
       accessColor: accessColors[avatarIdx],
       login: new Date().toLocaleDateString(),
       loginDot: loginDots[avatarIdx],
@@ -1042,25 +614,30 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
     // Support staff
     const deptColors = ["blue", "purple", "yellow", "green", "red"] as const;
     const deptIdx = index % 5;
-    
+
     return {
       initials: getInitials(fullName),
       name: fullName,
       phone: emp.mobile_no,
       id: emp.employee_id,
-      dept: emp.designation || "Support",
+      dept: emp.department_master?.department_name || emp.designation || "Support",
       deptClass: `bg-${deptColors[deptIdx]}-100 text-${deptColors[deptIdx]}-700` as const,
-      branch: emp.branch?.branch_name || "—",
+      branch: formatBranch(emp.branch),
       status: status as "active" | "leave",
     };
   }
 }
 
 export default function Staff() {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
   const tabsMenuRef = useRef<HTMLElement>(null);
+
+  const handleAddStaff = () => {
+    navigate("/STAFF/add?role=staff");
+  };
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -1105,6 +682,7 @@ export default function Staff() {
 
   // Fetch all employees from backend and filter by role_type (exclude DOCTOR for staff)
   const [realStaff, setRealStaff] = useState<EmployeeRecord[] | null>(null);
+  const [isStaffLoading, setIsStaffLoading] = useState(true);
 
   useEffect(() => {
     console.log("[Staff Page] Fetching all employees from employeeApi...");
@@ -1115,13 +693,11 @@ export default function Staff() {
         const allEmployees = res.data?.data?.employees || [];
         // Filter on frontend: exclude DOCTOR role_type
         const staff = allEmployees.filter((e) => e.user_table?.role_type !== "DOCTOR");
-        if (staff.length > 0) {
-          setRealStaff(staff);
-        } else {
+        setRealStaff(staff);
+        if (staff.length === 0) {
           toast({
-            title: "Using fallback data",
-            description: "No staff records returned yet — showing sample data.",
-            variant: "destructive",
+            title: "No staff records found",
+            description: "The employees API returned no staff records.",
           });
         }
       })
@@ -1130,10 +706,13 @@ export default function Staff() {
         console.error("[Staff Page] Error response:", err.response?.data);
         console.error("[Staff Page] Error status:", err.response?.status);
         toast({
-          title: "Using fallback data",
-          description: "Couldn't reach the employees API — showing sample data.",
+          title: "Failed to load staff",
+          description: "Couldn't reach the employees API.",
           variant: "destructive",
         });
+      })
+      .finally(() => {
+        setIsStaffLoading(false);
       });
   }, []);
 
@@ -1220,13 +799,22 @@ export default function Staff() {
     return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
   }
 
+  // Which of the three staff tabs an employee belongs to — keep this in
+  // sync with the branching inside mapEmployeeToStaffData below.
+  function getStaffCategory(emp: EmployeeRecord): "medical" | "administrative" | "support" {
+    const roleType = emp.user_table?.role_type || "STAFF";
+    if (roleType === "NURSE" || roleType === "PHARMACIST") return "medical";
+    if (roleType === "STAFF") return classifyStaffDesignation(emp.designation);
+    return "medical";
+  }
+
   function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
     const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
     const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
     const roleType = emp.user_table?.role_type || "STAFF";
     const isActive = emp.emp_status === true || emp.user_table?.user_status === 1;
-    const branchName = emp.branch?.branch_name || "—";
-    const deptName = emp.specialization || emp.designation || "Unassigned";
+    const branchName = formatBranch(emp.branch);
+    const deptName = emp.department_master?.department_name || emp.specialization || "Unassigned";
 
     // Determine which tab this employee belongs to
     if (roleType === "NURSE" || roleType === "PHARMACIST") {
@@ -1243,9 +831,8 @@ export default function Staff() {
       } as MedicalStaffRow;
     } else if (roleType === "STAFF") {
       // Administrative or Support tab - determine by designation
-      const designation = emp.designation?.toLowerCase() || "";
-      const isAdmin = ["admin", "executive", "accountant", "hr", "it", "manager", "receptionist"].some(d => designation.includes(d));
-      
+      const isAdmin = classifyStaffDesignation(emp.designation) === "administrative";
+
       if (isAdmin) {
         return {
           initials: getInitials(fullName),
@@ -1289,20 +876,20 @@ export default function Staff() {
 
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
-    // Use real data from API if available, otherwise fallback to static data
-    let sourceData: (StaffMember | MedicalStaffRow | AdministrativeStaffRow | SupportStaffRow)[] = [];
-    
-    if (realStaff && realStaff.length > 0) {
-      sourceData = realStaff.map(mapEmployeeToStaffData);
-    } else if (isMedicalTab) {
-      sourceData = [...medicalStaffData];
-    } else if (isAdministrativeTab) {
-      sourceData = [...administrativeStaffData];
-    } else if (isSupportTab) {
-      sourceData = [...supportStaffData];
-    } else {
-      sourceData = [...staffData];
-    }
+    // Real data only — no dummy fallback. Each tab only shows employees in
+    // its own category; "All staff" (none of the three flags) shows everyone.
+    const employeesForTab = !realStaff
+      ? []
+      : isMedicalTab
+        ? realStaff.filter((e) => getStaffCategory(e) === "medical")
+        : isAdministrativeTab
+          ? realStaff.filter((e) => getStaffCategory(e) === "administrative")
+          : isSupportTab
+            ? realStaff.filter((e) => getStaffCategory(e) === "support")
+            : realStaff;
+
+    const sourceData: (StaffMember | MedicalStaffRow | AdministrativeStaffRow | SupportStaffRow)[] =
+      employeesForTab.map(mapEmployeeToStaffData);
 
     let result = sourceData;
 
@@ -1397,7 +984,10 @@ export default function Staff() {
                 )}
               </div>
 
-              <button className="flex items-center gap-[6px] h-[34px] px-[20px] py-[10px] bg-[#004785] rounded-[10px] text-white text-[12px] font-semibold hover:bg-[#003a6b] transition-colors">
+              <button
+                onClick={handleAddStaff}
+                className="flex items-center gap-[6px] h-[34px] px-[20px] py-[10px] bg-[#004785] rounded-[10px] text-white text-[12px] font-semibold hover:bg-[#003a6b] transition-colors"
+              >
                 <Plus className="w-4 h-4" />
                 Add new staff
               </button>
@@ -1534,7 +1124,12 @@ export default function Staff() {
 
             {/* ==================== TABLE ==================== */}
             <div className="overflow-x-auto flex-1">
-              {isMedicalTab ? (
+              {isStaffLoading ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
+                  <Loader2 size={24} className="animate-spin text-[#00488D]" />
+                  Loading staff data...
+                </div>
+              ) : isMedicalTab ? (
                 <MedicalTableView
                   rows={currentRows as MedicalStaffRow[]}
                   sortField={sortField}
@@ -1730,6 +1325,13 @@ export default function Staff() {
           </div>
         </main>
       </div>
+            {/* FAB */}
+            <button
+              onClick={handleAddStaff}
+              className="fixed bottom-6 right-6 w-12 h-12 bg-[#00488D] rounded-2xl flex items-center justify-center shadow-lg z-10 hover:bg-[#003a6b] transition-colors"
+            >
+              <Plus className="w-5 h-5 text-white" />
+            </button>
     </div>
   );
 }

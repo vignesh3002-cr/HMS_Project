@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 import { remove } from "../../utils/token";
 import { getUser } from "@/utils/token";
@@ -42,6 +42,11 @@ const bottomNavIcon: Record<string, React.ReactNode> = {
 export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Form routes that shouldn't highlight parent nav items
+  const isFormPage = location.pathname.includes("/add") || 
+                     location.pathname.includes("/edit/");
 
 const logout = () => {
 
@@ -137,10 +142,11 @@ useEffect(() => {
             <NavLink
               key={item.to}
               to={item.to}
+              end
               className={({ isActive }) =>
                 cn(
                   "flex items-center gap-2 px-3 py-2 rounded-[4px] text-xs font-semibold tracking-[0.6px] capitalize",
-                  isActive
+                  isActive && !isFormPage
                     ? "bg-[#00488D] text-white shadow-sm"
                     : "text-[#475569] hover:bg-[#E6E8EA]"
                 )

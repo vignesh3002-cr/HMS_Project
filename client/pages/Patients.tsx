@@ -14,6 +14,7 @@ import {
   CalendarCheck,
   User,
   File,
+  Loader2,
 } from "lucide-react";
 
 import ExportReport from "@/components/ui/ExportReport";
@@ -22,62 +23,55 @@ import ExportReport from "@/components/ui/ExportReport";
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
+import { useToast } from "@/hooks/use-toast";
+import { patientApi, type PatientRecord } from "@/api/patient.api";
 
-// ============================================================
-// DATA - Grid View (photo, bloodGroup)
-// ============================================================
-const gridPatientsData = [
-  { id: "PAT-0001", name: "Sam", age: 32, gender: "M", mobile: "+91 91234 56789", bloodGroup: "A+", photo: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&h=200&fit=crop", status: "Active" },
-  { id: "PAT-0002", name: "Madhu", age: 28, gender: "F", mobile: "+91 92345 67890", bloodGroup: "O+", photo: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop", status: "Active" },
-  { id: "PAT-0003", name: "James", age: 65, gender: "M", mobile: "+91 93456 78901", bloodGroup: "B+", photo: "https://images.unsplash.com/photo-1560250097-0b93528c311a?w=200&h=200&fit=crop", status: "Active" },
-  { id: "PAT-0004", name: "Ramesh", age: 32, gender: "M", mobile: "+91 91234 56789", bloodGroup: "A+", photo: "", status: "Inactive" },
-  { id: "PAT-0005", name: "Priyanka", age: 45, gender: "F", mobile: "+91 98645 38360", bloodGroup: "O-", photo: "", status: "Active" },
-  { id: "PAT-0006", name: "Baskar", age: 16, gender: "M", mobile: "+91 93456 78901", bloodGroup: "B+", photo: "", status: "Active" },
-  { id: "PAT-0007", name: "Sonu", age: 45, gender: "M", mobile: "+91 91234 56789", bloodGroup: "A+", photo: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop", status: "Active" },
-  { id: "PAT-0008", name: "Arun", age: 23, gender: "M", mobile: "+91 91238 95546", bloodGroup: "B-", photo: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&h=200&fit=crop", status: "Inactive" },
-  { id: "PAT-0009", name: "Kaviya", age: 20, gender: "F", mobile: "+91 91234 56666", bloodGroup: "A-", photo: "https://images.unsplash.com/photo-1544725176-7c40e5a71c5e?w=200&h=200&fit=crop", status: "Active" },
-  { id: "PAT-0005", name: "Suresh", age: 45, gender: "M", mobile: "+91 92345 67890", bloodGroup: "B+", photo: "", status: "Active" },
-  { id: "PAT-0006", name: "Priya", age: 28, gender: "F", mobile: "+91 93456 78901", bloodGroup: "O+", photo: "", status: "Inactive" },
-  { id: "PAT-0007", name: "Anitha", age: 36, gender: "F", mobile: "+91 94567 89012", bloodGroup: "AB+", photo: "", status: "Active" },
-  { id: "PAT-0008", name: "Karthik", age: 41, gender: "M", mobile: "+91 95678 90123", bloodGroup: "B-", photo: "", status: "Inactive" },
-  { id: "PAT-0009", name: "Meena", age: 30, gender: "F", mobile: "+91 96789 01234", bloodGroup: "O-", photo: "", status: "Active" },
-  { id: "PAT-0010", name: "Arun", age: 52, gender: "M", mobile: "+91 97890 12345", bloodGroup: "A-", photo: "", status: "Inactive" },
-  { id: "PAT-0011", name: "Lakshmi", age: 39, gender: "F", mobile: "+91 98901 23456", bloodGroup: "AB-", photo: "", status: "Active" },
-  { id: "PAT-0012", name: "Vijay", age: 27, gender: "M", mobile: "+91 99012 34567", bloodGroup: "O+", photo: "", status: "Inactive" },
-  { id: "PAT-0013", name: "Divya", age: 34, gender: "F", mobile: "+91 90123 45678", bloodGroup: "A+", photo: "", status: "Active" },
-  { id: "PAT-0014", name: "Manoj", age: 48, gender: "M", mobile: "+91 91234 67890", bloodGroup: "B+", photo: "", status: "Inactive" },
-  { id: "PAT-0001", name: "Sam", age: 32, gender: "M", mobile: "+91 91234 56789", bloodGroup: "A+", photo: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&h=200&fit=crop", status: "Active" },
-  { id: "PAT-0002", name: "Madhu", age: 28, gender: "F", mobile: "+91 92345 67890", bloodGroup: "O+", photo: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop", status: "Active" },
-  { id: "PAT-0003", name: "James", age: 65, gender: "M", mobile: "+91 93456 78901", bloodGroup: "B+", photo: "https://images.unsplash.com/photo-1560250097-0b93528c311a?w=200&h=200&fit=crop", status: "Active" },
-  { id: "PAT-0004", name: "Ramesh", age: 32, gender: "M", mobile: "+91 91234 56789", bloodGroup: "A+", photo: "", status: "Inactive" },
-  { id: "PAT-0005", name: "Priyanka", age: 45, gender: "F", mobile: "+91 98645 38360", bloodGroup: "O-", photo: "", status: "Active" },
-  { id: "PAT-0006", name: "Baskar", age: 16, gender: "M", mobile: "+91 93456 78901", bloodGroup: "B+", photo: "", status: "Active" },
-  { id: "PAT-0007", name: "Sonu", age: 45, gender: "M", mobile: "+91 91234 56789", bloodGroup: "A+", photo: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop", status: "Active" },
-  { id: "PAT-0008", name: "Arun", age: 23, gender: "M", mobile: "+91 91238 95546", bloodGroup: "B-", photo: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&h=200&fit=crop", status: "Inactive" },
-  { id: "PAT-0009", name: "Kaviya", age: 20, gender: "F", mobile: "+91 91234 56666", bloodGroup: "A-", photo: "https://images.unsplash.com/photo-1544725176-7c40e5a71c5e?w=200&h=200&fit=crop", status: "Active" },
-  { id: "PAT-0005", name: "Suresh", age: 45, gender: "M", mobile: "+91 92345 67890", bloodGroup: "B+", photo: "", status: "Active" },
-  { id: "PAT-0006", name: "Priya", age: 28, gender: "F", mobile: "+91 93456 78901", bloodGroup: "O+", photo: "", status: "Inactive" },
-  { id: "PAT-0007", name: "Anitha", age: 36, gender: "F", mobile: "+91 94567 89012", bloodGroup: "AB+", photo: "", status: "Active" },
-  { id: "PAT-0008", name: "Karthik", age: 41, gender: "M", mobile: "+91 95678 90123", bloodGroup: "B-", photo: "", status: "Inactive" },
-  { id: "PAT-0009", name: "Meena", age: 30, gender: "F", mobile: "+91 96789 01234", bloodGroup: "O-", photo: "", status: "Active" },
-  { id: "PAT-0010", name: "Arun", age: 52, gender: "M", mobile: "+91 97890 12345", bloodGroup: "A-", photo: "", status: "Inactive" },
-  { id: "PAT-0011", name: "Lakshmi", age: 39, gender: "F", mobile: "+91 98901 23456", bloodGroup: "AB-", photo: "", status: "Active" },
-  { id: "PAT-0012", name: "Vijay", age: 27, gender: "M", mobile: "+91 99012 34567", bloodGroup: "O+", photo: "", status: "Inactive" },
-  { id: "PAT-0013", name: "Divya", age: 34, gender: "F", mobile: "+91 90123 45678", bloodGroup: "A+", photo: "", status: "Active" },
-] as const;
+function getPatientFullName(p: PatientRecord): string {
+  return [p.patient_first_name, p.patient_middle_name, p.patient_last_name]
+    .filter(Boolean)
+    .join(" ");
+}
 
-// ============================================================
-// DATA - List View (diagnose, doctor fields)
-// ============================================================
-const listPatientsData = [
-  { id: "PAT-0025", name: "James wilson", age: 37, gender: "M", mobile: "+91 91234 56789", diagnose: "Cancer", diagnoseBg: "#FEF3C7", diagnoseColor: "#D97706", doctor: "Dr. sarah Johnson", doctorId: "DOC-0034", doctorAvatar: "SJ", doctorColor: "#00488D", doctorBg: "#D6E3FF", status: "Active" },
-  { id: "PAT-0002", name: "Madhu", age: 33, gender: "F", mobile: "+91 93456 78901", diagnose: "Diabetics", diagnoseBg: "#D1FAE5", diagnoseColor: "#059669", doctor: "Dr. William", doctorId: "DOC-0035", doctorAvatar: "W", doctorColor: "#00488D", doctorBg: "#D6E3FF", status: "Inactive" },
-  { id: "PAT-0003", name: "James", age: 30, gender: "M", mobile: "+91 93456 78901", diagnose: "Asthma", diagnoseBg: "#FFE4E6", diagnoseColor: "#BE123C", doctor: "Dr. Wilson", doctorId: "DOC-0038", doctorAvatar: "W", doctorColor: "#00488D", doctorBg: "#D6E3FF", status: "Active" },
-  { id: "PAT-0004", name: "Ramesh", age: 30, gender: "M", mobile: "+91 91234 56789", diagnose: "Asthma", diagnoseBg: "#FFE4E6", diagnoseColor: "#BE123C", doctor: "Dr. Baskar", doctorId: "DOC-0039", doctorAvatar: "B", doctorColor: "#00488D", doctorBg: "#D6E3FF", status: "Inactive" },
-  { id: "PAT-0005", name: "Priyanka", age: 30, gender: "M", mobile: "+91 92345 67890", diagnose: "Cancer", diagnoseBg: "#FEF3C7", diagnoseColor: "#D97706", doctor: "Dr. Ramesh", doctorId: "DOC-0040", doctorAvatar: "R", doctorColor: "#00488D", doctorBg: "#D6E3FF", status: "Active" },
-  { id: "PAT-0006", name: "Baskar", age: 30, gender: "M", mobile: "+91 93456 78901", diagnose: "Cancer", diagnoseBg: "#FEF3C7", diagnoseColor: "#D97706", doctor: "Dr. James wilson", doctorId: "DOC-0041", doctorAvatar: "JW", doctorColor: "#00488D", doctorBg: "#D6E3FF", status: "Active" },
-  { id: "PAT-0007", name: "Kavitha", age: 28, gender: "F", mobile: "+91 98765 43210", diagnose: "Cancer", diagnoseBg: "#FEF3C7", diagnoseColor: "#D97706", doctor: "Dr. Ramesh", doctorId: "DOC-0040", doctorAvatar: "R", doctorColor: "#00488D", doctorBg: "#D6E3FF", status: "Inactive" },
-] as const;
+function getPatientStatus(p: PatientRecord): "Active" | "Inactive" {
+  return p.patient_active === "Active" ? "Active" : "Inactive";
+}
+
+// Grid view needs: id, name, age, gender, mobile, bloodGroup, photo, status —
+// all real patient_bio_data columns.
+function mapToGridPatient(p: PatientRecord) {
+  return {
+    id: p.patient_id,
+    name: getPatientFullName(p),
+    age: p.patient_age ?? "—",
+    gender: p.patient_gender ?? "—",
+    mobile: p.patient_primary_mobile ?? "—",
+    bloodGroup: p.patient_blood_group ?? "—",
+    photo: p.patient_photo_url ?? "",
+    status: getPatientStatus(p),
+  };
+}
+
+// List view additionally shows diagnose + assigned doctor, but GET /patients
+// doesn't join patient_history/appointment_history today, so that data isn't
+// available yet — shown as a clear placeholder instead of guessing.
+function mapToListPatient(p: PatientRecord) {
+  return {
+    id: p.patient_id,
+    name: getPatientFullName(p),
+    age: p.patient_age ?? "—",
+    gender: p.patient_gender ?? "—",
+    mobile: p.patient_primary_mobile ?? "—",
+    diagnose: "Not recorded",
+    diagnoseBg: "#F3F4F6",
+    diagnoseColor: "#6B7280",
+    doctor: "Unassigned",
+    doctorId: "—",
+    doctorAvatar: "?",
+    doctorColor: "#6B7280",
+    doctorBg: "#F3F4F6",
+    status: getPatientStatus(p),
+  };
+}
 
 // ============================================================
 // SHARED SUB-COMPONENTS (used by both list & grid views)
@@ -216,7 +210,39 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
 // ============================================================
 export default function PatientsManagement() {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
+
+  // Real patients fetched from the backend. No dummy fallback — an
+  // empty/failed fetch just shows an empty state.
+  const [realPatients, setRealPatients] = useState<PatientRecord[] | null>(null);
+  const [isPatientsLoading, setIsPatientsLoading] = useState(true);
+
+  useEffect(() => {
+    patientApi
+      .getAll()
+      .then((res) => {
+        const patients = res.data?.data?.patients || [];
+        setRealPatients(patients);
+        if (patients.length === 0) {
+          toast({
+            title: "No patient records found",
+            description: "The patients API returned no records.",
+          });
+        }
+      })
+      .catch((err) => {
+        console.error("[Patients Page] Error:", err);
+        toast({
+          title: "Failed to load patients",
+          description: "Couldn't reach the patients API.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => {
+        setIsPatientsLoading(false);
+      });
+  }, []);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -240,7 +266,7 @@ export default function PatientsManagement() {
 
   // Navigation helpers
   const handleAddDoctor = () => {
-    navigate('/add-doctor');
+    navigate('/patients/add');
   };
 
   const handleViewToggle = (mode: "list" | "grid") => {
@@ -270,7 +296,7 @@ export default function PatientsManagement() {
       label: "Patient ID",
       type: "combobox",
       placeholder: "Search ID",
-      options: listPatientsData.map((p) => ({ label: p.id, value: p.id })),
+      options: (realPatients ?? []).map((p) => ({ label: p.patient_id, value: p.patient_id })),
     },
     { id: "diagnose", label: "Diagnosis", type: "text", placeholder: "Search diagnosis" },
     { id: "doctor", label: "Assigned Doctor", type: "text", placeholder: "Search doctor" },
@@ -288,7 +314,7 @@ export default function PatientsManagement() {
       label: "Patient ID",
       type: "combobox",
       placeholder: "Search ID",
-      options: gridPatientsData.map((p) => ({ label: p.id, value: p.id })),
+      options: (realPatients ?? []).map((p) => ({ label: p.patient_id, value: p.patient_id })),
     },
     { id: "bloodGroup", label: "Blood Group", type: "text", placeholder: "Search blood group" },
     { id: "status", label: "Status", type: "multiselect", options: [
@@ -308,9 +334,11 @@ export default function PatientsManagement() {
   );
 
   const filteredData = useMemo(() => {
-    const rawData: Record<string, string | number>[] = viewMode === "grid"
-      ? [...gridPatientsData] as unknown as Record<string, string | number>[]
-      : [...listPatientsData] as unknown as Record<string, string | number>[];
+    const rawData: Record<string, string | number>[] = !realPatients
+      ? []
+      : viewMode === "grid"
+        ? (realPatients.map(mapToGridPatient) as unknown as Record<string, string | number>[])
+        : (realPatients.map(mapToListPatient) as unknown as Record<string, string | number>[]);
     let result = rawData;
 
     if (searchQuery) {
@@ -326,7 +354,7 @@ export default function PatientsManagement() {
     result = filterDataByValues(result, appliedValues);
 
     return result;
-  }, [searchQuery, searchableFields, appliedValues, viewMode]);
+  }, [searchQuery, searchableFields, appliedValues, viewMode, realPatients]);
 
   // ---- SORTING (list only) ----
   const handleSort = (field: string) => {
@@ -521,7 +549,12 @@ export default function PatientsManagement() {
             {/* ================================================================ */}
             {/* BODY: LIST VIEW (sortable table with diagnose/doctor columns)   */}
             {/* ================================================================ */}
-            {viewMode === "list" ? (
+            {isPatientsLoading ? (
+              <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
+                <Loader2 size={24} className="animate-spin text-[#00488D]" />
+                Loading patients...
+              </div>
+            ) : viewMode === "list" ? (
               <div className="overflow-x-auto flex-1">
                 <table className="w-full min-w-[800px]">
                   <thead className="hms-columnHeading-style">
