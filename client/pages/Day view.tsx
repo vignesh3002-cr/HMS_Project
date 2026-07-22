@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { Plus } from "lucide-react";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
 import { useToast } from "@/hooks/use-toast";
@@ -342,59 +341,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
 
-  const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>(initialScheduleRows);
-  const [isAddSlotOpen, setIsAddSlotOpen] = useState(false);
-  const [selectedSlot, setSelectedSlot] = useState<{ rowIdx: number; colIdx: number } | null>(null);
-
-  const handleAddSlot = () => {
-    if (selectedSlot) {
-      setScheduleRows((prev) =>
-        prev.map((row, rowIdx) =>
-          rowIdx !== selectedSlot.rowIdx
-            ? row
-            : {
-                ...row,
-                slots: row.slots.map((cell, colIdx) =>
-                  colIdx !== selectedSlot.colIdx
-                    ? cell
-                    : { count: 0, label: "Available", fill: 0, dark: false },
-                ),
-              },
-        ),
-      );
-    }
-    setIsAddSlotOpen(false);
-    setSelectedSlot(null);
-  };
-
-  const handleCancelAddSlot = () => {
-    setIsAddSlotOpen(false);
-    setSelectedSlot(null);
-  };
-
-  const [isCancelSlotOpen, setIsCancelSlotOpen] = useState(false);
-
-  const handleConfirmCancelSlot = () => {
-    if (selectedSlot) {
-      setScheduleRows((prev) =>
-        prev.map((row, rowIdx) =>
-          rowIdx !== selectedSlot.rowIdx
-            ? row
-            : {
-                ...row,
-                slots: row.slots.map((cell, colIdx) => (colIdx !== selectedSlot.colIdx ? cell : EMPTY)),
-              },
-        ),
-      );
-    }
-    setIsCancelSlotOpen(false);
-    setSelectedSlot(null);
-  };
-
-  const handleBackFromCancelSlot = () => {
-    setIsCancelSlotOpen(false);
-    setSelectedSlot(null);
-  };
+  const [scheduleRows] = useState<ScheduleRow[]>(initialScheduleRows);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -684,24 +631,9 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                       } ${isDoctorDimmed(doctors[i].name) ? "opacity-30" : ""}`}
                     >
                       {cell ? (
-                        <AppointmentCard
-                          cell={cell}
-                          onCancel={
-                            cell.count === 0
-                              ? () => {
-                                  setSelectedSlot({ rowIdx, colIdx: i });
-                                  setIsCancelSlotOpen(true);
-                                }
-                              : undefined
-                          }
-                        />
+                        <AppointmentCard cell={cell} />
                       ) : (
-                        <EmptySlot
-                          onClick={() => {
-                            setSelectedSlot({ rowIdx, colIdx: i });
-                            setIsAddSlotOpen(true);
-                          }}
-                        />
+                        <EmptySlot />
                       )}
                     </div>
                   ))}
@@ -714,66 +646,6 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           </div>
         </main>
       </div>
-
-      <Dialog
-        open={isAddSlotOpen}
-        onOpenChange={(open) => {
-          setIsAddSlotOpen(open);
-          if (!open) setSelectedSlot(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-[360px]">
-          <DialogHeader>
-            <DialogTitle>Add Slot</DialogTitle>
-          </DialogHeader>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleAddSlot}
-              className="flex-1 rounded-lg bg-[#004785] px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#003a6b]"
-            >
-              Add Slot
-            </button>
-            <button
-              type="button"
-              onClick={handleCancelAddSlot}
-              className="flex-1 rounded-lg border border-[#E5E7EB] px-4 py-2 text-xs font-semibold text-[#374151] transition-colors hover:bg-[#F2F4F6]"
-            >
-              Cancel
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={isCancelSlotOpen}
-        onOpenChange={(open) => {
-          setIsCancelSlotOpen(open);
-          if (!open) setSelectedSlot(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-[360px]">
-          <DialogHeader>
-            <DialogTitle className="text-black">Cancel Slot</DialogTitle>
-          </DialogHeader>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleConfirmCancelSlot}
-              className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
-            >
-              Cancel Slot
-            </button>
-            <button
-              type="button"
-              onClick={handleBackFromCancelSlot}
-              className="flex-1 rounded-lg border border-[#E5E7EB] px-4 py-2 text-xs font-semibold text-[#374151] transition-colors hover:bg-[#F2F4F6]"
-            >
-              Back
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

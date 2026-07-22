@@ -223,20 +223,18 @@ export default function DoctorProfile() {
   return (
     <div className="min-h-screen bg-[#f7f9fc] text-[#172033] font-[Inter,Arial,sans-serif]">
 
-      {/* HEADER */}
-      <header className="h-14 bg-white border-b border-[#edf0f4] flex items-center px-[18px]">
-        <button
-          onClick={() => window.history.back()}
-          className="flex items-center gap-2 border-0 bg-transparent text-[#343943] text-sm cursor-pointer"
-        >
-          <span className="text-[25px] leading-none">‹</span>
-          Doctors
-        </button>
-      </header>
+      
 
       <main className="w-full max-w-[1045px] mx-auto p-4">
 
         {/* DOCTOR PROFILE */}
+         <button
+          onClick={() => window.history.back()}
+          className="flex items-center gap-2 border-0 bg-transparent text-[#343943] text-sm cursor-pointer"
+        >
+          <span className="text-[25px] leading-none">‹</span>
+          
+        </button>
         <section className="bg-white border border-[#edf0f4] rounded-[10px] p-4 flex gap-[18px] mb-4 max-[700px]:flex-col">
 
           <div className="w-32 h-32 rounded-lg overflow-hidden shrink-0 bg-gray-200 max-[700px]:w-[105px] max-[700px]:h-[105px]">
@@ -662,14 +660,7 @@ export default function DoctorProfile() {
             <section className="bg-white border border-[#edf0f4] rounded-lg overflow-hidden">
 
               {[
-                {
-                  name: "John Doe",
-                  time: "2 days ago",
-                  image: "https://i.pravatar.cc/100?img=12",
-                  rating: "★★★★★",
-                  text: `"Dr was extremely professional and thorough during my cardiology consultation and explained the diagnosis in a way that was easy to understand and took the time to answer all my questions."`,
-                  tags: ["Consultation", "Follow-up"],
-                },
+              
                 {
                   name: "Sarah Jenkins",
                   time: "1 week ago",
