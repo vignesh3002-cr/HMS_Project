@@ -376,20 +376,6 @@ export default function EditPatientForm() {
                         disabled={submitting}
                       />
                     </div>
-                    <div>
-                      <label className={labelClass}>
-                        Marital status {requiredStar}
-                      </label>
-                      <FormDropdown
-                        options={["Single", "Married", "Divorced"]}
-                        value={formData.patient_marital_status}
-                        onValueChange={(val) => setField("patient_marital_status", val)}
-                        placeholder="Select"
-                        className={inputClass}
-                        disabled={submitting}
-                        required
-                      />
-                    </div>
                   </div>
                 </div>
 

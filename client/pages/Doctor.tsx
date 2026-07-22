@@ -511,6 +511,7 @@ export default function Doctor() {
                 rowKey={(r: any, i: number) => String(r.id) + i}
               />
             ) : (
+              <>
               
               <div className={`flex-1 p-5 hide-scrollbar max-h-[450px] ${infiniteScroll ? " overflow-y-auto max-h-[500px]" : ""}`}>
                 {displayCards.length > 0 ? (
