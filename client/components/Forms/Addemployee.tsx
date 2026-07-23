@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, ChangeEvent, FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, UserRound, Loader2, Plus, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
@@ -11,21 +12,35 @@ import { departmentApi, Department } from "@/api/department.api";
 
 // ---------------------------------------------------------------------------
 // Role configuration
-// Each role gets its own preset options for department / designation /
-// specialization / qualification, and its own label for the "license" field.
-// Add a new role here and the whole form adapts automatically.
+// Role options are fetched from the employee API (distinct role_type values
+// from the employee records, excluding DOCTOR). Each known role has preset
+// options for department / designation / specialization / qualification.
 // ---------------------------------------------------------------------------
-type RoleType = "Doctor" | "Nurse" | "Pharmacist" | "Staff" | "";
+type RoleType = string;
 
 interface RoleConfig {
   designations: string[];
   specializations: string[];
   qualifications: string[];
-  licenseLabel: string; // label shown for the license/registration number field
+  licenseLabel: string;
   licensePlaceholder: string;
+  // Explicit flag instead of inferring from empty specializations/qualifications —
+  // makes it obvious which roles get those fields without guessing from array length.
+  isMedical: boolean;
 }
 
-const ROLE_CONFIG: Record<Exclude<RoleType, "">, RoleConfig> = {
+function toDisplayRole(roleType: string): string {
+  return roleType
+    .split("_")
+    .map((word) => word.charAt(0) + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function toBackendRole(displayRole: string): string {
+  return displayRole.toUpperCase().replace(/ /g, "_");
+}
+
+const ROLE_CONFIG: Record<string, RoleConfig> = {
   Doctor: {
     designations: [
       "Consultant",
@@ -52,6 +67,7 @@ const ROLE_CONFIG: Record<Exclude<RoleType, "">, RoleConfig> = {
     qualifications: ["MBBS", "MD", "MS", "DM", "MCh", "BDS", "MDS"],
     licenseLabel: "Doctor License No",
     licensePlaceholder: "Enter Doctor License Number",
+    isMedical: true,
   },
   Nurse: {
     designations: [
@@ -79,6 +95,7 @@ const ROLE_CONFIG: Record<Exclude<RoleType, "">, RoleConfig> = {
     ],
     licenseLabel: "Nurse Registration No",
     licensePlaceholder: "Enter Nursing Council Registration Number",
+    isMedical: true,
   },
   Pharmacist: {
     designations: [
@@ -96,8 +113,42 @@ const ROLE_CONFIG: Record<Exclude<RoleType, "">, RoleConfig> = {
     qualifications: ["D.Pharm", "B.Pharm", "M.Pharm", "Pharm.D"],
     licenseLabel: "Pharmacist License No",
     licensePlaceholder: "Enter Pharmacist License Number",
+    isMedical: true,
   },
-  // Non-medical staff — no specialization/qualification/license fields.
+  "Lab Technician": {
+    designations: [
+      "Lab Technician",
+      "Senior Lab Technician",
+      "Lab Supervisor",
+      "Lab Manager",
+    ],
+    specializations: [
+      "Clinical Lab",
+      "Microbiology",
+      "Pathology",
+      "Hematology",
+      "Biochemistry",
+    ],
+    qualifications: ["B.Sc MLT", "M.Sc MLT", "DMLT", "PhD"],
+    licenseLabel: "Lab License No",
+    licensePlaceholder: "Enter Lab License Number",
+    isMedical: true,
+  },
+  // Non-medical roles — no specialization/qualification/license fields, so
+  // those grid cells are skipped entirely (see isMedicalRole) instead of
+  // rendering as blank filler boxes.
+  Receptionist: {
+    designations: [
+      "Receptionist",
+      "Senior Receptionist",
+      "Front Desk Executive",
+    ],
+    specializations: [],
+    qualifications: [],
+    licenseLabel: "License No",
+    licensePlaceholder: "",
+    isMedical: false,
+  },
   Staff: {
     designations: [
       "Receptionist",
@@ -113,10 +164,14 @@ const ROLE_CONFIG: Record<Exclude<RoleType, "">, RoleConfig> = {
     qualifications: [],
     licenseLabel: "License No",
     licensePlaceholder: "",
+    isMedical: false,
   },
 };
 
-const ROLE_OPTIONS: Exclude<RoleType, "">[] = ["Doctor", "Nurse", "Pharmacist", "Staff"];
+// All role types the backend accepts (from employee.types.ts). These serve
+// as the authoritative list — the employee API fetch below will merge any
+// extras it finds.
+const VALID_BACKEND_ROLES = ["DOCTOR", "NURSE", "LAB_TECHNICIAN", "PHARMACIST", "RECEPTIONIST", "STAFF"];
 
 // Sentinel departmentId value meaning "not in the list — user is typing a new one".
 const OTHER_DEPARTMENT_VALUE = "__OTHER__";
@@ -241,12 +296,31 @@ export default function AddEmployee() {
   // State initialized with the interface type
   const [formData, setFormData] = useState<EmployeeFormData>(emptyFormData);
 
-  // Read role from query param and pre-select on mount
+  // Role options: start with all backend-accepted roles, then merge any
+  // extras found in the employee API (so a role *can* exist in the DB and
+  // appear here without any frontend code change).
+  const [roleOptions, setRoleOptions] = useState<string[]>(() =>
+    VALID_BACKEND_ROLES.map(toDisplayRole),
+  );
   useEffect(() => {
-    const roleParam = searchParams.get("role") as RoleType;
-    if (roleParam && ROLE_OPTIONS.includes(roleParam)) {
-      setFormData((prev) => ({ ...prev, roleType: roleParam }));
-    }
+    employeeApi.getAll().then((res) => {
+      const employees = res.data?.data?.employees || [];
+      const apiRoles = [...new Set(employees
+        .map((e) => e.user_table?.role_type)
+        .filter((r): r is string => !!r)
+      )];
+      const allRoles = [...new Set([...VALID_BACKEND_ROLES, ...apiRoles])].map(toDisplayRole);
+      setRoleOptions(allRoles);
+      const roleParam = searchParams.get("role");
+      if (roleParam) {
+        const displayRole = toDisplayRole(roleParam);
+        if (allRoles.includes(displayRole)) {
+          setFormData((prev) => ({ ...prev, roleType: displayRole }));
+        }
+      }
+    }).catch(() => {
+      // API failed — keep the VALID_BACKEND_ROLES list as-is
+    });
   }, [searchParams]);
 
   // Re-typed password — must match before submit is allowed. Username has
@@ -309,10 +383,11 @@ export default function AddEmployee() {
   // empty option list and are disabled with a "select role first" hint.
   const roleConfig = formData.roleType ? ROLE_CONFIG[formData.roleType] : null;
 
-  // "Staff" is a non-medical role — it has no specialization/qualification/
-  // license fields. Everything else (including no role picked yet, so the
-  // form still shows its normal "select a role first" placeholders) does.
-  const isMedicalRole = formData.roleType !== "Staff";
+  // Driven by the role's own config instead of hardcoding a role name, so any
+  // non-medical role (Staff, Receptionist, ...) skips specialization/
+  // qualification/license the same way. No role picked yet still defaults to
+  // showing those fields (disabled, "select a role first" placeholder).
+  const isMedicalRole = roleConfig ? roleConfig.isMedical : true;
 
   // Divorced employees may not have (or want to list) an emergency contact.
   const emergencyOptional = formData.maritalStatus === "Divorced";
@@ -494,7 +569,7 @@ export default function AddEmployee() {
       const response = await employeeApi.create({
         username: formData.username,
         password: formData.password,
-        role_type: formData.roleType.toUpperCase() as "DOCTOR" | "NURSE" | "PHARMACIST" | "STAFF",
+        role_type: toBackendRole(formData.roleType) as "DOCTOR" | "NURSE" | "PHARMACIST" | "LAB_TECHNICIAN" | "RECEPTIONIST" | "STAFF",
         first_name: formData.firstName,
         middle_name: formData.middleName || undefined,
         last_name: formData.lastName,
@@ -590,7 +665,7 @@ export default function AddEmployee() {
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6">
+          <motion.div layout className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6">
             <div className="lg:col-span-3 flex flex-col sm:flex-row items-center sm:items-start gap-14 pb-2">
               <AvatarUpload
                 value={formData.photoUrl}
@@ -608,11 +683,11 @@ export default function AddEmployee() {
                 <FormDropdown
                   name="role"
                   className={inputClass}
-                  options={ROLE_OPTIONS}
+                  options={roleOptions}
                   value={formData.roleType}
                   onValueChange={handleRoleChange}
-                  placeholder="Select Role (Doctor / Nurse / Pharmacist)"
-                  disabled={submitting}
+                  placeholder={roleOptions.length ? "Select Role" : "Loading roles..."}
+                  disabled={submitting || roleOptions.length === 0}
                 />
               </div>
             </div>
@@ -832,81 +907,99 @@ export default function AddEmployee() {
                 disabled={submitting || !roleConfig}
               />
             </div>
-            {isMedicalRole ? (
-              <div>
-                <label className={labelClass}>
-                  {formData.roleType
-                    ? `${formData.roleType} Specialization`
-                    : "Specialization"}{" "}
-                  {requiredStar}
-                </label>
-                <FormDropdown
-                  name="specialization"
-                  className={roleConfig ? inputClass : disabledInputClass}
-                  options={roleConfig ? roleConfig.specializations : []}
-                  value={formData.specialization}
-                  onValueChange={(val) =>
-                    setFormData((prev) => ({ ...prev, specialization: val }))
-                  }
-                  placeholder={
-                    roleConfig ? "Select Specialization" : "Select a role first"
-                  }
-                  disabled={submitting || !roleConfig}
-                />
-              </div>
-            ) : (
-              <div />
-            )}
+<AnimatePresence>
+               {isMedicalRole && (
+                 <motion.div
+                   layout
+                   initial={{ opacity: 0 }}
+                   animate={{ opacity: 1 }}
+                   exit={{ opacity: 0 }}
+                   transition={{ duration: 0.25, ease: "easeInOut" }}
+                 >
+                   <label className={labelClass}>
+                     {formData.roleType
+                       ? `${formData.roleType} Specialization`
+                       : "Specialization"}{" "}
+                     {requiredStar}
+                   </label>
+                   <FormDropdown
+                     name="specialization"
+                     className={roleConfig ? inputClass : disabledInputClass}
+                     options={roleConfig ? roleConfig.specializations : []}
+                     value={formData.specialization}
+                     onValueChange={(val) =>
+                       setFormData((prev) => ({ ...prev, specialization: val }))
+                     }
+                     placeholder={
+                       roleConfig ? "Select Specialization" : "Select a role first"
+                     }
+                     disabled={submitting || !roleConfig}
+                   />
+                 </motion.div>
+               )}
+             </AnimatePresence>
 
             {/* Qualification, License/Registration No, Joining Date */}
-            {isMedicalRole ? (
-              <div>
-                <label className={labelClass}>
-                  {formData.roleType
-                    ? `${formData.roleType} Qualification`
-                    : "Qualification"}{" "}
-                  {requiredStar}
-                </label>
-                <FormDropdown
-                  name="qualification"
-                  className={roleConfig ? inputClass : disabledInputClass}
-                  options={roleConfig ? roleConfig.qualifications : []}
-                  value={formData.qualification}
-                  onValueChange={(val) =>
-                    setFormData((prev) => ({ ...prev, qualification: val }))
-                  }
-                  placeholder={
-                    roleConfig ? "Select Qualification" : "Select a role first"
-                  }
-                  disabled={submitting || !roleConfig}
-                />
-              </div>
-            ) : (
-              <div />
-            )}
-            {isMedicalRole ? (
-              <div>
-                <label className={labelClass}>
-                  {roleConfig ? roleConfig.licenseLabel : "License No"} {requiredStar}
-                </label>
-                <input
-                  type="text"
-                  name="docLicenseNo"
-                  maxLength={50}
-                  placeholder={
-                    roleConfig
-                      ? roleConfig.licensePlaceholder
-                      : "Select a role first"
-                  }
-                  className={roleConfig ? inputClass : disabledInputClass}
-                  value={formData.docLicenseNo}
-                  onChange={handleChange}
-                  disabled={submitting || !roleConfig}
-                />
-              </div>
-            ) : (
-              <div />
-            )}
+<AnimatePresence>
+               {isMedicalRole && (
+                 <motion.div
+                   layout
+                   initial={{ opacity: 0 }}
+                   animate={{ opacity: 1 }}
+                   exit={{ opacity: 0 }}
+                   transition={{ duration: 0.25, ease: "easeInOut" }}
+                 >
+                   <label className={labelClass}>
+                     {formData.roleType
+                       ? `${formData.roleType} Qualification`
+                       : "Qualification"}{" "}
+                     {requiredStar}
+                   </label>
+                   <FormDropdown
+                     name="qualification"
+                     className={roleConfig ? inputClass : disabledInputClass}
+                     options={roleConfig ? roleConfig.qualifications : []}
+                     value={formData.qualification}
+                     onValueChange={(val) =>
+                       setFormData((prev) => ({ ...prev, qualification: val }))
+                     }
+                     placeholder={
+                       roleConfig ? "Select Qualification" : "Select a role first"
+                     }
+                     disabled={submitting || !roleConfig}
+                   />
+                 </motion.div>
+               )}
+             </AnimatePresence>
+<AnimatePresence>
+               {isMedicalRole && (
+                 <motion.div
+                   layout
+                   initial={{ opacity: 0 }}
+                   animate={{ opacity: 1 }}
+                   exit={{ opacity: 0 }}
+                   transition={{ duration: 0.25, ease: "easeInOut" }}
+                 >
+                   <label className={labelClass}>
+                     {roleConfig ? roleConfig.licenseLabel : "License No"} {requiredStar}
+                   </label>
+                   <input
+                     type="text"
+                     name="docLicenseNo"
+                     maxLength={50}
+                     placeholder={
+                       roleConfig
+                         ? roleConfig.licensePlaceholder
+                         : "Select a role first"
+                     }
+                     className={roleConfig ? inputClass : disabledInputClass}
+                     value={formData.docLicenseNo}
+                     onChange={handleChange}
+                     disabled={submitting || !roleConfig}
+                   />
+                 </motion.div>
+               )}
+             </AnimatePresence>
             <div>
               <label className={labelClass}>Joining Date {requiredStar}</label>
               <input
@@ -953,14 +1046,21 @@ export default function AddEmployee() {
                 />
               )}
             </div>
-            <div />
-            <div />
 
             {/* Doctor-only — schedule / time slots. Any number of slots per day is
                 allowed (e.g. a morning slot at one branch, an evening slot at another).
                 A day with no slot simply has no doctor_schedule row (inactive). */}
+            <AnimatePresence>
             {formData.roleType === "Doctor" && (
-              <div className="lg:col-span-3">
+              <motion.div
+                layout
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.3, ease: "easeInOut" }}
+                style={{ overflow: "hidden" }}
+                className="lg:col-span-3"
+              >
                 <label className={labelClass}>Schedule / Time Slots</label>
 
                 <div className="mb-4 max-w-xs">
@@ -1075,8 +1175,9 @@ export default function AddEmployee() {
                 >
                   <Plus className="w-4 h-4" /> Add Time Slot
                 </button>
-              </div>
+              </motion.div>
             )}
+            </AnimatePresence>
 
             {/* Emergency Contact Name, Relation, Number — optional when Divorced */}
             <div>
@@ -1210,7 +1311,7 @@ export default function AddEmployee() {
                 disabled={submitting}
               />
             </div>
-          </div>
+          </motion.div>
 
           {/* Actions Footer */}
           <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-4 mt-10 pt-6 border-t border-gray-100">

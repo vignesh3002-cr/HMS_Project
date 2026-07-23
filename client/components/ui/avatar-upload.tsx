@@ -10,6 +10,7 @@ export interface AvatarUploadProps {
   size?: number;
   className?: string;
   maxSizeMB?: number;
+  readOnly?: boolean;
 }
 
 // Uploaded photos are resized/compressed client-side before being turned
@@ -61,6 +62,7 @@ export function AvatarUpload({
   size = 128,
   className,
   maxSizeMB = DEFAULT_MAX_SIZE_MB,
+  readOnly,
 }: AvatarUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -98,41 +100,48 @@ export function AvatarUpload({
 
   return (
     <div className={cn("flex flex-col items-center text-center", className)}>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handleFileChange}
-      />
+      {!readOnly && (
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+      )}
 
       <div
-        onClick={() => inputRef.current?.click()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            inputRef.current?.click();
-          }
-        }}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setIsDragging(true);
-        }}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={handleDrop}
-        role="button"
-        tabIndex={0}
-        aria-label={value ? "Change photo" : "Upload photo"}
+        {...(!readOnly
+          ? {
+              onClick: () => inputRef.current?.click(),
+              onKeyDown: (e: React.KeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  inputRef.current?.click();
+                }
+              },
+              onDragOver: (e: React.DragEvent) => {
+                e.preventDefault();
+                setIsDragging(true);
+              },
+              onDragLeave: () => setIsDragging(false),
+              onDrop: handleDrop,
+              role: "button" as const,
+              tabIndex: 0,
+              "aria-label": value ? "Change photo" : "Upload photo",
+            }
+          : {})}
         style={{ width: size, height: size }}
         className={cn(
-          "relative group cursor-pointer rounded-full border-4 border-white shadow-md overflow-hidden bg-[#D6E3FF] transition-all",
-          isDragging && "ring-2 ring-[#00488D] ring-offset-2",
+          "relative rounded-full border-4 border-white shadow-md overflow-hidden bg-[#D6E3FF] transition-all",
+          readOnly ? "cursor-default" : "group cursor-pointer",
+          !readOnly && isDragging && "ring-2 ring-[#00488D] ring-offset-2",
         )}
       >
         {value ? (
           <img
             src={value}
-            alt="Uploaded preview"
+            alt="Patient photo"
             className="w-full h-full object-cover"
           />
         ) : (
@@ -141,18 +150,20 @@ export function AvatarUpload({
           </div>
         )}
 
-        <div className="absolute inset-0 bg-[#00488D]/60 flex flex-col items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-          <UploadCloud className="w-6 h-6 text-white" />
-          <span className="text-white text-[10px] font-bold uppercase tracking-widest">
-            {value ? "Change" : "Upload"}
-          </span>
-        </div>
+        {!readOnly && (
+          <div className="absolute inset-0 bg-[#00488D]/60 flex flex-col items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+            <UploadCloud className="w-6 h-6 text-white" />
+            <span className="text-white text-[10px] font-bold uppercase tracking-widest">
+              {value ? "Change" : "Upload"}
+            </span>
+          </div>
+        )}
       </div>
 
       {label && <p className="mt-3 text-sm font-bold text-gray-800">{label}</p>}
       {hint && <p className="text-xs text-gray-400 mt-0.5">{hint}</p>}
-      <p className="text-xs text-gray-400 mt-0.5">{sizeHint}</p>
-      {error && <p className="text-xs text-red-500 mt-0.5">{error}</p>}
+      {!readOnly && <p className="text-xs text-gray-400 mt-0.5">{sizeHint}</p>}
+      {!readOnly && error && <p className="text-xs text-red-500 mt-0.5">{error}</p>}
     </div>
   );
 }

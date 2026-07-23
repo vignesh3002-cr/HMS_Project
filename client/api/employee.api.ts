@@ -3,7 +3,7 @@ import API from "./axios";
 export interface CreateEmployeePayload {
   username: string;
   password: string;
-  role_type: "DOCTOR" | "NURSE" | "PHARMACIST" | "STAFF";
+  role_type: "DOCTOR" | "NURSE" | "PHARMACIST" | "LAB_TECHNICIAN" | "RECEPTIONIST" | "STAFF";
   first_name: string;
   middle_name?: string;
   last_name: string;
@@ -101,7 +101,7 @@ export interface CreateEmployeeResponse {
 }
 
 export interface GetEmployeesParams {
-  role_type?: "DOCTOR" | "NURSE" | "PHARMACIST" | "STAFF";
+  role_type?: "DOCTOR" | "NURSE" | "PHARMACIST" | "LAB_TECHNICIAN" | "RECEPTIONIST" | "STAFF";
   branch_id?: string;
   department_id?: string;
   status?: boolean;

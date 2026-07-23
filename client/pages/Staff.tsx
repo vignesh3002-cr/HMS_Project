@@ -123,7 +123,7 @@ function classifyStaffDesignation(designation: string | null | undefined): "admi
 
 function getStaffCategory(emp: EmployeeRecord): "medical" | "administrative" | "support" {
   const roleType = emp.user_table?.role_type || "STAFF";
-  if (roleType === "NURSE" || roleType === "PHARMACIST") return "medical";
+  if (roleType === "NURSE" || roleType === "PHARMACIST" || roleType === "LAB_TECHNICIAN") return "medical";
   if (roleType === "STAFF") return classifyStaffDesignation(emp.designation);
   return "medical";
 }
@@ -136,7 +136,7 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
   const branchName = formatBranch(emp.branch);
   const deptName = emp.department_master?.department_name || emp.specialization || "Unassigned";
 
-  if (roleType === "NURSE" || roleType === "PHARMACIST") {
+  if (roleType === "NURSE" || roleType === "PHARMACIST" || roleType === "LAB_TECHNICIAN") {
     return {
       initials: getInitials(fullName),
       name: fullName,
@@ -632,7 +632,7 @@ export default function Staff() {
                     placeholder="Search..."
                     value={searchQuery}
                     onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-                    className="pl-8 pr-3 py-[5px] bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[224px] rounded-[4px] focus:ring-1 focus:ring-[#00488D]/30 transition-shadow duration-150"
+                    className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[250px]"
                   />
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
                 </div>
