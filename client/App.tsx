@@ -24,6 +24,9 @@ import ProtectedRoute from "./routes/ProtectedRoute";
 import Doctor from "./pages/Doctor";
 import Staff from "./pages/Staff";
 import Scheduled from "./pages/Scheduled";
+import DayScheduled from "./pages/Day Scheduled";
+import DayView from "./pages/Day view";
+import WeekView from "./pages/Week view";
 
 
 const queryClient = new QueryClient({
@@ -42,7 +45,11 @@ const protectedRoutes = [
   { path: "/patients", element: <Patients /> },
   { path: "/doctor", element: <Doctor /> },
   { path: "/doctor/view/:id", element: <Scheduled /> },
+  { path: "/doctor/view", element: <Scheduled /> },
+  { path: "/doctor/day-view", element: <DayScheduled /> },
   { path: "/appointments", element: <Appointments /> },
+  { path: "/appointments/day-view", element: <DayView /> },
+  { path: "/appointments/week-view", element: <WeekView /> },
   { path: "/departments", element: <Departments /> },
   
 

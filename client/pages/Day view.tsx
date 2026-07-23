@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
 import { useToast } from "@/hooks/use-toast";
@@ -120,7 +120,13 @@ const doctors: Doctor[] = [
   { name: "Davis", id: 7, spec: "PED" },
   { name: "Evans", id: 8, spec: "URO" },
   { name: "Foster", id: 9, spec: "RADL" },
-  
+  { name: "Kim", id: 10, spec: "CARD" },
+  { name: "Nguyen", id: 11, spec: "PULM" },
+  { name: "Patel", id: 12, spec: "ENDO" },
+  { name: "Brooks", id: 13, spec: "DERM" },
+  { name: "Reed", id: 14, spec: "OPHT" },
+  { name: "Turner", id: 15, spec: "PSYC" },
+
 ];
 
 function slot(count: number, label: string, fill: number, dark = false): AppointmentSlot {
@@ -143,6 +149,12 @@ const initialScheduleRows: ScheduleRow[] = [
       slot(2, "2 Patients", 66, false),
       slot(3, "3 Patients", 100, false),
        slot(2, "2 Patients", 66, false),
+      slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
+      slot(3, "3 Patients", 100, false),
+      slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
     ],
   },
   {
@@ -154,9 +166,15 @@ const initialScheduleRows: ScheduleRow[] = [
       slot(1, "1 Patient", 33, false),
        slot(2, "2 Patients", 66, false),
       slot(2, "2 Patients", 66, false),
-      
+
       slot(3, "3 Patients", 100, false),
       slot(1, "1 Patient", 33, true),
+      slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
+      slot(3, "3 Patients", 100, false),
+      slot(2, "2 Patients", 66, true),
+      slot(1, "1 Patient", 33, false),
       slot(2, "2 Patients", 66, false),
     ],
   },
@@ -172,11 +190,23 @@ const initialScheduleRows: ScheduleRow[] = [
       slot(3, "3 Patients", 100, false),
       slot(1, "1 Patient", 33, true),
        slot(2, "2 Patients", 66, false),
+      slot(2, "2 Patients", 66, false),
+      slot(3, "3 Patients", 100, false),
+      slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
+      slot(2, "2 Patients", 66, true),
+      slot(1, "1 Patient", 33, false),
     ],
   },
   {
     time: "12:00 PM",
     slots: [
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
       EMPTY,
       EMPTY,
       EMPTY,
@@ -200,6 +230,12 @@ const initialScheduleRows: ScheduleRow[] = [
       slot(2, "2 Patients", 66, false),
       slot(3, "3 Patients", 100, false),
       slot(2, "2 Patients", 66, false),
+      slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
+      slot(3, "3 Patients", 100, false),
+      slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
     ],
   },
   {
@@ -214,11 +250,23 @@ const initialScheduleRows: ScheduleRow[] = [
       slot(2, "2 Patients", 66, false),
       slot(3, "3 Patients", 100, false),
       slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
+      slot(2, "2 Patients", 66, false),
+      slot(3, "3 Patients", 100, false),
+      slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
     ],
   },
   {
     time: "03:00 PM",
     slots: [
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
       EMPTY,
       EMPTY,
       EMPTY,
@@ -241,9 +289,16 @@ const initialScheduleRows: ScheduleRow[] = [
       slot(3, "3 Patients", 100, false),
       slot(2, "2 Patients", 66, true),
       slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
+      slot(2, "2 Patients", 66, false),
+      slot(3, "3 Patients", 100, false),
+      slot(1, "1 Patient", 33, true),
+      slot(2, "2 Patients", 66, false),
+      slot(1, "1 Patient", 33, false),
     ],
   },
-  
+
 ];
 
 
@@ -331,6 +386,7 @@ function mapDoctorRecord(doc: DoctorRecord, index: number): DoctorDirectoryEntry
 /* ============================= Main component ============================= */
 
 const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) => {
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
   const [toolbarSearchTerm, setToolbarSearchTerm] = useState("");
   const [selectedDoctorName, setSelectedDoctorName] = useState<string | null>(null);
@@ -342,59 +398,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
 
-  const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>(initialScheduleRows);
-  const [isAddSlotOpen, setIsAddSlotOpen] = useState(false);
-  const [selectedSlot, setSelectedSlot] = useState<{ rowIdx: number; colIdx: number } | null>(null);
-
-  const handleAddSlot = () => {
-    if (selectedSlot) {
-      setScheduleRows((prev) =>
-        prev.map((row, rowIdx) =>
-          rowIdx !== selectedSlot.rowIdx
-            ? row
-            : {
-                ...row,
-                slots: row.slots.map((cell, colIdx) =>
-                  colIdx !== selectedSlot.colIdx
-                    ? cell
-                    : { count: 0, label: "Available", fill: 0, dark: false },
-                ),
-              },
-        ),
-      );
-    }
-    setIsAddSlotOpen(false);
-    setSelectedSlot(null);
-  };
-
-  const handleCancelAddSlot = () => {
-    setIsAddSlotOpen(false);
-    setSelectedSlot(null);
-  };
-
-  const [isCancelSlotOpen, setIsCancelSlotOpen] = useState(false);
-
-  const handleConfirmCancelSlot = () => {
-    if (selectedSlot) {
-      setScheduleRows((prev) =>
-        prev.map((row, rowIdx) =>
-          rowIdx !== selectedSlot.rowIdx
-            ? row
-            : {
-                ...row,
-                slots: row.slots.map((cell, colIdx) => (colIdx !== selectedSlot.colIdx ? cell : EMPTY)),
-              },
-        ),
-      );
-    }
-    setIsCancelSlotOpen(false);
-    setSelectedSlot(null);
-  };
-
-  const handleBackFromCancelSlot = () => {
-    setIsCancelSlotOpen(false);
-    setSelectedSlot(null);
-  };
+  const [scheduleRows] = useState<ScheduleRow[]>(initialScheduleRows);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -414,7 +418,11 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   const handleViewSelect = (view: ScheduleViewType) => {
     setIsViewMenuOpen(false);
-    onViewChange?.(view);
+    if (view === "week") {
+      navigate("/appointments/week-view");
+    } else {
+      onViewChange?.(view);
+    }
   };
 
   const [realDoctorDirectory, setRealDoctorDirectory] = useState<DoctorDirectoryEntry[] | null>(null);
@@ -629,11 +637,15 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         >
           <div role="table" className="w-full min-w-[620px] md:min-w-[691px]">
             {/* Header row */}
-            <div className="border-b border-[#c3c6d7] bg-[#f2f4f6]">
-              <div role="row" className="grid min-h-[39px] grid-cols-[70px_repeat(9,minmax(65px,1fr))]">
+            <div className="border-b border-[#c3c6d7] bg-white">
+              <div
+                role="row"
+                className="grid min-h-[39px]"
+                style={{ gridTemplateColumns: `70px repeat(${doctors.length}, 90px)` }}
+              >
                 <div
                   role="columnheader"
-                  className="flex items-center justify-center border-r border-[#c3c6d7] bg-[#f2f4f6] pb-[12.75px] pl-2 pr-[9px] pt-[12.75px]"
+                  className="sticky left-0 z-10 flex items-center justify-center border-r border-[#c3c6d7] bg-white pb-[12.75px] pl-2 pr-[9px] pt-[12.75px]"
                 >
                   <span className="whitespace-nowrap text-center font-['Manrope',sans-serif] text-[9px] font-bold leading-[13.5px] text-[#515f74]">
                     {format(selectedDate, "dd-MM-yyyy")}
@@ -665,10 +677,14 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                 key={row.time}
                 className={rowIdx !== scheduleRows.length - 1 ? "border-b border-[#c3c6d7]" : ""}
               >
-                <div role="row" className="grid grid-cols-[70px_repeat(9,minmax(65px,1fr))]">
+                <div
+                  role="row"
+                  className="grid"
+                  style={{ gridTemplateColumns: `70px repeat(${doctors.length}, 90px)` }}
+                >
                   <div
                     role="rowheader"
-                    className="flex h-[60px] items-center justify-center border-r border-[#c3c6d7] bg-[rgba(242,244,246,0.5)] pb-2 pl-2 pr-[9px] pt-2"
+                    className="sticky left-0 z-10 flex h-[60px] items-center justify-center border-r border-[#c3c6d7] bg-[#f2f4f6] pb-2 pl-2 pr-[9px] pt-2"
                   >
                     <span className="whitespace-nowrap font-['Manrope',sans-serif] text-[10px] leading-[10px] text-[#515f74]">
                       {row.time}
@@ -684,24 +700,9 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                       } ${isDoctorDimmed(doctors[i].name) ? "opacity-30" : ""}`}
                     >
                       {cell ? (
-                        <AppointmentCard
-                          cell={cell}
-                          onCancel={
-                            cell.count === 0
-                              ? () => {
-                                  setSelectedSlot({ rowIdx, colIdx: i });
-                                  setIsCancelSlotOpen(true);
-                                }
-                              : undefined
-                          }
-                        />
+                        <AppointmentCard cell={cell} />
                       ) : (
-                        <EmptySlot
-                          onClick={() => {
-                            setSelectedSlot({ rowIdx, colIdx: i });
-                            setIsAddSlotOpen(true);
-                          }}
-                        />
+                        <EmptySlot />
                       )}
                     </div>
                   ))}
@@ -714,66 +715,6 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           </div>
         </main>
       </div>
-
-      <Dialog
-        open={isAddSlotOpen}
-        onOpenChange={(open) => {
-          setIsAddSlotOpen(open);
-          if (!open) setSelectedSlot(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-[360px]">
-          <DialogHeader>
-            <DialogTitle>Add Slot</DialogTitle>
-          </DialogHeader>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleAddSlot}
-              className="flex-1 rounded-lg bg-[#004785] px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#003a6b]"
-            >
-              Add Slot
-            </button>
-            <button
-              type="button"
-              onClick={handleCancelAddSlot}
-              className="flex-1 rounded-lg border border-[#E5E7EB] px-4 py-2 text-xs font-semibold text-[#374151] transition-colors hover:bg-[#F2F4F6]"
-            >
-              Cancel
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={isCancelSlotOpen}
-        onOpenChange={(open) => {
-          setIsCancelSlotOpen(open);
-          if (!open) setSelectedSlot(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-[360px]">
-          <DialogHeader>
-            <DialogTitle className="text-black">Cancel Slot</DialogTitle>
-          </DialogHeader>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleConfirmCancelSlot}
-              className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
-            >
-              Cancel Slot
-            </button>
-            <button
-              type="button"
-              onClick={handleBackFromCancelSlot}
-              className="flex-1 rounded-lg border border-[#E5E7EB] px-4 py-2 text-xs font-semibold text-[#374151] transition-colors hover:bg-[#F2F4F6]"
-            >
-              Back
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

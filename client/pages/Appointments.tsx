@@ -525,8 +525,14 @@ const AppointmentSchedule: React.FC = () => {
                         key={opt.key}
                         type="button"
                         onClick={() => {
-                          setViewType(opt.key);
                           setIsViewMenuOpen(false);
+                          if (opt.key === "day") {
+                            navigate("/appointments/day-view");
+                          } else if (opt.key === "week") {
+                            navigate("/appointments/week-view");
+                          } else {
+                            setViewType(opt.key);
+                          }
                         }}
                         className={`flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors ${
                           viewType === opt.key ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
