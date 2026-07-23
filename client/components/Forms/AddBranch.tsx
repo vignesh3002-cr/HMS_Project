@@ -17,6 +17,7 @@ interface BranchFormData {
   state: string;
   district: string;
   country: string;
+  countryId: string;
   pincode: string;
   licenseNumber: string;
   emergencyNumber: string;
@@ -43,6 +44,7 @@ const emptyFormData: BranchFormData = {
   state: "",
   district: "",
   country: "",
+  countryId: "",
   pincode: "",
   licenseNumber: "",
   emergencyNumber: "",
@@ -133,7 +135,7 @@ export default function AddBranch() {
         address: formData.address,
         district: formData.district,
         state_name: formData.state,
-        country: formData.country,
+        country_id: formData.countryId,
         area: formData.area,
         pincode: formData.pincode ? Number(formData.pincode) : undefined,
         license_number: formData.licenseNumber,
@@ -254,6 +256,9 @@ export default function AddBranch() {
                 district={formData.district}
                 onCountryChange={(country) =>
                   setFormData((prev) => ({ ...prev, country }))
+                }
+                onCountryCodeChange={(isoCode) =>
+                  setFormData((prev) => ({ ...prev, countryId: isoCode }))
                 }
                 onStateChange={(state) =>
                   setFormData((prev) => ({ ...prev, state }))

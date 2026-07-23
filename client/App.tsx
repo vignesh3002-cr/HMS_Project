@@ -46,13 +46,8 @@ const protectedRoutes = [
   { path: "/patients", element: <Patients /> },
   { path: "/doctor", element: <Doctor /> },
   { path: "/doctor/view/:id", element: <Scheduled /> },
-<<<<<<< HEAD
-  { path: "/doctor/view/:id/details", element: <DoctorDetails /> },
-  { path: "/doctor-details", element: <DoctorDetails /> },
-=======
   { path: "/doctor/view", element: <Scheduled /> },
   { path: "/doctor/day-view", element: <DayScheduled /> },
->>>>>>> 535bfbd9577efdf9bf586071d65da983339bdf7e
   { path: "/appointments", element: <Appointments /> },
   { path: "/appointments/day-view", element: <DayView /> },
   { path: "/appointments/week-view", element: <WeekView /> },

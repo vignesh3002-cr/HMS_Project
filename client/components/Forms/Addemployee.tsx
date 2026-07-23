@@ -6,6 +6,8 @@ import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { MultiSelectDropdown } from "@/components/ui/multi-select-dropdown";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
+import { State as CSState, City } from "country-state-city";
+import type { IState } from "country-state-city";
 import { DayOfWeek, WorkingHourPayload, employeeApi } from "@/api/employee.api";
 import { branchApi, Branch } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
@@ -243,6 +245,8 @@ interface EmployeeFormData {
   aadhaarNo: string;
   panNo: string;
   passportNo: string;
+  country: string;
+  countryId: string;
   state: string;
   district: string;
   area: string;
@@ -279,6 +283,8 @@ const emptyFormData: EmployeeFormData = {
   aadhaarNo: "",
   panNo: "",
   passportNo: "",
+  country: "",
+  countryId: "",
   state: "",
   district: "",
   area: "",
@@ -339,6 +345,29 @@ export default function AddEmployee() {
 
   // Free-typed department name, used only when departmentId === OTHER_DEPARTMENT_VALUE.
   const [customDepartment, setCustomDepartment] = useState("");
+
+  // Indian states and districts for the dependent dropdowns
+  const [indianStates, setIndianStates] = useState<IState[]>([]);
+  const [districtOptions, setDistrictOptions] = useState<string[]>([]);
+
+  // Load Indian states on mount
+  useEffect(() => {
+    const states = CSState.getStatesOfCountry("IN");
+    setIndianStates(states);
+  }, []);
+
+  // Load districts (cities) when state changes
+  useEffect(() => {
+    if (formData.state) {
+      const selectedState = indianStates.find(s => s.name === formData.state);
+      if (selectedState) {
+        const cities = City.getCitiesOfState("IN", selectedState.isoCode);
+        setDistrictOptions(cities.map(c => c.name).sort());
+      }
+    } else {
+      setDistrictOptions([]);
+    }
+  }, [formData.state, indianStates]);
 
   // Fetch branches on mount for the branch dropdown
   useEffect(() => {
@@ -806,28 +835,26 @@ export default function AddEmployee() {
             {/* State, District, Area, Pincode */}
             <div>
               <label className={labelClass}>State {requiredStar}</label>
-              <input
-                type="text"
+              <FormDropdown
                 name="state"
-                placeholder="Enter State"
-                maxLength={50}
                 className={inputClass}
+                options={indianStates.map(s => s.name)}
                 value={formData.state}
-                onChange={handleChange}
+                onValueChange={(val) => setFormData((prev) => ({ ...prev, state: val, district: "" }))}
+                placeholder="Select State"
                 disabled={submitting}
               />
             </div>
             <div>
               <label className={labelClass}>District {requiredStar}</label>
-              <input
-                type="text"
+              <FormDropdown
                 name="district"
-                placeholder="Enter District"
-                maxLength={50}
                 className={inputClass}
+                options={districtOptions}
                 value={formData.district}
-                onChange={handleChange}
-                disabled={submitting}
+                onValueChange={(val) => setFormData((prev) => ({ ...prev, district: val }))}
+                placeholder={formData.state ? "Select District" : "Select State first"}
+                disabled={submitting || !formData.state}
               />
             </div>
             <div>
@@ -858,7 +885,6 @@ export default function AddEmployee() {
                 disabled={submitting}
               />
             </div>
-            <div />
             <div />
 
             {/* Mobile No, Email, Aadhaar No */}

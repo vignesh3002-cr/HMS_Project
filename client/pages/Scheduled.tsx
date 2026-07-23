@@ -1,12 +1,8 @@
 import React, { useState } from "react";
-<<<<<<< HEAD
-import { useNavigate, useParams } from "react-router-dom";
-=======
 import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
->>>>>>> 535bfbd9577efdf9bf586071d65da983339bdf7e
 
 const WEEK_DAYS = [
   ["Monday", "13/05/26"],
@@ -136,15 +132,10 @@ export default function DoctorProfile() {
   const [cancelSlotOpen, setCancelSlotOpen] = useState(false);
   const [cancelSlotPos, setCancelSlotPos] = useState(null);
   const [cancelSlotInfo, setCancelSlotInfo] = useState("");
-<<<<<<< HEAD
-  const navigate = useNavigate();
-  const { id } = useParams<{ id: string }>();
-=======
   const [fromDate, setFromDate] = useState(null);
   const [toDate, setToDate] = useState(null);
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
   const [isToCalendarOpen, setIsToCalendarOpen] = useState(false);
->>>>>>> 535bfbd9577efdf9bf586071d65da983339bdf7e
   const [weekDates, setWeekDates] = useState(WEEK_DAYS.map(([, date]) => date));
 
   const [, calMonth, calYear] = weekDates[0].split("/").map(Number);
