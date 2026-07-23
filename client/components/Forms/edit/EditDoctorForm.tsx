@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, ChangeEvent, FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Loader2, Plus, Stethoscope, X } from "lucide-react";
+import { ArrowLeft, Loader2, Plus, Stethoscope, X, Calendar, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { MultiSelectDropdown } from "@/components/ui/multi-select-dropdown";
@@ -481,25 +481,28 @@ export default function EditDoctorForm() {
               <form onSubmit={handleSubmit} className="p-8 space-y-6">
                 <div className={sectionClass}>
                   <h3 className={sectionTitleClass}>Personal details</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6">
-                    <div className="lg:col-span-3 flex flex-col sm:flex-row items-center sm:items-start gap-14 pb-2">
-                      <AvatarUpload
-                        value={formData.photoUrl}
-                        onChange={(url) => setField("photoUrl", url ?? "")}
-                        label="Doctor photo"
-                        hint="Click or drag an image to upload (Max 1MB)"
-                        size={128}
-                      />
-                      <div aria-hidden="true" className="hidden sm:block w-px self-stretch bg-gray-200" />
-                      <div className="w-full sm:w-72">
-                        <label className={labelClass}>First name {requiredStar}</label>
-                        <input
-                          type="text"
-                          className={inputClass}
-                          value={formData.firstName}
-                          onChange={(e) => handleChange(e, "firstName")}
-                          disabled={submitting}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-6 gap-y-6">
+                    {/* Photo + First Name row - spans full width */}
+                    <div className="lg:col-span-3">
+                      <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 pb-2">
+                        <AvatarUpload
+                          value={formData.photoUrl}
+                          onChange={(url) => setField("photoUrl", url ?? "")}
+                          label="Doctor photo"
+                          hint="Click or drag an image to upload (Max 1MB)"
+                          size={128}
                         />
+                        <div aria-hidden="true" className="hidden sm:block w-px self-stretch bg-gray-200" />
+                        <div className="w-full sm:w-72">
+                          <label className={labelClass}>First name {requiredStar}</label>
+                          <input
+                            type="text"
+                            className={inputClass}
+                            value={formData.firstName}
+                            onChange={(e) => handleChange(e, "firstName")}
+                            disabled={submitting}
+                          />
+                        </div>
                       </div>
                     </div>
 
@@ -606,7 +609,7 @@ export default function EditDoctorForm() {
 
                 <div className={sectionClass}>
                   <h3 className={sectionTitleClass}>Contact</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-6 gap-y-6">
                     <div>
                       <label className={labelClass}>Mobile number {requiredStar}</label>
                       <input
@@ -716,7 +719,7 @@ export default function EditDoctorForm() {
 
                 <div className={sectionClass}>
                   <h3 className={sectionTitleClass}>Professional details</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-6 gap-y-6">
                     <div>
                       <label className={labelClass}>Department {requiredStar}</label>
                       <FormDropdown

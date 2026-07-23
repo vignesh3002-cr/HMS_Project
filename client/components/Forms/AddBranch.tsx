@@ -1,9 +1,10 @@
 import { useState, ChangeEvent, FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Building2, Loader2, Plus } from "lucide-react";
+import { ArrowLeft, Building2, Loader2, Plus, Globe, MapPin } from "lucide-react";
 import { branchApi } from "@/api/branch.api";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
+import { CountryStateCitySelect } from "@/components/ui/CountryStateCitySelect";
 
 // Strongly typed interface for the form state.
 // Field names mirror the `branch` table columns (see hms-backend/prisma/schema.prisma)
@@ -104,6 +105,10 @@ export default function AddBranch() {
       { key: "adminUsername", label: "Admin Username" },
       { key: "password", label: "Password" },
       { key: "medicalServices", label: "Medical Services" },
+      { key: "totalBeds", label: "Total Beds" },
+      { key: "totalEmployees", label: "Total Employees" },
+      { key: "gstNo", label: "GST No" },
+      { key: "panNo", label: "PAN No" },
     ];
 
     const missing = requiredFields.find((f) => !formData[f.key].trim());
@@ -242,44 +247,22 @@ export default function AddBranch() {
             </div>
 
             {/* Row 2 - Country, State, District */}
-            <div>
-              <label className={labelClass}>Country {requiredStar}</label>
-              <input
-                type="text"
-                name="country"
-                placeholder="Enter Country"
-                className={inputClass}
-                value={formData.country}
-                onChange={handleChange}
-                disabled={submitting}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>State {requiredStar}</label>
-              <FormDropdown
-                name="state"
-                className={inputClass}
-                options={["Tamil Nadu", "Karnataka"]}
-                value={formData.state}
-                onValueChange={(val) =>
-                  setFormData((prev) => ({ ...prev, state: val }))
+            <div className="lg:col-span-3">
+              <CountryStateCitySelect
+                country={formData.country}
+                state={formData.state}
+                district={formData.district}
+                onCountryChange={(country) =>
+                  setFormData((prev) => ({ ...prev, country }))
                 }
-                placeholder="Select State"
-                disabled={submitting}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>District {requiredStar}</label>
-              <FormDropdown
-                name="district"
-                className={inputClass}
-                options={["Chennai", "Coimbatore", "Madurai", "Bangalore", "Mysore"]}
-                value={formData.district}
-                onValueChange={(val) =>
-                  setFormData((prev) => ({ ...prev, district: val }))
+                onStateChange={(state) =>
+                  setFormData((prev) => ({ ...prev, state }))
                 }
-                placeholder="Select District"
+                onDistrictChange={(district) =>
+                  setFormData((prev) => ({ ...prev, district }))
+                }
                 disabled={submitting}
+                required
               />
             </div>
 
@@ -364,7 +347,7 @@ export default function AddBranch() {
 
             {/* Row 5 - Total Beds, Total Employees, Fax Number */}
             <div>
-              <label className={labelClass}>Total Beds</label>
+              <label className={labelClass}>Total Beds {requiredStar}</label>
               <input
                 type="number"
                 name="totalBeds"
@@ -377,7 +360,7 @@ export default function AddBranch() {
             </div>
 
             <div>
-              <label className={labelClass}>Total Employees</label>
+              <label className={labelClass}>Total Employees {requiredStar}</label>
               <input
                 type="text"
                 inputMode="numeric"
@@ -405,7 +388,7 @@ export default function AddBranch() {
 
             {/* Row 6 - GST No, PAN No, Website Address */}
             <div>
-              <label className={labelClass}>GST No</label>
+              <label className={labelClass}>GST No {requiredStar}</label>
               <input
                 type="text"
                 name="gstNo"
@@ -418,7 +401,7 @@ export default function AddBranch() {
             </div>
 
             <div>
-              <label className={labelClass}>PAN No</label>
+              <label className={labelClass}>PAN No {requiredStar}</label>
               <input
                 type="text"
                 name="panNo"

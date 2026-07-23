@@ -18,7 +18,7 @@ import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { AvatarUpload } from "@/components/ui/avatar-upload";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
@@ -251,11 +251,12 @@ export default function PatientProfile() {
             <div className="absolute top-0 right-0 w-1/3 h-full bg-slate-50 opacity-50 rounded-l-full transform translate-x-1/4 -translate-y-1/4 pointer-events-none" />
             <div className="relative z-10 flex flex-col items-start gap-6 md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-6">
-                <Avatar className="h-24 w-24 rounded-2xl border border-slate-200">
-                    <AvatarFallback className="rounded-2xl bg-slate-100 text-slate-400 text-2xl font-bold">
-                      {patientInitial}
-                    </AvatarFallback>
-                  </Avatar>
+                  <AvatarUpload
+                    value={patient.patient_photo_url}
+                    onChange={() => {}}
+                    size={96}
+                    readOnly
+                  />
                   <div>
                     <h1 className="text-2xl font-bold text-slate-900">{patientName}</h1>
                     <p className="hms-id-text mt-0.5">#{patient.patient_id}</p>
@@ -441,12 +442,12 @@ export default function PatientProfile() {
                 <button
                   data-tab="appointments"
                   className="relative pb-1 text-xs font-semibold tracking-[1.2px] capitalize transition-colors duration-200"
-                  style={{ color: "#00488D" }}
+                  style={{ color: "#00488" }}
                 >
                   Appointments
                 </button>
                 <div
-                  className="absolute bottom-0 h-0.5 bg-[#00488D] transition-all duration-300 ease-out"
+                  className="absolute bottom-0 h-[2.5px] bg-[#00488D] transition-all duration-300 ease-out"
                   style={{ left: underline.left, width: underline.width }}
                 />
               </nav>
@@ -463,48 +464,6 @@ export default function PatientProfile() {
                   <svg className="absolute left-2 top-1/2 -translate-y-1/2" width="12" height="12" viewBox="0 0 12 12" fill="none">
                     <path d="M11.0667 11.5713L6.86667 7.3713C6.53333 7.638 6.15 7.8491 5.71667 8.0046C5.28333 8.1602 4.82222 8.238 4.33333 8.238C3.12222 8.238 2.09722 7.8185 1.25833 6.9796C0.419444 6.1407 0 5.1157 0 3.90462C0 2.69351.419444 1.66851 1.25833.82962C2.09722-.00927 3.12222-.42871 4.33333-.42871C5.54444-.42871 6.56944-.00927 7.40833.82962C8.24722 1.66851 8.66667 2.69351 8.66667 3.90462C8.66667 4.3935 8.58889 4.8546 8.43333 5.288C8.27778 5.7213 8.06667 6.1046 7.8 6.438L12 10.638L11.0667 11.5713ZM4.33333 6.9046C5.16667 6.9046 5.875 6.613 6.45833 6.0296C7.04167 5.4463 7.33333 4.738 7.33333 3.90462C7.33333 3.07129 7.04167 2.36296 6.45833 1.77962C5.875 1.19629 5.16667.90462 4.33333.90462C3.5.90462 2.79167 1.19629 2.20833 1.77962C1.625 2.36296 1.33333 3.07129 1.33333 3.90462C1.33333 4.738 1.625 5.4463 2.20833 6.0296C2.79167 6.613 3.5 6.9046 4.33333 6.9046Z" fill="#424752"/>
                   </svg>
-                </div>
-                {/* Date nav */}
-                <div className="flex items-center">
-                  <button
-                    onClick={() => setSelectedDate((prev) => subDays(prev, 1))}
-                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
-                  >
-                    <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
-                      <path d="M5 1L1 5L5 9" stroke="black" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  </button>
-                  <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-                    <PopoverTrigger asChild>
-                      <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
-                        {isToday(selectedDate)
-                          ? "Today"
-                          : isYesterday(selectedDate)
-                            ? "Yesterday"
-                            : isTomorrow(selectedDate)
-                              ? "Tomorrow"
-                              : format(selectedDate, "dd/MM/yyyy")}
-                      </button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
-                      <CalendarPicker
-                        selected={selectedDate}
-                        hideThemePicker
-                        onSelect={(date) => {
-                          setSelectedDate(date);
-                          setIsCalendarOpen(false);
-                        }}
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  <button
-                    onClick={() => setSelectedDate((prev) => addDays(prev, 1))}
-                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
-                  >
-                    <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
-                      <path d="M1 1L5 5L1 9" stroke="black" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  </button>
                 </div>
                 {/* Filters */}
                 <FilterPopover

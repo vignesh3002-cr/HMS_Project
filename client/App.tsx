@@ -25,6 +25,9 @@ import Doctor from "./pages/Doctor";
 import DoctorDetails from "./pages/Viewmoredoctor";
 import Staff from "./pages/Staff";
 import Scheduled from "./pages/Scheduled";
+import DayScheduled from "./pages/Day Scheduled";
+import DayView from "./pages/Day view";
+import WeekView from "./pages/Week view";
 
 
 const queryClient = new QueryClient({
@@ -43,9 +46,16 @@ const protectedRoutes = [
   { path: "/patients", element: <Patients /> },
   { path: "/doctor", element: <Doctor /> },
   { path: "/doctor/view/:id", element: <Scheduled /> },
+<<<<<<< HEAD
   { path: "/doctor/view/:id/details", element: <DoctorDetails /> },
   { path: "/doctor-details", element: <DoctorDetails /> },
+=======
+  { path: "/doctor/view", element: <Scheduled /> },
+  { path: "/doctor/day-view", element: <DayScheduled /> },
+>>>>>>> 535bfbd9577efdf9bf586071d65da983339bdf7e
   { path: "/appointments", element: <Appointments /> },
+  { path: "/appointments/day-view", element: <DayView /> },
+  { path: "/appointments/week-view", element: <WeekView /> },
   { path: "/departments", element: <Departments /> },
   
 

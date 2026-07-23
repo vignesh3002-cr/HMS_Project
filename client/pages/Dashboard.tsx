@@ -10,6 +10,7 @@ import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
+import { patientApi } from "@/api/patient.api";
 
 
 
@@ -170,74 +171,7 @@ const bottomNavItems = [
   },
 ];
 
-const stats = [
-  {
-    label: "Doctors",
-    value: "124",
-    change: "+2",
-    changeType: "positive",
-    bg: "#D6E3FF",
-    border: "#00488D",
-    valueColor: "#00488D",
-    icon: <Stethoscope className="h-4 w-4" color="#00488D" />,
-    iconBg: "rgba(255,255,255,0.20)",
-  },
-  {
-    label: "Patients",
-    value: "12,450",
-    change: "+20",
-    changeType: "positive",
-    bg: "rgba(0,200,150,0.12)",
-    border: "#00C896",
-    valueColor: "#00C896",
-    icon: <UserRound className="h-4 w-4" color="#00C896" />,
-    iconBg: "rgba(255,255,255,0.20)",
-  },
-  {
-    label: "Staff",
-    value: "342",
-    change: "",
-    changeType: "neutral",
-    bg: "rgba(255,107,53,0.12)",
-    border: "rgba(123,50,0,0.40)",
-    valueColor: "#7B3200",
-    icon: <Users className="h-4 w-4" color="#7B3200" />,
-    iconBg: "#FFDBCB",
-  },
-  {
-    label: "Appointments",
-    value: "1,204",
-    change: "+114",
-    changeType: "positive",
-    bg: "rgba(255,255,255,0.80)",
-    border: "#C2C6D4",
-    valueColor: "#00488D",
-    icon: <CalendarIcon className="h-4 w-4" color="#00488D" />,
-    iconBg: "rgba(168,200,255,0.20)",
-  },
-  {
-    label: "Prescription Generated",
-    value: "8,432",
-    change: "124",
-    changeType: "negative",
-    bg: "#E6E8EA",
-    border: "#4A5F83",
-    valueColor: "#4A5F83",
-    icon: <FileText className="h-4 w-4" color="#4A5F83" />,
-    iconBg: "rgba(236,238,240,0.40)",
-  },
-  {
-    label: "Bills Generated",
-    value: "2700",
-    change: "+160",
-    changeType: "positive",
-    bg: "#D6E3FF",
-    border: "#00488D",
-    valueColor: "#00488D",
-    icon: <Receipt className="h-4 w-4" color="#00488D" />,
-    iconBg: "rgba(255,255,255,0.20)",
-  },
-];
+
 
 // Cosmetic-only values the real /employees endpoint doesn't return (avatar
 // initials/colors, department badge colors) — cycled per row so real data
@@ -321,6 +255,18 @@ export default function Dashboard() {
   const [realDoctors, setRealDoctors] = useState<Record<string, unknown>[] | null>(null);
   const [realStaff, setRealStaff] = useState<Record<string, unknown>[] | null>(null);
   const [isEmployeesLoading, setIsEmployeesLoading] = useState(true);
+  const [patientCount, setPatientCount] = useState<number>(0);
+
+  useEffect(() => {
+    patientApi
+      .getAll({ limit: 1 })
+      .then((res) => {
+        setPatientCount(res.data?.data?.total ?? 0);
+      })
+      .catch(() => {
+        setPatientCount(0);
+      });
+  }, []);
 
   useEffect(() => {
     console.log("[Dashboard] Fetching all employees from employeeApi...");
@@ -363,6 +309,75 @@ export default function Dashboard() {
         setIsEmployeesLoading(false);
       });
   }, []);
+
+  const liveStats = useMemo(() => [
+    {
+      label: "Doctors",
+      value: (realDoctors?.length ?? 0).toLocaleString(),
+      change: "",
+      changeType: "positive",
+      bg: "#D6E3FF",
+      border: "#00488D",
+      valueColor: "#00488D",
+      icon: <Stethoscope className="h-4 w-4" color="#00488D" />,
+      iconBg: "rgba(255,255,255,0.20)",
+    },
+    {
+      label: "Patients",
+      value: patientCount.toLocaleString(),
+      change: "",
+      changeType: "positive",
+      bg: "rgba(0,200,150,0.12)",
+      border: "#00C896",
+      valueColor: "#00C896",
+      icon: <UserRound className="h-4 w-4" color="#00C896" />,
+      iconBg: "rgba(255,255,255,0.20)",
+    },
+    {
+      label: "Staff",
+      value: (realStaff?.length ?? 0).toLocaleString(),
+      change: "",
+      changeType: "neutral",
+      bg: "rgba(255,107,53,0.12)",
+      border: "rgba(123,50,0,0.40)",
+      valueColor: "#7B3200",
+      icon: <Users className="h-4 w-4" color="#7B3200" />,
+      iconBg: "#FFDBCB",
+    },
+    {
+      label: "Appointments",
+      value: "1,204",
+      change: "+114",
+      changeType: "positive",
+      bg: "rgba(255,255,255,0.80)",
+      border: "#C2C6D4",
+      valueColor: "#00488D",
+      icon: <CalendarIcon className="h-4 w-4" color="#00488D" />,
+      iconBg: "rgba(168,200,255,0.20)",
+    },
+    {
+      label: "Prescription Generated",
+      value: "8,432",
+      change: "124",
+      changeType: "negative",
+      bg: "#E6E8EA",
+      border: "#4A5F83",
+      valueColor: "#4A5F83",
+      icon: <FileText className="h-4 w-4" color="#4A5F83" />,
+      iconBg: "rgba(236,238,240,0.40)",
+    },
+    {
+      label: "Bills Generated",
+      value: "2700",
+      change: "+160",
+      changeType: "positive",
+      bg: "#D6E3FF",
+      border: "#00488D",
+      valueColor: "#00488D",
+      icon: <Receipt className="h-4 w-4" color="#00488D" />,
+      iconBg: "rgba(255,255,255,0.20)",
+    },
+  ], [realDoctors, realStaff, patientCount]);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -661,7 +676,7 @@ useEffect(() => {
         <main className="flex flex-col gap-6 border-t border-[#E5E7EB] pt-6">
           {/* Stats Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-8">
-            {stats.map((stat) => (
+            {liveStats.map((stat) => (
               <div
                 key={stat.label}
                 className="flex flex-col p-4 rounded-xl shadow-[2px_2px_16px_0_rgba(0,0,0,0.25)] transition-all duration-200 hover:-translate-y-1 hover:shadow-lg cursor-pointer"

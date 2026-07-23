@@ -1,12 +1,8 @@
 import React, { useState } from "react";
-<<<<<<< HEAD
-import { useNavigate, useParams } from "react-router-dom";
-=======
 import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
->>>>>>> 535bfbd9577efdf9bf586071d65da983339bdf7e
 
 const WEEK_DAYS = [
   ["Monday", "13/05/26"],
@@ -27,46 +23,6 @@ const formatTime12 = (time) => {
   const period = hour >= 12 ? "PM" : "AM";
   const hour12 = hour % 12 === 0 ? 12 : hour % 12;
   return `${String(hour12).padStart(2, "0")}:${minuteStr} ${period}`;
-};
-
-const shiftDate = (dateStr, days) => {
-  const [dd, mm, yy] = dateStr.split("/").map(Number);
-  const date = new Date(2000 + yy, mm - 1, dd);
-  date.setDate(date.getDate() + days);
-  const newDd = String(date.getDate()).padStart(2, "0");
-  const newMm = String(date.getMonth() + 1).padStart(2, "0");
-  const newYy = String(date.getFullYear() % 100).padStart(2, "0");
-  return `${newDd}/${newMm}/${newYy}`;
-};
-
-const parseDate = (dateStr) => {
-  const [dd, mm, yy] = dateStr.split("/").map(Number);
-  return new Date(2000 + yy, mm - 1, dd);
-};
-
-const isSameDay = (a, b) =>
-  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-
-const buildCalendarDays = (year, month) => {
-  const firstDay = new Date(year, month, 1);
-  const startOffset = firstDay.getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const daysInPrevMonth = new Date(year, month, 0).getDate();
-
-  const cells = [];
-
-  for (let i = startOffset - 1; i >= 0; i--) {
-    cells.push({ date: new Date(year, month - 1, daysInPrevMonth - i), inMonth: false });
-  }
-  for (let d = 1; d <= daysInMonth; d++) {
-    cells.push({ date: new Date(year, month, d), inMonth: true });
-  }
-  while (cells.length % 7 !== 0 || cells.length < 42) {
-    const last = cells[cells.length - 1].date;
-    cells.push({ date: new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1), inMonth: false });
-  }
-
-  return cells;
 };
 
 const INITIAL_SCHEDULE = [
@@ -113,20 +69,9 @@ const createEmptySchedule = () =>
     Array.from({ length: 7 }, () => ["+", "empty"]),
   );
 
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-const getMonthYearLabel = (dateStr) => {
-  const [, mm, yy] = dateStr.split("/").map(Number);
-  return `${MONTH_NAMES[mm - 1]} 20${String(yy).padStart(2, "0")}`;
-};
-
 export default function DoctorProfile() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState("week");
-  const [selectedDay, setSelectedDay] = useState(() => parseDate(WEEK_DAYS[0][1]));
+  const [activeTab, setActiveTab] = useState("day");
   const [addSlotOpen, setAddSlotOpen] = useState(false);
   const [addSlotDay, setAddSlotDay] = useState("");
   const [addSlotPos, setAddSlotPos] = useState(null);
@@ -136,21 +81,12 @@ export default function DoctorProfile() {
   const [cancelSlotOpen, setCancelSlotOpen] = useState(false);
   const [cancelSlotPos, setCancelSlotPos] = useState(null);
   const [cancelSlotInfo, setCancelSlotInfo] = useState("");
-<<<<<<< HEAD
-  const navigate = useNavigate();
-  const { id } = useParams<{ id: string }>();
-=======
   const [fromDate, setFromDate] = useState(null);
   const [toDate, setToDate] = useState(null);
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
   const [isToCalendarOpen, setIsToCalendarOpen] = useState(false);
->>>>>>> 535bfbd9577efdf9bf586071d65da983339bdf7e
-  const [weekDates, setWeekDates] = useState(WEEK_DAYS.map(([, date]) => date));
 
-  const [, calMonth, calYear] = weekDates[0].split("/").map(Number);
-  const calendarDays = buildCalendarDays(2000 + calYear, calMonth - 1);
-
-  const [weekOffset, setWeekOffset] = useState(0);
+  const [weekOffset] = useState(0);
   const [scheduleByWeek, setScheduleByWeek] = useState({ 0: INITIAL_SCHEDULE });
   const schedule = scheduleByWeek[weekOffset] ?? createEmptySchedule();
 
@@ -179,16 +115,6 @@ export default function DoctorProfile() {
     if (window.confirm("Are you sure you want to clear the schedule?")) {
       alert("Schedule cleared");
     }
-  };
-
-  const previousWeek = () => {
-    setWeekDates((prev) => prev.map((date) => shiftDate(date, -7)));
-    setWeekOffset((prev) => prev - 1);
-  };
-
-  const nextWeek = () => {
-    setWeekDates((prev) => prev.map((date) => shiftDate(date, 7)));
-    setWeekOffset((prev) => prev + 1);
   };
 
   const openAddSlot = (dayName, rowIndex = null, colIndex = null) => {
@@ -347,13 +273,7 @@ export default function DoctorProfile() {
             </h2>
 
             <button
-              onClick={() => {
-                if (id) {
-                  navigate(`/doctor/view/${id}/details`);
-                } else {
-                  showAlert("Unable to open the detailed doctor profile.");
-                }
-              }}
+              onClick={() => showAlert("More doctor information will be displayed.")}
               className="border-0 bg-transparent text-[#135dc5] underline text-[13px] cursor-pointer"
             >
               View More
@@ -414,7 +334,7 @@ export default function DoctorProfile() {
           {["day", "week"].map((tab) => (
             <button
               key={tab}
-              onClick={() => (tab === "day" ? navigate("/doctor/day-view") : setActiveTab(tab))}
+              onClick={() => (tab === "week" ? navigate("/doctor/view") : setActiveTab(tab))}
               className={`h-[39px] px-[17px] border-0 bg-transparent text-xs cursor-pointer ${
                 activeTab === tab
                   ? "text-[#004a91] border-b-2 border-[#004a91]"
@@ -445,20 +365,6 @@ export default function DoctorProfile() {
                 <div className="flex items-center gap-4 flex-wrap">
 
                   <button
-                    onClick={previousWeek}
-                    className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
-                  >
-                    ‹ Previous week
-                  </button>
-
-                  <button
-                    onClick={nextWeek}
-                    className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
-                  >
-                    Next week ›
-                  </button>
-
-                  <button
                     onClick={() => openAddSlot("")}
                     className="bg-[#004a91] text-white px-[14px] py-2 rounded-md text-xs font-semibold border-0 cursor-pointer"
                   >
@@ -477,15 +383,12 @@ export default function DoctorProfile() {
                   {/* HEADER */}
                   <div className="grid grid-cols-7 bg-[#f1f3f5] border-b border-[#b9bfcb]">
 
-                    {WEEK_DAYS.map(([day], dayIdx) => (
+                    {WEEK_DAYS.map(([day]) => (
                       <div
                         key={day}
-                        className="min-h-[43px] p-[7px_3px] border-r border-[#b9bfcb] text-center text-[#003b80] text-[8px] font-bold"
+                        className="min-h-[43px] p-[7px_3px] border-r border-[#b9bfcb] flex items-center justify-center text-center text-[#003b80] text-[8px] font-bold"
                       >
                         {day}
-                        <small className="block mt-[3px] text-[7px]">
-                          {weekDates[dayIdx]}
-                        </small>
                       </div>
                     ))}
 
@@ -680,72 +583,6 @@ export default function DoctorProfile() {
 
           {/* RIGHT COLUMN */}
           <aside className="min-w-0 max-[900px]:grid max-[900px]:grid-cols-2 max-[900px]:gap-5 max-[700px]:block">
-
-            {/* CALENDAR */}
-            <section className="bg-white border border-[#edf0f4] rounded-[10px] p-[25px] mb-6 max-[900px]:mb-0 max-[700px]:mb-5">
-
-              <div className="flex items-center justify-between mb-[22px]">
-
-                <button
-                  onClick={() => showAlert("Previous month")}
-                  className="border-0 bg-transparent text-[#9ca3af] text-2xl cursor-pointer"
-                >
-                  ‹
-                </button>
-
-                <h3 className="text-[15px]">
-                  {getMonthYearLabel(weekDates[0])}
-                </h3>
-
-                <button
-                  onClick={() => showAlert("Next month")}
-                  className="border-0 bg-transparent text-[#9ca3af] text-2xl cursor-pointer"
-                >
-                  ›
-                </button>
-
-              </div>
-
-              <div className="grid grid-cols-7 gap-2 mb-2">
-
-                {["SU", "MO", "TU", "WE", "TH", "FR", "SA"].map((day) => (
-                  <span
-                    key={day}
-                    className="text-center text-[#9ca3af] text-[8px] font-bold"
-                  >
-                    {day}
-                  </span>
-                ))}
-
-              </div>
-
-              <div className="grid grid-cols-7 gap-2">
-
-                {calendarDays.map((cell, index) => {
-                  const isInActiveWeek =
-                    cell.inMonth && weekDates.some((d) => isSameDay(parseDate(d), cell.date));
-                  const isHighlighted = isInActiveWeek || isSameDay(cell.date, selectedDay);
-
-                  return (
-                    <button
-                      key={index}
-                      onClick={() => setSelectedDay(cell.date)}
-                      className={`w-[31px] h-[31px] flex items-center justify-center rounded-full text-[11px] mx-auto border-0 cursor-pointer ${
-                        !cell.inMonth
-                          ? "text-[#c8ced7] bg-transparent"
-                          : isHighlighted
-                          ? "bg-[#2167d5] text-white"
-                          : "text-[#596273] bg-transparent hover:bg-[#e8f0ff]"
-                      }`}
-                    >
-                      {cell.date.getDate()}
-                    </button>
-                  );
-                })}
-
-              </div>
-
-            </section>
 
             {/* REVIEWS */}
             <section className="bg-white border border-[#edf0f4] rounded-lg overflow-hidden">

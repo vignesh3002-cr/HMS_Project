@@ -525,8 +525,14 @@ const AppointmentSchedule: React.FC = () => {
                         key={opt.key}
                         type="button"
                         onClick={() => {
-                          setViewType(opt.key);
                           setIsViewMenuOpen(false);
+                          if (opt.key === "day") {
+                            navigate("/appointments/day-view");
+                          } else if (opt.key === "week") {
+                            navigate("/appointments/week-view");
+                          } else {
+                            setViewType(opt.key);
+                          }
                         }}
                         className={`flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors ${
                           viewType === opt.key ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
@@ -558,7 +564,7 @@ const AppointmentSchedule: React.FC = () => {
                       setSearchQuery(e.target.value);
                       setCurrentPage(1);
                     }}
-                    className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:w-[200px] sm:focus:w-[250px]"
+                    className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[250px]"
                   />
 
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
