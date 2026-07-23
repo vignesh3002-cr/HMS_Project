@@ -188,6 +188,11 @@ interface EmployeeFormData {
   aadhaarNo: string;
   panNo: string;
   passportNo: string;
+  state: string;
+  district: string;
+  area: string;
+  pincode: string;
+  experience: string;
   departmentId: string;
   designation: string;
   specialization: string;
@@ -219,6 +224,11 @@ const emptyFormData: EmployeeFormData = {
   aadhaarNo: "",
   panNo: "",
   passportNo: "",
+  state: "",
+  district: "",
+  area: "",
+  pincode: "",
+  experience: "",
   departmentId: "",
   designation: "",
   specialization: "",
@@ -387,6 +397,10 @@ export default function AddEmployee() {
       { key: "email", label: "Email" },
       { key: "aadhaarNo", label: "Aadhaar No" },
       { key: "panNo", label: "PAN No" },
+      { key: "state", label: "State" },
+      { key: "district", label: "District" },
+      { key: "area", label: "Area" },
+      { key: "pincode", label: "Pincode" },
       { key: "departmentId", label: "Department" },
       { key: "designation", label: "Designation" },
       ...(isMedicalRole
@@ -674,6 +688,19 @@ export default function AddEmployee() {
               />
             </div>
             <div>
+              <label className={labelClass}>Experience {requiredStar}</label>
+              <input
+                type="text"
+                name="experience"
+                placeholder="Enter Experience (in years)"
+                maxLength={50}
+                className={inputClass}
+                value={formData.experience}
+                onChange={handleChange}
+                disabled={submitting}
+              />
+            </div>
+            <div>
               <label className={labelClass}>Nationality {requiredStar}</label>
               <input
                 type="text"
@@ -700,6 +727,64 @@ export default function AddEmployee() {
                 disabled={submitting}
               />
             </div>
+
+            {/* State, District, Area, Pincode */}
+            <div>
+              <label className={labelClass}>State {requiredStar}</label>
+              <input
+                type="text"
+                name="state"
+                placeholder="Enter State"
+                maxLength={50}
+                className={inputClass}
+                value={formData.state}
+                onChange={handleChange}
+                disabled={submitting}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>District {requiredStar}</label>
+              <input
+                type="text"
+                name="district"
+                placeholder="Enter District"
+                maxLength={50}
+                className={inputClass}
+                value={formData.district}
+                onChange={handleChange}
+                disabled={submitting}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Area {requiredStar}</label>
+              <input
+                type="text"
+                name="area"
+                placeholder="Enter Area"
+                maxLength={50}
+                className={inputClass}
+                value={formData.area}
+                onChange={handleChange}
+                disabled={submitting}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Pincode {requiredStar}</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                name="pincode"
+                placeholder="Enter Pincode"
+                maxLength={10}
+                className={inputClass}
+                value={formData.pincode}
+                onChange={handleChange}
+                disabled={submitting}
+              />
+            </div>
+            <div />
+            <div />
 
             {/* Mobile No, Email, Aadhaar No */}
             <div>

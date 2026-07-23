@@ -22,7 +22,7 @@ import NotFound from "./pages/NotFound";
 import Patients from "./pages/Patients";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import Doctor from "./pages/Doctor";
-
+import DoctorDetails from "./pages/Viewmoredoctor";
 import Staff from "./pages/Staff";
 import Scheduled from "./pages/Scheduled";
 
@@ -42,7 +42,9 @@ const protectedRoutes = [
   { path: "/dashboard", element: <Dashboard /> },
   { path: "/patients", element: <Patients /> },
   { path: "/doctor", element: <Doctor /> },
-  
+  { path: "/doctor/view/:id", element: <Scheduled /> },
+  { path: "/doctor/view/:id/details", element: <DoctorDetails /> },
+  { path: "/doctor-details", element: <DoctorDetails /> },
   { path: "/appointments", element: <Appointments /> },
   { path: "/departments", element: <Departments /> },
   
@@ -54,6 +56,7 @@ const protectedRoutes = [
   { path: "/staff/add", element: <AddEmployee /> },
   { path: "/patients/add", element: <PatientRegistrationForm /> },
   { path: "/patients/view/:id", element: <PatientProfile /> },
+  { path: "/doctor/view/:id", element: <DoctorDetails /> },
   { path: "/patients/edit/:id", element: <EditPatientForm /> },
   { path: "/doctor/edit/:id", element: <EditDoctorForm /> },
   { path: "/appointments/add", element: <AddAppointment /> },

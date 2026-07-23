@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 
 const WEEK_DAYS = [
   ["Monday", "13/05/26"],
@@ -43,6 +44,8 @@ export default function DoctorProfile() {
   const [cancelSlotOpen, setCancelSlotOpen] = useState(false);
   const [cancelSlotPos, setCancelSlotPos] = useState(null);
   const [cancelSlotInfo, setCancelSlotInfo] = useState("");
+  const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
   const [weekDates, setWeekDates] = useState(WEEK_DAYS.map(([, date]) => date));
 
   const calendarDays = [
@@ -304,7 +307,13 @@ export default function DoctorProfile() {
             </h2>
 
             <button
-              onClick={() => showAlert("More doctor information will be displayed.")}
+              onClick={() => {
+                if (id) {
+                  navigate(`/doctor/view/${id}/details`);
+                } else {
+                  showAlert("Unable to open the detailed doctor profile.");
+                }
+              }}
               className="border-0 bg-transparent text-[#135dc5] underline text-[13px] cursor-pointer"
             >
               View More
