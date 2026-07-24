@@ -24,7 +24,7 @@ export interface CreateBranchPayload {
   address?: string;
   district?: string;
   state_name?: string;
-  country?: string;
+  country_id?: string;
   area?: string;
   pincode?: number;
   license_number?: string;

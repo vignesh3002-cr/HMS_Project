@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Check,
   MoreVertical,
+  Loader2,
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
@@ -17,6 +18,8 @@ import CalendarPicker from "@/components/hms/Calender";
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
+import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { useToast } from "@/hooks/use-toast";
 
 import DayView from "./Day view";
 import WeekView from "./Week view";
@@ -25,6 +28,7 @@ import ExportReport from "@/components/ui/ExportReport";
 
 interface Appointment {
   id: string;
+  tokenId: string;
   patient: string;
   patientId: string;
   patientInitial: string;
@@ -40,186 +44,96 @@ interface Appointment {
 }
 
 
-const initialAppointments: Appointment[] = [
-  {
-    id: "APT-2026-8842",
-    patient: "James Wilson",
-    patientId: "PAT-0025",
-    patientInitial: "JW",
-    avatarColor: "bg-blue-100 text-blue-600",
-    branch: "Central Hospital Tambaram",
-    doctor: "Dr. Sarah Johnson",
-    doctorId: "DOC-0001",
-    doctorInitial: "SJ",
-    date: "05/20/2026",
-    time: "11:20 AM",
-    status: "Scheduled",
-  },
-
-  {
-    id: "APT-2026-8843",
-    patient: "Priya",
-    patientId: "PAT-0002",
-    patientInitial: "P",
-    avatarColor: "bg-green-100 text-green-600",
-    branch: "Central Hospital Tambaram",
-    doctor: "Dr. Emily Blunt",
-    doctorId: "DOC-0002",
-    doctorInitial: "EB",
-    date: "05/20/2026",
-    time: "11:40 AM",
-    status: "Conformed",
-  },
-
-  {
-    id: "APT-2026-8845",
-    patient: "Ramesh",
-    patientId: "PAT-0003",
-    patientInitial: "R",
-    avatarColor: "bg-blue-100 text-blue-600",
-    branch: "Central Hospital Egmore",
-    doctor: "Dr. Robert Fox",
-    doctorId: "DOC-0003",
-    doctorInitial: "RF",
-    date: "05/20/2026",
-    time: "01:30 PM",
-    status: "Scheduled",
-  },
-  {
-    id: "APT-2026-8846",
-    patient: "John Cena",
-    patientId: "PAT-0004",
-    patientInitial: "JC",
-    avatarColor: "bg-blue-100 text-blue-600",
-    branch: "Central Hospital Egmore",
-    doctor: "Dr. Alan Walker",
-    doctorId: "DOC-0004",
-    doctorInitial: "AW",
-    date: "05/20/2026",
-    time: "01:30 PM",
-    status: "Cancelled",
-  },
-  {
-    id: "APT-2026-8847",
-    patient: "Jaden Smith",
-    patientId: "PAT-0005",
-    patientInitial: "JS",
-    avatarColor: "bg-blue-100 text-blue-600",
-    branch: "Central Hospital Egmore",
-    doctor: "Dr. Suriya Sharma",
-    doctorId: "DOC-0005",
-    doctorInitial: "SS",
-    date: "05/20/2026",
-    time: "01:30 PM",
-    status: "Rescheduled",
-  },
-  {
-    id: "APT-2026-8848",
-    patient: "Tom Cruise",
-    patientId: "PAT-0006",
-    patientInitial: "TC",
-    avatarColor: "bg-blue-100 text-blue-600",
-    branch: "Central Hospital Egmore",
-    doctor: "Dr. Robert Fox",
-    doctorId: "DOC-0003",
-    doctorInitial: "RF",
-    date: "05/20/2026",
-    time: "01:30 PM",
-    status: "Scheduled",
-  },
-  {
-    id: "APT-2026-8847",
-    patient: "Robert Downey Jr.",
-    patientId: "PAT-0006",
-    patientInitial: "RDJ",
-    avatarColor: "bg-blue-100 text-blue-600",
-    branch: "Central Hospital Egmore",
-    doctor: "Dr. Robert Fox",
-    doctorId: "DOC-0003",
-    doctorInitial: "RF",
-    date: "05/20/2026",
-    time: "01:30 PM",
-    status: "Scheduled",
-  },
-  {
-    id: "APT-2026-8845",
-    patient: "Jane",
-    patientId: "PAT-0003",
-    patientInitial: "J",
-    avatarColor: "bg-blue-100 text-blue-600",
-    branch: "Central Hospital Egmore",
-    doctor: "Dr. Robert Fox",
-    doctorId: "DOC-0003",
-    doctorInitial: "RF",
-    date: "05/20/2026",
-    time: "01:30 PM",
-    status: "Scheduled",
-  },
-  {
-    id: "APT-2026-8845",
-    patient: "Jane",
-    patientId: "PAT-0003",
-    patientInitial: "J",
-    avatarColor: "bg-blue-100 text-blue-600",
-    branch: "Central Hospital Egmore",
-    doctor: "Dr. Robert Fox",
-    doctorId: "DOC-0003",
-    doctorInitial: "RF",
-    date: "05/20/2026",
-    time: "01:30 PM",
-    status: "Scheduled",
-  },
-  {
-    id: "APT-2026-8845",
-    patient: "Jane",
-    patientId: "PAT-0003",
-    patientInitial: "J",
-    avatarColor: "bg-blue-100 text-blue-600",
-    branch: "Central Hospital Egmore",
-    doctor: "Dr. Robert Fox",
-    doctorId: "DOC-0003",
-    doctorInitial: "RF",
-    date: "05/20/2026",
-    time: "01:30 PM",
-    status: "Scheduled",
-  },
-  {
-    id: "APT-2026-8845",
-    patient: "Jane",
-    patientId: "PAT-0003",
-    patientInitial: "J",
-    avatarColor: "bg-blue-100 text-blue-600",
-    branch: "Central Hospital Egmore",
-    doctor: "Dr. Robert Fox",
-    doctorId: "DOC-0003",
-    doctorInitial: "RF",
-    date: "05/20/2026",
-    time: "01:30 PM",
-    status: "Scheduled",
-  },
-  {
-    id: "APT-2026-8845",
-    patient: "Jane",
-    patientId: "PAT-0003",
-    patientInitial: "J",
-    avatarColor: "bg-blue-100 text-blue-600",
-    branch: "Central Hospital Egmore",
-    doctor: "Dr. Robert Fox",
-    doctorId: "DOC-0003",
-    doctorInitial: "RF",
-    date: "01/01/2026",
-    time: "01:30 PM",
-    status: "Scheduled",
-  },
-];
-
-
 const statusStyles: Record<string, string> = {
   Scheduled: "bg-blue-50 text-blue-600",
   Conformed: "bg-green-50 text-green-600",
   Cancelled: "bg-red-50 text-red-600",
   Rescheduled: "bg-amber-50 text-amber-600",
+  "Checked In": "bg-indigo-50 text-indigo-600",
+  "In Consultation": "bg-purple-50 text-purple-600",
+  Completed: "bg-emerald-50 text-emerald-600",
+  "No Show": "bg-gray-100 text-gray-600",
 };
+
+// Backend appointment_history.status values (see APPOINTMENT_STATUS in
+// Backend/HMS_Backend/src/modules/appointment/appointment.constants.ts)
+// mapped to the labels this page already renders/styles.
+const STATUS_LABELS: Record<string, string> = {
+  BOOKED: "Scheduled",
+  CONFIRMED: "Conformed",
+  CHECKED_IN: "Checked In",
+  IN_CONSULTATION: "In Consultation",
+  COMPLETED: "Completed",
+  CANCELLED: "Cancelled",
+  NO_SHOW: "No Show",
+};
+
+const APPOINTMENT_AVATAR_COLORS = [
+  "bg-blue-100 text-blue-600",
+  "bg-green-100 text-green-600",
+  "bg-amber-100 text-amber-600",
+  "bg-purple-100 text-purple-600",
+  "bg-rose-100 text-rose-600",
+];
+
+function getInitials(name: string): string {
+  const words = name.replace(/^Dr\.?\s*/i, "").trim().split(/\s+/).filter(Boolean);
+  return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
+}
+
+function formatPatientName(p: AppointmentRecord["patient_bio_data"]): string {
+  if (!p) return "Unknown Patient";
+  return [p.patient_first_name, p.patient_middle_name, p.patient_last_name]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function formatDoctorName(e: AppointmentRecord["employees"]): string {
+  if (!e) return "Unassigned";
+  return `Dr. ${[e.first_name, e.middle_name, e.last_name].filter(Boolean).join(" ")}`;
+}
+
+// appointment_date/appointment_time are stored as UTC-anchored Date/Time
+// values (see appointment.utils.ts on the backend), so formatting must read
+// UTC getters directly -- local getters would shift the day/hour in
+// timezones behind UTC.
+function formatAppointmentDate(date: string): string {
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return "—";
+  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${month}/${day}/${d.getUTCFullYear()}`;
+}
+
+function formatAppointmentTime(time: string): string {
+  const t = new Date(time);
+  if (isNaN(t.getTime())) return "—";
+  const minutes = String(t.getUTCMinutes()).padStart(2, "0");
+  const period = t.getUTCHours() >= 12 ? "PM" : "AM";
+  const hours12 = t.getUTCHours() % 12 || 12;
+  return `${String(hours12).padStart(2, "0")}:${minutes} ${period}`;
+}
+
+function mapAppointmentRecord(record: AppointmentRecord, index: number): Appointment {
+  const patientName = formatPatientName(record.patient_bio_data);
+  const doctorName = formatDoctorName(record.employees);
+
+  return {
+    id: record.appointment_id,
+    tokenId: record.token_number != null ? String(record.token_number) : "—",
+    patient: patientName,
+    patientId: record.patient_id,
+    patientInitial: getInitials(patientName),
+    avatarColor: APPOINTMENT_AVATAR_COLORS[index % APPOINTMENT_AVATAR_COLORS.length],
+    branch: record.branch?.branch_name ?? "—",
+    doctor: doctorName,
+    doctorId: record.employee_id ?? "—",
+    doctorInitial: getInitials(doctorName),
+    date: formatAppointmentDate(record.appointment_date),
+    time: formatAppointmentTime(record.appointment_time),
+    status: STATUS_LABELS[record.status ?? ""] ?? (record.status || "Unknown"),
+  };
+}
 
 // Action menu for the three-dot button on each appointment row
 function ActionMenu({
@@ -287,9 +201,39 @@ function ActionMenu({
 
 const AppointmentSchedule: React.FC = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
 
-  // Appointment data (mutable so status changes like cancellation can be reflected)
-  const [appointments, setAppointments] = useState<Appointment[]>(initialAppointments);
+  // Appointment data fetched from GET /appointments (mutable so status
+  // changes like cancellation can be reflected). No dummy fallback — an
+  // empty/failed fetch just shows an empty state.
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
+
+  useEffect(() => {
+    appointmentApi
+      .getAll()
+      .then((res) => {
+        const records = res.data?.data?.appointments || [];
+        setAppointments(records.map(mapAppointmentRecord));
+        if (records.length === 0) {
+          toast({
+            title: "No appointment records found",
+            description: "The appointments API returned no records.",
+          });
+        }
+      })
+      .catch((err) => {
+        console.error("[Appointments Page] Error:", err);
+        toast({
+          title: "Failed to load appointments",
+          description: "Couldn't reach the appointments API.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => {
+        setIsAppointmentsLoading(false);
+      });
+  }, []);
 
   const handleCancelAppointment = (target: Appointment) => {
     setAppointments((prev) =>
@@ -350,7 +294,7 @@ const AppointmentSchedule: React.FC = () => {
         label: value,
         value,
       })),
-    [],
+    [appointments],
   );
 
   const statusOptions = useMemo(
@@ -359,7 +303,7 @@ const AppointmentSchedule: React.FC = () => {
         label: value,
         value,
       })),
-    [],
+    [appointments],
   );
 
   const appointmentFilterFields: FilterField[] = [
@@ -646,54 +590,64 @@ const AppointmentSchedule: React.FC = () => {
 
             </div>
 
-            <HmsTable
-              columns={[
-                { key: "id", label: "Token ID", render: (r: Appointment) => (
-                  <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.id}</span>
-                )},
-                { key: "patient", label: "Patient", render: (r: Appointment) => (
-                  <div className="flex items-center gap-2">
-                    <div className={`w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text ${r.avatarColor}`}>{r.patientInitial}</div>
-                    <div><div className="hms-name-text capitalize">{r.patient}</div><div className="hms-id-text">{r.patientId}</div></div>
-                  </div>
-                )},
-                { key: "branch", label: "Branch", render: (r: Appointment) => <span className="hms-content-text text-[#191C1E]">{r.branch}</span> },
-                { key: "doctor", label: "Doctor", render: (r: Appointment) => (
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center hms-avatar-text">{r.doctorInitial}</div>
-                    <div><div className="hms-name-text capitalize">{r.doctor}</div><div className="hms-id-text">{r.doctorId}</div></div>
-                  </div>
-                )},
-                { key: "date", label: "Appointment Date", render: (r: Appointment) => (
-                  <div className="hms-content-text text-[#191C1E] leading-4"><div>{r.date}</div><div className="text-[11px] font-medium text-[#8C8D8F] mt-1">{r.time}</div></div>
-                )},
-                { key: "status", label: "Status", render: (r: Appointment) => (
-                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${statusStyles[r.status] ?? "bg-indigo-50 text-indigo-600"}`}>{r.status}</span>
-                )},
-                { key: "actions", label: "Action", sortable: false, render: (r: Appointment) => (
-                  <ActionMenu
-                    onView={() => alert(`Viewing appointment ${r.id}`)}
-                    onEdit={() => alert(`Editing appointment ${r.id}`)}
-                    onCancel={() => alert(`Cancelling appointment ${r.id}`)}
-                  />
-                )},
-              ]}
-              data={currentRows}
-              sortField={sortField}
-              sortDirection={sortDirection}
-              onSort={handleSort}
-              currentPage={currentPage}
-              totalPages={totalPages}
-              totalRecords={totalRecords}
-              rowsPerPage={rowsPerPage}
-              visibleStart={visibleStart}
-              visibleEnd={visibleEnd}
-              onPageChange={setCurrentPage}
-              onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
-              rowsPerPageOptions={[5, 10, 20]}
-              emptyMessage="No appointments found matching the current filters."
-              rowKey={(r: Appointment, i: number) => r.id + i}
-            />
+            {isAppointmentsLoading ? (
+              <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
+                <Loader2 size={24} className="animate-spin text-[#00488D]" />
+                Loading appointments...
+              </div>
+            ) : (
+              <HmsTable
+                columns={[
+                  { key: "id", label: "Appointment No", render: (r: Appointment) => (
+                    <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.id}</span>
+                  )},
+                  { key: "tokenId", label: "Token Id", render: (r: Appointment) => (
+                    <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.tokenId}</span>
+                  )},
+                  { key: "patient", label: "Patient", render: (r: Appointment) => (
+                    <div className="flex items-center gap-2">
+                      <div className={`w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text ${r.avatarColor}`}>{r.patientInitial}</div>
+                      <div><div className="hms-name-text capitalize">{r.patient}</div><div className="hms-id-text">{r.patientId}</div></div>
+                    </div>
+                  )},
+                  { key: "branch", label: "Branch", render: (r: Appointment) => <span className="hms-content-text text-[#191C1E]">{r.branch}</span> },
+                  { key: "doctor", label: "Doctor", render: (r: Appointment) => (
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center hms-avatar-text">{r.doctorInitial}</div>
+                      <div><div className="hms-name-text capitalize">{r.doctor}</div><div className="hms-id-text">{r.doctorId}</div></div>
+                    </div>
+                  )},
+                  { key: "date", label: "Appointment Date", render: (r: Appointment) => (
+                    <div className="hms-content-text text-[#191C1E] leading-4"><div>{r.date}</div><div className="text-[11px] font-medium text-[#8C8D8F] mt-1">{r.time}</div></div>
+                  )},
+                  { key: "status", label: "Status", render: (r: Appointment) => (
+                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${statusStyles[r.status] ?? "bg-indigo-50 text-indigo-600"}`}>{r.status}</span>
+                  )},
+                  { key: "actions", label: "Action", sortable: false, render: (r: Appointment) => (
+                    <ActionMenu
+                      onView={() => alert(`Viewing appointment ${r.id}`)}
+                      onEdit={() => alert(`Editing appointment ${r.id}`)}
+                      onCancel={() => alert(`Cancelling appointment ${r.id}`)}
+                    />
+                  )},
+                ]}
+                data={currentRows}
+                sortField={sortField}
+                sortDirection={sortDirection}
+                onSort={handleSort}
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalRecords={totalRecords}
+                rowsPerPage={rowsPerPage}
+                visibleStart={visibleStart}
+                visibleEnd={visibleEnd}
+                onPageChange={setCurrentPage}
+                onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
+                rowsPerPageOptions={[5, 10, 20]}
+                emptyMessage="No appointments found matching the current filters."
+                rowKey={(r: Appointment, i: number) => r.id + i}
+              />
+            )}
           </div>
         </main>
       </div>

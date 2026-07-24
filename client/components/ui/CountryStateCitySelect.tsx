@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Country, State, City } from "country-state-city";
 import type { ICountry, IState, ICity } from "country-state-city";
 import { Globe, MapPin, ChevronDown, Loader2, X } from "lucide-react";
@@ -15,6 +15,7 @@ interface CountryStateCitySelectProps {
   state?: string;
   district?: string;
   onCountryChange: (country: string) => void;
+  onCountryCodeChange?: (isoCode: string) => void;
   onStateChange: (state: string) => void;
   onDistrictChange: (district: string) => void;
   disabled?: boolean;
@@ -23,6 +24,8 @@ interface CountryStateCitySelectProps {
   countryPlaceholder?: string;
   statePlaceholder?: string;
   districtPlaceholder?: string;
+  hideCountry?: boolean;
+  fixedCountry?: string;
 }
 
 export function CountryStateCitySelect({
@@ -30,6 +33,7 @@ export function CountryStateCitySelect({
   state,
   district,
   onCountryChange,
+  onCountryCodeChange,
   onStateChange,
   onDistrictChange,
   disabled = false,
@@ -38,6 +42,8 @@ export function CountryStateCitySelect({
   countryPlaceholder = "Select Country",
   statePlaceholder = "Select State",
   districtPlaceholder = "Select District",
+  hideCountry = false,
+  fixedCountry,
 }: CountryStateCitySelectProps) {
   const [countries, setCountries] = useState<ICountry[]>([]);
   const [states, setStates] = useState<IState[]>([]);
@@ -54,6 +60,8 @@ export function CountryStateCitySelect({
     city: useRef<HTMLDivElement>(null),
   };
 
+  const resolvedCountry = hideCountry ? (fixedCountry || "India") : country;
+
   // Load all countries on mount
   useEffect(() => {
     const allCountries = Country.getAllCountries();
@@ -64,27 +72,28 @@ export function CountryStateCitySelect({
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
-      if (!dropdownRefs.country.current?.contains(target) &&
-          !dropdownRefs.state.current?.contains(target) &&
-          !dropdownRefs.city.current?.contains(target)) {
+      const clickedCountry = !hideCountry && dropdownRefs.country.current?.contains(target);
+      const clickedState = dropdownRefs.state.current?.contains(target);
+      const clickedCity = dropdownRefs.city.current?.contains(target);
+      if (!clickedCountry && !clickedState && !clickedCity) {
         setOpenDropdown(null);
       }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [hideCountry]);
 
   // Load states when country changes
   useEffect(() => {
-    if (country) {
+    if (resolvedCountry) {
       const selectedCountry = countries.find(c =>
-        c.name === country || c.isoCode === country
+        c.name === resolvedCountry || c.isoCode === resolvedCountry
       );
 
       if (selectedCountry) {
-        const countryChanged = prevCountryRef.current !== country;
-        prevCountryRef.current = country;
+        const countryChanged = prevCountryRef.current !== resolvedCountry;
+        prevCountryRef.current = resolvedCountry;
 
         setLoadingStates(true);
         setStates([]);
@@ -109,14 +118,14 @@ export function CountryStateCitySelect({
       setCities([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [country, countries]);
+  }, [resolvedCountry, countries]);
 
   // Load cities when state changes
   useEffect(() => {
-    if (state && country) {
+    if (state && resolvedCountry) {
       const selectedCountry = countries.find(c =>
-        c.name?.toLowerCase().trim() === country?.toLowerCase().trim() ||
-        c.isoCode?.toLowerCase().trim() === country?.toLowerCase().trim()
+        c.name?.toLowerCase().trim() === resolvedCountry?.toLowerCase().trim() ||
+        c.isoCode?.toLowerCase().trim() === resolvedCountry?.toLowerCase().trim()
       );
       const selectedState = states.find(s =>
         s.name?.toLowerCase().trim() === state?.toLowerCase().trim() ||
@@ -150,12 +159,12 @@ export function CountryStateCitySelect({
       setCities([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, country, states, countries]);
+  }, [state, resolvedCountry, states, countries]);
 
   // Helper to find selected items - more robust matching
   const selectedCountry = countries.find(c => 
-    c.name?.toLowerCase().trim() === country?.toLowerCase().trim() || 
-    c.isoCode?.toLowerCase().trim() === country?.toLowerCase().trim()
+    c.name?.toLowerCase().trim() === resolvedCountry?.toLowerCase().trim() || 
+    c.isoCode?.toLowerCase().trim() === resolvedCountry?.toLowerCase().trim()
   );
   const selectedState = states.find(s =>
     s.name?.toLowerCase().trim() === state?.toLowerCase().trim() ||
@@ -170,6 +179,7 @@ export function CountryStateCitySelect({
   // Handle country selection
   const handleCountryChange = (selectedCountry: ICountry) => {
     onCountryChange(selectedCountry.name);
+    onCountryCodeChange?.(selectedCountry.isoCode);
     onStateChange("");
     onDistrictChange("");
     setOpenDropdown(null);
@@ -194,7 +204,10 @@ export function CountryStateCitySelect({
     
     switch (field) {
       case 'country':
-        onCountryChange("");
+        if (!hideCountry) {
+          onCountryChange("");
+          onCountryCodeChange?.("");
+        }
         onStateChange("");
         onDistrictChange("");
         setStates([]);
@@ -263,66 +276,68 @@ export function CountryStateCitySelect({
   };
 
   return (
-    <div className={cn("grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-6", className)}>
+    <div className={cn("grid grid-cols-1 gap-x-6 gap-y-6", hideCountry ? "md:grid-cols-2" : "md:grid-cols-3", className)}>
       {/* Country Dropdown */}
-      <div className="relative" ref={dropdownRefs.country}>
-        <label className={labelStyle}>
-          Country {required && <span className="text-red-600 ml-0.5">*</span>}
-        </label>
-        <div className="relative">
-          <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
-          
-          <button
-            type="button"
-            onClick={() => !disabled && setOpenDropdown(openDropdown === 'country' ? null : 'country')}
-            disabled={disabled}
-            className={cn(
-              baseInputStyle,
-              "pl-10 pr-10",
-              openDropdown === 'country' && "ring-2 ring-blue-500"
-            )}
-            aria-haspopup="listbox"
-            aria-expanded={openDropdown === 'country'}
-          >
-            <span className={country ? "text-gray-900 truncate" : "text-gray-400 truncate"}>
-              {selectedCountry?.name || countryPlaceholder}
-            </span>
+      {!hideCountry && (
+        <div className="relative" ref={dropdownRefs.country}>
+          <label className={labelStyle}>
+            Country {required && <span className="text-red-600 ml-0.5">*</span>}
+          </label>
+          <div className="relative">
+            <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
             
-            <div className="flex items-center gap-1 flex-shrink-0">
-              {country && !disabled && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    clearField('country');
-                  }}
-                  className="p-1 hover:bg-gray-100 rounded-full transition-colors"
-                  aria-label="Clear country"
-                >
-                  <X className="w-4 h-4 text-gray-400" />
-                </button>
+            <button
+              type="button"
+              onClick={() => !disabled && setOpenDropdown(openDropdown === 'country' ? null : 'country')}
+              disabled={disabled}
+              className={cn(
+                baseInputStyle,
+                "pl-10 pr-10",
+                openDropdown === 'country' && "ring-2 ring-blue-500"
               )}
-              <ChevronDown className={cn(
-                "w-4 h-4 text-gray-400 transition-transform duration-200",
-                openDropdown === 'country' && "rotate-180"
-              )} />
-            </div>
-          </button>
+              aria-haspopup="listbox"
+              aria-expanded={openDropdown === 'country'}
+            >
+              <span className={resolvedCountry ? "text-gray-900 truncate" : "text-gray-400 truncate"}>
+                {selectedCountry?.name || countryPlaceholder}
+              </span>
+              
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {resolvedCountry && !disabled && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      clearField('country');
+                    }}
+                    className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+                    aria-label="Clear country"
+                  >
+                    <X className="w-4 h-4 text-gray-400" />
+                  </button>
+                )}
+                <ChevronDown className={cn(
+                  "w-4 h-4 text-gray-400 transition-transform duration-200",
+                  openDropdown === 'country' && "rotate-180"
+                )} />
+              </div>
+            </button>
 
-          {openDropdown === 'country' && (
-            <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-auto">
-              {renderDropdownOptions(
-                countries,
-                country,
-                handleCountryChange,
-                (c) => c.isoCode,
-                (c) => c.name,
-                false
-              )}
-            </div>
-          )}
+            {openDropdown === 'country' && (
+              <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-auto">
+                {renderDropdownOptions(
+                  countries,
+                  resolvedCountry,
+                  handleCountryChange,
+                  (c) => c.isoCode,
+                  (c) => c.name,
+                  false
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* State Dropdown */}
       <div className="relative" ref={dropdownRefs.state}>
@@ -335,23 +350,23 @@ export function CountryStateCitySelect({
           <button
             type="button"
             onClick={() => {
-              if (!disabled && states.length > 0 && country) {
+              if (!disabled && states.length > 0 && resolvedCountry) {
                 setOpenDropdown(openDropdown === 'state' ? null : 'state');
               }
             }}
-            disabled={disabled || !country || states.length === 0}
+            disabled={disabled || !resolvedCountry || states.length === 0}
             className={cn(
               baseInputStyle,
               "pl-10 pr-10",
               openDropdown === 'state' && "ring-2 ring-blue-500",
-              (!country || states.length === 0) && "opacity-60"
+              (!resolvedCountry || states.length === 0) && "opacity-60"
             )}
             aria-haspopup="listbox"
             aria-expanded={openDropdown === 'state'}
           >
             <span className={state ? "text-gray-900 truncate" : "text-gray-400 truncate"}>
               {selectedState?.name || 
-                (!country ? "Select Country first" : statePlaceholder)}
+                (!resolvedCountry ? "Select Country first" : statePlaceholder)}
             </span>
             
             <div className="flex items-center gap-1 flex-shrink-0">
@@ -405,16 +420,16 @@ export function CountryStateCitySelect({
           <button
             type="button"
             onClick={() => {
-              if (!disabled && cities.length > 0 && state && country) {
+              if (!disabled && cities.length > 0 && state && resolvedCountry) {
                 setOpenDropdown(openDropdown === 'city' ? null : 'city');
               }
             }}
-            disabled={disabled || !state || !country || cities.length === 0}
+            disabled={disabled || !state || !resolvedCountry || cities.length === 0}
             className={cn(
               baseInputStyle,
               "pl-10 pr-10",
               openDropdown === 'city' && "ring-2 ring-blue-500",
-              (!state || !country || cities.length === 0) && "opacity-60"
+              (!state || !resolvedCountry || cities.length === 0) && "opacity-60"
             )}
             aria-haspopup="listbox"
             aria-expanded={openDropdown === 'city'}
