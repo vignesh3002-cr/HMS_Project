@@ -25,7 +25,3 @@ dist-ssr
 
 .config/
 !.env
-
-# Backend
-Backend/HMS_Backend/.env
-Backend/HMS_Backend/dist
