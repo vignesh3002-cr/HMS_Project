@@ -10,7 +10,6 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import AddBranch from "@/components/Forms/AddBranch";
 import AddEmployee from "@/components/Forms/Addemployee";
 import PatientRegistrationForm from "@/components/Forms/PatientRegistrationForm";
-import EditBranch from "@/components/Forms/edit/EditBranch";
 import EditPatientForm from "@/components/Forms/edit/EditPatientForm";
 import EditDoctorForm from "@/components/Forms/edit/EditDoctorForm";
 import AddAppointment from "@/components/Forms/AddAppointment";
@@ -66,7 +65,6 @@ const protectedRoutes = [
   { path: "/doctor/view/:id", element: <DoctorDetails /> },
   { path: "/patients/edit/:id", element: <EditPatientForm /> },
   { path: "/doctor/edit/:id", element: <EditDoctorForm /> },
-  { path: "/branches/edit/:id", element: <EditBranch /> },
   { path: "/appointments/add", element: <AddAppointment /> },
   { path: "/appointments/book", element: <AppointmentBooking /> },
 

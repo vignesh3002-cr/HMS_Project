@@ -100,35 +100,6 @@ export interface CreateEmployeeResponse {
   };
 }
 
-export interface DoctorProfile {
-  employee_id: string;
-  specialization: string;
-  qualification: string | null;
-  license_no: string | null;
-  consultation_minutes: number;
-}
-
-export interface DoctorSchedule {
-  schedule_id: string;
-  employee_id: string;
-  branch_id: string;
-  day_of_week: DayOfWeek | null;
-  shift_name: string | null;
-  start_time: string | null;
-  end_time: string | null;
-  consultation_minutes: number | null;
-  is_active: boolean | null;
-  branch?: { branch_name: string } | null;
-}
-
-export interface EmployeeDetail {
-  employee: EmployeeRecord;
-  user: { role_type: string; user_status: number } | null;
-  branches: { branch_id: string; branch_name: string }[];
-  doctorProfile?: DoctorProfile | null;
-  doctorSchedules?: DoctorSchedule[];
-}
-
 export interface GetEmployeesParams {
   role_type?: "DOCTOR" | "NURSE" | "PHARMACIST" | "LAB_TECHNICIAN" | "RECEPTIONIST" | "STAFF";
   branch_id?: string;
@@ -177,9 +148,6 @@ export const employeeApi = {
 
   getAll: (params?: GetEmployeesParams) =>
     API.get<{ success: boolean; data: { employees: EmployeeRecord[]; total: number; page: number; limit: number } }>("/employees", { params }),
-
-  getById: (employeeId: string) =>
-    API.get<{ success: boolean; data: EmployeeDetail }>(`/employees/${employeeId}`),
 
   update: (employeeId: string, data: UpdateEmployeePayload) =>
     API.put<{ success: boolean; data: any; message?: string }>(`/employees/${employeeId}`, data),

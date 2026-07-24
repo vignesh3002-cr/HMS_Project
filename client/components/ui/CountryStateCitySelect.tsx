@@ -4,12 +4,6 @@ import type { ICountry, IState, ICity } from "country-state-city";
 import { Globe, MapPin, ChevronDown, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// Tolerates data-entry inconsistencies like "TamilNadu" vs "Tamil Nadu" by
-// comparing with whitespace stripped, in addition to the exact trimmed match.
-function normalizeForMatch(value?: string | null): string {
-  return (value ?? "").toLowerCase().replace(/\s+/g, "").trim();
-}
-
 interface CountryStateCitySelectProps {
   country?: string;
   state?: string;
@@ -129,8 +123,7 @@ export function CountryStateCitySelect({
       );
       const selectedState = states.find(s =>
         s.name?.toLowerCase().trim() === state?.toLowerCase().trim() ||
-        s.isoCode?.toLowerCase().trim() === state?.toLowerCase().trim() ||
-        normalizeForMatch(s.name) === normalizeForMatch(state)
+        s.isoCode?.toLowerCase().trim() === state?.toLowerCase().trim()
       );
 
       if (selectedCountry && selectedState) {
@@ -166,14 +159,12 @@ export function CountryStateCitySelect({
     c.name?.toLowerCase().trim() === resolvedCountry?.toLowerCase().trim() || 
     c.isoCode?.toLowerCase().trim() === resolvedCountry?.toLowerCase().trim()
   );
-  const selectedState = states.find(s =>
-    s.name?.toLowerCase().trim() === state?.toLowerCase().trim() ||
-    s.isoCode?.toLowerCase().trim() === state?.toLowerCase().trim() ||
-    normalizeForMatch(s.name) === normalizeForMatch(state)
+  const selectedState = states.find(s => 
+    s.name?.toLowerCase().trim() === state?.toLowerCase().trim() || 
+    s.isoCode?.toLowerCase().trim() === state?.toLowerCase().trim()
   );
-  const selectedCity = cities.find(c =>
-    c.name?.toLowerCase().trim() === district?.toLowerCase().trim() ||
-    normalizeForMatch(c.name) === normalizeForMatch(district)
+  const selectedCity = cities.find(c => 
+    c.name?.toLowerCase().trim() === district?.toLowerCase().trim()
   );
 
   // Handle country selection
