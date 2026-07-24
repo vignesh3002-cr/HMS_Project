@@ -59,12 +59,43 @@ export interface CreateBranchResponse {
   };
 }
 
+export interface BranchDetail {
+  branch_id: string;
+  branch_code: string | null;
+  branch_name: string;
+  branch_type: string | null;
+  branch_area: string | null;
+  branch_email: string | null;
+  emergency_no: string | null;
+  address: string | null;
+  district: string | null;
+  state_name: string | null;
+  country: string | null;
+  branch_pincode: number | null;
+  branch_license_no: string | null;
+  total_beds: number | null;
+  total_no_emp: string | null;
+  fax_no: string | null;
+  gst_no: string | null;
+  pan_no: string | null;
+  website_address: string | null;
+  date_of_establish: string | null;
+  medical_services: string | null;
+  branch_status: string | null;
+  hospital_id: string;
+  hospital_name: string;
+}
+
 // ✅ Make sure branchApi is exported with 'export const'
 export const branchApi = {
   // Get all branches
   getAll: () => API.get<{
     branches: any[]; success: boolean; data: Branch[]
 }>("/branch"),
+
+  // Get branch by id
+  getById: (branchId: string) =>
+    API.get<{ success: boolean; data: BranchDetail }>(`/branch/${branchId}`),
 
   // Create new branch (also creates its branch-admin user)
   create: (data: CreateBranchPayload) =>

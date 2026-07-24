@@ -79,6 +79,13 @@ function deriveShiftName(startTime: string): string {
   return hour < 12 ? "Morning" : "Evening";
 }
 
+// Prisma serializes `@db.Time` columns as an ISO datetime string anchored at
+// 1970-01-01 (e.g. "1970-01-01T09:00:00.000Z") — pull the HH:MM back out.
+function formatTimeFromApi(value: string | null | undefined): string {
+  const match = value ? /T(\d{2}):(\d{2})/.exec(value) : null;
+  return match ? `${match[1]}:${match[2]}` : "09:00";
+}
+
 // Field names mirror the `employees` table columns so every input here has a
 // real column to be saved into (username/password are excluded — they live on
 // `user_table` and aren't editable from here).
@@ -235,14 +242,12 @@ export default function EditDoctorForm() {
   useEffect(() => {
     if (!id) return;
     employeeApi
-      .getAll({ limit: 1000 })
+      .getById(id)
       .then((res) => {
-        const employees = res.data?.data?.employees || [];
-        const found = employees.find(
-          (e) => e.employee_id === id && e.user_table?.role_type === "DOCTOR",
-        );
+        const detail = res.data?.data;
+        const found = detail?.employee;
 
-        if (!found) {
+        if (!found || detail?.user?.role_type !== "DOCTOR") {
           toast({
             title: "Doctor not found",
             description: "Couldn't find this doctor's record.",
@@ -250,6 +255,13 @@ export default function EditDoctorForm() {
           });
           return;
         }
+
+        const doctorProfile = detail.doctorProfile;
+        const branchIds = detail.branches?.length
+          ? detail.branches.map((b) => b.branch_id)
+          : found.branch_id
+            ? [found.branch_id]
+            : [];
 
         setFormData({
           firstName: found.first_name || "",
@@ -270,16 +282,35 @@ export default function EditDoctorForm() {
           emergencyContactNumber: found.emergency_contact_number || "",
           departmentId: found.department_id || "",
           designation: found.designation || "",
-          specialization: found.specialization || "",
-          qualification: found.qualification || "",
-          docLicenseNo: found.doc_license_no || "",
+          specialization: doctorProfile?.specialization || found.specialization || "",
+          qualification: doctorProfile?.qualification || found.qualification || "",
+          docLicenseNo: doctorProfile?.license_no || found.doc_license_no || "",
           joiningDate: found.joining_date ? String(found.joining_date).slice(0, 10) : "",
-          branchIds: found.branch_id ? [found.branch_id] : [],
+          branchIds,
           status: found.emp_status === false ? "Inactive" : "Active",
           photoUrl: found.photo || null,
         });
         if (found.current_address && found.current_address === found.parmanant_address) {
           setSameAsCurrent(true);
+        }
+        if (doctorProfile?.consultation_minutes) {
+          setConsultationMinutes(String(doctorProfile.consultation_minutes));
+        }
+
+        const schedules = detail.doctorSchedules || [];
+        if (schedules.length) {
+          setSchedule(
+            schedules.map((s) => {
+              const slotId = `slot-${nextSlotId.current++}`;
+              return {
+                id: slotId,
+                day_of_week: s.day_of_week || "",
+                start_time: formatTimeFromApi(s.start_time),
+                end_time: formatTimeFromApi(s.end_time),
+                branch_id: s.branch_id || "",
+              };
+            }),
+          );
         }
       })
       .catch(() => {
@@ -497,6 +528,7 @@ export default function EditDoctorForm() {
                           <label className={labelClass}>First name {requiredStar}</label>
                           <input
                             type="text"
+                            maxLength={50}
                             className={inputClass}
                             value={formData.firstName}
                             onChange={(e) => handleChange(e, "firstName")}
@@ -510,6 +542,7 @@ export default function EditDoctorForm() {
                       <label className={labelClass}>Middle name</label>
                       <input
                         type="text"
+                        maxLength={50}
                         className={inputClass}
                         value={formData.middleName}
                         onChange={(e) => handleChange(e, "middleName")}
@@ -520,6 +553,7 @@ export default function EditDoctorForm() {
                       <label className={labelClass}>Last name {requiredStar}</label>
                       <input
                         type="text"
+                        maxLength={50}
                         className={inputClass}
                         value={formData.lastName}
                         onChange={(e) => handleChange(e, "lastName")}
@@ -542,6 +576,7 @@ export default function EditDoctorForm() {
                       <label className={labelClass}>Nationality {requiredStar}</label>
                       <input
                         type="text"
+                        maxLength={50}
                         className={inputClass}
                         value={formData.nationality}
                         onChange={(e) => handleChange(e, "nationality")}
@@ -577,6 +612,7 @@ export default function EditDoctorForm() {
                       <label className={labelClass}>Aadhaar No {requiredStar}</label>
                       <input
                         type="text"
+                        maxLength={20}
                         className={inputClass}
                         value={formData.aadhaarNo}
                         onChange={(e) => handleChange(e, "aadhaarNo")}
@@ -587,6 +623,7 @@ export default function EditDoctorForm() {
                       <label className={labelClass}>PAN No {requiredStar}</label>
                       <input
                         type="text"
+                        maxLength={20}
                         className={inputClass}
                         value={formData.panNo}
                         onChange={(e) => handleChange(e, "panNo")}
@@ -598,6 +635,7 @@ export default function EditDoctorForm() {
                       <label className={labelClass}>Passport No</label>
                       <input
                         type="text"
+                        maxLength={20}
                         className={inputClass}
                         value={formData.passportNo}
                         onChange={(e) => handleChange(e, "passportNo")}
@@ -614,6 +652,7 @@ export default function EditDoctorForm() {
                       <label className={labelClass}>Mobile number {requiredStar}</label>
                       <input
                         type="tel"
+                        maxLength={15}
                         className={inputClass}
                         value={formData.mobileNo}
                         onChange={(e) => handleChange(e, "mobileNo")}
@@ -624,6 +663,7 @@ export default function EditDoctorForm() {
                       <label className={labelClass}>Email {requiredStar}</label>
                       <input
                         type="email"
+                        maxLength={50}
                         className={inputClass}
                         value={formData.email}
                         onChange={(e) => handleChange(e, "email")}
@@ -638,6 +678,7 @@ export default function EditDoctorForm() {
                       </label>
                       <input
                         type="text"
+                        maxLength={100}
                         className={inputClass}
                         value={formData.emergencyContactName}
                         onChange={(e) => handleChange(e, "emergencyContactName")}
@@ -651,6 +692,7 @@ export default function EditDoctorForm() {
                       <input
                         type="text"
                         placeholder="e.g. Spouse, Parent"
+                        maxLength={50}
                         className={inputClass}
                         value={formData.emergencyContactRelation}
                         onChange={(e) => handleChange(e, "emergencyContactRelation")}
@@ -663,6 +705,7 @@ export default function EditDoctorForm() {
                       </label>
                       <input
                         type="tel"
+                        maxLength={15}
                         className={inputClass}
                         value={formData.emergencyContactNumber}
                         onChange={(e) => handleChange(e, "emergencyContactNumber")}
@@ -764,31 +807,44 @@ export default function EditDoctorForm() {
                     </div>
                     <div>
                       <label className={labelClass}>Specialization {requiredStar}</label>
-                      <FormDropdown
-                        options={DOCTOR_SPECIALIZATIONS}
-                        value={formData.specialization}
-                        onValueChange={(val) => setField("specialization", val)}
-                        placeholder="Select specialization"
+                      <input
+                        type="text"
+                        list="specialization-options"
+                        maxLength={100}
                         className={inputClass}
+                        value={formData.specialization}
+                        onChange={(e) => handleChange(e, "specialization")}
                         disabled={submitting}
                       />
+                      <datalist id="specialization-options">
+                        {DOCTOR_SPECIALIZATIONS.map((s) => (
+                          <option key={s} value={s} />
+                        ))}
+                      </datalist>
                     </div>
 
                     <div>
                       <label className={labelClass}>Qualification {requiredStar}</label>
-                      <FormDropdown
-                        options={DOCTOR_QUALIFICATIONS}
-                        value={formData.qualification}
-                        onValueChange={(val) => setField("qualification", val)}
-                        placeholder="Select qualification"
+                      <input
+                        type="text"
+                        list="qualification-options"
+                        maxLength={150}
                         className={inputClass}
+                        value={formData.qualification}
+                        onChange={(e) => handleChange(e, "qualification")}
                         disabled={submitting}
                       />
+                      <datalist id="qualification-options">
+                        {DOCTOR_QUALIFICATIONS.map((q) => (
+                          <option key={q} value={q} />
+                        ))}
+                      </datalist>
                     </div>
                     <div>
                       <label className={labelClass}>Doctor License No {requiredStar}</label>
                       <input
                         type="text"
+                        maxLength={50}
                         className={inputClass}
                         value={formData.docLicenseNo}
                         onChange={(e) => handleChange(e, "docLicenseNo")}
@@ -847,7 +903,7 @@ export default function EditDoctorForm() {
                         {schedule.map((entry) => (
                           <div
                             key={entry.id}
-                            className="flex flex-wrap items-end gap-3 rounded-xl border border-gray-200 p-3"
+                            className="flex flex-wrap sm:w-[700px] items-end gap-3 rounded-xl border border-gray-200 p-3"
                           >
                             <div className="w-40">
                               <label className="block text-xs font-semibold text-gray-600 mb-1">
@@ -931,9 +987,9 @@ export default function EditDoctorForm() {
                         type="button"
                         onClick={addScheduleEntry}
                         disabled={submitting}
-                        className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-blue-600 border border-blue-200 rounded-xl hover:bg-blue-50 transition-colors disabled:opacity-50"
+                        className="mt-3 inline-flex items-center gap-1 whitespace-nowrap px-3 py-1.5 text-xs font-semibold text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors disabled:opacity-50"
                       >
-                        <Plus className="w-4 h-4" /> Add Time Slot
+                        <Plus className="w-3.5 h-3.5" /> Add Time Slot
                       </button>
                     </div>
                   </div>
