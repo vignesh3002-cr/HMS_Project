@@ -340,7 +340,13 @@ export default function DoctorProfile() {
             </h2>
 
             <button
-              onClick={() => showAlert("More doctor information will be displayed.")}
+              onClick={() => {
+                if (id) {
+                  navigate(`/doctor/view/${id}/details`);
+                } else {
+                  showAlert("Unable to open the detailed doctor profile.");
+                }
+              }}
               className="border-0 bg-transparent text-[#135dc5] underline text-[13px] cursor-pointer"
             >
               View More

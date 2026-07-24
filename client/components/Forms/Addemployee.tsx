@@ -6,6 +6,8 @@ import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { MultiSelectDropdown } from "@/components/ui/multi-select-dropdown";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
+import { State as CSState, City } from "country-state-city";
+import type { IState } from "country-state-city";
 import { DayOfWeek, WorkingHourPayload, employeeApi } from "@/api/employee.api";
 import { branchApi, Branch } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
@@ -243,6 +245,13 @@ interface EmployeeFormData {
   aadhaarNo: string;
   panNo: string;
   passportNo: string;
+  country: string;
+  countryId: string;
+  state: string;
+  district: string;
+  area: string;
+  pincode: string;
+  experience: string;
   departmentId: string;
   designation: string;
   specialization: string;
@@ -274,6 +283,13 @@ const emptyFormData: EmployeeFormData = {
   aadhaarNo: "",
   panNo: "",
   passportNo: "",
+  country: "",
+  countryId: "",
+  state: "",
+  district: "",
+  area: "",
+  pincode: "",
+  experience: "",
   departmentId: "",
   designation: "",
   specialization: "",
@@ -329,6 +345,29 @@ export default function AddEmployee() {
 
   // Free-typed department name, used only when departmentId === OTHER_DEPARTMENT_VALUE.
   const [customDepartment, setCustomDepartment] = useState("");
+
+  // Indian states and districts for the dependent dropdowns
+  const [indianStates, setIndianStates] = useState<IState[]>([]);
+  const [districtOptions, setDistrictOptions] = useState<string[]>([]);
+
+  // Load Indian states on mount
+  useEffect(() => {
+    const states = CSState.getStatesOfCountry("IN");
+    setIndianStates(states);
+  }, []);
+
+  // Load districts (cities) when state changes
+  useEffect(() => {
+    if (formData.state) {
+      const selectedState = indianStates.find(s => s.name === formData.state);
+      if (selectedState) {
+        const cities = City.getCitiesOfState("IN", selectedState.isoCode);
+        setDistrictOptions(cities.map(c => c.name).sort());
+      }
+    } else {
+      setDistrictOptions([]);
+    }
+  }, [formData.state, indianStates]);
 
   // Fetch branches on mount for the branch dropdown
   useEffect(() => {
@@ -462,6 +501,10 @@ export default function AddEmployee() {
       { key: "email", label: "Email" },
       { key: "aadhaarNo", label: "Aadhaar No" },
       { key: "panNo", label: "PAN No" },
+      { key: "state", label: "State" },
+      { key: "district", label: "District" },
+      { key: "area", label: "Area" },
+      { key: "pincode", label: "Pincode" },
       { key: "departmentId", label: "Department" },
       { key: "designation", label: "Designation" },
       ...(isMedicalRole
@@ -749,6 +792,19 @@ export default function AddEmployee() {
               />
             </div>
             <div>
+              <label className={labelClass}>Experience {requiredStar}</label>
+              <input
+                type="text"
+                name="experience"
+                placeholder="Enter Experience (in years)"
+                maxLength={50}
+                className={inputClass}
+                value={formData.experience}
+                onChange={handleChange}
+                disabled={submitting}
+              />
+            </div>
+            <div>
               <label className={labelClass}>Nationality {requiredStar}</label>
               <input
                 type="text"
@@ -775,6 +831,61 @@ export default function AddEmployee() {
                 disabled={submitting}
               />
             </div>
+
+            {/* State, District, Area, Pincode */}
+            <div>
+              <label className={labelClass}>State {requiredStar}</label>
+              <FormDropdown
+                name="state"
+                className={inputClass}
+                options={indianStates.map(s => s.name)}
+                value={formData.state}
+                onValueChange={(val) => setFormData((prev) => ({ ...prev, state: val, district: "" }))}
+                placeholder="Select State"
+                disabled={submitting}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>District {requiredStar}</label>
+              <FormDropdown
+                name="district"
+                className={inputClass}
+                options={districtOptions}
+                value={formData.district}
+                onValueChange={(val) => setFormData((prev) => ({ ...prev, district: val }))}
+                placeholder={formData.state ? "Select District" : "Select State first"}
+                disabled={submitting || !formData.state}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Area {requiredStar}</label>
+              <input
+                type="text"
+                name="area"
+                placeholder="Enter Area"
+                maxLength={50}
+                className={inputClass}
+                value={formData.area}
+                onChange={handleChange}
+                disabled={submitting}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Pincode {requiredStar}</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                name="pincode"
+                placeholder="Enter Pincode"
+                maxLength={10}
+                className={inputClass}
+                value={formData.pincode}
+                onChange={handleChange}
+                disabled={submitting}
+              />
+            </div>
+            <div />
 
             {/* Mobile No, Email, Aadhaar No */}
             <div>
