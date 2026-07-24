@@ -14,6 +14,7 @@ import EditPatientForm from "@/components/Forms/edit/EditPatientForm";
 import EditDoctorForm from "@/components/Forms/edit/EditDoctorForm";
 import AddAppointment from "@/components/Forms/AddAppointment";
 import PatientProfile from "@/components/Forms/view/patientProfile";
+import AppointmentBooking from "@/components/Forms/view/AppointmentBooking";
 import Appointments from "./pages/Appointments";
 import Dashboard from "./pages/Dashboard";
 import Departments from "./pages/Departments";
@@ -63,6 +64,7 @@ const protectedRoutes = [
   { path: "/patients/edit/:id", element: <EditPatientForm /> },
   { path: "/doctor/edit/:id", element: <EditDoctorForm /> },
   { path: "/appointments/add", element: <AddAppointment /> },
+  { path: "/appointments/book", element: <AppointmentBooking /> },
 
 ];
 

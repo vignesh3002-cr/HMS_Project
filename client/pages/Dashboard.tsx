@@ -11,83 +11,7 @@ import { filterDataByValues } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { patientApi } from "@/api/patient.api";
-
-
-
-const appointments = [
-  {
-    id: 1,
-    appointmentNo: "APT-9042",
-    patientName: "Divakar",
-    patientId: "PTN-9042",
-    avatar: "D",
-    avatarColor: "#00488D",
-    avatarBg: "#D6E3FF",
-    doctorName: "Dr. Sarah Jenkins",
-    doctorId: "DOC-442",
-    doctorAvatar: "SJ",
-    doctorAvatarcolor: "#FF6B35",
-    doctorAvatarBg: "#ff6b351f",
-    reason: "General Check-Up",
-    date: "12-12-2026",
-    time: "10:00 AM",
-    status: "Active",
-  },
-  {
-    id: 2,
-    appointmentNo: "APT-2219",
-    patientName: "Bharath",
-    patientId: "PTN-2219",
-    avatar: "B",
-    avatarColor: "#7B3200",
-    avatarBg: "#FFDBCB",
-    doctorName: "Dr. Robert Lee",
-    doctorId: "DOC-2210",
-    doctorAvatar: "RL",
-    doctorAvatarcolor: "#475C7F",
-    doctorAvatarBg: "#E6E8EA",
-    reason: "Initial Diagnosis",
-    date: "12-12-2026",
-    time: "11:20 AM",
-    status: "Leave",
-  },
-  {
-    id: 3,
-    appointmentNo: "APT-4431",
-    patientName: "Babu",
-    patientId: "PTN-4431",
-    avatar: "B",
-    avatarColor: "#00C896",
-    avatarBg: "rgba(0,200,150,0.12)",
-    doctorName: "Dr.Marcus Kincaid",
-    doctorId: "DOC-4431",
-    doctorAvatar: "MK",
-    doctorAvatarcolor: "#00488D",
-    doctorAvatarBg: "#D6E3FF",
-    reason: "Follow-Up Visit",
-    date: "12-12-2026",
-    time: "12:30 PM",
-    status: "Active",
-  },
-  {
-    id: 4,
-    appointmentNo: "APT-2219",
-    patientName: "Govindan",
-    patientId: "PTN-2219",
-    avatar: "G",
-    avatarColor: "#475C7F",
-    avatarBg: "#E6E8EA",
-    doctorName: "Dr. Robert Lee",
-    doctorId: "DOC-2210",
-    doctorAvatar: "RL",
-    doctorAvatarcolor: "#475C7F",
-    doctorAvatarBg: "#E6E8EA",
-    reason: "Initial Diagnosis",
-    date: "12-12-2026",
-    time: "01:15 PM",
-    status: "Active",
-  },
-];
+import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 
 const navItems = [
   {
@@ -213,6 +137,69 @@ function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
   };
 }
 
+// Real appointment_time/appointment_date come back from Prisma as ISO
+// strings whose UTC components hold the actual stored date/time (both
+// columns are timezone-less in Postgres) — read with UTC getters so the
+// displayed value doesn't shift with the browser's local timezone.
+function formatDateOnly(iso: string): string {
+  const d = new Date(iso);
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${day}-${month}-${d.getUTCFullYear()}`;
+}
+
+function formatTimeOnly(iso: string): string {
+  const d = new Date(iso);
+  const hours = d.getUTCHours();
+  const minutes = String(d.getUTCMinutes()).padStart(2, "0");
+  const period = hours >= 12 ? "PM" : "AM";
+  const h12 = hours % 12 || 12;
+  return `${String(h12).padStart(2, "0")}:${minutes} ${period}`;
+}
+
+function formatAppointmentStatus(status: string | null): string {
+  if (!status) return "Unknown";
+  return status
+    .toLowerCase()
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
+  const patientPalette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
+  const doctorPalette = AVATAR_PALETTE[(index + 1) % AVATAR_PALETTE.length];
+
+  const patient = doc.patient_bio_data;
+  const patientName = patient
+    ? `${patient.patient_first_name} ${patient.patient_middle_name ? patient.patient_middle_name + " " : ""}${patient.patient_last_name ?? ""}`.trim()
+    : "Unknown Patient";
+
+  const doctor = doc.employees;
+  const doctorName = doctor
+    ? `${doctor.first_name} ${doctor.middle_name ? doctor.middle_name + " " : ""}${doctor.last_name}`.trim()
+    : doc.doctor_name || "Unassigned";
+
+  return {
+    id: doc.appointment_id,
+    appointmentNo: doc.appointment_id,
+    patientName,
+    patientId: doc.patient_id,
+    avatar: getInitials(patientName),
+    avatarColor: patientPalette.avatarColor,
+    avatarBg: patientPalette.initBg,
+    doctorName,
+    doctorId: doc.employee_id ?? "—",
+    doctorAvatar: getInitials(doctorName),
+    doctorAvatarcolor: doctorPalette.avatarColor,
+    doctorAvatarBg: doctorPalette.initBg,
+    reason: doc.reason_for_visit || "—",
+    date: formatDateOnly(doc.appointment_date),
+    time: formatTimeOnly(doc.appointment_time),
+    status: formatAppointmentStatus(doc.status),
+  };
+}
+
 function parseStatValue(value: string): number {
   return Number(value.replace(/,/g, ""));
 }
@@ -256,6 +243,31 @@ export default function Dashboard() {
   const [realStaff, setRealStaff] = useState<Record<string, unknown>[] | null>(null);
   const [isEmployeesLoading, setIsEmployeesLoading] = useState(true);
   const [patientCount, setPatientCount] = useState<number>(0);
+
+  // Real appointments fetched from the backend. No dummy fallback — an
+  // empty/failed fetch just leaves this null and the tab shows no rows.
+  const [realAppointments, setRealAppointments] = useState<Record<string, unknown>[] | null>(null);
+  const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
+
+  useEffect(() => {
+    appointmentApi
+      .getAll({ limit: 100, sortBy: "appointment_date", sortOrder: "desc" })
+      .then((res) => {
+        const rows = res.data?.data?.appointments || [];
+        setRealAppointments(rows.map(mapAppointmentRecord));
+      })
+      .catch((err) => {
+        console.error("[Dashboard] Failed to load appointments:", err);
+        toast({
+          title: "Failed to load appointments",
+          description: "Couldn't reach the appointments API.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => {
+        setIsAppointmentsLoading(false);
+      });
+  }, []);
 
   useEffect(() => {
     patientApi
@@ -462,8 +474,13 @@ export default function Dashboard() {
     { id: "doctorName", label: "Doctor Name", type: "text", placeholder: "Search by doctor" },
     { id: "reason", label: "Reason", type: "text", placeholder: "Search reason" },
     { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "Active", value: "Active" },
-      { label: "Leave", value: "Leave" },
+      { label: "Booked", value: "Booked" },
+      { label: "Confirmed", value: "Confirmed" },
+      { label: "Checked In", value: "Checked In" },
+      { label: "In Consultation", value: "In Consultation" },
+      { label: "Completed", value: "Completed" },
+      { label: "Cancelled", value: "Cancelled" },
+      { label: "No Show", value: "No Show" },
     ]},
   ];
 
@@ -500,7 +517,7 @@ export default function Dashboard() {
     activeTab === "staff"
       ? (realStaff ?? [])
       : activeTab === "appointments"
-        ? appointments
+        ? (realAppointments ?? [])
         : (realDoctors ?? []);
 
   const searchableFields =
@@ -524,7 +541,7 @@ export default function Dashboard() {
     result = filterDataByValues(result, appliedValues);
 
     return result;
-  }, [searchQuery, activeTab, appliedValues, realDoctors, realStaff]);
+  }, [searchQuery, activeTab, appliedValues, realDoctors, realStaff, realAppointments]);
 
   const currentSortField = sortField[activeTab];
   const currentSortDirection = sortDirection[activeTab];
@@ -830,7 +847,8 @@ useEffect(() => {
             </div>
 
             {/* Table / Loading */}
-            {(activeTab === "doctors" || activeTab === "staff") && isEmployeesLoading ? (
+            {((activeTab === "doctors" || activeTab === "staff") && isEmployeesLoading) ||
+            (activeTab === "appointments" && isAppointmentsLoading) ? (
               <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
                 <Loader2 size={24} className="animate-spin text-[#00488D]" />
                 Loading {activeTab}...
@@ -858,7 +876,7 @@ useEffect(() => {
                     <div className="text-[#191C1E] hms-content-text leading-4"><div>{r.date}</div><div className="text-[#8C8D8F] hms-department-text">{r.time}</div></div>
                   )},
                   { key: "status", label: "Status", render: (r: any) => {
-                    const isActive = String(r.status) === "Active";
+                    const isActive = !["Cancelled", "No Show"].includes(String(r.status));
                     return (
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
                         <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />

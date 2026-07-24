@@ -43,6 +43,8 @@ const parseDate = (dateStr) => {
 const isSameDay = (a, b) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
+const dateKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+
 const buildCalendarDays = (year, month) => {
   const firstDay = new Date(year, month, 1);
   const startOffset = firstDay.getDay();
@@ -122,7 +124,7 @@ const getMonthYearLabel = (dateStr) => {
 export default function DoctorProfile() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("week");
-  const [selectedDay, setSelectedDay] = useState(() => parseDate(WEEK_DAYS[0][1]));
+  const [toggledDates, setToggledDates] = useState<Set<string>>(new Set());
   const [addSlotOpen, setAddSlotOpen] = useState(false);
   const [addSlotDay, setAddSlotDay] = useState("");
   const [addSlotPos, setAddSlotPos] = useState(null);
@@ -303,7 +305,7 @@ export default function DoctorProfile() {
               </div>
 
               <button
-                onClick={() => showAlert("Book Appointment clicked")}
+                onClick={() => navigate("/appointments/book")}
                 className="border-0 bg-[#004a91] hover:bg-[#003b75] text-white px-[17px] py-[11px] rounded-[7px] text-[13px] font-semibold cursor-pointer max-[700px]:w-full"
               >
                 Book Appointment
@@ -709,12 +711,21 @@ export default function DoctorProfile() {
                 {calendarDays.map((cell, index) => {
                   const isInActiveWeek =
                     cell.inMonth && weekDates.some((d) => isSameDay(parseDate(d), cell.date));
-                  const isHighlighted = isInActiveWeek || isSameDay(cell.date, selectedDay);
+                  const key = dateKey(cell.date);
+                  const isToggled = toggledDates.has(key);
+                  const isHighlighted = isToggled ? !isInActiveWeek : isInActiveWeek;
 
                   return (
                     <button
                       key={index}
-                      onClick={() => setSelectedDay(cell.date)}
+                      onClick={() =>
+                        setToggledDates((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(key)) next.delete(key);
+                          else next.add(key);
+                          return next;
+                        })
+                      }
                       className={`w-[31px] h-[31px] flex items-center justify-center rounded-full text-[11px] mx-auto border-0 cursor-pointer ${
                         !cell.inMonth
                           ? "text-[#c8ced7] bg-transparent"
