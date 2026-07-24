@@ -66,6 +66,7 @@ const STATUS_LABELS: Record<string, string> = {
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
   NO_SHOW: "No Show",
+  RESCHEDULED: "Rescheduled",
 };
 
 const APPOINTMENT_AVATAR_COLORS = [
@@ -236,9 +237,29 @@ const AppointmentSchedule: React.FC = () => {
   }, []);
 
   const handleCancelAppointment = (target: Appointment) => {
-    setAppointments((prev) =>
-      prev.map((appt) => (appt === target ? { ...appt, status: "Cancelled" } : appt)),
-    );
+    if (!window.confirm(`Cancel appointment ${target.id} for ${target.patient}?`)) {
+      return;
+    }
+
+    appointmentApi
+      .cancel(target.id)
+      .then(() => {
+        setAppointments((prev) =>
+          prev.map((appt) => (appt === target ? { ...appt, status: "Cancelled" } : appt)),
+        );
+        toast({
+          title: "Appointment cancelled",
+          description: `Appointment ${target.id} has been cancelled.`,
+        });
+      })
+      .catch((err) => {
+        console.error("[Appointments Page] Cancel error:", err);
+        toast({
+          title: "Failed to cancel appointment",
+          description: "Couldn't reach the appointments API.",
+          variant: "destructive",
+        });
+      });
   };
 
   // Pagination state
@@ -625,9 +646,9 @@ const AppointmentSchedule: React.FC = () => {
                   )},
                   { key: "actions", label: "Action", sortable: false, render: (r: Appointment) => (
                     <ActionMenu
-                      onView={() => alert(`Viewing appointment ${r.id}`)}
-                      onEdit={() => alert(`Editing appointment ${r.id}`)}
-                      onCancel={() => alert(`Cancelling appointment ${r.id}`)}
+                      onView={() => navigate(`/appointments/view/${r.id}`)}
+                      onEdit={() => navigate(`/appointments/edit/${r.id}`)}
+                      onCancel={() => handleCancelAppointment(r)}
                     />
                   )},
                 ]}

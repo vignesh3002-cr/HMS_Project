@@ -1,8 +1,14 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { format } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
+import { employeeApi, type EmployeeDetailResponse } from "@/api/employee.api";
+
+function formatDoctorFullName(e: EmployeeDetailResponse["employee"] | null): string {
+  if (!e) return "Doctor";
+  return `Dr. ${[e.first_name, e.middle_name, e.last_name].filter(Boolean).join(" ")}`;
+}
 
 const WEEK_DAYS = [
   ["Monday", "13/05/26"],
@@ -123,6 +129,7 @@ const getMonthYearLabel = (dateStr) => {
 
 export default function DoctorProfile() {
   const navigate = useNavigate();
+  const { id } = useParams();
   const [activeTab, setActiveTab] = useState("week");
   const [toggledDates, setToggledDates] = useState<Set<string>>(new Set());
   const [addSlotOpen, setAddSlotOpen] = useState(false);
@@ -139,6 +146,40 @@ export default function DoctorProfile() {
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
   const [isToCalendarOpen, setIsToCalendarOpen] = useState(false);
   const [weekDates, setWeekDates] = useState(WEEK_DAYS.map(([, date]) => date));
+
+  const [doctorDetail, setDoctorDetail] = useState<EmployeeDetailResponse | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    employeeApi
+      .getOne(id)
+      .then((res) => {
+        setDoctorDetail(res.data?.data ?? null);
+      })
+      .catch((err) => {
+        console.error("[Doctor Profile] Error:", err);
+        setDoctorDetail(null);
+      });
+  }, [id]);
+
+  const doctorEmployee = doctorDetail?.employee ?? null;
+  const doctorName = formatDoctorFullName(doctorEmployee);
+  const doctorSpecialization = doctorDetail?.doctorProfile?.specialization || doctorEmployee?.specialization || "—";
+  const doctorQualification = doctorDetail?.doctorProfile?.qualification || doctorEmployee?.qualification || "—";
+  const doctorBranchNames = (doctorDetail?.branches?.length
+    ? doctorDetail.branches.map((b) => b.branch_name)
+    : doctorEmployee?.branch?.branch_name
+      ? [doctorEmployee.branch.branch_name]
+      : []
+  );
+  const doctorIsAvailable = doctorEmployee?.emp_status === true || doctorDetail?.user?.user_status === 1;
+  const doctorPhoto = doctorEmployee?.employee_photo_URL || "https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?auto=format&fit=crop&w=500&q=80";
+  const doctorLicenseNo = doctorDetail?.doctorProfile?.license_no || doctorEmployee?.doc_license_no || "—";
+  const doctorPhone = doctorEmployee?.mobile_no || "—";
+  const doctorEmail = doctorEmployee?.email || "—";
+  const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanant_address || "—";
+  const doctorBloodGroup = doctorEmployee?.blood_group || "—";
+  const doctorExperience = doctorEmployee?.employee_no_experence != null ? `${doctorEmployee.employee_no_experence}+ yrs` : "—";
 
   const [, calMonth, calYear] = weekDates[0].split("/").map(Number);
   const calendarDays = buildCalendarDays(2000 + calYear, calMonth - 1);
@@ -277,7 +318,7 @@ export default function DoctorProfile() {
 
           <div className="w-32 h-32 rounded-lg overflow-hidden shrink-0 bg-gray-200 max-[700px]:w-[105px] max-[700px]:h-[105px]">
             <img
-              src="https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?auto=format&fit=crop&w=500&q=80"
+              src={doctorPhoto}
               alt="Doctor"
               className="w-full h-full object-cover"
             />
@@ -290,17 +331,17 @@ export default function DoctorProfile() {
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h1 className="text-xl font-bold text-[#182235] max-[500px]:text-lg">
-                    Dr. John Smith
+                    {doctorName}
                   </h1>
 
                   <span className="inline-flex items-center gap-[5px] bg-[#edf5ff] text-[#2266c8] border border-[#d5e6ff] px-[9px] py-1 rounded-full text-[11px]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#2675df]" />
-                    Cardiology
+                    {doctorSpecialization}
                   </span>
                 </div>
 
                 <p className="mt-[5px] text-[#707784] text-[13px]">
-                  MBBS, M.D, Cardiology
+                  {doctorQualification}
                 </p>
               </div>
 
@@ -317,13 +358,12 @@ export default function DoctorProfile() {
 
               <div className="text-[#555e6d]">
                 <span className="mr-1.5">▣</span>
-                Hospital : Central Hospital
-                (Tambaram, Egmore, Saidapet)
+                Hospital : {doctorBranchNames.length ? doctorBranchNames.join(", ") : "—"}
               </div>
 
-              <div className="text-[#0b955e] flex items-center gap-[7px]">
-                <span className="w-2 h-2 rounded-full bg-[#16a866]" />
-                Available
+              <div className={`flex items-center gap-[7px] ${doctorIsAvailable ? "text-[#0b955e]" : "text-[#9aa1ab]"}`}>
+                <span className={`w-2 h-2 rounded-full ${doctorIsAvailable ? "bg-[#16a866]" : "bg-[#9aa1ab]"}`} />
+                {doctorIsAvailable ? "Available" : "Unavailable"}
               </div>
 
             </div>
@@ -356,14 +396,12 @@ export default function DoctorProfile() {
           <div className="grid grid-cols-4 gap-x-6 gap-y-5 max-[900px]:grid-cols-2 max-[500px]:grid-cols-1">
 
             {[
-              ["▣", "Medical Licence Number", "ML566659898"],
-              ["⌕", "Phone Number", "+91 90020 90456"],
-              ["✉", "Email", "john@example.com"],
-              ["⌖", "Location", "4150 Hiney Road, Las Vegas, NV 89109"],
-              ["▣", "DOB", "25 Jan 1990"],
-              ["♧", "Blood group", "A1B+"],
-              ["⚥", "Gender", "Male"],
-              ["▣", "Experience", "12+yrs"],
+              ["▣", "Medical Licence Number", doctorLicenseNo],
+              ["⌕", "Phone Number", doctorPhone],
+              ["✉", "Email", doctorEmail],
+              ["⌖", "Location", doctorLocation],
+              ["♧", "Blood group", doctorBloodGroup],
+              ["▣", "Experience", doctorExperience],
             ].map(([icon, title, value]) => (
               <div
                 key={title}

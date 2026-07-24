@@ -1,18 +1,19 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { Plus, Loader2 } from "lucide-react";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
 import { useToast } from "@/hooks/use-toast";
 import { doctorApi, type DoctorRecord } from "@/api/doctor.api";
+import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 
 /* ============================= Types ============================= */
 
-interface Doctor {
+interface DayDoctorColumn {
+  employeeId: string;
   name: string;
-  id: number;
   spec: string;
 }
 
@@ -110,23 +111,19 @@ function CheckIcon({ className }: { className?: string }) {
 
 /* ============================= Data ============================= */
 
-const doctors: Doctor[] = [
-  { name: "Sarah", id: 1, spec: "Oncology" },
-  { name: "Jones", id: 2, spec: "RAD" },
-  { name: "Lee", id: 3, spec: "SURG" },
-  { name: "Adams", id: 4, spec: "HEM" },
-  { name: "Baker", id: 5, spec: "GYN" },
-  { name: "Carter", id: 6, spec: "NEURO" },
-  { name: "Davis", id: 7, spec: "PED" },
-  { name: "Evans", id: 8, spec: "URO" },
-  { name: "Foster", id: 9, spec: "RADL" },
-  { name: "Kim", id: 10, spec: "CARD" },
-  { name: "Nguyen", id: 11, spec: "PULM" },
-  { name: "Patel", id: 12, spec: "ENDO" },
-  { name: "Brooks", id: 13, spec: "DERM" },
-  { name: "Reed", id: 14, spec: "OPHT" },
-  { name: "Turner", id: 15, spec: "PSYC" },
-
+// Hourly rows shown in the grid (09:00 AM - 04:00 PM). Real appointment
+// counts per doctor/hour are computed from the appointments API response
+// in the scheduleRows useMemo below.
+const TIME_ROW_HOURS = [9, 10, 11, 12, 13, 14, 15, 16];
+const TIME_ROW_LABELS = [
+  "09:00 AM",
+  "10:00 AM",
+  "11:00 AM",
+  "12:00 PM",
+  "01:00 PM",
+  "02:00 PM",
+  "03:00 PM",
+  "04:00 PM",
 ];
 
 function slot(count: number, label: string, fill: number, dark = false): AppointmentSlot {
@@ -134,173 +131,6 @@ function slot(count: number, label: string, fill: number, dark = false): Appoint
 }
 
 const EMPTY = null;
-
-const initialScheduleRows: ScheduleRow[] = [
-  {
-    time: "09:00 AM",
-    slots: [
-      slot(2, "2 Patients", 66, false),
-      slot(1, "1 Patient", 33, false),
-       slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-      slot(1, "1 Patient", 33, false),
-
-      slot(2, "2 Patients", 66, false),
-      slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-       slot(2, "2 Patients", 66, false),
-      slot(2, "2 Patients", 66, false),
-      slot(1, "1 Patient", 33, false),
-      slot(3, "3 Patients", 100, false),
-      slot(2, "2 Patients", 66, false),
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-    ],
-  },
-  {
-    time: "10:00 AM",
-    slots: [
-      slot(2, "2 Patients", 66, false),
-      slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-      slot(1, "1 Patient", 33, false),
-       slot(2, "2 Patients", 66, false),
-      slot(2, "2 Patients", 66, false),
-
-      slot(3, "3 Patients", 100, false),
-      slot(1, "1 Patient", 33, true),
-      slot(2, "2 Patients", 66, false),
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-      slot(2, "2 Patients", 66, true),
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-    ],
-  },
-  {
-    time: "11:00 AM",
-    slots: [
-       slot(2, "2 Patients", 66, false),
-      slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-       slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-      slot(1, "1 Patient", 33, true),
-       slot(2, "2 Patients", 66, false),
-      slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-      slot(2, "2 Patients", 66, true),
-      slot(1, "1 Patient", 33, false),
-    ],
-  },
-  {
-    time: "12:00 PM",
-    slots: [
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-    ],
-  },
-  {
-    time: "01:00 PM",
-    slots: [
-      slot(1, "1 Patients", 66, false),
-      slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-      slot(2, "2 Patients", 66, false),
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-      slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-      slot(2, "2 Patients", 66, false),
-      slot(2, "2 Patients", 66, false),
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-    ],
-  },
-  {
-    time: "02:00 PM",
-    slots: [
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-      slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-      slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-      slot(2, "2 Patients", 66, false),
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-      slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-      slot(2, "2 Patients", 66, false),
-      slot(1, "1 Patient", 33, false),
-    ],
-  },
-  {
-    time: "03:00 PM",
-    slots: [
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-      EMPTY,
-    ],
-  },
-  {
-    time: "04:00 PM",
-    slots: [
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-      slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-      slot(2, "2 Patients", 66, true),
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-      slot(1, "1 Patient", 33, false),
-      slot(2, "2 Patients", 66, false),
-      slot(3, "3 Patients", 100, false),
-      slot(1, "1 Patient", 33, true),
-      slot(2, "2 Patients", 66, false),
-      slot(1, "1 Patient", 33, false),
-    ],
-  },
-
-];
-
 
 /* ============================= Sub-components ============================= */
 
@@ -398,7 +228,62 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
 
-  const [scheduleRows] = useState<ScheduleRow[]>(initialScheduleRows);
+  // Real appointments for the selected date, fetched from GET /appointments
+  // -- the doctor columns and hourly slot counts below are both derived from
+  // this instead of dummy data.
+  const [dayAppointments, setDayAppointments] = useState<AppointmentRecord[]>([]);
+  const [isLoadingDay, setIsLoadingDay] = useState(true);
+
+  useEffect(() => {
+    setIsLoadingDay(true);
+    appointmentApi
+      .getAll({ date: format(selectedDate, "yyyy-MM-dd") })
+      .then((res) => {
+        setDayAppointments(res.data?.data?.appointments || []);
+      })
+      .catch((err) => {
+        console.error("[Day View] Error:", err);
+        setDayAppointments([]);
+        toast({
+          title: "Failed to load appointments",
+          description: "Couldn't reach the appointments API.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => setIsLoadingDay(false));
+  }, [selectedDate]);
+
+  const doctorColumns: DayDoctorColumn[] = useMemo(() => {
+    const byId = new Map<string, DayDoctorColumn>();
+    dayAppointments.forEach((appt) => {
+      const emp = appt.employees;
+      if (!emp || byId.has(emp.employee_id)) return;
+      byId.set(emp.employee_id, {
+        employeeId: emp.employee_id,
+        name: `Dr. ${[emp.first_name, emp.middle_name, emp.last_name].filter(Boolean).join(" ")}`,
+        spec: emp.specialization || "General",
+      });
+    });
+    return Array.from(byId.values());
+  }, [dayAppointments]);
+
+  const scheduleRows: ScheduleRow[] = useMemo(() => {
+    return TIME_ROW_HOURS.map((hour, idx) => ({
+      time: TIME_ROW_LABELS[idx],
+      slots: doctorColumns.map((doc) => {
+        const count = dayAppointments.filter((appt) => {
+          if (appt.employees?.employee_id !== doc.employeeId) return false;
+          const t = new Date(appt.appointment_time);
+          return !isNaN(t.getTime()) && t.getUTCHours() === hour;
+        }).length;
+
+        if (count === 0) return EMPTY;
+
+        const fill = count >= 3 ? 100 : count === 2 ? 66 : 33;
+        return slot(count, `${count} Patient${count > 1 ? "s" : ""}`, fill, false);
+      }),
+    }));
+  }, [doctorColumns, dayAppointments]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -464,10 +349,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         ? "Tomorrow"
         : format(selectedDate, "dd/MM/yyyy");
 
-  const totalAppointments = scheduleRows.reduce(
-    (total, row) => total + row.slots.filter((cell) => cell !== null).length,
-    0,
-  );
+  const totalAppointments = dayAppointments.length;
 
   const isDoctorDimmed = (gridDoctorName: string) => {
     const gridName = gridDoctorName.toLowerCase();
@@ -635,13 +517,23 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           aria-label="Doctor appointment schedule grid"
           className="min-w-0 flex-1 overflow-x-auto rounded-xl border border-[#E5E7EB] bg-white shadow-sm"
         >
+          {isLoadingDay ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
+              <Loader2 size={24} className="animate-spin text-[#00488D]" />
+              Loading schedule...
+            </div>
+          ) : doctorColumns.length === 0 ? (
+            <div className="flex items-center justify-center py-16 text-[#6B7280] text-sm">
+              No appointments found for this date.
+            </div>
+          ) : (
           <div role="table" className="w-full min-w-[620px] md:min-w-[691px]">
             {/* Header row */}
             <div className="border-b border-[#c3c6d7] bg-white">
               <div
                 role="row"
                 className="grid min-h-[39px]"
-                style={{ gridTemplateColumns: `70px repeat(${doctors.length}, 90px)` }}
+                style={{ gridTemplateColumns: `70px repeat(${doctorColumns.length}, 90px)` }}
               >
                 <div
                   role="columnheader"
@@ -652,12 +544,12 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                   </span>
                 </div>
 
-                {doctors.map((doc, i) => (
+                {doctorColumns.map((doc, i) => (
                   <div
-                    key={doc.name}
+                    key={doc.employeeId}
                     role="columnheader"
                     className={`flex flex-col items-center justify-center pb-1.5 pl-1.5 pr-[7px] pt-1.5 text-center transition-opacity ${
-                      i !== doctors.length - 1 ? "border-r border-[#c3c6d7]" : ""
+                      i !== doctorColumns.length - 1 ? "border-r border-[#c3c6d7]" : ""
                     } ${isDoctorDimmed(doc.name) ? "opacity-30" : ""}`}
                   >
                     <span className="whitespace-nowrap font-['Manrope',sans-serif] text-[10px] font-bold leading-[15px] text-[#004ac6]">
@@ -680,7 +572,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                 <div
                   role="row"
                   className="grid"
-                  style={{ gridTemplateColumns: `70px repeat(${doctors.length}, 90px)` }}
+                  style={{ gridTemplateColumns: `70px repeat(${doctorColumns.length}, 90px)` }}
                 >
                   <div
                     role="rowheader"
@@ -697,7 +589,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                       role="cell"
                       className={`h-[60px] pb-1 pl-1 pr-[5px] pt-1 transition-opacity ${
                         i !== row.slots.length - 1 ? "border-r border-[#c3c6d7]" : ""
-                      } ${isDoctorDimmed(doctors[i].name) ? "opacity-30" : ""}`}
+                      } ${isDoctorDimmed(doctorColumns[i].name) ? "opacity-30" : ""}`}
                     >
                       {cell ? (
                         <AppointmentCard cell={cell} />
@@ -710,6 +602,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
               </div>
             ))}
           </div>
+          )}
         </section>
           </div>
           </div>

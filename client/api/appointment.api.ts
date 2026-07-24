@@ -78,6 +78,16 @@ export interface AppointmentRecord {
   } | null;
 }
 
+export interface UpdateAppointmentPayload {
+  employee_id?: string;
+  branch_id?: string;
+  department_id?: string;
+  appointment_date?: string;
+  appointment_time?: string;
+  reason_for_visit?: string;
+  referred_by?: string;
+}
+
 export interface GetAppointmentsParams {
   branchId?: string;
   employeeId?: string;
@@ -100,6 +110,26 @@ export const appointmentApi = {
     API.get<{ success: boolean; data: AvailableSlotsResult }>("/appointments/available-slots", {
       params: { employeeId, branchId, date },
     }),
+
+  cancel: (appointmentNo: string) =>
+    API.delete<{ success: boolean; message: string; data: AppointmentRecord }>(
+      `/appointments/${appointmentNo}`,
+    ),
+
+  getOne: (appointmentNo: string) =>
+    API.get<{ success: boolean; data: AppointmentRecord }>(`/appointments/${appointmentNo}`),
+
+  update: (appointmentNo: string, data: UpdateAppointmentPayload) =>
+    API.put<{ success: boolean; message: string; data: AppointmentRecord }>(
+      `/appointments/${appointmentNo}`,
+      data,
+    ),
+
+  updateStatus: (appointmentNo: string, status: string) =>
+    API.patch<{ success: boolean; message: string; data: AppointmentRecord }>(
+      `/appointments/${appointmentNo}/status`,
+      { status },
+    ),
 
   getAll: (params?: GetAppointmentsParams) =>
     API.get<{
