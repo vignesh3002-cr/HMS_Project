@@ -24,6 +24,7 @@ export interface CreateBranchPayload {
   address?: string;
   district?: string;
   state_name?: string;
+  country?: string;
   country_id?: string;
   area?: string;
   pincode?: number;
@@ -70,13 +71,14 @@ export const branchApi = {
   create: (data: CreateBranchPayload) =>
     API.post<CreateBranchResponse>("/branch", data),
 
-  // Update an existing branch. NOTE: no PUT /branch/:id route exists on the
-  // backend yet — this will 404 until that's added.
+  getById: (branchId: string) =>
+    API.get<{ success: boolean; data: any }>(`/branch/${branchId}`),
+
+  // Update an existing branch.
   update: (branchId: string, data: Partial<CreateBranchPayload>) =>
     API.put<{ success: boolean; message: string; data?: unknown }>(`/branch/${branchId}`, data),
 
-  // Delete a branch. NOTE: no DELETE /branch/:id route exists on the
-  // backend yet — this will 404 until that's added.
+  // Delete a branch.
   remove: (branchId: string) =>
     API.delete<{ success: boolean; message: string }>(`/branch/${branchId}`),
 };
