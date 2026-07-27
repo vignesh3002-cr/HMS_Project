@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { format } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
@@ -123,6 +123,7 @@ const getMonthYearLabel = (dateStr) => {
 
 export default function DoctorProfile() {
   const navigate = useNavigate();
+  const { id } = useParams<{ id?: string }>();
   const [activeTab, setActiveTab] = useState("week");
   const [toggledDates, setToggledDates] = useState<Set<string>>(new Set());
   const [addSlotOpen, setAddSlotOpen] = useState(false);

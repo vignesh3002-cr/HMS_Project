@@ -1,7 +1,6 @@
 // client/api/branch.ts
 import API from "./axios";
 
-// Shape actually returned by GET /branch (see hms-backend BranchService.getAllBranches)
 export interface Branch {
   branch_id: string;
   branch_name: string | null;
@@ -10,11 +9,43 @@ export interface Branch {
   branch_contact_number: string | null;
   hospital_name: string;
   hospital_id: string;
+  admin_name?: string;
+  admin_employee_id?: string;
 }
 
-// Shape accepted by POST /branch (see hms-backend CreateBranchDto). Only branch_name,
-// username and password are actually required by the service today; the rest are optional
-// so callers can send whatever the form collects.
+export type BranchAdminMode = "EXISTING" | "NEW";
+
+export interface NewBranchAdminPayload {
+  first_name: string;
+  middle_name?: string;
+  last_name?: string;
+  email: string;
+  mobile_no: string;
+  username: string;
+  password: string;
+  designation?: string;
+  department_id?: string;
+
+  blood_group?: string;
+  nationality?: string;
+  marital_status?: string;
+  aadhaar_no?: string;
+  pan_no?: string;
+  passport_no?: string;
+  permanent_address?: string;
+  current_address?: string;
+  employee_photo_URL?: string;
+  employee_state?: string;
+  employee_district?: string;
+  employee_area?: string;
+  employee_pincode?: number;
+  employee_no_experence?: number;
+  emergency_contact_name?: string;
+  emergency_contact_relationship?: string;
+  emergency_contact_number?: string;
+  joining_date?: string;
+}
+
 export interface CreateBranchPayload {
   branch_code?: string;
   branch_name: string;
@@ -37,8 +68,10 @@ export interface CreateBranchPayload {
   pan_no?: string;
   website_address?: string;
   date_of_establish?: string;
-  username: string;
-  password: string;
+
+  admin_mode: BranchAdminMode;
+  admin_user_id?: string;
+  admin?: NewBranchAdminPayload;
 }
 
 export interface CreateBranchResponse {
@@ -60,25 +93,95 @@ export interface CreateBranchResponse {
   };
 }
 
-// ✅ Make sure branchApi is exported with 'export const'
-export const branchApi = {
-  // Get all branches
-  getAll: () => API.get<{
-    branches: any[]; success: boolean; data: Branch[]
-}>("/branch"),
+export interface AssignableUser {
+  user_id: string;
+  employee_id: string | null;
+  full_name: string;
+  email: string | null;
+  role_type: string;
+  current_branches: string[];
+  current_branch_names: (string | null)[];
+}
 
-  // Create new branch (also creates its branch-admin user)
+export interface CurrentBranchAdmin {
+  user_id: string;
+  employee_id: string | null;
+  full_name: string;
+  email: string | null;
+  mobile_no: string | null;
+  username: string | null;
+  designation: string | null;
+  employee_photo_URL: string | null;
+  assigned_date: string | null;
+}
+
+// Full row shape returned by GET /branch/:branchId (see branch.service.ts#getBranchById) —
+// every `branch` table column plus the derived `current_admin` (or null if unassigned).
+export interface BranchDetail {
+  branch_id: string;
+  branch_code: string | null;
+  branch_name: string | null;
+  branch_type: string;
+  branch_area: string | null;
+  district: string | null;
+  state_name: string | null;
+  country: string | null;
+  branch_pincode: number | null;
+  branch_license_no: string | null;
+  emergency_no: string | null;
+  branch_email: string | null;
+  address: string | null;
+  date_of_establish: string | null;
+  total_beds: number | null;
+  total_no_emp: string | null;
+  fax_no: string | null;
+  gst_no: string | null;
+  pan_no: string | null;
+  website_address: string | null;
+  medical_services: string | null;
+  branch_status: string | null;
+  current_admin: CurrentBranchAdmin | null;
+}
+
+export const branchApi = {
+  getAll: () =>
+    API.get<{
+      branches: any[];
+      success: boolean;
+      data: Branch[];
+    }>("/branch"),
+
   create: (data: CreateBranchPayload) =>
     API.post<CreateBranchResponse>("/branch", data),
 
   getById: (branchId: string) =>
-    API.get<{ success: boolean; data: any }>(`/branch/${branchId}`),
+    API.get<{ success: boolean; data: BranchDetail }>(`/branch/${branchId}`),
 
-  // Update an existing branch.
   update: (branchId: string, data: Partial<CreateBranchPayload>) =>
-    API.put<{ success: boolean; message: string; data?: unknown }>(`/branch/${branchId}`, data),
+    API.put<{ success: boolean; message: string; data?: unknown }>(
+      `/branch/${branchId}`,
+      data
+    ),
 
-  // Delete a branch.
   remove: (branchId: string) =>
     API.delete<{ success: boolean; message: string }>(`/branch/${branchId}`),
+
+  getAssignableAdmins: (search?: string) =>
+    API.get<{ success: boolean; data: AssignableUser[] }>(
+      "/branch/assignable-admins",
+      {
+        params: search ? { search } : undefined,
+      }
+    ),
+
+  assignAdmin: (branchId: string, userId: string) =>
+    API.patch<{ success: boolean; message: string }>(
+      `/branch/${branchId}/admin`,
+      { user_id: userId }
+    ),
+
+  unassignAdmin: (userId: string) =>
+    API.patch<{ success: boolean; message: string }>(
+      `/branch/admin/${userId}/unassign`
+    ),
 };

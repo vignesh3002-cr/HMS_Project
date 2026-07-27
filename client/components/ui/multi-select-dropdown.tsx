@@ -67,16 +67,30 @@ export function MultiSelectDropdown({
                   className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700"
                 >
                   {opt?.label ?? v}
-                  <button
-                    type="button"
+                  {/* A real <button> here would nest inside the trigger's own
+                      <button>, which is invalid HTML (React warns and some
+                      browsers mis-handle the click). A span with button
+                      semantics avoids the nesting while staying clickable
+                      and keyboard-accessible. */}
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Remove ${opt?.label ?? v}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       toggleOption(v);
                     }}
-                    className="inline-flex items-center justify-center leading-none hover:text-blue-900"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        toggleOption(v);
+                      }
+                    }}
+                    className="inline-flex items-center justify-center leading-none hover:text-blue-900 cursor-pointer"
                   >
                     ×
-                  </button>
+                  </span>
                 </span>
               );
             })

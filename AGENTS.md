@@ -162,3 +162,56 @@ const data: MyRouteResponse = await response.json();
 - Production-ready with multiple deployment options
 - Comprehensive UI component library included
 - Type-safe API communication via shared interfaces
+
+## Project Layout (HMS-specific)
+
+### Frontend (`HMS_Project/`) — React 18 + TS + Vite + TailwindCSS 3.4 + React Router 7 + TanStack Query 5
+- **API layer**: `client/api/` — Axios instance at `axios.ts`, JWT interceptor, base URL from `VITE_BACKEND_URL`
+- **Forms**: `client/components/Forms/` — `AddBranch`, `EditBranch`, `Addemployee`, `PatientRegistrationForm`, `EditPatientForm`, `EditDoctorForm`, `AddAppointment`, `AppointmentBooking`, `patientProfile`
+- **UI components**: `client/components/ui/` (56 shadcn-style Radix components) + `client/components/hms/` (domain-specific)
+- **Key custom components**: `FormDropdown` (searchable), `MultiSelectDropdown`, `AvatarUpload` (base64), `CountryStateCitySelect`, `BranchSelector`, `QuickAddFab`
+- **Routing**: Protected routes in `AppLayout` (sidebar: Dashboard, Staff, Doctor, Patients, Appointment, Billing, Protocol)
+
+### Backend (`HMS_Backend/`) — Express 5 + TS + Prisma ORM 7 + PostgreSQL (Supabase)
+- **Architecture**: Routes → Controllers → Services → Repositories → Prisma
+- **Auth**: JWT (8h expiry), bcrypt, role-based authorization
+- **Modules**: auth, branch, employee, patient, appointment, encounter, department, chemotherapy
+- **Database**: 34 models, hosted on Supabase
+- **Note**: Doctor routes, prescription routes, and doctor-schedule routes are currently disabled/commented out
+
+## Changes Made (Session Log)
+
+### 1. EditBranch Wiring (BranchSelector.tsx)
+- Changed edit button from inline dialog to navigation: `navigate("/branches/edit/:id")`
+- Removed unused inline edit Dialog (state, handlers, JSX)
+- Added `useNavigate` import
+
+### 2. Addemployee.tsx — Specialization from Departments
+- Removed hardcoded `specializations` arrays from all `ROLE_CONFIG` entries
+- Specialization dropdown now populated from `departments` list (department names)
+- When department selected, specialization auto-fills with department name
+
+### 3. Addemployee.tsx — Time Format
+- Changed `TIME_OPTIONS` label from `"9:00 AM"` → `"09:00 AM"` (leading zero for hours)
+
+### 4. Addemployee.tsx — Branch Width
+- Branch section changed from default grid column to `lg:col-span-2`
+
+### 5. Addemployee.tsx — Photo URL
+- `employee_photo_URL: formData.photoUrl || undefined` sent in create payload
+- `photo?: string` added to `CreateEmployeePayload` in `employee.api.ts`
+
+### 6. Addemployee.tsx — Dropdown Overflow
+- Card wrapper changed from `overflow-hidden` to `overflow-clip` to prevent dropdown clipping
+
+### 7. employee.api.ts — Type Alignment
+- Added `"STAFF"` to `CreateEmployeePayload.role_type` union
+- Renamed `GetEmployeesParams` fields: `role_type`→`roleType`, `branch_id`→`branchId`, `department_id`→`department` (matching backend camelCase params)
+
+### 8. Addemployee.tsx — Admin Role (Replaces Receptionist)
+- `toDisplayRole`: `"RECEPTIONIST"` → `"Admin"`
+- `toBackendRole`: `"Admin"` → `"RECEPTIONIST"`
+- `ROLE_CONFIG`: Renamed `Receptionist` → `Admin` with designations `["Branch Admin", "Staff Admin", "Receptionist"]`
+- Department dropdown shows `[{ label: "All Departments", value: "__ALL__" }]` when Admin is selected
+- Submit handles `__ALL__` by falling back to first department ID
+- Added `ALL_DEPARTMENTS_VALUE = "__ALL__"` sentinel

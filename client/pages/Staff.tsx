@@ -1,16 +1,18 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import CalendarPicker from "@/components/hms/Calender";
 import { useNavigate } from "react-router-dom";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Search, FileText, ChevronDown, Plus, Loader2 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
+import { RefreshButton } from "@/components/hms/RefreshButton";
 
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
+import { useBranchFilter } from "@/context/BranchFilterContext";
 
 interface StaffMember {
   initials: string;
@@ -39,6 +41,9 @@ interface AdministrativeStaffRow {
   avatar: "purple" | "indigo";
   name: string;
   id: string;
+  roleType: string;
+  phone: string;
+  dept: string;
   role: string;
   roleColor: "purple" | "indigo";
   branch: string;
@@ -122,8 +127,9 @@ function classifyStaffDesignation(designation: string | null | undefined): "admi
 }
 
 function getStaffCategory(emp: EmployeeRecord): "medical" | "administrative" | "support" {
-  const roleType = emp.user_table?.role_type || "STAFF";
+  const roleType = (emp.user_table?.role_type || "STAFF").toUpperCase();
   if (roleType === "NURSE" || roleType === "PHARMACIST" || roleType === "LAB_TECHNICIAN") return "medical";
+  if (roleType === "ADMIN" || roleType === "BRANCH_ADMIN") return "administrative";
   if (roleType === "STAFF") return classifyStaffDesignation(emp.designation);
   return "medical";
 }
@@ -131,7 +137,7 @@ function getStaffCategory(emp: EmployeeRecord): "medical" | "administrative" | "
 function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
-  const roleType = emp.user_table?.role_type || "STAFF";
+  const roleType = (emp.user_table?.role_type || "STAFF").toUpperCase();
   const isActive = emp.emp_status === true || emp.user_table?.user_status === 1;
   const branchName = formatBranch(emp.branch);
   const deptName = emp.department_master?.department_name || emp.specialization || "Unassigned";
@@ -147,6 +153,24 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
       branch: branchName,
       status: isActive ? "active" : "leave",
     } as MedicalStaffRow;
+  } else if (roleType === "ADMIN" || roleType === "BRANCH_ADMIN") {
+    return {
+      initials: getInitials(fullName),
+      avatar: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
+      name: fullName,
+      id: emp.employee_id,
+      roleType,
+      phone: emp.mobile_no,
+      dept: deptName,
+      role: emp.designation || (roleType === "BRANCH_ADMIN" ? "Branch Admin" : "Admin"),
+      roleColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
+      branch: branchName,
+      access: "Full Access",
+      accessColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
+      login: isActive ? "Online" : "Offline",
+      loginDot: isActive ? "green" : "orange",
+      status: isActive ? "active" : "leave",
+    } as AdministrativeStaffRow;
   } else if (roleType === "STAFF") {
     const isAdmin = classifyStaffDesignation(emp.designation) === "administrative";
     if (isAdmin) {
@@ -155,6 +179,9 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
         avatar: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
         name: fullName,
         id: emp.employee_id,
+        roleType,
+        phone: emp.mobile_no,
+        dept: deptName,
         role: emp.designation || "Staff",
         roleColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
         branch: branchName,
@@ -201,31 +228,44 @@ const StatusBadge = ({ status }: { status: string }) => (
   </span>
 );
 
-const ActionIcons = () => (
-  <div className="flex items-center gap-1">
-    <button title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
-      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
-        <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-        <circle cx="12" cy="12" r="3" />
-      </svg>
-    </button>
-    <button title="Edit" className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
-      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
-        <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-        <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
-      </svg>
-    </button>
-    <button title="Delete" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
-      <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
-        <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-      </svg>
-    </button>
-  </div>
-);
+const ActionIcons = ({ id, roleType }: { id?: string; roleType?: string } = {}) => {
+  const navigate = useNavigate();
+  // Only Branch Admin rows have an edit destination today (EditAdmin.tsx is
+  // scoped to Branch Admin only) — other roles keep the icon inert.
+  const canEdit = roleType === "BRANCH_ADMIN" && !!id;
+
+  return (
+    <div className="flex items-center gap-1">
+      <button title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
+          <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      </button>
+      <button
+        title="Edit"
+        onClick={canEdit ? () => navigate(`/staff/edit/${id}`) : undefined}
+        disabled={!canEdit}
+        className={`p-1.5 rounded transition-colors duration-200 group ${canEdit ? "hover:bg-blue-50 cursor-pointer" : "opacity-40 cursor-not-allowed"}`}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
+          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+          <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
+        </svg>
+      </button>
+      <button title="Delete" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
+        <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
+          <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+        </svg>
+      </button>
+    </div>
+  );
+};
 
 export default function Staff() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { selectedBranchId, isAllBranches } = useBranchFilter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
   const tabsMenuRef = useRef<HTMLElement>(null);
@@ -284,36 +324,40 @@ export default function Staff() {
   const [realStaff, setRealStaff] = useState<EmployeeRecord[] | null>(null);
   const [isStaffLoading, setIsStaffLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchStaff = useCallback(async () => {
+    setIsStaffLoading(true);
     console.log("[Staff Page] Fetching all employees from employeeApi...");
-    employeeApi
-      .getAll()
-      .then((res) => {
-        console.log("[Staff Page] Response:", res.data);
-        const allEmployees = res.data?.data?.employees || [];
-        const staff = allEmployees.filter((e) => e.user_table?.role_type !== "DOCTOR");
-        setRealStaff(staff);
-        if (staff.length === 0) {
-          toast({
-            title: "No staff records found",
-            description: "The employees API returned no staff records.",
-          });
-        }
-      })
-      .catch((err) => {
-        console.error("[Staff Page] Error:", err);
-        console.error("[Staff Page] Error response:", err.response?.data);
-        console.error("[Staff Page] Error status:", err.response?.status);
-        toast({
-          title: "Failed to load staff",
-          description: "Couldn't reach the employees API.",
-          variant: "destructive",
-        });
-      })
-      .finally(() => {
-        setIsStaffLoading(false);
+    try {
+      const res = await employeeApi.getAll({
+        branchId: isAllBranches ? undefined : selectedBranchId,
       });
-  }, []);
+      console.log("[Staff Page] Response:", res.data);
+      const allEmployees = res.data?.data?.employees || [];
+      const staff = allEmployees.filter((e) => e.user_table?.role_type !== "DOCTOR");
+      setRealStaff(staff);
+      if (staff.length === 0) {
+        toast({
+          title: "No staff records found",
+          description: "The employees API returned no staff records.",
+        });
+      }
+    } catch (err: any) {
+      console.error("[Staff Page] Error:", err);
+      console.error("[Staff Page] Error response:", err.response?.data);
+      console.error("[Staff Page] Error status:", err.response?.status);
+      toast({
+        title: "Failed to load staff",
+        description: err.response?.data?.message || "Couldn't reach the employees API.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsStaffLoading(false);
+    }
+  }, [toast, selectedBranchId, isAllBranches]);
+
+  useEffect(() => {
+    fetchStaff();
+  }, [fetchStaff]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -473,7 +517,7 @@ export default function Staff() {
           </span>
         )},
         { key: "status", label: "Status", render: (r: any) => <StatusBadge status={r.status} /> },
-        { key: "actions", label: "Action", sortable: false, render: () => <ActionIcons /> },
+        { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} /> },
       ];
     }
     if (isSupportTab) {
@@ -490,7 +534,7 @@ export default function Staff() {
         )},
         { key: "branch", label: "Branch", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.branch}</span> },
         { key: "status", label: "Status", render: (r: any) => <StatusBadge status={r.status} /> },
-        { key: "actions", label: "Action", sortable: false, render: () => <ActionIcons /> },
+        { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} /> },
       ];
     }
     // Medical or All staff
@@ -513,7 +557,7 @@ export default function Staff() {
         </span>
       )},
       { key: "status", label: "Status", render: (r: any) => <StatusBadge status={r.status} /> },
-      { key: "actions", label: "Action", sortable: false, render: () => <ActionIcons /> },
+      { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} /> },
     ];
   };
 
@@ -689,6 +733,7 @@ export default function Staff() {
                   open={isFilterOpen}
                   onOpenChange={setIsFilterOpen}
                 />
+                <RefreshButton onClick={fetchStaff} isLoading={isStaffLoading} />
               </div>
             </div>
 

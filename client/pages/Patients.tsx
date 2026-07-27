@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate } from 'react-router-dom';
 import CalendarPicker from "@/components/hms/Calender";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
@@ -22,6 +22,8 @@ import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
+import { RefreshButton } from "@/components/hms/RefreshButton";
+import { useBranchFilter } from "@/context/BranchFilterContext";
 
 function getPatientFullName(p: PatientRecord): string {
   return [p.patient_first_name, p.patient_middle_name, p.patient_last_name]
@@ -162,6 +164,7 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
 export default function PatientsManagement() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { selectedBranchId, isAllBranches } = useBranchFilter();
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
 
   // Real patients fetched from the backend. No dummy fallback — an
@@ -169,31 +172,35 @@ export default function PatientsManagement() {
   const [realPatients, setRealPatients] = useState<PatientRecord[] | null>(null);
   const [isPatientsLoading, setIsPatientsLoading] = useState(true);
 
-  useEffect(() => {
-    patientApi
-      .getAll()
-      .then((res) => {
-        const patients = res.data?.data?.patients || [];
-        setRealPatients(patients);
-        if (patients.length === 0) {
-          toast({
-            title: "No patient records found",
-            description: "The patients API returned no records.",
-          });
-        }
-      })
-      .catch((err) => {
-        console.error("[Patients Page] Error:", err);
-        toast({
-          title: "Failed to load patients",
-          description: "Couldn't reach the patients API.",
-          variant: "destructive",
-        });
-      })
-      .finally(() => {
-        setIsPatientsLoading(false);
+  const fetchPatients = useCallback(async () => {
+    setIsPatientsLoading(true);
+    try {
+      const res = await patientApi.getAll({
+        branchId: isAllBranches ? undefined : selectedBranchId,
       });
-  }, []);
+      const patients = res.data?.data?.patients || [];
+      setRealPatients(patients);
+      if (patients.length === 0) {
+        toast({
+          title: "No patient records found",
+          description: "The patients API returned no records.",
+        });
+      }
+    } catch (err: any) {
+      console.error("[Patients Page] Error:", err);
+      toast({
+        title: "Failed to load patients",
+        description: err.response?.data?.message || "Couldn't reach the patients API.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsPatientsLoading(false);
+    }
+  }, [toast, selectedBranchId, isAllBranches]);
+
+  useEffect(() => {
+    fetchPatients();
+  }, [fetchPatients]);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -494,6 +501,7 @@ export default function PatientsManagement() {
                   open={isFilterOpen}
                   onOpenChange={setIsFilterOpen}
                 />
+                <RefreshButton onClick={fetchPatients} isLoading={isPatientsLoading} />
               </div>
             </div>
 

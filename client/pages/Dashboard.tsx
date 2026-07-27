@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2 } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import HmsTable from "@/components/hms/HmsTable";
@@ -12,6 +12,8 @@ import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { patientApi } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { RefreshButton } from "@/components/hms/RefreshButton";
+import { useBranchFilter } from "@/context/BranchFilterContext";
 
 const navItems = [
   {
@@ -236,6 +238,7 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("doctors");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { toast } = useToast();
+  const { selectedBranchId, isAllBranches } = useBranchFilter();
 
   // Real doctors/staff fetched from the backend. No dummy fallback — an
   // empty/failed fetch just leaves these null and the tab shows no rows.
@@ -249,78 +252,88 @@ export default function Dashboard() {
   const [realAppointments, setRealAppointments] = useState<Record<string, unknown>[] | null>(null);
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
 
-  useEffect(() => {
-    appointmentApi
-      .getAll({ limit: 100, sortBy: "appointment_date", sortOrder: "desc" })
-      .then((res) => {
-        const rows = res.data?.data?.appointments || [];
-        setRealAppointments(rows.map(mapAppointmentRecord));
-      })
-      .catch((err) => {
-        console.error("[Dashboard] Failed to load appointments:", err);
-        toast({
-          title: "Failed to load appointments",
-          description: "Couldn't reach the appointments API.",
-          variant: "destructive",
-        });
-      })
-      .finally(() => {
-        setIsAppointmentsLoading(false);
+  const fetchEmployees = useCallback(async () => {
+    setIsEmployeesLoading(true);
+    try {
+      console.log("[Dashboard] Fetching all employees from employeeApi...");
+      const res = await employeeApi.getAll({
+        branchId: isAllBranches ? undefined : selectedBranchId,
       });
-  }, []);
+      console.log("[Dashboard] Response:", res.data);
+      const allEmployees = res.data?.data?.employees || [];
+      const doctors = allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR");
+      const staff = allEmployees.filter((e) => e.user_table?.role_type !== "DOCTOR");
+
+      setRealDoctors(doctors.map(mapEmployeeRecord));
+      setRealStaff(staff.map(mapEmployeeRecord));
+
+      if (doctors.length === 0) {
+        toast({
+          title: "No doctor records found",
+          description: "The employees API returned no doctor records.",
+        });
+      }
+      if (staff.length === 0) {
+        toast({
+          title: "No staff records found",
+          description: "The employees API returned no staff records.",
+        });
+      }
+    } catch (err: any) {
+      console.error("[Dashboard] Error:", err);
+      console.error("[Dashboard] Error response:", err.response?.data);
+      console.error("[Dashboard] Error status:", err.response?.status);
+      toast({
+        title: "Failed to load employees",
+        description: err.response?.data?.message || "Couldn't reach the employees API.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsEmployeesLoading(false);
+    }
+  }, [toast, selectedBranchId, isAllBranches]);
+
+  const fetchAppointments = useCallback(async () => {
+    setIsAppointmentsLoading(true);
+    try {
+      const res = await appointmentApi.getAll({
+        limit: 100,
+        sortBy: "appointment_date",
+        sortOrder: "desc",
+        branchId: isAllBranches ? undefined : selectedBranchId,
+      });
+      const rows = res.data?.data?.appointments || [];
+      setRealAppointments(rows.map(mapAppointmentRecord));
+    } catch (err: any) {
+      console.error("[Dashboard] Failed to load appointments:", err);
+      toast({
+        title: "Failed to load appointments",
+        description: err.response?.data?.message || "Couldn't reach the appointments API.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAppointmentsLoading(false);
+    }
+  }, [toast, selectedBranchId, isAllBranches]);
+
+  useEffect(() => {
+    fetchAppointments();
+  }, [fetchAppointments]);
 
   useEffect(() => {
     patientApi
-      .getAll({ limit: 1 })
+      .getAll({ limit: 1, branchId: isAllBranches ? undefined : selectedBranchId })
       .then((res) => {
         setPatientCount(res.data?.data?.total ?? 0);
       })
       .catch(() => {
         setPatientCount(0);
       });
-  }, []);
+  }, [selectedBranchId, isAllBranches]);
 
   useEffect(() => {
-    console.log("[Dashboard] Fetching all employees from employeeApi...");
-    employeeApi
-      .getAll()
-      .then((res) => {
-        console.log("[Dashboard] Response:", res.data);
-        const allEmployees = res.data?.data?.employees || [];
-        // Filter on frontend by user_table.role_type
-        const doctors = allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR");
-        const staff = allEmployees.filter((e) => e.user_table?.role_type !== "DOCTOR");
-
-        setRealDoctors(doctors.map(mapEmployeeRecord));
-        setRealStaff(staff.map(mapEmployeeRecord));
-
-        if (doctors.length === 0) {
-          toast({
-            title: "No doctor records found",
-            description: "The employees API returned no doctor records.",
-          });
-        }
-        if (staff.length === 0) {
-          toast({
-            title: "No staff records found",
-            description: "The employees API returned no staff records.",
-          });
-        }
-      })
-      .catch((err) => {
-        console.error("[Dashboard] Error:", err);
-        console.error("[Dashboard] Error response:", err.response?.data);
-        console.error("[Dashboard] Error status:", err.response?.status);
-        toast({
-          title: "Failed to load employees",
-          description: "Couldn't reach the employees API.",
-          variant: "destructive",
-        });
-      })
-      .finally(() => {
-        setIsEmployeesLoading(false);
-      });
-  }, []);
+    fetchEmployees();
+  }, [fetchEmployees]);
 
   const liveStats = useMemo(() => [
     {
@@ -842,6 +855,10 @@ useEffect(() => {
                   onClear={handleClearFilter}
                   open={isFilterOpen}
                   onOpenChange={setIsFilterOpen}
+                />
+                <RefreshButton
+                  onClick={activeTab === "appointments" ? fetchAppointments : fetchEmployees}
+                  isLoading={activeTab === "appointments" ? isAppointmentsLoading : isEmployeesLoading}
                 />
               </div>
             </div>

@@ -5,6 +5,11 @@ import { cn } from "@/lib/utils";
 export interface FormDropdownOption {
   label: string;
   value: string;
+  // Optional visual affordances for options that need to stand out — e.g. a
+  // branch admin already assigned elsewhere gets a light-blue highlight and
+  // a badge naming their current branch.
+  highlight?: boolean;
+  badge?: string;
 }
 
 export interface FormDropdownProps
@@ -178,6 +183,8 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
                       "flex cursor-pointer items-center justify-between px-4 py-2.5 text-sm transition-colors relative group",
                       isSelected
                         ? "bg-blue-50 font-medium text-blue-700"
+                        : option.highlight
+                        ? "bg-blue-500/10 text-gray-900 hover:bg-blue-500/15"
                         : "text-gray-900 hover:bg-gray-50",
                     )}
                   >
@@ -187,7 +194,14 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
                         isSelected ? "scale-y-100" : "scale-y-0 group-hover:scale-y-100",
                       )}
                     />
-                    <span className="pl-2">{option.label}</span>
+                    <span className="pl-2 flex flex-col">
+                      <span>{option.label}</span>
+                      {option.badge && (
+                        <span className="text-[11px] font-medium text-blue-600">
+                          {option.badge}
+                        </span>
+                      )}
+                    </span>
                     <Check
                       className={cn(
                         "h-4 w-4 text-blue-600 transition-opacity",

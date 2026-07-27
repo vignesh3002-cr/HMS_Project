@@ -1,16 +1,16 @@
 import { useEffect, useState, useRef, ChangeEvent, FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Loader2, Plus, Stethoscope, X, Calendar, Clock } from "lucide-react";
+import { ArrowLeft, Loader2, Plus, Stethoscope, X, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { MultiSelectDropdown } from "@/components/ui/multi-select-dropdown";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
+import { State as CSState, City } from "country-state-city";
+import type { IState } from "country-state-city";
 import { branchApi, Branch } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
 import { DayOfWeek, WorkingHourPayload, employeeApi } from "@/api/employee.api";
-import ProfilePreview from "@/components/ui/Patient-preview";
 
-// Doctor-only field presets — same values as the Doctor role in Addemployee.tsx.
 const DOCTOR_DESIGNATIONS = [
   "Consultant",
   "Senior Consultant",
@@ -35,14 +35,8 @@ const DOCTOR_SPECIALIZATIONS = [
 ];
 const DOCTOR_QUALIFICATIONS = ["MBBS", "MD", "MS", "DM", "MCh", "BDS", "MDS"];
 
-// Sentinel departmentId value meaning "not in the list — user is typing a new one".
 const OTHER_DEPARTMENT_VALUE = "__OTHER__";
 
-// ---------------------------------------------------------------------------
-// Doctor schedule — same shape as the Doctor role in Addemployee.tsx. Only
-// Doctor (and other medical roles there) get multi-branch + schedule; this
-// page is Doctor-only, so both always apply here.
-// ---------------------------------------------------------------------------
 const DAYS_OF_WEEK: { value: DayOfWeek; label: string }[] = [
   { value: "MONDAY", label: "Monday" },
   { value: "TUESDAY", label: "Tuesday" },
@@ -79,9 +73,6 @@ function deriveShiftName(startTime: string): string {
   return hour < 12 ? "Morning" : "Evening";
 }
 
-// Field names mirror the `employees` table columns so every input here has a
-// real column to be saved into (username/password are excluded — they live on
-// `user_table` and aren't editable from here).
 interface EditDoctorFormData {
   firstName: string;
   middleName: string;
@@ -99,6 +90,11 @@ interface EditDoctorFormData {
   emergencyContactName: string;
   emergencyContactRelation: string;
   emergencyContactNumber: string;
+  state: string;
+  district: string;
+  area: string;
+  pincode: string;
+  experience: string;
   departmentId: string;
   designation: string;
   specialization: string;
@@ -106,8 +102,8 @@ interface EditDoctorFormData {
   docLicenseNo: string;
   joiningDate: string;
   branchIds: string[];
-  status: "Active" | "Inactive" | "";
   photoUrl: string | null;
+  isActive: boolean;
 }
 
 const emptyFormData: EditDoctorFormData = {
@@ -127,6 +123,11 @@ const emptyFormData: EditDoctorFormData = {
   emergencyContactName: "",
   emergencyContactRelation: "",
   emergencyContactNumber: "",
+  state: "",
+  district: "",
+  area: "",
+  pincode: "",
+  experience: "",
   departmentId: "",
   designation: "",
   specialization: "",
@@ -134,17 +135,39 @@ const emptyFormData: EditDoctorFormData = {
   docLicenseNo: "",
   joiningDate: "",
   branchIds: [],
-  status: "",
   photoUrl: null,
+  isActive: true,
 };
 
-const inputClass =
-  "w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed";
-const labelClass = "block text-sm font-semibold text-gray-800 mb-1.5";
-const sectionClass = "border border-gray-100 rounded-xl p-6 bg-gray-50/40";
-const sectionTitleClass = "text-xs font-bold text-[#00488D] uppercase tracking-wide mb-5";
-const requiredStar = <span className="text-red-600 ml-0.5">*</span>;
-const optionalTag = <span className="text-gray-400 text-xs font-normal">(optional)</span>;
+const inputCls =
+  "w-full h-10 px-4 bg-white border border-gray-200 rounded-xl text-[13.5px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-[3px] focus:ring-blue-500/15 focus:border-blue-500 transition-all duration-200 disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed";
+
+const labelCls = "block text-[12.5px] font-semibold text-gray-700 mb-1.5";
+
+const Req = () => <span className="text-red-600 ml-0.5">*</span>;
+const Opt = () => (
+  <span className="text-gray-400 text-[11px] font-normal ml-1">(optional)</span>
+);
+
+function Section({
+  title,
+  sub,
+  children,
+}: {
+  title: string;
+  sub: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mb-7">
+      <h2 className="text-[14px] font-bold text-gray-900 pb-2 mb-1 border-b-2 border-blue-50">
+        {title}
+      </h2>
+      <p className="text-[12px] text-gray-400 mb-4">{sub}</p>
+      {children}
+    </section>
+  );
+}
 
 export default function EditDoctorForm() {
   const navigate = useNavigate();
@@ -159,9 +182,25 @@ export default function EditDoctorForm() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [customDepartment, setCustomDepartment] = useState("");
 
-  // Schedule / time slots — same model as Addemployee.tsx's Doctor role. There's
-  // no read endpoint for existing doctor_schedule rows yet, so this starts empty;
-  // any slots added here are for new/updated hours going forward.
+  const [indianStates, setIndianStates] = useState<IState[]>([]);
+  const [districtOptions, setDistrictOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    setIndianStates(CSState.getStatesOfCountry("IN"));
+  }, []);
+
+  useEffect(() => {
+    if (formData.state) {
+      const selectedState = indianStates.find((s) => s.name === formData.state);
+      if (selectedState) {
+        const cities = City.getCitiesOfState("IN", selectedState.isoCode);
+        setDistrictOptions(cities.map((c) => c.name).sort());
+        return;
+      }
+    }
+    setDistrictOptions([]);
+  }, [formData.state, indianStates]);
+
   const [schedule, setSchedule] = useState<ScheduleEntry[]>([]);
   const [consultationMinutes, setConsultationMinutes] = useState("20");
   const nextSlotId = useRef(0);
@@ -186,13 +225,13 @@ export default function EditDoctorForm() {
 
   const emergencyOptional = formData.maritalStatus === "Divorced";
 
-  const setField = (key: Exclude<keyof EditDoctorFormData, "status">, value: string) => {
+  const setField = (key: keyof EditDoctorFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
   };
 
   const handleChange = (
     e: ChangeEvent<HTMLInputElement | HTMLSelectElement>,
-    key: Exclude<keyof EditDoctorFormData, "status">,
+    key: keyof EditDoctorFormData,
   ) => {
     const value = e.target.value;
     setFormData((prev) => {
@@ -235,14 +274,13 @@ export default function EditDoctorForm() {
   useEffect(() => {
     if (!id) return;
     employeeApi
-      .getAll({ limit: 1000 })
+      .getById(id)
       .then((res) => {
-        const employees = res.data?.data?.employees || [];
-        const found = employees.find(
-          (e) => e.employee_id === id && e.user_table?.role_type === "DOCTOR",
-        );
+        const payload = res.data?.data;
+        const employee = payload?.employee;
+        const user = payload?.user;
 
-        if (!found) {
+        if (!employee) {
           toast({
             title: "Doctor not found",
             description: "Couldn't find this doctor's record.",
@@ -251,35 +289,67 @@ export default function EditDoctorForm() {
           return;
         }
 
+        if (user?.role_type !== "DOCTOR") {
+          toast({
+            title: "Not a Doctor",
+            description: "This edit form only supports Doctor accounts.",
+            variant: "destructive",
+          });
+          return;
+        }
+
         setFormData({
-          firstName: found.first_name || "",
-          middleName: found.middle_name || "",
-          lastName: found.last_name || "",
-          bloodGroup: found.blood_group || "",
-          nationality: found.nationality || "",
-          maritalStatus: found.marital_status || "",
-          mobileNo: found.mobile_no || "",
-          email: found.email || "",
-          aadhaarNo: found.aadhaar_no || "",
-          panNo: found.pan_no || "",
-          passportNo: found.passport_no || "",
-          currentAddress: found.current_address || "",
-          permanentAddress: found.parmanant_address || "",
-          emergencyContactName: found.emergency_contact_name || "",
-          emergencyContactRelation: found.emergency_contact_relationship || "",
-          emergencyContactNumber: found.emergency_contact_number || "",
-          departmentId: found.department_id || "",
-          designation: found.designation || "",
-          specialization: found.specialization || "",
-          qualification: found.qualification || "",
-          docLicenseNo: found.doc_license_no || "",
-          joiningDate: found.joining_date ? String(found.joining_date).slice(0, 10) : "",
-          branchIds: found.branch_id ? [found.branch_id] : [],
-          status: found.emp_status === false ? "Inactive" : "Active",
-          photoUrl: found.photo || null,
+          firstName: employee.first_name || "",
+          middleName: employee.middle_name || "",
+          lastName: employee.last_name || "",
+          bloodGroup: employee.blood_group || "",
+          nationality: employee.nationality || "",
+          maritalStatus: employee.marital_status || "",
+          mobileNo: employee.mobile_no || "",
+          email: employee.email || "",
+          aadhaarNo: employee.aadhaar_no || "",
+          panNo: employee.pan_no || "",
+          passportNo: employee.passport_no || "",
+          currentAddress: employee.current_address || "",
+          permanentAddress: employee.parmanant_address || "",
+          emergencyContactName: employee.emergency_contact_name || "",
+          emergencyContactRelation: employee.emergency_contact_relationship || "",
+          emergencyContactNumber: employee.emergency_contact_number || "",
+          state: employee.employee_state || "",
+          district: employee.employee_district || "",
+          area: employee.employee_area || "",
+          pincode: employee.employee_pincode != null ? String(employee.employee_pincode) : "",
+          experience: employee.employee_no_experence != null ? String(employee.employee_no_experence) : "",
+          departmentId: employee.department_id || "",
+          designation: employee.designation || "",
+          specialization: employee.specialization || "",
+          qualification: employee.qualification || "",
+          docLicenseNo: employee.license_no || "",
+          joiningDate: employee.joining_date ? String(employee.joining_date).slice(0, 10) : "",
+          branchIds: employee.branch_id ? [employee.branch_id] : [],
+          photoUrl: employee.employee_photo_URL || employee.photo || null,
+          isActive: employee.emp_status === true,
         });
-        if (found.current_address && found.current_address === found.parmanant_address) {
+
+        if (employee.current_address && employee.current_address === employee.parmanant_address) {
           setSameAsCurrent(true);
+        }
+
+        const dbSchedules: any[] = payload?.doctorSchedules || [];
+        if (dbSchedules.length > 0) {
+          const mapped: ScheduleEntry[] = dbSchedules.map((s: any) => ({
+            id: `db-${s.schedule_id}`,
+            day_of_week: s.day_of_week || "",
+            start_time: s.start_time ? String(s.start_time).slice(0, 5) : "09:00",
+            end_time: s.end_time ? String(s.end_time).slice(0, 5) : "17:00",
+            branch_id: s.branch_id || "",
+          }));
+          setSchedule(mapped);
+
+          const profile: any = payload?.doctorProfile;
+          if (profile?.consultation_minutes) {
+            setConsultationMinutes(String(profile.consultation_minutes));
+          }
         }
       })
       .catch(() => {
@@ -296,7 +366,7 @@ export default function EditDoctorForm() {
     e.preventDefault();
     if (!id) return;
 
-    const requiredFields: { key: Exclude<keyof EditDoctorFormData, "branchIds">; label: string }[] = [
+    const requiredFields: { key: Exclude<keyof EditDoctorFormData, "branchIds" | "isActive">; label: string }[] = [
       { key: "firstName", label: "First Name" },
       { key: "lastName", label: "Last Name" },
       { key: "bloodGroup", label: "Blood Group" },
@@ -312,9 +382,13 @@ export default function EditDoctorForm() {
       { key: "qualification", label: "Qualification" },
       { key: "docLicenseNo", label: "License No" },
       { key: "joiningDate", label: "Joining Date" },
-      { key: "status", label: "Status" },
       { key: "currentAddress", label: "Current Address" },
       { key: "permanentAddress", label: "Permanent Address" },
+      { key: "state", label: "State" },
+      { key: "district", label: "District" },
+      { key: "area", label: "Area" },
+      { key: "pincode", label: "Pincode" },
+      { key: "experience", label: "Experience" },
       ...(emergencyOptional
         ? []
         : [
@@ -400,17 +474,22 @@ export default function EditDoctorForm() {
         emergency_contact_name: formData.emergencyContactName || undefined,
         emergency_contact_relationship: formData.emergencyContactRelation || undefined,
         emergency_contact_number: formData.emergencyContactNumber || undefined,
+        employee_state: formData.state || undefined,
+        employee_district: formData.district || undefined,
+        employee_area: formData.area || undefined,
+        employee_pincode: formData.pincode ? Number(formData.pincode) : undefined,
+        employee_no_experence: formData.experience ? Number(formData.experience) : undefined,
         department_id: departmentId,
         designation: formData.designation,
         specialization: formData.specialization || undefined,
         qualification: formData.qualification || undefined,
-        doc_license_no: formData.docLicenseNo || undefined,
+        license_no: formData.docLicenseNo || undefined,
         joining_date: formData.joiningDate,
-        emp_status: formData.status === "Active",
         branch_ids: formData.branchIds,
         consultation_minutes: Number(consultationMinutes) || 20,
         working_hours: workingHours,
-        photo: formData.photoUrl || undefined,
+        employee_photo_URL: formData.photoUrl || undefined,
+        emp_status: formData.isActive,
       });
 
       if (!response.data.success) {
@@ -444,548 +523,596 @@ export default function EditDoctorForm() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F7F9FB] flex items-center justify-center">
-        <Loader2 size={32} className="animate-spin text-[#00488D]" />
+      <div className="min-h-screen bg-gray-50 py-8 px-4 flex items-center justify-center">
+        <div className="w-full max-w-5xl bg-white rounded-2xl shadow-sm border border-gray-100 p-8 flex items-center justify-center">
+          <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+        </div>
       </div>
     );
   }
 
-  const departmentName =
-    departments.find((d) => d.department_id === formData.departmentId)?.department_name || "";
-  const branchLabels = branches
-    .filter((b) => formData.branchIds.includes(b.branch_id))
-    .map((b) => `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`)
-    .join(", ");
-
   return (
-    <div className="min-h-screen bg-[#F7F9FB] p-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-8">
-            <div className="w-full bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 overflow-hidden">
-              <div className="px-8 py-6 border-b border-gray-100 flex items-center gap-3">
+    <div className="min-h-screen bg-gray-50 py-8 px-4">
+      <div className="max-w-5xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100">
+        {/* ── Header ── */}
+        <div className="flex items-center gap-3 px-8 py-5 border-b border-gray-100">
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-gray-50 transition-colors text-gray-500"
+            aria-label="Go back"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="w-9 h-9 flex items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+            <Stethoscope className="w-5 h-5" />
+          </div>
+          <h4 className="hms-heading text-gray-900 tracking-tight">Edit Doctor</h4>
+        </div>
+
+        {/* ── Body ── */}
+        <form onSubmit={handleSubmit} className="px-8 pt-7 pb-8">
+          {/* Photo + Status */}
+          <div className="flex items-start gap-10 pb-6 border-b border-gray-100 mb-7">
+            <AvatarUpload
+              value={formData.photoUrl}
+              onChange={(url) => setFormData((p) => ({ ...p, photoUrl: url }))}
+              label="Doctor photo"
+              hint="Click or drag an image to upload (Max 1MB)"
+              size={80}
+            />
+            <div className="w-px self-stretch bg-gray-200" aria-hidden />
+            <div className="w-64">
+              <label className={labelCls}>Status <Req /></label>
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => navigate(-1)}
-                  className="p-2 rounded-xl hover:bg-gray-50 transition-colors"
-                  aria-label="Go back"
+                  onClick={() => setFormData((p) => ({ ...p, isActive: true }))}
+                  disabled={submitting}
+                  className={`h-10 rounded-xl border-2 text-[13px] font-semibold transition-colors ${
+                    formData.isActive
+                      ? "border-green-500 bg-green-50 text-green-700"
+                      : "border-gray-200 text-gray-600 hover:border-gray-300"
+                  }`}
                 >
-                  <ArrowLeft className="w-5 h-5 text-gray-500" />
+                  Active
                 </button>
-                <div className="p-2.5 bg-blue-50 rounded-xl flex items-center justify-center">
-                  <Stethoscope className="w-5 h-5 text-blue-600" />
-                </div>
-                <h4 className="hms-heading text-gray-900 tracking-tight">Edit Doctor</h4>
+                <button
+                  type="button"
+                  onClick={() => setFormData((p) => ({ ...p, isActive: false }))}
+                  disabled={submitting}
+                  className={`h-10 rounded-xl border-2 text-[13px] font-semibold transition-colors ${
+                    !formData.isActive
+                      ? "border-red-400 bg-red-50 text-red-700"
+                      : "border-gray-200 text-gray-600 hover:border-gray-300"
+                  }`}
+                >
+                  Inactive
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Personal details ── */}
+          <Section title="Personal details" sub="Identifying details for this doctor.">
+            <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
+              <div>
+                <label className={labelCls}>First name <Req /></label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  value={formData.firstName}
+                  onChange={(e) => handleChange(e, "firstName")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Middle name <Opt /></label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  value={formData.middleName}
+                  onChange={(e) => handleChange(e, "middleName")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Last name <Req /></label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  value={formData.lastName}
+                  onChange={(e) => handleChange(e, "lastName")}
+                  disabled={submitting}
+                />
               </div>
 
-              <form onSubmit={handleSubmit} className="p-8 space-y-6">
-                <div className={sectionClass}>
-                  <h3 className={sectionTitleClass}>Personal details</h3>
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-6 gap-y-6">
-                    {/* Photo + First Name row - spans full width */}
-                    <div className="lg:col-span-3">
-                      <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 pb-2">
-                        <AvatarUpload
-                          value={formData.photoUrl}
-                          onChange={(url) => setField("photoUrl", url ?? "")}
-                          label="Doctor photo"
-                          hint="Click or drag an image to upload (Max 1MB)"
-                          size={128}
-                        />
-                        <div aria-hidden="true" className="hidden sm:block w-px self-stretch bg-gray-200" />
-                        <div className="w-full sm:w-72">
-                          <label className={labelClass}>First name {requiredStar}</label>
-                          <input
-                            type="text"
-                            className={inputClass}
-                            value={formData.firstName}
-                            onChange={(e) => handleChange(e, "firstName")}
-                            disabled={submitting}
-                          />
-                        </div>
-                      </div>
-                    </div>
+              <div>
+                <label className={labelCls}>Blood group <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]}
+                  value={formData.bloodGroup}
+                  onValueChange={(val) => setField("bloodGroup", val)}
+                  placeholder="Select"
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Nationality <Req /></label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  value={formData.nationality}
+                  onChange={(e) => handleChange(e, "nationality")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Marital status <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={["Single", "Married", "Divorced"]}
+                  value={formData.maritalStatus}
+                  onValueChange={(val) => setField("maritalStatus", val)}
+                  placeholder="Select"
+                  disabled={submitting}
+                />
+              </div>
 
-                    <div>
-                      <label className={labelClass}>Middle name</label>
-                      <input
-                        type="text"
-                        className={inputClass}
-                        value={formData.middleName}
-                        onChange={(e) => handleChange(e, "middleName")}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Last name {requiredStar}</label>
-                      <input
-                        type="text"
-                        className={inputClass}
-                        value={formData.lastName}
-                        onChange={(e) => handleChange(e, "lastName")}
-                        disabled={submitting}
-                      />
-                    </div>
+              <div>
+                <label className={labelCls}>Aadhaar no <Req /></label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  value={formData.aadhaarNo}
+                  onChange={(e) => handleChange(e, "aadhaarNo")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>PAN no <Req /></label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  value={formData.panNo}
+                  onChange={(e) => handleChange(e, "panNo")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Passport no <Opt /></label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  value={formData.passportNo}
+                  onChange={(e) => handleChange(e, "passportNo")}
+                  disabled={submitting}
+                />
+              </div>
 
-                    <div>
-                      <label className={labelClass}>Blood group {requiredStar}</label>
-                      <FormDropdown
-                        options={["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]}
-                        value={formData.bloodGroup}
-                        onValueChange={(val) => setField("bloodGroup", val)}
-                        placeholder="Select"
-                        className={inputClass}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Nationality {requiredStar}</label>
-                      <input
-                        type="text"
-                        className={inputClass}
-                        value={formData.nationality}
-                        onChange={(e) => handleChange(e, "nationality")}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Marital status {requiredStar}</label>
-                      <FormDropdown
-                        options={["Single", "Married", "Divorced"]}
-                        value={formData.maritalStatus}
-                        onValueChange={(val) => setField("maritalStatus", val)}
-                        placeholder="Select"
-                        className={inputClass}
-                        disabled={submitting}
-                      />
-                    </div>
+              <div>
+                <label className={labelCls}>Email <Req /></label>
+                <input
+                  type="email"
+                  className={inputCls}
+                  value={formData.email}
+                  onChange={(e) => handleChange(e, "email")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Mobile <Req /></label>
+                <input
+                  type="tel"
+                  className={inputCls}
+                  value={formData.mobileNo}
+                  onChange={(e) => handleChange(e, "mobileNo")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Joining date <Req /></label>
+                <input
+                  type="date"
+                  className={inputCls + " text-gray-500"}
+                  value={formData.joiningDate}
+                  onChange={(e) => handleChange(e, "joiningDate")}
+                  disabled={submitting}
+                />
+              </div>
+            </div>
+          </Section>
 
-                    <div>
-                      <label className={labelClass}>Status {requiredStar}</label>
-                      <FormDropdown
-                        options={["Active", "Inactive"]}
-                        value={formData.status}
-                        onValueChange={(val) =>
-                          setFormData((prev) => ({ ...prev, status: val as "Active" | "Inactive" }))
-                        }
-                        placeholder="Select"
-                        className={inputClass}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Aadhaar No {requiredStar}</label>
-                      <input
-                        type="text"
-                        className={inputClass}
-                        value={formData.aadhaarNo}
-                        onChange={(e) => handleChange(e, "aadhaarNo")}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>PAN No {requiredStar}</label>
-                      <input
-                        type="text"
-                        className={inputClass}
-                        value={formData.panNo}
-                        onChange={(e) => handleChange(e, "panNo")}
-                        disabled={submitting}
-                      />
-                    </div>
+          {/* ── Contact & Address ── */}
+          <Section title="Contact & Address" sub="Contact details, address and location information.">
+            <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
+              <div>
+                <label className={labelCls}>
+                  Emergency contact name {emergencyOptional ? <Opt /> : <Req />}
+                </label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  value={formData.emergencyContactName}
+                  onChange={(e) => handleChange(e, "emergencyContactName")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>
+                  Emergency contact relation {emergencyOptional ? <Opt /> : <Req />}
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Spouse, Parent"
+                  className={inputCls}
+                  value={formData.emergencyContactRelation}
+                  onChange={(e) => handleChange(e, "emergencyContactRelation")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>
+                  Emergency contact number {emergencyOptional ? <Opt /> : <Req />}
+                </label>
+                <input
+                  type="tel"
+                  className={inputCls}
+                  value={formData.emergencyContactNumber}
+                  onChange={(e) => handleChange(e, "emergencyContactNumber")}
+                  disabled={submitting}
+                />
+              </div>
 
-                    <div>
-                      <label className={labelClass}>Passport No</label>
-                      <input
-                        type="text"
-                        className={inputClass}
-                        value={formData.passportNo}
-                        onChange={(e) => handleChange(e, "passportNo")}
-                        disabled={submitting}
-                      />
-                    </div>
-                  </div>
-                </div>
+              <div className="col-span-3">
+                <label className={labelCls}>Current address <Req /></label>
+                <input
+                  type="text"
+                  maxLength={255}
+                  className={inputCls}
+                  value={formData.currentAddress}
+                  onChange={(e) => handleChange(e, "currentAddress")}
+                  disabled={submitting}
+                />
+              </div>
 
-                <div className={sectionClass}>
-                  <h3 className={sectionTitleClass}>Contact</h3>
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-6 gap-y-6">
-                    <div>
-                      <label className={labelClass}>Mobile number {requiredStar}</label>
-                      <input
-                        type="tel"
-                        className={inputClass}
-                        value={formData.mobileNo}
-                        onChange={(e) => handleChange(e, "mobileNo")}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Email {requiredStar}</label>
-                      <input
-                        type="email"
-                        className={inputClass}
-                        value={formData.email}
-                        onChange={(e) => handleChange(e, "email")}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div />
+              <div className="col-span-3 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="sameAsCurrent"
+                  checked={sameAsCurrent}
+                  onChange={handleSameAsCurrentToggle}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  disabled={submitting}
+                />
+                <label
+                  htmlFor="sameAsCurrent"
+                  className="text-[13px] text-gray-700 cursor-pointer select-none"
+                >
+                  Same as current address
+                </label>
+              </div>
 
-                    <div>
-                      <label className={labelClass}>
-                        Emergency contact name {emergencyOptional ? optionalTag : requiredStar}
-                      </label>
-                      <input
-                        type="text"
-                        className={inputClass}
-                        value={formData.emergencyContactName}
-                        onChange={(e) => handleChange(e, "emergencyContactName")}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>
-                        Emergency contact relation {emergencyOptional ? optionalTag : requiredStar}
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Spouse, Parent"
-                        className={inputClass}
-                        value={formData.emergencyContactRelation}
-                        onChange={(e) => handleChange(e, "emergencyContactRelation")}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>
-                        Emergency contact number {emergencyOptional ? optionalTag : requiredStar}
-                      </label>
-                      <input
-                        type="tel"
-                        className={inputClass}
-                        value={formData.emergencyContactNumber}
-                        onChange={(e) => handleChange(e, "emergencyContactNumber")}
-                        disabled={submitting}
-                      />
-                    </div>
+              <div className="col-span-3">
+                <label className={labelCls}>Permanent address <Req /></label>
+                <input
+                  type="text"
+                  maxLength={255}
+                  className={inputCls}
+                  value={formData.permanentAddress}
+                  onChange={(e) => handleChange(e, "permanentAddress")}
+                  disabled={submitting || sameAsCurrent}
+                />
+              </div>
 
-                    <div className="lg:col-span-3">
-                      <label className={labelClass}>Current address {requiredStar}</label>
-                      <input
-                        type="text"
-                        maxLength={255}
-                        className={inputClass}
-                        value={formData.currentAddress}
-                        onChange={(e) => handleChange(e, "currentAddress")}
-                        disabled={submitting}
-                      />
-                    </div>
+              <div>
+                <label className={labelCls}>State <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={indianStates.map((s) => s.name)}
+                  value={formData.state}
+                  onValueChange={(val) =>
+                    setFormData((prev) => ({ ...prev, state: val, district: "" }))
+                  }
+                  placeholder="Select State"
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>District <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={districtOptions}
+                  value={formData.district}
+                  onValueChange={(val) => setField("district", val)}
+                  placeholder={formData.state ? "Select District" : "Select State first"}
+                  disabled={submitting || !formData.state}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Area <Req /></label>
+                <input
+                  type="text"
+                  maxLength={50}
+                  className={inputCls}
+                  value={formData.area}
+                  onChange={(e) => handleChange(e, "area")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Pincode <Req /></label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={10}
+                  className={inputCls}
+                  value={formData.pincode}
+                  onChange={(e) => handleChange(e, "pincode")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Experience <Req /></label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  placeholder="Years of experience"
+                  maxLength={50}
+                  className={inputCls}
+                  value={formData.experience}
+                  onChange={(e) => handleChange(e, "experience")}
+                  disabled={submitting}
+                />
+              </div>
+            </div>
+          </Section>
 
-                    <div className="lg:col-span-3 flex items-center gap-2 -mt-2">
-                      <input
-                        type="checkbox"
-                        id="sameAsCurrent"
-                        checked={sameAsCurrent}
-                        onChange={handleSameAsCurrentToggle}
-                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                        disabled={submitting}
-                      />
-                      <label
-                        htmlFor="sameAsCurrent"
-                        className="text-sm font-medium text-gray-700 cursor-pointer select-none"
-                      >
-                        Same as Current Address
-                      </label>
-                    </div>
+          {/* ── Professional details ── */}
+          <Section title="Professional details" sub="Doctor's professional credentials and affiliations.">
+            <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
+              <div>
+                <label className={labelCls}>Department <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={[
+                    ...departments.map((d) => ({
+                      label: d.department_name,
+                      value: d.department_id,
+                    })),
+                    { label: "Others", value: OTHER_DEPARTMENT_VALUE },
+                  ]}
+                  value={formData.departmentId}
+                  onValueChange={(val) => {
+                    setField("departmentId", val);
+                    if (val !== OTHER_DEPARTMENT_VALUE) setCustomDepartment("");
+                  }}
+                  placeholder={departments.length ? "Select department" : "Loading departments..."}
+                  disabled={submitting}
+                />
+                {formData.departmentId === OTHER_DEPARTMENT_VALUE && (
+                  <input
+                    type="text"
+                    placeholder="Type your department name"
+                    maxLength={100}
+                    className={inputCls + " mt-2"}
+                    value={customDepartment}
+                    onChange={(e) => setCustomDepartment(e.target.value)}
+                    disabled={submitting}
+                  />
+                )}
+              </div>
+              <div>
+                <label className={labelCls}>Designation <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={DOCTOR_DESIGNATIONS}
+                  value={formData.designation}
+                  onValueChange={(val) => setField("designation", val)}
+                  placeholder="Select designation"
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Specialization <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={DOCTOR_SPECIALIZATIONS}
+                  value={formData.specialization}
+                  onValueChange={(val) => setField("specialization", val)}
+                  placeholder="Select specialization"
+                  disabled={submitting}
+                />
+              </div>
 
-                    <div className="lg:col-span-3">
-                      <label className={labelClass}>Permanent address {requiredStar}</label>
-                      <input
-                        type="text"
-                        maxLength={255}
-                        className={
-                          sameAsCurrent
-                            ? inputClass.replace("bg-white", "bg-gray-50").replace("text-gray-900", "text-gray-500")
-                            : inputClass
-                        }
-                        value={formData.permanentAddress}
-                        onChange={(e) => handleChange(e, "permanentAddress")}
-                        disabled={submitting || sameAsCurrent}
-                      />
-                    </div>
-                  </div>
-                </div>
+              <div>
+                <label className={labelCls}>Qualification <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={DOCTOR_QUALIFICATIONS}
+                  value={formData.qualification}
+                  onValueChange={(val) => setField("qualification", val)}
+                  placeholder="Select qualification"
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>License No <Req /></label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  value={formData.docLicenseNo}
+                  onChange={(e) => handleChange(e, "docLicenseNo")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Branch(es) <Req /></label>
+                <MultiSelectDropdown
+                  options={branches.map((b) => ({
+                    label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                    value: b.branch_id,
+                  }))}
+                  value={formData.branchIds}
+                  onValueChange={(vals) =>
+                    setFormData((prev) => ({ ...prev, branchIds: vals }))
+                  }
+                  placeholder={branches.length ? "Select branch(es)" : "No branches available"}
+                  className={inputCls}
+                  disabled={submitting || branches.length === 0}
+                />
+              </div>
+            </div>
+          </Section>
 
-                <div className={sectionClass}>
-                  <h3 className={sectionTitleClass}>Professional details</h3>
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-6 gap-y-6">
-                    <div>
-                      <label className={labelClass}>Department {requiredStar}</label>
-                      <FormDropdown
-                        options={[
-                          ...departments.map((d) => ({
-                            label: d.department_name,
-                            value: d.department_id,
-                          })),
-                          { label: "Others", value: OTHER_DEPARTMENT_VALUE },
-                        ]}
-                        value={formData.departmentId}
-                        onValueChange={(val) => {
-                          setField("departmentId", val);
-                          if (val !== OTHER_DEPARTMENT_VALUE) setCustomDepartment("");
-                        }}
-                        placeholder={departments.length ? "Select department" : "Loading departments..."}
-                        className={inputClass}
-                        disabled={submitting}
-                      />
-                      {formData.departmentId === OTHER_DEPARTMENT_VALUE && (
-                        <input
-                          type="text"
-                          placeholder="Type your department name"
-                          maxLength={100}
-                          className={inputClass + " mt-2"}
-                          value={customDepartment}
-                          onChange={(e) => setCustomDepartment(e.target.value)}
+          {/* ── Schedule / Time Slots ── */}
+          <Section title="Schedule / Time Slots" sub="Set the doctor's weekly working hours and consultation duration.">
+            <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
+              <div>
+                <label className={labelCls}>Consultation Minutes <Req /></label>
+                <input
+                  type="number"
+                  min={1}
+                  className={inputCls}
+                  value={consultationMinutes}
+                  onChange={(e) => setConsultationMinutes(e.target.value)}
+                  disabled={submitting}
+                />
+              </div>
+
+              <div className="col-span-3">
+                {schedule.length === 0 && (
+                  <p className="text-sm text-gray-400 mb-3">No time slots added yet.</p>
+                )}
+
+                <div className="space-y-3">
+                  {schedule.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className="flex flex-wrap items-end gap-3 rounded-xl border border-gray-200 p-3"
+                    >
+                      <div className="w-40">
+                        <label className="block text-[12.5px] font-semibold text-gray-600 mb-1">
+                          Day
+                        </label>
+                        <FormDropdown
+                          className={inputCls}
+                          options={DAYS_OF_WEEK}
+                          value={entry.day_of_week}
+                          onValueChange={(val) =>
+                            updateScheduleEntry(entry.id, "day_of_week", val)
+                          }
+                          placeholder="Select Day"
                           disabled={submitting}
                         />
-                      )}
-                    </div>
-                    <div>
-                      <label className={labelClass}>Designation {requiredStar}</label>
-                      <FormDropdown
-                        options={DOCTOR_DESIGNATIONS}
-                        value={formData.designation}
-                        onValueChange={(val) => setField("designation", val)}
-                        placeholder="Select designation"
-                        className={inputClass}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Specialization {requiredStar}</label>
-                      <FormDropdown
-                        options={DOCTOR_SPECIALIZATIONS}
-                        value={formData.specialization}
-                        onValueChange={(val) => setField("specialization", val)}
-                        placeholder="Select specialization"
-                        className={inputClass}
-                        disabled={submitting}
-                      />
-                    </div>
-
-                    <div>
-                      <label className={labelClass}>Qualification {requiredStar}</label>
-                      <FormDropdown
-                        options={DOCTOR_QUALIFICATIONS}
-                        value={formData.qualification}
-                        onValueChange={(val) => setField("qualification", val)}
-                        placeholder="Select qualification"
-                        className={inputClass}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Doctor License No {requiredStar}</label>
-                      <input
-                        type="text"
-                        className={inputClass}
-                        value={formData.docLicenseNo}
-                        onChange={(e) => handleChange(e, "docLicenseNo")}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Joining date {requiredStar}</label>
-                      <input
-                        type="date"
-                        className={inputClass + " text-gray-500"}
-                        value={formData.joiningDate}
-                        onChange={(e) => handleChange(e, "joiningDate")}
-                        disabled={submitting}
-                      />
-                    </div>
-
-                    <div>
-                      <label className={labelClass}>Branch(es) {requiredStar}</label>
-                      <MultiSelectDropdown
-                        options={branches.map((b) => ({
-                          label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
-                          value: b.branch_id,
-                        }))}
-                        value={formData.branchIds}
-                        onValueChange={(vals) =>
-                          setFormData((prev) => ({ ...prev, branchIds: vals }))
-                        }
-                        placeholder={branches.length ? "Select branch(es)" : "No branches available"}
-                        className={inputClass}
-                        disabled={submitting || branches.length === 0}
-                      />
-                    </div>
-
-                    {/* Schedule / time slots — same model as Addemployee.tsx's Doctor role. */}
-                    <div className="lg:col-span-3">
-                      <label className={labelClass}>Schedule / Time Slots</label>
-
-                      <div className="mb-4 max-w-xs">
-                        <label className={labelClass}>Consultation Minutes {requiredStar}</label>
-                        <input
-                          type="number"
-                          min={1}
-                          className={inputClass}
-                          value={consultationMinutes}
-                          onChange={(e) => setConsultationMinutes(e.target.value)}
+                      </div>
+                      <div className="w-36">
+                        <label className="block text-[12.5px] font-semibold text-gray-600 mb-1">
+                          Start Time
+                        </label>
+                        <FormDropdown
+                          className={inputCls}
+                          options={TIME_OPTIONS}
+                          value={entry.start_time}
+                          onValueChange={(val) =>
+                            updateScheduleEntry(entry.id, "start_time", val)
+                          }
+                          placeholder="Start Time"
                           disabled={submitting}
                         />
                       </div>
-
-                      {schedule.length === 0 && (
-                        <p className="text-sm text-gray-400 mb-3">No time slots added yet.</p>
-                      )}
-
-                      <div className="space-y-3">
-                        {schedule.map((entry) => (
-                          <div
-                            key={entry.id}
-                            className="flex flex-wrap items-end gap-3 rounded-xl border border-gray-200 p-3"
-                          >
-                            <div className="w-40">
-                              <label className="block text-xs font-semibold text-gray-600 mb-1">
-                                Day
-                              </label>
-                              <FormDropdown
-                                className={inputClass}
-                                options={DAYS_OF_WEEK}
-                                value={entry.day_of_week}
-                                onValueChange={(val) =>
-                                  updateScheduleEntry(entry.id, "day_of_week", val)
-                                }
-                                placeholder="Select Day"
-                                disabled={submitting}
-                              />
-                            </div>
-                            <div className="w-36">
-                              <label className="block text-xs font-semibold text-gray-600 mb-1">
-                                Start Time
-                              </label>
-                              <FormDropdown
-                                className={inputClass}
-                                options={TIME_OPTIONS}
-                                value={entry.start_time}
-                                onValueChange={(val) =>
-                                  updateScheduleEntry(entry.id, "start_time", val)
-                                }
-                                placeholder="Start Time"
-                                disabled={submitting}
-                              />
-                            </div>
-                            <div className="w-36">
-                              <label className="block text-xs font-semibold text-gray-600 mb-1">
-                                End Time
-                              </label>
-                              <FormDropdown
-                                className={inputClass}
-                                options={TIME_OPTIONS}
-                                value={entry.end_time}
-                                onValueChange={(val) =>
-                                  updateScheduleEntry(entry.id, "end_time", val)
-                                }
-                                placeholder="End Time"
-                                disabled={submitting}
-                              />
-                            </div>
-                            <div className="w-56">
-                              <label className="block text-xs font-semibold text-gray-600 mb-1">
-                                Branch
-                              </label>
-                              <FormDropdown
-                                className={inputClass}
-                                options={branches
-                                  .filter((b) => formData.branchIds.includes(b.branch_id))
-                                  .map((b) => ({
-                                    label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
-                                    value: b.branch_id,
-                                  }))}
-                                value={entry.branch_id}
-                                onValueChange={(val) =>
-                                  updateScheduleEntry(entry.id, "branch_id", val)
-                                }
-                                placeholder="Select Branch"
-                                disabled={submitting || branches.length === 0}
-                              />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => removeScheduleEntry(entry.id)}
-                              disabled={submitting}
-                              className="p-2.5 rounded-xl border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-200 transition-colors disabled:opacity-50"
-                              aria-label="Remove time slot"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ))}
+                      <div className="w-36">
+                        <label className="block text-[12.5px] font-semibold text-gray-600 mb-1">
+                          End Time
+                        </label>
+                        <FormDropdown
+                          className={inputCls}
+                          options={TIME_OPTIONS}
+                          value={entry.end_time}
+                          onValueChange={(val) =>
+                            updateScheduleEntry(entry.id, "end_time", val)
+                          }
+                          placeholder="End Time"
+                          disabled={submitting}
+                        />
                       </div>
-
+                      <div className="w-56">
+                        <label className="block text-[12.5px] font-semibold text-gray-600 mb-1">
+                          Branch
+                        </label>
+                        <FormDropdown
+                          className={inputCls}
+                          options={branches
+                            .filter((b) => formData.branchIds.includes(b.branch_id))
+                            .map((b) => ({
+                              label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                              value: b.branch_id,
+                            }))}
+                          value={entry.branch_id}
+                          onValueChange={(val) =>
+                            updateScheduleEntry(entry.id, "branch_id", val)
+                          }
+                          placeholder="Select Branch"
+                          disabled={submitting || branches.length === 0}
+                        />
+                      </div>
                       <button
                         type="button"
-                        onClick={addScheduleEntry}
+                        onClick={() => removeScheduleEntry(entry.id)}
                         disabled={submitting}
-                        className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-blue-600 border border-blue-200 rounded-xl hover:bg-blue-50 transition-colors disabled:opacity-50"
+                        className="p-2.5 rounded-xl border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-200 transition-colors disabled:opacity-50"
+                        aria-label="Remove time slot"
                       >
-                        <Plus className="w-4 h-4" /> Add Time Slot
+                        <X className="w-4 h-4" />
                       </button>
                     </div>
-                  </div>
+                  ))}
                 </div>
 
-                <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-4 pt-6 border-t border-gray-100">
-                  <button
-                    type="button"
-                    onClick={handleReset}
-                    disabled={submitting}
-                    className="w-full sm:w-auto px-8 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    Reset
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="w-full sm:w-auto px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 active:scale-[0.98] transition-all duration-200 shadow-[0_4px_14px_0_rgba(37,99,235,0.2)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.3)] disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
-                  >
-                    {submitting ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    )}
-                    Update Doctor
-                  </button>
-                </div>
-              </form>
+                <button
+                  type="button"
+                  onClick={addScheduleEntry}
+                  disabled={submitting}
+                  className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-semibold text-blue-600 border border-blue-200 rounded-xl hover:bg-blue-50 transition-colors disabled:opacity-50"
+                >
+                  <Plus className="w-4 h-4" /> Add Time Slot
+                </button>
+              </div>
             </div>
-          </div>
+          </Section>
 
-          <div className="lg:col-span-4">
-            <div className="sticky top-6 h-[calc(100vh-2rem)]">
-              <ProfilePreview
-                name={[formData.firstName, formData.lastName].filter(Boolean).join(" ")}
-                emptyNameFallback="Doctor profile"
-                chips={[formData.designation, formData.specialization]}
-                details={[
-                  { label: "Department", value: departmentName },
-                  { label: "Blood group", value: formData.bloodGroup },
-                  { label: "License No", value: formData.docLicenseNo },
-                  { label: "Mobile", value: formData.mobileNo },
-                  { label: "Email", value: formData.email },
-                  { label: "Branch(es)", value: branchLabels },
-                  { label: "Status", value: formData.status },
-                ]}
-              />
-            </div>
+          {/* ── Actions ── */}
+          <div className="flex justify-end gap-3.5 pt-5 mt-1.5 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={handleReset}
+              disabled={submitting}
+              className="h-[42px] px-6 text-[13.5px] font-semibold text-gray-700 border border-gray-300 rounded-xl bg-white hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              Reset
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="h-[42px] px-6 text-[13.5px] font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  Save changes
+                </>
+              )}
+            </button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );

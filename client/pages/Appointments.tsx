@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Download,
@@ -20,6 +20,8 @@ import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { useToast } from "@/hooks/use-toast";
+import { RefreshButton } from "@/components/hms/RefreshButton";
+import { useBranchFilter } from "@/context/BranchFilterContext";
 
 import DayView from "./Day view";
 import WeekView from "./Week view";
@@ -202,6 +204,7 @@ function ActionMenu({
 const AppointmentSchedule: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { selectedBranchId, isAllBranches } = useBranchFilter();
 
   // Appointment data fetched from GET /appointments (mutable so status
   // changes like cancellation can be reflected). No dummy fallback — an
@@ -209,31 +212,35 @@ const AppointmentSchedule: React.FC = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
 
-  useEffect(() => {
-    appointmentApi
-      .getAll()
-      .then((res) => {
-        const records = res.data?.data?.appointments || [];
-        setAppointments(records.map(mapAppointmentRecord));
-        if (records.length === 0) {
-          toast({
-            title: "No appointment records found",
-            description: "The appointments API returned no records.",
-          });
-        }
-      })
-      .catch((err) => {
-        console.error("[Appointments Page] Error:", err);
-        toast({
-          title: "Failed to load appointments",
-          description: "Couldn't reach the appointments API.",
-          variant: "destructive",
-        });
-      })
-      .finally(() => {
-        setIsAppointmentsLoading(false);
+  const fetchAppointments = useCallback(async () => {
+    setIsAppointmentsLoading(true);
+    try {
+      const res = await appointmentApi.getAll({
+        branchId: isAllBranches ? undefined : selectedBranchId,
       });
-  }, []);
+      const records = res.data?.data?.appointments || [];
+      setAppointments(records.map(mapAppointmentRecord));
+      if (records.length === 0) {
+        toast({
+          title: "No appointment records found",
+          description: "The appointments API returned no records.",
+        });
+      }
+    } catch (err: any) {
+      console.error("[Appointments Page] Error:", err);
+      toast({
+        title: "Failed to load appointments",
+        description: err.response?.data?.message || "Couldn't reach the appointments API.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAppointmentsLoading(false);
+    }
+  }, [toast, selectedBranchId, isAllBranches]);
+
+  useEffect(() => {
+    fetchAppointments();
+  }, [fetchAppointments]);
 
   const handleCancelAppointment = (target: Appointment) => {
     setAppointments((prev) =>
@@ -565,7 +572,7 @@ const AppointmentSchedule: React.FC = () => {
 
 
 
-                {/* Filters */}
+{/* Filters */}
 
                 <FilterPopover
                   title="Filters"
@@ -583,8 +590,7 @@ const AppointmentSchedule: React.FC = () => {
                   open={isFilterOpen}
                   onOpenChange={setIsFilterOpen}
                 />
-
-
+                <RefreshButton onClick={fetchAppointments} isLoading={isAppointmentsLoading} />
               </div>
 
 

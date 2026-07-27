@@ -5,6 +5,7 @@ import { remove } from "../../utils/token";
 import { getUser } from "@/utils/token";
 import { cn } from "@/lib/utils";
 import { BranchSelector } from "@/components/hms/BranchSelector";
+import { BranchFilterProvider } from "@/context/BranchFilterContext";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 import {
@@ -107,6 +108,7 @@ useEffect(() => {
 }, []);
 
   return (
+    <BranchFilterProvider>
     <div className="flex h-screen font-[Manrope,sans-serif] bg-[#F7F9FB]">
 
       {/* Mobile overlay */}
@@ -250,5 +252,6 @@ useEffect(() => {
 
       <QuickAddFab />
     </div>
+    </BranchFilterProvider>
   );
 }

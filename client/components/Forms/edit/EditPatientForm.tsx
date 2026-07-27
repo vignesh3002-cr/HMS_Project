@@ -1,12 +1,12 @@
 import { useEffect, useState, ChangeEvent, FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Loader2, UserRound } from "lucide-react";
+import { ArrowLeft, Loader2, UserRound, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import { branchApi, Branch } from "@/api/branch.api";
 import { patientApi } from "@/api/patient.api";
-import ProfilePreview from "@/components/ui/Patient-preview";
+
 
 interface FormData {
   branch_id: string;
@@ -50,12 +50,35 @@ const emptyFormData: FormData = {
   patient_photo_url: null,
 };
 
-const inputClass =
-  "w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed";
-const labelClass = "block text-sm font-semibold text-gray-800 mb-1.5";
-const sectionClass = "border border-gray-100 rounded-xl p-6 bg-gray-50/40";
-const sectionTitleClass = "text-xs font-bold text-[#00488D] uppercase tracking-wide mb-5";
-const requiredStar = <span className="text-red-600 ml-0.5">*</span>;
+const inputCls =
+  "w-full h-10 px-4 bg-white border border-gray-200 rounded-xl text-[13.5px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-[3px] focus:ring-blue-500/15 focus:border-blue-500 transition-all duration-200 disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed";
+
+const labelCls = "block text-[12.5px] font-semibold text-gray-700 mb-1.5";
+
+const Req = () => <span className="text-red-600 ml-0.5">*</span>;
+const Opt = () => (
+  <span className="text-gray-400 text-[11px] font-normal ml-1">(optional)</span>
+);
+
+function Section({
+  title,
+  sub,
+  children,
+}: {
+  title: string;
+  sub: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mb-7">
+      <h2 className="text-[14px] font-bold text-gray-900 pb-2 mb-1 border-b-2 border-blue-50">
+        {title}
+      </h2>
+      <p className="text-[12px] text-gray-400 mb-4">{sub}</p>
+      {children}
+    </section>
+  );
+}
 
 export default function EditPatientForm() {
   const navigate = useNavigate();
@@ -215,357 +238,299 @@ export default function EditPatientForm() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F7F9FB] flex items-center justify-center">
-        <Loader2 size={32} className="animate-spin text-[#00488D]" />
+      <div className="min-h-screen bg-gray-50 py-8 px-4 flex items-center justify-center">
+        <div className="w-full max-w-5xl bg-white rounded-2xl shadow-sm border border-gray-100 p-8 flex items-center justify-center">
+          <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+        </div>
       </div>
     );
   }
 
-  const firstName = formData.patient_first_name;
-  const lastName = formData.patient_last_name;
-  const bloodGroup = formData.patient_blood_group;
-  const gender = formData.patient_gender;
-  const dob = formData.patient_dob;
-  const primaryMobile = formData.patient_primary_mobile;
-  const email = formData.patient_email;
-  const currentCity = formData.patient_current_address?.split(",").pop()?.trim() || "";
-  const emergencyName = formData.patient_emergency_name;
-  const emergencyMobile = formData.patient_emergency_mobile;
-
   return (
-    <div className="min-h-screen bg-[#F7F9FB] p-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-8">
-            <div className="w-full bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 overflow-hidden">
-              <div className="px-8 py-6 border-b border-gray-100 flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => navigate(-1)}
-                  className="p-2 rounded-xl hover:bg-gray-50 transition-colors"
-                  aria-label="Go back"
-                >
-                  <ArrowLeft className="w-5 h-5 text-gray-500" />
-                </button>
-                <div className="p-2.5 bg-blue-50 rounded-xl flex items-center justify-center">
-                  <UserRound className="w-5 h-5 text-blue-600" />
-                </div>
-                <h4 className="hms-heading text-gray-900 tracking-tight">Edit Patient</h4>
-              </div>
-
-              <form onSubmit={handleSubmit} className="p-8 space-y-6">
-                <div className={sectionClass}>
-                  <h3 className={sectionTitleClass}>Personal details</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-10">
-                    <div className="lg:col-span-3 flex flex-col sm:flex-row items-center sm:items-start gap-14 pb-2">
-                      <AvatarUpload
-                        value={formData.patient_photo_url}
-                        onChange={(url) => setField("patient_photo_url", url ?? "")}
-                        label="Patient photo"
-                        hint="Click or drag an image to upload"
-                      />
-                      <div aria-hidden="true" className="hidden sm:block w-px self-stretch bg-gray-200" />
-                      <div className="w-full sm:w-72">
-                        <label className={labelClass}>
-                          Branch {requiredStar}
-                        </label>
-                        <FormDropdown
-                          options={branches.map((b) => ({
-                            label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
-                            value: b.branch_id,
-                          }))}
-                          value={formData.branch_id}
-                          onValueChange={(val) => setField("branch_id", val)}
-                          placeholder={branches.length ? "Select branch" : "No branches available"}
-                          className={inputClass}
-                          disabled={submitting || branches.length === 0}
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className={labelClass}>
-                        First name {requiredStar}
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Aisha"
-                        className={inputClass}
-                        value={formData.patient_first_name}
-                        onChange={(e) => handleInputChange(e, "patient_first_name")}
-                        required
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Middle name</label>
-                      <input
-                        type="text"
-                        className={inputClass}
-                        value={formData.patient_middle_name}
-                        onChange={(e) => handleInputChange(e, "patient_middle_name")}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>
-                        Last name {requiredStar}
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Rahman"
-                        className={inputClass}
-                        value={formData.patient_last_name}
-                        onChange={(e) => handleInputChange(e, "patient_last_name")}
-                        required
-                        disabled={submitting}
-                      />
-                    </div>
-
-                    <div>
-                      <label className={labelClass}>Gender {requiredStar}</label>
-                      <FormDropdown
-                        options={["Female", "Male", "Other"]}
-                        value={formData.patient_gender}
-                        onValueChange={(val) => setField("patient_gender", val)}
-                        placeholder="Select"
-                        className={inputClass}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>
-                        Date of birth {requiredStar}
-                      </label>
-                      <input
-                        type="date"
-                        className={inputClass + " text-gray-500"}
-                        value={formData.patient_dob}
-                        onChange={(e) => handleInputChange(e, "patient_dob")}
-                        required
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>
-                        Blood group {requiredStar}
-                      </label>
-                      <FormDropdown
-                        options={[
-                          "A+", "A−", "B+", "B−", "AB+", "AB−", "O+", "O−",
-                        ]}
-                        value={formData.patient_blood_group}
-                        onValueChange={(val) => setField("patient_blood_group", val)}
-                        placeholder="Select"
-                        className={inputClass}
-                        disabled={submitting}
-                      />
-                    </div>
-
-                    <div>
-                      <label className={labelClass}>
-                        Nationality {requiredStar}
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Indian"
-                        className={inputClass}
-                        value={formData.patient_nationality}
-                        onChange={(e) => handleInputChange(e, "patient_nationality")}
-                        required
-                        disabled={submitting}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className={sectionClass}>
-                  <h3 className={sectionTitleClass}>Contact & address</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6">
-                    <div>
-                      <label className={labelClass}>
-                        Primary mobile {requiredStar}
-                      </label>
-                      <input
-                        type="tel"
-                        placeholder="+91 98765 43210"
-                        className={inputClass}
-                        value={formData.patient_primary_mobile}
-                        onChange={(e) => handleInputChange(e, "patient_primary_mobile")}
-                        required
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Alternate mobile</label>
-                      <input
-                        type="tel"
-                        className={inputClass}
-                        value={formData.patient_alternate_mobile}
-                        onChange={(e) => handleInputChange(e, "patient_alternate_mobile")}
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Email</label>
-                      <input
-                        type="email"
-                        placeholder="name@example.com"
-                        className={inputClass}
-                        value={formData.patient_email}
-                        onChange={(e) => handleInputChange(e, "patient_email")}
-                        disabled={submitting}
-                      />
-                    </div>
-
-                    <div>
-                      <label className={labelClass}>
-                        Emergency mobile {requiredStar}
-                      </label>
-                      <input
-                        type="tel"
-                        placeholder="+91 98765 43210"
-                        className={inputClass}
-                        value={formData.patient_emergency_mobile}
-                        onChange={(e) => handleInputChange(e, "patient_emergency_mobile")}
-                        required
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>
-                        Emergency contact name {requiredStar}
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. John Doe"
-                        className={inputClass}
-                        value={formData.patient_emergency_name}
-                        onChange={(e) => handleInputChange(e, "patient_emergency_name")}
-                        required
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>
-                        Relation {requiredStar}
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Spouse, Parent, Sibling"
-                        className={inputClass}
-                        value={formData.patient_emergency_relation}
-                        onChange={(e) => handleInputChange(e, "patient_emergency_relation")}
-                        required
-                        disabled={submitting}
-                      />
-                    </div>
-
-                    <div className="lg:col-span-3">
-                      <label className={labelClass}>
-                        Current Address {requiredStar}
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Enter current address"
-                        maxLength={255}
-                        className={inputClass}
-                        value={formData.patient_current_address}
-                        onChange={(e) => handleInputChange(e, "patient_current_address")}
-                        required
-                        disabled={submitting}
-                      />
-                    </div>
-
-                    <div className="lg:col-span-3 flex items-center gap-2 -mt-2">
-                      <input
-                        type="checkbox"
-                        id="sameAsCurrent"
-                        checked={sameAsCurrent}
-                        onChange={handleSameAsCurrentToggle}
-                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                        disabled={submitting}
-                      />
-                      <label
-                        htmlFor="sameAsCurrent"
-                        className="text-sm font-medium text-gray-700 cursor-pointer select-none"
-                      >
-                        Same as Current Address
-                      </label>
-                    </div>
-
-                    <div className="lg:col-span-3">
-                      <label className={labelClass}>
-                        Permanent Address {requiredStar}
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Enter permanent address"
-                        maxLength={255}
-                        className={sameAsCurrent ? inputClass.replace("bg-white", "bg-gray-50").replace("text-gray-900", "text-gray-500") : inputClass}
-                        value={formData.patient_permanent_address}
-                        onChange={(e) => handleInputChange(e, "patient_permanent_address")}
-                        required
-                        disabled={submitting || sameAsCurrent}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-4 pt-6 border-t border-gray-100">
-                  <button
-                    type="button"
-                    onClick={handleReset}
-                    disabled={submitting}
-                    className="w-full sm:w-auto px-8 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    Reset
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="w-full sm:w-auto px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 active:scale-[0.98] transition-all duration-200 shadow-[0_4px_14px_0_rgba(37,99,235,0.2)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.3)] disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
-                  >
-                    {submitting ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                        Update Patient
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
+    <div className="min-h-screen bg-gray-50 py-8 px-4">
+      <div className="max-w-5xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100">
+        {/* ── Header ── */}
+        <div className="flex items-center gap-3 px-8 py-5 border-b border-gray-100">
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-gray-50 transition-colors text-gray-500"
+            aria-label="Go back"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="w-9 h-9 flex items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+            <UserRound className="w-5 h-5" />
           </div>
+          <h4 className="hms-heading text-gray-900 tracking-tight">Edit Patient</h4>
+        </div>
 
-          <div className="lg:col-span-4">
-            <div className="sticky top-6 h-[calc(100vh-2rem)]">
-              <ProfilePreview
-                name={[firstName, lastName].filter(Boolean).join(" ")}
-                emptyNameFallback="New patient"
-                chips={[bloodGroup]}
-                photoDataUrl={formData.patient_photo_url || undefined}
-                details={[
-                  { label: "Gender", value: gender },
-                  { label: "DOB", value: dob },
-                  { label: "Mobile", value: primaryMobile },
-                  { label: "Email", value: email },
-                  { label: "City", value: currentCity },
-                  {
-                    label: "Emergency",
-                    value: emergencyName
-                      ? `${emergencyName}${emergencyMobile ? " (" + emergencyMobile + ")" : ""}`
-                      : undefined,
-                  },
-                ]}
+        {/* ── Body ── */}
+        <form onSubmit={handleSubmit} className="px-8 pt-7 pb-8">
+          {/* Photo + Branch */}
+          <div className="flex items-start gap-10 pb-6 border-b border-gray-100 mb-7">
+            <AvatarUpload
+              value={formData.patient_photo_url}
+              onChange={(url) => setField("patient_photo_url", url ?? "")}
+              label="Patient photo"
+              hint="Click or drag an image to upload (Max 1MB)"
+              size={80}
+            />
+            <div className="w-px self-stretch bg-gray-200" aria-hidden />
+            <div className="w-64">
+              <label className="block text-[12.5px] font-semibold text-gray-700 mb-1.5">Branch <span className="text-red-600 ml-0.5">*</span></label>
+              <FormDropdown
+                options={branches.map((b) => ({
+                  label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                  value: b.branch_id,
+                }))}
+                value={formData.branch_id}
+                onValueChange={(val) => setField("branch_id", val)}
+                placeholder={branches.length ? "Select branch" : "No branches available"}
+                className="w-full h-10 px-4 bg-white border border-gray-200 rounded-xl text-[13.5px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-[3px] focus:ring-blue-500/15 focus:border-blue-500 transition-all duration-200 disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
+                disabled={submitting || branches.length === 0}
               />
             </div>
           </div>
-        </div>
+
+          {/* ── Personal details ── */}
+          <Section title="Personal details" sub="Identifying details for this patient.">
+            <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
+              <div>
+                <label className={labelCls}>First name <Req /></label>
+                <input
+                  type="text"
+                  placeholder="e.g. Aisha"
+                  className={inputCls}
+                  value={formData.patient_first_name}
+                  onChange={(e) => handleInputChange(e, "patient_first_name")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Middle name <Opt /></label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  value={formData.patient_middle_name}
+                  onChange={(e) => handleInputChange(e, "patient_middle_name")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Last name <Req /></label>
+                <input
+                  type="text"
+                  placeholder="e.g. Rahman"
+                  className={inputCls}
+                  value={formData.patient_last_name}
+                  onChange={(e) => handleInputChange(e, "patient_last_name")}
+                  disabled={submitting}
+                />
+              </div>
+
+              <div>
+                <label className={labelCls}>Gender <Req /></label>
+                <FormDropdown
+                  options={["Female", "Male", "Other"]}
+                  value={formData.patient_gender}
+                  onValueChange={(val) => setField("patient_gender", val)}
+                  placeholder="Select"
+                  className={inputCls}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Date of birth <Req /></label>
+                <input
+                  type="date"
+                  className={inputCls + " text-gray-500"}
+                  value={formData.patient_dob}
+                  onChange={(e) => handleInputChange(e, "patient_dob")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Blood group <Req /></label>
+                <FormDropdown
+                  options={["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]}
+                  value={formData.patient_blood_group}
+                  onValueChange={(val) => setField("patient_blood_group", val)}
+                  placeholder="Select"
+                  className={inputCls}
+                  disabled={submitting}
+                />
+              </div>
+
+              <div>
+                <label className={labelCls}>Nationality <Req /></label>
+                <input
+                  type="text"
+                  placeholder="e.g. Indian"
+                  className={inputCls}
+                  value={formData.patient_nationality}
+                  onChange={(e) => handleInputChange(e, "patient_nationality")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Marital status <Opt /></label>
+                <FormDropdown
+                  options={["Single", "Married", "Divorced"]}
+                  value={formData.patient_marital_status}
+                  onValueChange={(val) => setField("patient_marital_status", val)}
+                  placeholder="Select"
+                  className={inputCls}
+                  disabled={submitting}
+                />
+              </div>
+            </div>
+          </Section>
+
+          {/* ── Contact & Address ── */}
+          <Section title="Contact & Address" sub="Contact details, address and location information.">
+            <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
+              <div>
+                <label className={labelCls}>Primary mobile <Req /></label>
+                <input
+                  type="tel"
+                  placeholder="+91 98765 43210"
+                  className={inputCls}
+                  value={formData.patient_primary_mobile}
+                  onChange={(e) => handleInputChange(e, "patient_primary_mobile")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Alternate mobile <Opt /></label>
+                <input
+                  type="tel"
+                  className={inputCls}
+                  value={formData.patient_alternate_mobile}
+                  onChange={(e) => handleInputChange(e, "patient_alternate_mobile")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Email <Opt /></label>
+                <input
+                  type="email"
+                  placeholder="name@example.com"
+                  className={inputCls}
+                  value={formData.patient_email}
+                  onChange={(e) => handleInputChange(e, "patient_email")}
+                  disabled={submitting}
+                />
+              </div>
+
+              <div>
+                <label className={labelCls}>Emergency mobile <Req /></label>
+                <input
+                  type="tel"
+                  placeholder="+91 98765 43210"
+                  className={inputCls}
+                  value={formData.patient_emergency_mobile}
+                  onChange={(e) => handleInputChange(e, "patient_emergency_mobile")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Emergency contact name <Req /></label>
+                <input
+                  type="text"
+                  placeholder="e.g. John Doe"
+                  className={inputCls}
+                  value={formData.patient_emergency_name}
+                  onChange={(e) => handleInputChange(e, "patient_emergency_name")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Relation <Req /></label>
+                <input
+                  type="text"
+                  placeholder="e.g. Spouse, Parent, Sibling"
+                  className={inputCls}
+                  value={formData.patient_emergency_relation}
+                  onChange={(e) => handleInputChange(e, "patient_emergency_relation")}
+                  disabled={submitting}
+                />
+              </div>
+
+              <div className="col-span-3">
+                <label className={labelCls}>Current address <Req /></label>
+                <input
+                  type="text"
+                  placeholder="Enter current address"
+                  maxLength={255}
+                  className={inputCls}
+                  value={formData.patient_current_address}
+                  onChange={(e) => handleInputChange(e, "patient_current_address")}
+                  disabled={submitting}
+                />
+              </div>
+
+              <div className="col-span-3 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="sameAsCurrent"
+                  checked={sameAsCurrent}
+                  onChange={handleSameAsCurrentToggle}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  disabled={submitting}
+                />
+                <label
+                  htmlFor="sameAsCurrent"
+                  className="text-[13px] text-gray-700 cursor-pointer select-none"
+                >
+                  Same as current address
+                </label>
+              </div>
+
+              <div className="col-span-3">
+                <label className={labelCls}>Permanent address <Req /></label>
+                <input
+                  type="text"
+                  placeholder="Enter permanent address"
+                  maxLength={255}
+                  className={inputCls}
+                  value={formData.patient_permanent_address}
+                  onChange={(e) => handleInputChange(e, "patient_permanent_address")}
+                  disabled={submitting || sameAsCurrent}
+                />
+              </div>
+            </div>
+          </Section>
+
+          {/* ── Actions ── */}
+          <div className="flex justify-end gap-3.5 pt-5 mt-1.5 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={handleReset}
+              disabled={submitting}
+              className="h-[42px] px-6 text-[13.5px] font-semibold text-gray-700 border border-gray-300 rounded-xl bg-white hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              Reset
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="h-[42px] px-6 text-[13.5px] font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  Save changes
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
