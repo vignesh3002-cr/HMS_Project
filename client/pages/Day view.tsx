@@ -7,12 +7,14 @@ import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
 import { useToast } from "@/hooks/use-toast";
 import { doctorApi, type DoctorRecord } from "@/api/doctor.api";
-import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { appointmentApi, type AppointmentRecord, type AvailableSlot } from "@/api/appointment.api";
+import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 
 /* ============================= Types ============================= */
 
 interface DayDoctorColumn {
   employeeId: string;
+  branchId: string;
   name: string;
   spec: string;
 }
@@ -204,6 +206,15 @@ function getInitials(name: string): string {
   return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
+function mapEmployeeToDayColumn(emp: EmployeeRecord): DayDoctorColumn {
+  return {
+    employeeId: emp.employee_id,
+    branchId: emp.branch_id,
+    name: `Dr. ${[emp.first_name, emp.middle_name, emp.last_name].filter(Boolean).join(" ")}`,
+    spec: emp.department_master?.department_name || emp.specialization || "General",
+  };
+}
+
 function mapDoctorRecord(doc: DoctorRecord, index: number): DoctorDirectoryEntry {
   return {
     initials: getInitials(doc.doctor_name),
@@ -253,19 +264,51 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       .finally(() => setIsLoadingDay(false));
   }, [selectedDate]);
 
-  const doctorColumns: DayDoctorColumn[] = useMemo(() => {
-    const byId = new Map<string, DayDoctorColumn>();
-    dayAppointments.forEach((appt) => {
-      const emp = appt.employees;
-      if (!emp || byId.has(emp.employee_id)) return;
-      byId.set(emp.employee_id, {
-        employeeId: emp.employee_id,
-        name: `Dr. ${[emp.first_name, emp.middle_name, emp.last_name].filter(Boolean).join(" ")}`,
-        spec: emp.specialization || "General",
-      });
+  // All doctors (not just ones with an appointment today), so every doctor
+  // gets a column and their real schedule decides which empty hours are
+  // actually open.
+  const [doctorColumns, setDoctorColumns] = useState<DayDoctorColumn[]>([]);
+  const [isLoadingDoctors, setIsLoadingDoctors] = useState(true);
+
+  useEffect(() => {
+    employeeApi
+      .getAll({ limit: 1000 })
+      .then((res) => {
+        const employees = res.data?.data?.employees || [];
+        const doctors = employees.filter((e) => e.user_table?.role_type === "DOCTOR");
+        setDoctorColumns(doctors.map(mapEmployeeToDayColumn));
+      })
+      .catch((err) => {
+        console.error("[Day View] Failed to load doctors:", err);
+        setDoctorColumns([]);
+      })
+      .finally(() => setIsLoadingDoctors(false));
+  }, []);
+
+  // Real per-doctor available slots for the selected date, from
+  // GET /appointments/available-slots -- used to tell a truly open hour
+  // apart from an hour the doctor isn't even scheduled for.
+  const [availableSlotsByDoctor, setAvailableSlotsByDoctor] = useState<Record<string, AvailableSlot[]>>({});
+
+  useEffect(() => {
+    if (doctorColumns.length === 0) {
+      setAvailableSlotsByDoctor({});
+      return;
+    }
+
+    const dateStr = format(selectedDate, "yyyy-MM-dd");
+
+    Promise.all(
+      doctorColumns.map((doc) =>
+        appointmentApi
+          .getAvailableSlots(doc.employeeId, doc.branchId, dateStr)
+          .then((res) => [doc.employeeId, res.data?.data?.slots ?? []] as const)
+          .catch(() => [doc.employeeId, []] as const),
+      ),
+    ).then((entries) => {
+      setAvailableSlotsByDoctor(Object.fromEntries(entries));
     });
-    return Array.from(byId.values());
-  }, [dayAppointments]);
+  }, [doctorColumns, selectedDate]);
 
   const scheduleRows: ScheduleRow[] = useMemo(() => {
     return TIME_ROW_HOURS.map((hour, idx) => ({
@@ -277,13 +320,19 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           return !isNaN(t.getTime()) && t.getUTCHours() === hour;
         }).length;
 
-        if (count === 0) return EMPTY;
+        if (count > 0) {
+          const fill = count >= 3 ? 100 : count === 2 ? 66 : 33;
+          return slot(count, `${count} Patient${count > 1 ? "s" : ""}`, fill, false);
+        }
 
-        const fill = count >= 3 ? 100 : count === 2 ? 66 : 33;
-        return slot(count, `${count} Patient${count > 1 ? "s" : ""}`, fill, false);
+        const hasOpenSlot = (availableSlotsByDoctor[doc.employeeId] ?? []).some(
+          (s) => s.is_available && Number(s.time.split(":")[0]) === hour,
+        );
+
+        return hasOpenSlot ? slot(0, "New slot available", 0, false) : EMPTY;
       }),
     }));
-  }, [doctorColumns, dayAppointments]);
+  }, [doctorColumns, dayAppointments, availableSlotsByDoctor]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -517,14 +566,14 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           aria-label="Doctor appointment schedule grid"
           className="min-w-0 flex-1 overflow-x-auto rounded-xl border border-[#E5E7EB] bg-white shadow-sm"
         >
-          {isLoadingDay ? (
+          {isLoadingDay || isLoadingDoctors ? (
             <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
               <Loader2 size={24} className="animate-spin text-[#00488D]" />
               Loading schedule...
             </div>
           ) : doctorColumns.length === 0 ? (
             <div className="flex items-center justify-center py-16 text-[#6B7280] text-sm">
-              No appointments found for this date.
+              No doctors found.
             </div>
           ) : (
           <div role="table" className="w-full min-w-[620px] md:min-w-[691px]">
@@ -548,14 +597,15 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                   <div
                     key={doc.employeeId}
                     role="columnheader"
-                    className={`flex flex-col items-center justify-center pb-1.5 pl-1.5 pr-[7px] pt-1.5 text-center transition-opacity ${
+                    title={`${doc.name} - ${doc.spec}`}
+                    className={`flex w-full flex-col items-center justify-center gap-0.5 overflow-hidden pb-1.5 pl-1.5 pr-[7px] pt-1.5 text-center transition-opacity ${
                       i !== doctorColumns.length - 1 ? "border-r border-[#c3c6d7]" : ""
                     } ${isDoctorDimmed(doc.name) ? "opacity-30" : ""}`}
                   >
-                    <span className="whitespace-nowrap font-['Manrope',sans-serif] text-[10px] font-bold leading-[15px] text-[#004ac6]">
+                    <span className="line-clamp-2 w-full break-words font-['Manrope',sans-serif] text-[10px] font-bold leading-[13px] text-[#004ac6]">
                       {doc.name}
                     </span>
-                    <span className="whitespace-nowrap font-['Manrope',sans-serif] text-[8px] uppercase leading-3 text-[#515f74]">
+                    <span className="w-full truncate font-['Manrope',sans-serif] text-[8px] uppercase leading-3 text-[#515f74]">
                       {doc.spec}
                     </span>
                   </div>

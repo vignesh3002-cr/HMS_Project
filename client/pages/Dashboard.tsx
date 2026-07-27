@@ -248,6 +248,7 @@ export default function Dashboard() {
   // empty/failed fetch just leaves this null and the tab shows no rows.
   const [realAppointments, setRealAppointments] = useState<Record<string, unknown>[] | null>(null);
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
+  const [appointmentCount, setAppointmentCount] = useState<number>(0);
 
   useEffect(() => {
     appointmentApi
@@ -255,6 +256,7 @@ export default function Dashboard() {
       .then((res) => {
         const rows = res.data?.data?.appointments || [];
         setRealAppointments(rows.map(mapAppointmentRecord));
+        setAppointmentCount(res.data?.data?.total ?? rows.length);
       })
       .catch((err) => {
         console.error("[Dashboard] Failed to load appointments:", err);
@@ -358,8 +360,8 @@ export default function Dashboard() {
     },
     {
       label: "Appointments",
-      value: "1,204",
-      change: "+114",
+      value: appointmentCount.toLocaleString(),
+      change: "",
       changeType: "positive",
       bg: "rgba(255,255,255,0.80)",
       border: "#C2C6D4",
@@ -389,7 +391,7 @@ export default function Dashboard() {
       icon: <Receipt className="h-4 w-4" color="#00488D" />,
       iconBg: "rgba(255,255,255,0.20)",
     },
-  ], [realDoctors, realStaff, patientCount]);
+  ], [realDoctors, realStaff, patientCount, appointmentCount]);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");

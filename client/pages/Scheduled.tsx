@@ -4,6 +4,7 @@ import { format } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import { employeeApi, type EmployeeDetailResponse } from "@/api/employee.api";
+import { appointmentApi, type AvailableSlotsResult } from "@/api/appointment.api";
 
 function formatDoctorFullName(e: EmployeeDetailResponse["employee"] | null): string {
   if (!e) return "Doctor";
@@ -162,6 +163,11 @@ export default function DoctorProfile() {
       });
   }, [id]);
 
+  // Real available slots for the selected day (today), fetched from the
+  // appointments API for the doctor being viewed here.
+  const [todaySlots, setTodaySlots] = useState<AvailableSlotsResult | null>(null);
+  const [isSlotsLoading, setIsSlotsLoading] = useState(false);
+
   const doctorEmployee = doctorDetail?.employee ?? null;
   const doctorName = formatDoctorFullName(doctorEmployee);
   const doctorSpecialization = doctorDetail?.doctorProfile?.specialization || doctorEmployee?.specialization || "—";
@@ -180,6 +186,25 @@ export default function DoctorProfile() {
   const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanant_address || "—";
   const doctorBloodGroup = doctorEmployee?.blood_group || "—";
   const doctorExperience = doctorEmployee?.employee_no_experence != null ? `${doctorEmployee.employee_no_experence}+ yrs` : "—";
+
+  useEffect(() => {
+    const branchId = doctorDetail?.branches?.[0]?.branch_id;
+    if (!id || !branchId) return;
+
+    setIsSlotsLoading(true);
+    appointmentApi
+      .getAvailableSlots(id, branchId, format(new Date(), "yyyy-MM-dd"))
+      .then((res) => {
+        setTodaySlots(res.data?.data ?? null);
+      })
+      .catch((err) => {
+        console.error("[Doctor Profile] Failed to load available slots:", err);
+        setTodaySlots(null);
+      })
+      .finally(() => {
+        setIsSlotsLoading(false);
+      });
+  }, [id, doctorDetail]);
 
   const [, calMonth, calYear] = weekDates[0].split("/").map(Number);
   const calendarDays = buildCalendarDays(2000 + calYear, calMonth - 1);
@@ -581,6 +606,34 @@ export default function DoctorProfile() {
 
                 </div>
 
+              </div>
+
+              {/* TODAY'S REAL AVAILABLE SLOTS (from appointments API) */}
+              <div className="mt-4 border border-[#edf0f4] rounded-[7px] p-3">
+                <h3 className="text-[11px] font-bold text-[#182235] mb-2">
+                  Today's Available Slots
+                </h3>
+
+                {isSlotsLoading ? (
+                  <p className="text-[#9aa1ab] text-[11px]">Loading available slots...</p>
+                ) : todaySlots?.slots?.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {todaySlots.slots.map((slot) => (
+                      <span
+                        key={slot.schedule_id}
+                        className={`px-[9px] py-1 rounded-full text-[10px] font-semibold border ${
+                          slot.is_available
+                            ? "bg-[#f0faf6] text-[#087d53] border-[#087d53]"
+                            : "bg-[#fff1f0] text-[#9aa1ab] border-[#dfe4ea] line-through"
+                        }`}
+                      >
+                        {slot.shift_name} · {slot.time}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[#9aa1ab] text-[11px]">No available slots for today.</p>
+                )}
               </div>
 
               <button

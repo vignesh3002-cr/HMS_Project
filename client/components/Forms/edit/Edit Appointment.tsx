@@ -53,6 +53,38 @@ function toTimeInputValue(time: string): string {
   return `${hh}:${mm}`;
 }
 
+// Looks forward day-by-day (up to 2 weeks) from startDateStr for the first
+// date this doctor/branch has a real open slot, so picking a doctor doesn't
+// leave the form pointed at a day they're fully booked or not scheduled on.
+async function findNearestAvailableDate(
+  doctorId: string,
+  branchId: string,
+  startDateStr: string,
+): Promise<string | null> {
+  const start = new Date(`${startDateStr}T00:00:00Z`);
+
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(start);
+    d.setUTCDate(d.getUTCDate() + i);
+    const dateStr = d.toISOString().split("T")[0];
+
+    try {
+      const res = await appointmentApi.getAvailableSlots(doctorId, branchId, dateStr);
+      const slots = res.data?.data?.slots || [];
+      if (slots.some((s) => s.is_available)) {
+        return dateStr;
+      }
+    } catch (err) {
+      // Doctor/branch combo can legitimately 400 on days with no schedule --
+      // log so a real backend/auth failure is still visible, then keep
+      // trying the remaining days.
+      console.error(`[Edit Appointment] getAvailableSlots(${doctorId}, ${branchId}, ${dateStr}) failed:`, err);
+    }
+  }
+
+  return null;
+}
+
 function formatSlotLabel(time: string): string {
   const [hours, minutes] = time.split(":").map(Number);
   const ampm = hours >= 12 ? "PM" : "AM";
@@ -96,6 +128,7 @@ export default function EditAppointment() {
 
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
+  const [findingNearestDate, setFindingNearestDate] = useState(false);
 
   useEffect(() => {
     branchApi
@@ -381,14 +414,81 @@ export default function EditAppointment() {
                     };
                   })}
                   value={formData.doctorId}
-                  onValueChange={(val) => setFormData((prev) => ({ ...prev, doctorId: val, timeSlot: "" }))}
+                  onValueChange={(val) => {
+                    const selectedDoctor = doctors.find((doc) => doc.employee_id === val);
+
+                    // department_id and specialization are entered as two
+                    // independent fields on the doctor's record (see
+                    // EditDoctorForm.tsx), so they can end up out of sync for
+                    // some doctors -- prefer whichever department's name
+                    // actually matches the doctor's specialization, and only
+                    // fall back to the (possibly mismatched) department_id
+                    // when no department name matches.
+                    const specialization = selectedDoctor?.specialization?.trim().toLowerCase();
+                    const matchedDepartment = specialization
+                      ? departments.find((d) => d.department_name.trim().toLowerCase() === specialization)
+                      : undefined;
+
+                    setFormData((prev) => ({
+                      ...prev,
+                      doctorId: val,
+                      departmentId: matchedDepartment?.department_id || selectedDoctor?.department_id || prev.departmentId,
+                      timeSlot: "",
+                    }));
+
+                    if (!val) return;
+
+                    setFindingNearestDate(true);
+
+                    // employee.branch_id is just the doctor's "home" branch and
+                    // isn't guaranteed to be one they're actually scheduled at --
+                    // getAvailableSlots requires a real active user_branch_mapping,
+                    // so look up their actual mapped branches first (same data
+                    // employeeApi.getOne exposes via /employees/:id).
+                    employeeApi
+                      .getOne(val)
+                      .then((res) => {
+                        const mappedBranches = res.data?.data?.branches || [];
+                        const nextBranchId =
+                          mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
+                          mappedBranches[0]?.branch_id ||
+                          selectedDoctor?.branch_id ||
+                          formData.branchId;
+
+                        if (!nextBranchId) return null;
+
+                        setFormData((prev) => ({ ...prev, branchId: nextBranchId }));
+
+                        return findNearestAvailableDate(val, nextBranchId, formData.selectDate);
+                      })
+                      .then((date) => {
+                        if (date) {
+                          setFormData((prev) => ({ ...prev, selectDate: date, timeSlot: "" }));
+                        } else if (date === null) {
+                          toast({
+                            title: "No available date found",
+                            description: "This doctor has no open slots in the next 14 days at their branch.",
+                            variant: "destructive",
+                          });
+                        }
+                      })
+                      .finally(() => setFindingNearestDate(false));
+                  }}
                   placeholder={doctors.length ? "Select Doctor" : "Loading doctors..."}
                 />
               </div>
 
               {/* Select Date */}
               <div>
-                <label className={labelClass}>Appointment Date {requiredStar}</label>
+                <label className={labelClass}>
+                  Appointment Date {requiredStar}
+                  {findingNearestDate && (
+                    <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-gray-400 normal-case">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      Finding nearest available date...
+                    </span>
+                  )}
+                </label>
                 <input
                   type="date"
                   name="selectDate"

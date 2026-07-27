@@ -12,9 +12,9 @@ import {
 import { format, addDays, subDays, startOfWeek, isSameWeek } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ExportReport from "@/components/ui/ExportReport";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { employeeApi } from "@/api/employee.api";
 
 interface Schedule {
   patients: number;
@@ -77,8 +77,6 @@ const colorStyles = {
 const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) => {
   const navigate = useNavigate();
   const [doctors, setDoctors] = useState<Doctor[]>([]);
-  const [isAddSlotOpen, setIsAddSlotOpen] = useState(false);
-  const [selectedSlot, setSelectedSlot] = useState<{ doctorIdx: number; colIdx: number } | null>(null);
 
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -128,6 +126,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       .getAll({
         dateFrom: format(weekStart, "yyyy-MM-dd"),
         dateTo: format(addDays(weekStart, 6), "yyyy-MM-dd"),
+        limit: 100,
       })
       .then((res) => {
         setWeekAppointments(res.data?.data?.appointments || []);
@@ -139,10 +138,36 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       .finally(() => setIsLoadingWeek(false));
   }, [selectedDate]);
 
+  // All doctors (not just ones with an appointment this week), so every
+  // doctor gets a row -- same approach as Day view.tsx.
+  const [allDoctors, setAllDoctors] = useState<
+    { employeeId: string; name: string; department: string }[]
+  >([]);
+
+  useEffect(() => {
+    employeeApi
+      .getAll({ role_type: "DOCTOR", limit: 1000 })
+      .then((res) => {
+        const employees = res.data?.data?.employees || [];
+        setAllDoctors(
+          employees.map((emp) => ({
+            employeeId: emp.employee_id,
+            name: `Dr. ${[emp.first_name, emp.middle_name, emp.last_name].filter(Boolean).join(" ")}`,
+            department: (emp.department_master?.department_name || emp.specialization || "General").toUpperCase(),
+          })),
+        );
+      })
+      .catch((err) => {
+        console.error("[Week View] Failed to load doctors:", err);
+        setAllDoctors([]);
+      });
+  }, []);
+
   useEffect(() => {
     const dayKeys = weekDays.map((d) => format(d, "yyyy-MM-dd"));
 
     const byId = new Map<string, { employeeId: string; name: string; department: string }>();
+    allDoctors.forEach((doc) => byId.set(doc.employeeId, doc));
     weekAppointments.forEach((appt) => {
       const emp = appt.employees;
       if (!emp || byId.has(emp.employee_id)) return;
@@ -153,13 +178,27 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       });
     });
 
-    const derivedDoctors: Doctor[] = Array.from(byId.values()).map((doc) => ({
+    // Same doctor can have more than one employee_id (e.g. duplicate records,
+    // multi-branch mappings) -- group by name so they render as one row
+    // instead of repeating, while still counting appointments from every
+    // employee_id that maps to that name.
+    const byName = new Map<string, { employeeIds: string[]; name: string; department: string }>();
+    byId.forEach((doc) => {
+      const existing = byName.get(doc.name);
+      if (existing) {
+        existing.employeeIds.push(doc.employeeId);
+      } else {
+        byName.set(doc.name, { employeeIds: [doc.employeeId], name: doc.name, department: doc.department });
+      }
+    });
+
+    const derivedDoctors: Doctor[] = Array.from(byName.values()).map((doc) => ({
       name: doc.name,
       department: doc.department,
       schedule: dayKeys.map((key) => {
         const count = weekAppointments.filter(
           (appt) =>
-            appt.employees?.employee_id === doc.employeeId &&
+            appt.employees && doc.employeeIds.includes(appt.employees.employee_id) &&
             utcDateKey(appt.appointment_date) === key,
         ).length;
 
@@ -174,7 +213,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     }));
 
     setDoctors(derivedDoctors);
-  }, [weekAppointments, selectedDate]);
+  }, [weekAppointments, allDoctors, selectedDate]);
 
   const dateLabel = isSameWeek(selectedDate, new Date(), { weekStartsOn: 1 })
     ? "This Week"
@@ -182,60 +221,6 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   const isDoctorDimmed = (doctorName: string) =>
     Boolean(searchTerm) && !doctorName.toLowerCase().includes(searchTerm.toLowerCase());
-
-  const handleAddSlot = () => {
-    if (selectedSlot) {
-      setDoctors((prev) =>
-        prev.map((doctor, doctorIdx) =>
-          doctorIdx !== selectedSlot.doctorIdx
-            ? doctor
-            : {
-                ...doctor,
-                schedule: doctor.schedule.map((item, colIdx) =>
-                  colIdx !== selectedSlot.colIdx
-                    ? item
-                    : { patients: 0, progress: 0, color: "blue", off: false },
-                ),
-              },
-        ),
-      );
-    }
-    setIsAddSlotOpen(false);
-    setSelectedSlot(null);
-  };
-
-  const handleCancelAddSlot = () => {
-    setIsAddSlotOpen(false);
-    setSelectedSlot(null);
-  };
-
-  const [isCancelSlotOpen, setIsCancelSlotOpen] = useState(false);
-
-  const handleConfirmCancelSlot = () => {
-    if (selectedSlot) {
-      setDoctors((prev) =>
-        prev.map((doctor, doctorIdx) =>
-          doctorIdx !== selectedSlot.doctorIdx
-            ? doctor
-            : {
-                ...doctor,
-                schedule: doctor.schedule.map((item, colIdx) =>
-                  colIdx !== selectedSlot.colIdx
-                    ? item
-                    : { patients: 0, progress: 0, color: "gray", off: true },
-                ),
-              },
-        ),
-      );
-    }
-    setIsCancelSlotOpen(false);
-    setSelectedSlot(null);
-  };
-
-  const handleBackFromCancelSlot = () => {
-    setIsCancelSlotOpen(false);
-    setSelectedSlot(null);
-  };
 
   const totalAppointments = weekAppointments.length;
 
@@ -426,9 +411,9 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
           <tbody>
 
-            {doctors.map((doctor, doctorIdx) => (
+            {doctors.map((doctor) => (
               <tr
-                key={doctor.name + doctorIdx}
+                key={doctor.name}
                 className={`border-b border-[#c3c6d7] last:border-b-0 transition-opacity ${
                   isDoctorDimmed(doctor.name) ? "opacity-30" : ""
                 }`}
@@ -452,18 +437,11 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                         key={index}
                         className="border-r border-[#c3c6d7] last:border-r-0 p-1 align-middle"
                       >
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedSlot({ doctorIdx, colIdx: index });
-                            setIsAddSlotOpen(true);
-                          }}
-                          className="flex h-[52px] w-full items-center justify-center rounded border border-dashed border-[#c3c6d7] transition-colors hover:border-[#00488D] hover:bg-[#F7F9FB]"
-                        >
+                        <div className="flex h-[52px] w-full items-center justify-center rounded border border-dashed border-[#c3c6d7]">
                           <span className="font-['Manrope',sans-serif] text-[9px] font-bold uppercase tracking-wide text-[#9aa1ad]">
                             OFF
                           </span>
-                        </button>
+                        </div>
                       </td>
                     );
                   }
@@ -471,18 +449,11 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                   if (item.patients === 0) {
                     return (
                       <td key={index} className="border-r border-[#c3c6d7] last:border-r-0 p-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedSlot({ doctorIdx, colIdx: index });
-                            setIsCancelSlotOpen(true);
-                          }}
-                          className="flex h-[52px] w-full items-center justify-center rounded-[2px] border-l-2 border-l-[#004ac6] bg-[rgba(0,74,198,0.05)] p-1 text-center transition-colors hover:bg-[rgba(0,74,198,0.1)]"
-                        >
+                        <div className="flex h-[52px] w-full items-center justify-center rounded-[2px] border-l-2 border-l-[#004ac6] bg-[rgba(0,74,198,0.05)] p-1 text-center">
                           <span className="font-['Manrope',sans-serif] text-[9px] font-bold leading-[13px] text-[#004ac6]">
                             New slot available
                           </span>
-                        </button>
+                        </div>
                       </td>
                     );
                   }
@@ -522,66 +493,6 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           </div>
         </main>
       </div>
-
-      <Dialog
-        open={isAddSlotOpen}
-        onOpenChange={(open) => {
-          setIsAddSlotOpen(open);
-          if (!open) setSelectedSlot(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-[360px]">
-          <DialogHeader>
-            <DialogTitle>Add Slot</DialogTitle>
-          </DialogHeader>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleAddSlot}
-              className="flex-1 rounded-lg bg-[#004785] px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#003a6b]"
-            >
-              Add Slot
-            </button>
-            <button
-              type="button"
-              onClick={handleCancelAddSlot}
-              className="flex-1 rounded-lg border border-[#E5E7EB] px-4 py-2 text-xs font-semibold text-[#374151] transition-colors hover:bg-[#F2F4F6]"
-            >
-              Cancel
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={isCancelSlotOpen}
-        onOpenChange={(open) => {
-          setIsCancelSlotOpen(open);
-          if (!open) setSelectedSlot(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-[360px]">
-          <DialogHeader>
-            <DialogTitle className="text-black">Cancel Slot</DialogTitle>
-          </DialogHeader>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleConfirmCancelSlot}
-              className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
-            >
-              Cancel Slot
-            </button>
-            <button
-              type="button"
-              onClick={handleBackFromCancelSlot}
-              className="flex-1 rounded-lg border border-[#E5E7EB] px-4 py-2 text-xs font-semibold text-[#374151] transition-colors hover:bg-[#F2F4F6]"
-            >
-              Back
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

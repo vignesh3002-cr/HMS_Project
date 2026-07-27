@@ -189,7 +189,7 @@ export default function Doctor() {
   useEffect(() => {
     console.log("[Doctor Page] Fetching all employees from employeeApi...");
     employeeApi
-      .getAll()
+      .getAll({ limit: 1000 })
       .then((res) => {
         console.log("[Doctor Page] Response:", res.data);
         const allEmployees = res.data?.data?.employees || [];
