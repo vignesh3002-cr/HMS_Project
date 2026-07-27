@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
@@ -7,12 +7,14 @@ import {
   Plus,
   Search,
   Check,
+  Loader2,
 } from "lucide-react";
 import { format, addDays, subDays, startOfWeek, isSameWeek } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ExportReport from "@/components/ui/ExportReport";
+import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 
 interface Schedule {
   patients: number;
@@ -33,216 +35,17 @@ interface AppointmentScheduleProps {
   onViewChange?: (view: ScheduleViewType) => void;
 }
 
-const initialDoctors: Doctor[] = [
-  {
-    name: "Dr. Sarah Johnson",
-    department: "HEMATOLOGY",
-    schedule: [
-      { patients: 13, progress: 80, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 8, progress: 55, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 9, progress: 60, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Sarah Johnson",
-    department: "HEMATOLOGY",
-    schedule: [
-      { patients: 13, progress: 80, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 8, progress: 55, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 9, progress: 60, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Sarah Johnson",
-    department: "HEMATOLOGY",
-    schedule: [
-      { patients: 13, progress: 80, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 8, progress: 55, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 9, progress: 60, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Sarah Johnson",
-    department: "HEMATOLOGY",
-    schedule: [
-      { patients: 13, progress: 80, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 8, progress: 55, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 9, progress: 60, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Sarah Johnson",
-    department: "HEMATOLOGY",
-    schedule: [
-      { patients: 13, progress: 80, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 8, progress: 55, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 9, progress: 60, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Sarah Johnson",
-    department: "HEMATOLOGY",
-    schedule: [
-      { patients: 13, progress: 80, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 8, progress: 55, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 9, progress: 60, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Sarah Johnson",
-    department: "HEMATOLOGY",
-    schedule: [
-      { patients: 13, progress: 80, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 8, progress: 55, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 9, progress: 60, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Sarah Johnson",
-    department: "HEMATOLOGY",
-    schedule: [
-      { patients: 13, progress: 80, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 8, progress: 55, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 9, progress: 60, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Sarah Johnson",
-    department: "HEMATOLOGY",
-    schedule: [
-      { patients: 13, progress: 80, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 8, progress: 55, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 9, progress: 60, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Sarah Johnson",
-    department: "HEMATOLOGY",
-    schedule: [
-      { patients: 13, progress: 80, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 8, progress: 55, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 9, progress: 60, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Sarah Johnson",
-    department: "HEMATOLOGY",
-    schedule: [
-      { patients: 13, progress: 80, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 8, progress: 55, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 9, progress: 60, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Sarah Johnson",
-    department: "HEMATOLOGY",
-    schedule: [
-      { patients: 13, progress: 80, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 8, progress: 55, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 9, progress: 60, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Sarah Johnson",
-    department: "HEMATOLOGY",
-    schedule: [
-      { patients: 13, progress: 80, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 8, progress: 55, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 9, progress: 60, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Sarah Johnson",
-    department: "HEMATOLOGY",
-    schedule: [
-      { patients: 13, progress: 80, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 8, progress: 55, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 9, progress: 60, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Michael Brown",
-    department: "RADIATION",
-    schedule: [
-      { patients: 16, progress: 100, color: "red" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 12, progress: 85, color: "blue" },
-      { patients: 9, progress: 65, color: "blue" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-  {
-    name: "Dr. Elena Rodriguez",
-    department: "PEDIATRIC",
-    schedule: [
-      { patients: 6, progress: 40, color: "green" },
-      { patients: 11, progress: 75, color: "blue" },
-      { patients: 12, progress: 85, color: "blue" },
-      { patients: 10, progress: 70, color: "blue" },
-      { patients: 13, progress: 90, color: "blue" },
-      { patients: 4, progress: 30, color: "gray" },
-      { patients: 0, progress: 0, color: "gray", off: true },
-    ],
-  },
-];
+// appointment_date is stored as a UTC-anchored Date (see appointment.utils.ts
+// on the backend), so this must read UTC getters directly -- local getters
+// would shift the day in timezones behind UTC.
+function utcDateKey(dateStr: string): string {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "";
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
 
 const colorStyles = {
   blue: {
@@ -273,7 +76,7 @@ const colorStyles = {
 
 const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) => {
   const navigate = useNavigate();
-  const [doctors, setDoctors] = useState<Doctor[]>(initialDoctors);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [isAddSlotOpen, setIsAddSlotOpen] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<{ doctorIdx: number; colIdx: number } | null>(null);
 
@@ -312,6 +115,66 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 });
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+
+  // Real appointments for the selected week, fetched from GET /appointments
+  // -- the doctor rows and per-day patient counts below are both derived
+  // from this instead of dummy data.
+  const [weekAppointments, setWeekAppointments] = useState<AppointmentRecord[]>([]);
+  const [isLoadingWeek, setIsLoadingWeek] = useState(true);
+
+  useEffect(() => {
+    setIsLoadingWeek(true);
+    appointmentApi
+      .getAll({
+        dateFrom: format(weekStart, "yyyy-MM-dd"),
+        dateTo: format(addDays(weekStart, 6), "yyyy-MM-dd"),
+      })
+      .then((res) => {
+        setWeekAppointments(res.data?.data?.appointments || []);
+      })
+      .catch((err) => {
+        console.error("[Week View] Error:", err);
+        setWeekAppointments([]);
+      })
+      .finally(() => setIsLoadingWeek(false));
+  }, [selectedDate]);
+
+  useEffect(() => {
+    const dayKeys = weekDays.map((d) => format(d, "yyyy-MM-dd"));
+
+    const byId = new Map<string, { employeeId: string; name: string; department: string }>();
+    weekAppointments.forEach((appt) => {
+      const emp = appt.employees;
+      if (!emp || byId.has(emp.employee_id)) return;
+      byId.set(emp.employee_id, {
+        employeeId: emp.employee_id,
+        name: `Dr. ${[emp.first_name, emp.middle_name, emp.last_name].filter(Boolean).join(" ")}`,
+        department: (emp.specialization || "General").toUpperCase(),
+      });
+    });
+
+    const derivedDoctors: Doctor[] = Array.from(byId.values()).map((doc) => ({
+      name: doc.name,
+      department: doc.department,
+      schedule: dayKeys.map((key) => {
+        const count = weekAppointments.filter(
+          (appt) =>
+            appt.employees?.employee_id === doc.employeeId &&
+            utcDateKey(appt.appointment_date) === key,
+        ).length;
+
+        if (count === 0) {
+          return { patients: 0, progress: 0, color: "gray", off: true };
+        }
+
+        const progress = Math.min(100, count * 10);
+        const color: Schedule["color"] = progress >= 100 ? "red" : progress <= 40 ? "green" : "blue";
+        return { patients: count, progress, color };
+      }),
+    }));
+
+    setDoctors(derivedDoctors);
+  }, [weekAppointments, selectedDate]);
 
   const dateLabel = isSameWeek(selectedDate, new Date(), { weekStartsOn: 1 })
     ? "This Week"
@@ -374,10 +237,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     setSelectedSlot(null);
   };
 
-  const totalAppointments = doctors.reduce(
-    (total, doctor) => total + doctor.schedule.filter((item) => !item.off).length,
-    0,
-  );
+  const totalAppointments = weekAppointments.length;
 
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
@@ -531,6 +391,16 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
             className="w-full overflow-x-auto rounded-xl border border-[#E5E7EB] bg-white shadow-sm"
           >
 
+            {isLoadingWeek ? (
+              <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
+                <Loader2 size={24} className="animate-spin text-[#00488D]" />
+                Loading schedule...
+              </div>
+            ) : doctors.length === 0 ? (
+              <div className="flex items-center justify-center py-16 text-[#6B7280] text-sm">
+                No appointments found for this week.
+              </div>
+            ) : (
             <table className="w-full min-w-[1070px] table-fixed border-collapse">
 
           <thead>
@@ -644,6 +514,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           </tbody>
 
         </table>
+            )}
 
       </section>
 

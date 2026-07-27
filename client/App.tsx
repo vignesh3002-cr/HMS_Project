@@ -15,8 +15,10 @@ import EditDoctorForm from "@/components/Forms/edit/EditDoctorForm";
 import EditBranch from "@/components/Forms/edit/EditBranch";
 import EditAdmin from "@/components/Forms/edit/EditAdmin";
 import AddAppointment from "@/components/Forms/AddAppointment";
+import EditAppointment from "@/components/Forms/edit/Edit Appointment";
 import PatientProfile from "@/components/Forms/view/patientProfile";
 import AppointmentBooking from "@/components/Forms/view/AppointmentBooking";
+import ViewAppointmentScheduled from "@/components/Forms/view/View Appointment Scheduled";
 import Appointments from "./pages/Appointments";
 import Dashboard from "./pages/Dashboard";
 import Departments from "./pages/Departments";
@@ -70,7 +72,9 @@ const protectedRoutes = [
   { path: "/staff/edit/:id", element: <EditAdmin /> },
   { path: "/doctor/edit/:id", element: <EditDoctorForm /> },
   { path: "/appointments/add", element: <AddAppointment /> },
+  { path: "/appointments/edit/:id", element: <EditAppointment /> },
   { path: "/appointments/book", element: <AppointmentBooking /> },
+  { path: "/appointments/view/:id", element: <ViewAppointmentScheduled /> },
 
 ];
 

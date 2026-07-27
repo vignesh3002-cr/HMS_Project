@@ -97,6 +97,24 @@ export interface EmployeeRecord {
   employee_no_experence?: string | number | null;
 }
 
+export interface EmployeeDetailResponse {
+  employee: EmployeeRecord & {
+    employee_photo_URL?: string | null;
+    employee_no_experence?: number | null;
+    current_address?: string | null;
+    parmanant_address?: string | null;
+  };
+  user: { role_type: string; user_status: number } | null;
+  branches: { branch_id: string; branch_name: string }[];
+  doctorProfile?: {
+    specialization: string | null;
+    qualification: string | null;
+    license_no: string | null;
+    consultation_minutes: number | null;
+  } | null;
+  doctorSchedules?: unknown[];
+}
+
 export interface CreateEmployeeResponse {
   success: boolean;
   message: string;
@@ -171,6 +189,9 @@ export const employeeApi = {
 
   getById: (employeeId: string) =>
     API.get<{ success: boolean; data: any }>(`/employees/${employeeId}`),
+
+  getOne: (employeeId: string) =>
+    API.get<{ success: boolean; data: EmployeeDetailResponse }>(`/employees/${employeeId}`),
 
   update: (employeeId: string, data: UpdateEmployeePayload) =>
     API.put<{ success: boolean; data: any; message?: string }>(`/employees/${employeeId}`, data),
