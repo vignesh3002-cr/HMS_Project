@@ -1,9 +1,22 @@
 import API from "./axios";
 
+export type DayOfWeek = "MONDAY" | "TUESDAY" | "WEDNESDAY" | "THURSDAY" | "FRIDAY" | "SATURDAY" | "SUNDAY";
+
+export interface WorkingHourDto {
+  branch_id: string;
+  day_of_week: DayOfWeek;
+  shift_name: string;
+  start_time: string;
+  end_time: string;
+}
+
+// Alias for backward compatibility
+export type WorkingHourPayload = WorkingHourDto;
+
 export interface CreateEmployeePayload {
   username: string;
   password: string;
-  role_type: "DOCTOR" | "NURSE" | "PHARMACIST" | "LAB_TECHNICIAN" | "RECEPTIONIST" | "STAFF";
+  role_type: "DOCTOR" | "NURSE" | "LAB_TECHNICIAN" | "PHARMACIST" | "BRANCH_ADMIN" | "Admin";
   first_name: string;
   middle_name?: string;
   last_name: string;
@@ -17,6 +30,12 @@ export interface CreateEmployeePayload {
   passport_no?: string;
   permanent_address?: string;
   current_address?: string;
+  employee_photo_URL?: string;
+  employee_state?: string;
+  employee_district?: string;
+  employee_area?: string;
+  employee_pincode?: number;
+  employee_no_experence?: number;
   emergency_contact_name?: string;
   emergency_contact_relationship?: string;
   emergency_contact_number?: string;
@@ -24,22 +43,12 @@ export interface CreateEmployeePayload {
   designation: string;
   specialization?: string;
   qualification?: string;
-  doc_license_no?: string;
+  license_no?: string;
   joining_date: string;
   emp_status: boolean;
   branch_ids: string[];
   consultation_minutes?: number;
-  working_hours?: WorkingHourPayload[];
-}
-
-export type DayOfWeek = "MONDAY" | "TUESDAY" | "WEDNESDAY" | "THURSDAY" | "FRIDAY" | "SATURDAY" | "SUNDAY";
-
-export interface WorkingHourPayload {
-  branch_id: string;
-  day_of_week: DayOfWeek;
-  shift_name: string;
-  start_time: string;
-  end_time: string;
+  working_hours?: WorkingHourDto[];
 }
 
 export interface EmployeeRecord {
@@ -63,7 +72,7 @@ export interface EmployeeRecord {
   designation: string | null;
   specialization: string | null;
   qualification: string | null;
-  doc_license_no: string | null;
+  license_no: string | null;
   joining_date: string;
   branch_id: string;
   emp_status: boolean | null;
@@ -80,6 +89,12 @@ export interface EmployeeRecord {
     branch_area?: string | null;
   } | null;
   photo?: string | null;
+  employee_photo_URL?: string | null;
+  employee_state?: string | null;
+  employee_district?: string | null;
+  employee_area?: string | null;
+  employee_pincode?: string | number | null;
+  employee_no_experence?: string | number | null;
 }
 
 export interface EmployeeDetailResponse {
@@ -119,15 +134,18 @@ export interface CreateEmployeeResponse {
 }
 
 export interface GetEmployeesParams {
-  role_type?: "DOCTOR" | "NURSE" | "PHARMACIST" | "LAB_TECHNICIAN" | "RECEPTIONIST" | "STAFF";
-  branch_id?: string;
-  department_id?: string;
+  roleType?: string;
+  branchId?: string;
+  department?: string;
   status?: boolean;
+  search?: string;
   page?: number;
   limit?: number;
 }
 
 export interface UpdateEmployeePayload {
+  username?: string;
+  password?: string;
   first_name?: string;
   middle_name?: string;
   last_name?: string;
@@ -148,16 +166,18 @@ export interface UpdateEmployeePayload {
   designation?: string;
   specialization?: string;
   qualification?: string;
-  doc_license_no?: string;
+  license_no?: string;
   joining_date?: string;
   emp_status?: boolean;
-  // Not yet persisted by PUT /employees/:employeeId (the backend's updateEmployee
-  // only maps the fields above) — sent anyway so the request already carries them
-  // once the backend adds support, without another frontend change.
+  employee_photo_URL?: string;
+  employee_state?: string;
+  employee_district?: string;
+  employee_area?: string;
+  employee_pincode?: number;
+  employee_no_experence?: number;
   branch_ids?: string[];
   consultation_minutes?: number;
-  working_hours?: WorkingHourPayload[];
-  photo?: string;
+  working_hours?: WorkingHourDto[];
 }
 
 export const employeeApi = {
@@ -165,11 +185,17 @@ export const employeeApi = {
     API.post<CreateEmployeeResponse>("/employees/create", data),
 
   getAll: (params?: GetEmployeesParams) =>
-    API.get<{ success: boolean; data: { employees: EmployeeRecord[]; total: number; page: number; limit: number } }>("/employees", { params }),
+    API.get<{ success: boolean; data: { employees: EmployeeRecord[]; total: number; page: number; limit: number; totalPages: number } }>("/employees", { params }),
+
+  getById: (employeeId: string) =>
+    API.get<{ success: boolean; data: any }>(`/employees/${employeeId}`),
 
   getOne: (employeeId: string) =>
     API.get<{ success: boolean; data: EmployeeDetailResponse }>(`/employees/${employeeId}`),
 
   update: (employeeId: string, data: UpdateEmployeePayload) =>
     API.put<{ success: boolean; data: any; message?: string }>(`/employees/${employeeId}`, data),
+
+  remove: (employeeId: string) =>
+    API.delete<{ success: boolean; message: string }>(`/employees/${employeeId}`),
 };

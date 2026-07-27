@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+  import { useNavigate, useParams } from "react-router-dom";
 import { format } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
@@ -180,7 +180,7 @@ export default function DoctorProfile() {
   );
   const doctorIsAvailable = doctorEmployee?.emp_status === true || doctorDetail?.user?.user_status === 1;
   const doctorPhoto = doctorEmployee?.employee_photo_URL || "https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?auto=format&fit=crop&w=500&q=80";
-  const doctorLicenseNo = doctorDetail?.doctorProfile?.license_no || doctorEmployee?.doc_license_no || "—";
+  const doctorLicenseNo = doctorDetail?.doctorProfile?.license_no || doctorEmployee?.license_no || "—";
   const doctorPhone = doctorEmployee?.mobile_no || "—";
   const doctorEmail = doctorEmployee?.email || "—";
   const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanant_address || "—";

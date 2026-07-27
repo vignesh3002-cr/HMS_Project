@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import CalendarPicker from "@/components/hms/Calender";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
@@ -20,6 +20,8 @@ import { filterDataByValues } from "@/components/Filter/utils";
 import ExportReport from "@/components/ui/ExportReport";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
+import { RefreshButton } from "@/components/hms/RefreshButton";
+import { useBranchFilter } from "@/context/BranchFilterContext";
 
 
 // ============================================================
@@ -114,6 +116,7 @@ function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
 export default function Doctor() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { selectedBranchId, isAllBranches } = useBranchFilter();
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
 
   // Search state
@@ -186,8 +189,10 @@ export default function Doctor() {
   const [realDoctors, setRealDoctors] = useState<EmployeeRecord[] | null>(null);
   const [isDoctorsLoading, setIsDoctorsLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchDoctors = useCallback(async () => {
+    setIsDoctorsLoading(true);
     console.log("[Doctor Page] Fetching all employees from employeeApi...");
+<<<<<<< HEAD
     employeeApi
       .getAll({ limit: 1000 })
       .then((res) => {
@@ -215,8 +220,39 @@ export default function Doctor() {
       })
       .finally(() => {
         setIsDoctorsLoading(false);
+=======
+    try {
+      const res = await employeeApi.getAll({
+        branchId: isAllBranches ? undefined : selectedBranchId,
+>>>>>>> c4e38228745f8b0c782b534ff175545130f36bb3
       });
-  }, []);
+      console.log("[Doctor Page] Response:", res.data);
+      const allEmployees = res.data?.data?.employees || [];
+      const doctors = allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR");
+      setRealDoctors(doctors);
+      if (doctors.length === 0) {
+        toast({
+          title: "No doctor records found",
+          description: "The employees API returned no doctor records.",
+        });
+      }
+    } catch (err: any) {
+      console.error("[Doctor Page] Error:", err);
+      console.error("[Doctor Page] Error response:", err.response?.data);
+      console.error("[Doctor Page] Error status:", err.response?.status);
+      toast({
+        title: "Failed to load doctors",
+        description: err.response?.data?.message || "Couldn't reach the employees API.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDoctorsLoading(false);
+    }
+  }, [toast, selectedBranchId, isAllBranches]);
+
+  useEffect(() => {
+    fetchDoctors();
+  }, [fetchDoctors]);
 
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
@@ -422,6 +458,7 @@ export default function Doctor() {
                   open={isFilterOpen}
                   onOpenChange={setIsFilterOpen}
                 />
+                <RefreshButton onClick={fetchDoctors} isLoading={isDoctorsLoading} />
               </div>
             </div>
 

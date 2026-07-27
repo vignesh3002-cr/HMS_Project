@@ -13,6 +13,7 @@ import PatientRegistrationForm from "@/components/Forms/PatientRegistrationForm"
 import EditPatientForm from "@/components/Forms/edit/EditPatientForm";
 import EditDoctorForm from "@/components/Forms/edit/EditDoctorForm";
 import EditBranch from "@/components/Forms/edit/EditBranch";
+import EditAdmin from "@/components/Forms/edit/EditAdmin";
 import AddAppointment from "@/components/Forms/AddAppointment";
 import EditAppointment from "@/components/Forms/edit/Edit Appointment";
 import PatientProfile from "@/components/Forms/view/patientProfile";
@@ -68,6 +69,7 @@ const protectedRoutes = [
   { path: "/doctor/view/:id", element: <DoctorDetails /> },
   { path: "/patients/edit/:id", element: <EditPatientForm /> },
   { path: "/branches/edit/:id", element: <EditBranch /> },
+  { path: "/staff/edit/:id", element: <EditAdmin /> },
   { path: "/doctor/edit/:id", element: <EditDoctorForm /> },
   { path: "/appointments/add", element: <AddAppointment /> },
   { path: "/appointments/edit/:id", element: <EditAppointment /> },

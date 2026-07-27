@@ -1,9 +1,12 @@
 import { useEffect, useState, ChangeEvent, FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Loader2, Plus, UserRound } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
+import { State as CSState, City } from "country-state-city";
+import type { IState } from "country-state-city";
 import { branchApi, Branch } from "@/api/branch.api";
 import { patientApi } from "@/api/patient.api";
 
@@ -17,11 +20,17 @@ interface FormData {
   patient_gender: string;
   patient_dob: string;
   patient_blood_group: string;
+  patient_type: string;
+  patient_type_other: string;
   patient_primary_mobile: string;
   patient_alternate_mobile: string;
   patient_email: string;
   patient_marital_status: string;
   patient_nationality: string;
+  patient_state: string;
+  patient_district: string;
+  patient_area: string;
+  patient_pincode: string;
   patient_current_address: string;
   patient_permanent_address: string;
   patient_username: string;
@@ -45,6 +54,17 @@ interface FormData {
   // diagnosis_notes: string;
 }
 
+const PATIENT_TYPE_OPTIONS = [
+  "Outpatient (OPD)",
+  "Inpatient (IPD)",
+  "Emergency",
+  "Day-care",
+  "Corporate",
+  "Insurance",
+  "Referral",
+];
+const OTHER_PATIENT_TYPE_VALUE = "Others";
+
 const emptyFormData: FormData = {
   branch_id: "",
   patient_first_name: "",
@@ -53,11 +73,17 @@ const emptyFormData: FormData = {
   patient_gender: "",
   patient_dob: "",
   patient_blood_group: "",
+  patient_type: "",
+  patient_type_other: "",
   patient_primary_mobile: "",
   patient_alternate_mobile: "",
   patient_email: "",
   patient_marital_status: "",
   patient_nationality: "",
+  patient_state: "",
+  patient_district: "",
+  patient_area: "",
+  patient_pincode: "",
   patient_current_address: "",
   patient_permanent_address: "",
   patient_username: "",
@@ -79,14 +105,39 @@ const emptyFormData: FormData = {
   // diagnosis_notes: "",
 };
 
-// Shared styling — matches AddBranch.tsx / Addemployee.tsx conventions.
-const inputClass =
-  "w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed";
-const labelClass = "block text-sm font-semibold text-gray-800 mb-1.5";
-const sectionClass = "border border-gray-100 rounded-xl p-6 bg-gray-50/40";
-const sectionTitleClass =
-  "text-xs font-bold text-[#00488D] uppercase tracking-wide mb-5";
-const requiredStar = <span className="text-red-600 ml-0.5">*</span>;
+// ─── Shared style tokens — matches Addemployee.tsx conventions ───────────────
+
+const inputCls =
+  "w-full h-10 px-4 bg-white border border-gray-200 rounded-xl text-[13.5px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-[3px] focus:ring-blue-500/15 focus:border-blue-500 transition-all duration-200 disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed";
+
+const labelCls = "block text-[12.5px] font-semibold text-gray-700 mb-1.5";
+
+const Req = () => <span className="text-red-600 ml-0.5">*</span>;
+const Opt = () => (
+  <span className="text-gray-400 text-[11px] font-normal ml-1">(optional)</span>
+);
+
+// ─── Section wrapper ──────────────────────────────────────────────────────────
+
+function Section({
+  title,
+  sub,
+  children,
+}: {
+  title: string;
+  sub: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mb-7">
+      <h2 className="text-[14px] font-bold text-gray-900 pb-2 mb-1 border-b-2 border-blue-50">
+        {title}
+      </h2>
+      <p className="text-[12px] text-gray-400 mb-4">{sub}</p>
+      {children}
+    </section>
+  );
+}
 
 export default function PatientRegistrationForm() {
   const navigate = useNavigate();
@@ -97,6 +148,8 @@ export default function PatientRegistrationForm() {
   const [submitting, setSubmitting] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [insuranceFiles, setInsuranceFiles] = useState<File[]>([]);
+  const [indianStates, setIndianStates] = useState<IState[]>([]);
+  const [districtOptions, setDistrictOptions] = useState<string[]>([]);
   // Re-typed password — must match before submit is allowed. Username has
   // no confirm field; it's a single required field (matches Addemployee.tsx).
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -125,6 +178,24 @@ export default function PatientRegistrationForm() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setIndianStates(CSState.getStatesOfCountry("IN"));
+  }, []);
+
+  useEffect(() => {
+    if (formData.patient_state) {
+      const s = indianStates.find((s) => s.name === formData.patient_state);
+      if (s)
+        setDistrictOptions(
+          City.getCitiesOfState("IN", s.isoCode)
+            .map((c) => c.name)
+            .sort(),
+        );
+    } else {
+      setDistrictOptions([]);
+    }
+  }, [formData.patient_state, indianStates]);
 
   const setField = (key: keyof FormData, value: string) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
@@ -162,6 +233,27 @@ export default function PatientRegistrationForm() {
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    if (!formData.patient_type) {
+      toast({
+        title: "Missing required field",
+        description: 'Please select a "Patient type".',
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (
+      formData.patient_type === OTHER_PATIENT_TYPE_VALUE &&
+      !formData.patient_type_other.trim()
+    ) {
+      toast({
+        title: "Missing required field",
+        description: 'Please specify the patient type for "Others".',
+        variant: "destructive",
+      });
+      return;
+    }
 
     if (!confirmPassword.trim()) {
       toast({
@@ -229,6 +321,14 @@ export default function PatientRegistrationForm() {
         email: formData.patient_email || undefined,
         marital_status: formData.patient_marital_status || undefined,
         nationality: formData.patient_nationality || undefined,
+        patient_type:
+          formData.patient_type === OTHER_PATIENT_TYPE_VALUE
+            ? formData.patient_type_other.trim() || undefined
+            : formData.patient_type || undefined,
+        patient_state: formData.patient_state || undefined,
+        patient_district: formData.patient_district || undefined,
+        patient_area: formData.patient_area || undefined,
+        patient_pincode: formData.patient_pincode ? Number(formData.patient_pincode) : undefined,
         photo: formData.patient_photo_url || undefined,
         created_by: "SYSTEM",
       });
@@ -263,592 +363,670 @@ export default function PatientRegistrationForm() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F7F9FB] p-6">
-      <div className="max-w-6xl mx-auto">
-        {/* Main Card */}
-        <div className="w-full bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 overflow-hidden">
-          {/* Header */}
-          <div className="px-8 py-6 border-b border-gray-100 flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate(-1)}
-              className="p-2 rounded-xl hover:bg-gray-50 transition-colors"
-              aria-label="Go back"
-            >
-              <ArrowLeft className="w-5 h-5 text-gray-500" />
-            </button>
-            <div className="p-2.5 bg-blue-50 rounded-xl flex items-center justify-center">
-              <UserRound className="w-5 h-5 text-blue-600" />
-            </div>
-            <h4 className="hms-heading text-gray-900 tracking-tight">
-              Patient Registration
-            </h4>
+    <div className="min-h-screen bg-gray-50 py-8 px-4">
+      <div className="max-w-5xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100">
+        {/* ── Header ── */}
+        <div className="flex items-center gap-3 px-8 py-5 border-b border-gray-100">
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-gray-50 transition-colors text-gray-500"
+            aria-label="Go back"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="w-9 h-9 flex items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+            <UserRound className="w-5 h-5" />
+          </div>
+          <h4 className="hms-heading text-gray-900 tracking-tight">
+            Patient Registration
+          </h4>
+        </div>
+
+        {/* ── Body ── */}
+        <form onSubmit={handleSubmit} className="px-8 pt-7 pb-8">
+
+          {/* Photo */}
+          <div className="flex items-start gap-10 pb-6 border-b border-gray-100 mb-7">
+            <AvatarUpload
+              value={formData.patient_photo_url}
+              onChange={(url) => setField("patient_photo_url", url ?? "")}
+              label="Patient photo"
+              hint="Click or drag an image to upload"
+              size={96}
+            />
           </div>
 
-          {/* Form Body */}
-          <form onSubmit={handleSubmit} className="p-8 space-y-6">
-            {/* PERSONAL DETAILS */}
-            <div className={sectionClass}>
-              <h3 className={sectionTitleClass}>Personal details</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-10">
-                {/* Photo (left) + Branch (right) */}
-                <div className="lg:col-span-3 flex flex-col sm:flex-row items-center sm:items-start gap-14 pb-2">
-                  <AvatarUpload
-                    value={formData.patient_photo_url}
-                    onChange={(url) => setField("patient_photo_url", url ?? "")}
-                    label="Patient photo"
-                    hint="Click or drag an image to upload"
-                  />
-                  <div
-                    aria-hidden="true"
-                    className="hidden sm:block w-px self-stretch bg-gray-200"
-                  />
-                  <div className="w-full sm:w-72">
-                    <label className={labelClass}>
-                      Branch {requiredStar}
+          {/* ── Personal details ── */}
+          <Section
+            title="Personal details"
+            sub="Personal details used to identify the patient."
+          >
+            <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
+              <div>
+                <label className={labelCls}>First name <Req /></label>
+                <input
+                  type="text"
+                  placeholder="e.g. Aisha"
+                  className={inputCls}
+                  value={formData.patient_first_name}
+                  onChange={(e) => handleInputChange(e, "patient_first_name")}
+                  disabled={submitting}
+                  required
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Middle name</label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  value={formData.patient_middle_name}
+                  onChange={(e) => handleInputChange(e, "patient_middle_name")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Last name <Req /></label>
+                <input
+                  type="text"
+                  placeholder="e.g. Rahman"
+                  className={inputCls}
+                  value={formData.patient_last_name}
+                  onChange={(e) => handleInputChange(e, "patient_last_name")}
+                  disabled={submitting}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className={labelCls}>Gender <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={["Female", "Male", "Other"]}
+                  value={formData.patient_gender}
+                  onValueChange={(val) => setField("patient_gender", val)}
+                  placeholder="Select"
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Date of birth <Req /></label>
+                <input
+                  type="date"
+                  className={inputCls + " text-gray-500"}
+                  value={formData.patient_dob}
+                  onChange={(e) => handleInputChange(e, "patient_dob")}
+                  disabled={submitting}
+                  required
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Blood group <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={["A+", "A−", "B+", "B−", "AB+", "AB−", "O+", "O−"]}
+                  value={formData.patient_blood_group}
+                  onValueChange={(val) => setField("patient_blood_group", val)}
+                  placeholder="Select"
+                  disabled={submitting}
+                />
+              </div>
+
+              <div>
+                <label className={labelCls}>Nationality <Req /></label>
+                <input
+                  type="text"
+                  placeholder="e.g. Indian"
+                  className={inputCls}
+                  value={formData.patient_nationality}
+                  onChange={(e) => handleInputChange(e, "patient_nationality")}
+                  disabled={submitting}
+                  required
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Marital status <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={["Single", "Married", "Divorced"]}
+                  value={formData.patient_marital_status}
+                  onValueChange={(val) => setField("patient_marital_status", val)}
+                  placeholder="Select"
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Patient type <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={[...PATIENT_TYPE_OPTIONS, OTHER_PATIENT_TYPE_VALUE]}
+                  value={formData.patient_type}
+                  onValueChange={(val) =>
+                    setFormData((p) => ({
+                      ...p,
+                      patient_type: val,
+                      patient_type_other:
+                        val === OTHER_PATIENT_TYPE_VALUE ? p.patient_type_other : "",
+                    }))
+                  }
+                  placeholder="Select patient type"
+                  disabled={submitting}
+                />
+              </div>
+
+              <AnimatePresence>
+                {formData.patient_type === OTHER_PATIENT_TYPE_VALUE && (
+                  <motion.div
+                    key="patientTypeOther"
+                    layout
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <label className={labelCls}>
+                      Specify patient type <Req />
                     </label>
-                    <FormDropdown
-                      options={branches.map((b) => ({
-                        label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
-                        value: b.branch_id,
-                      }))}
-                      value={formData.branch_id}
-                      onValueChange={(val) => setField("branch_id", val)}
-                      placeholder={branches.length ? "Select branch" : "No branches available"}
-                      className={inputClass}
-                      disabled={submitting || branches.length === 0}
+                    <input
+                      type="text"
+                      placeholder="Enter patient type"
+                      maxLength={50}
+                      className={inputCls}
+                      value={formData.patient_type_other}
+                      onChange={(e) => setField("patient_type_other", e.target.value)}
+                      disabled={submitting}
                     />
-                  </div>
-                </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </Section>
 
-                <div>
-                  <label className={labelClass}>
-                    First name {requiredStar}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Aisha"
-                    className={inputClass}
-                    value={formData.patient_first_name}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_first_name")
-                    }
-                    required
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>Middle name</label>
-                  <input
-                    type="text"
-                    className={inputClass}
-                    value={formData.patient_middle_name}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_middle_name")
-                    }
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Last name {requiredStar}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Rahman"
-                    className={inputClass}
-                    value={formData.patient_last_name}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_last_name")
-                    }
-                    required
-                  />
-                </div>
+          {/* ── Address and location ── */}
+          <Section
+            title="Address and location"
+            sub="State, district and residential details."
+          >
+            <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
+              <div>
+                <label className={labelCls}>State <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={indianStates.map((s) => s.name)}
+                  value={formData.patient_state}
+                  onValueChange={(v) =>
+                    setFormData((p) => ({ ...p, patient_state: v, patient_district: "" }))
+                  }
+                  placeholder="Select state"
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>District <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={districtOptions}
+                  value={formData.patient_district}
+                  onValueChange={(v) => setField("patient_district", v)}
+                  placeholder={formData.patient_state ? "Select district" : "Select state first"}
+                  disabled={submitting || !formData.patient_state}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Area <Req /></label>
+                <input
+                  name="patient_area"
+                  placeholder="Enter area"
+                  maxLength={50}
+                  className={inputCls}
+                  value={formData.patient_area}
+                  onChange={(e) => handleInputChange(e, "patient_area")}
+                  disabled={submitting}
+                />
+              </div>
 
-                <div>
-                  <label className={labelClass}>Gender {requiredStar}</label>
-                  <FormDropdown
-                    options={["Female", "Male", "Other"]}
-                    value={formData.patient_gender}
-                    onValueChange={(val) => setField("patient_gender", val)}
-                    placeholder="Select"
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Date of birth {requiredStar}
-                  </label>
-                  <input
-                    type="date"
-                    className={inputClass + " text-gray-500"}
-                    value={formData.patient_dob}
-                    onChange={(e) => handleInputChange(e, "patient_dob")}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Blood group {requiredStar}
-                  </label>
-                  <FormDropdown
-                    options={[
-                      "A+",
-                      "A−",
-                      "B+",
-                      "B−",
-                      "AB+",
-                      "AB−",
-                      "O+",
-                      "O−",
-                    ]}
-                    value={formData.patient_blood_group}
-                    onValueChange={(val) =>
-                      setField("patient_blood_group", val)
-                    }
-                    placeholder="Select"
-                    className={inputClass}
-                  />
-                </div>
+              <div>
+                <label className={labelCls}>Pincode <Req /></label>
+                <input
+                  name="patient_pincode"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  placeholder="Enter pincode"
+                  maxLength={10}
+                  className={inputCls}
+                  value={formData.patient_pincode}
+                  onChange={(e) => handleInputChange(e, "patient_pincode")}
+                  disabled={submitting}
+                />
+              </div>
 
-                <div>
-                  <label className={labelClass}>
-                    Nationality {requiredStar}
+              <div className="col-span-3">
+                <label className={labelCls}>Current address <Req /></label>
+                <input
+                  type="text"
+                  placeholder="Enter current address"
+                  maxLength={255}
+                  className={inputCls}
+                  value={formData.patient_current_address}
+                  onChange={(e) => handleInputChange(e, "patient_current_address")}
+                  disabled={submitting}
+                  required
+                />
+              </div>
+
+              <div className="col-span-3 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="sameAsCurrent"
+                  checked={sameAsCurrent}
+                  onChange={handleSameAsCurrentToggle}
+                  disabled={submitting}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <label
+                  htmlFor="sameAsCurrent"
+                  className="text-[13px] text-gray-700 cursor-pointer select-none"
+                >
+                  Same as Current Address
+                </label>
+              </div>
+
+              <div className="col-span-3">
+                <label className={labelCls}>Permanent address <Req /></label>
+                <input
+                  type="text"
+                  placeholder="Enter permanent address"
+                  maxLength={255}
+                  className={inputCls}
+                  value={formData.patient_permanent_address}
+                  onChange={(e) => handleInputChange(e, "patient_permanent_address")}
+                  disabled={submitting || sameAsCurrent}
+                  required
+                />
+              </div>
+            </div>
+          </Section>
+
+          {/* ── Contact information ── */}
+          <Section
+            title="Contact information"
+            sub="How to reach the patient and in an emergency."
+          >
+            <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
+              <div>
+                <label className={labelCls}>Primary mobile <Req /></label>
+                <input
+                  type="tel"
+                  placeholder="+91 98765 43210"
+                  className={inputCls}
+                  value={formData.patient_primary_mobile}
+                  onChange={(e) => handleInputChange(e, "patient_primary_mobile")}
+                  disabled={submitting}
+                  required
+                />
+              </div>
+              <div>
+                <label className={labelCls}>
+                  Alternate mobile <Opt />
+                </label>
+                <input
+                  type="tel"
+                  className={inputCls}
+                  value={formData.patient_alternate_mobile}
+                  onChange={(e) => handleInputChange(e, "patient_alternate_mobile")}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>
+                  Email <Opt />
+                </label>
+                <input
+                  type="email"
+                  placeholder="name@example.com"
+                  className={inputCls}
+                  value={formData.patient_email}
+                  onChange={(e) => handleInputChange(e, "patient_email")}
+                  disabled={submitting}
+                />
+              </div>
+
+              <div>
+                <label className={labelCls}>Emergency mobile <Req /></label>
+                <input
+                  type="tel"
+                  placeholder="+91 98765 43210"
+                  className={inputCls}
+                  value={formData.patient_emergency_mobile}
+                  onChange={(e) => handleInputChange(e, "patient_emergency_mobile")}
+                  disabled={submitting}
+                  required
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Emergency contact name <Req /></label>
+                <input
+                  type="text"
+                  placeholder="e.g. John Doe"
+                  className={inputCls}
+                  value={formData.patient_emergency_name}
+                  onChange={(e) => handleInputChange(e, "patient_emergency_name")}
+                  disabled={submitting}
+                  required
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Relation <Req /></label>
+                <input
+                  type="text"
+                  placeholder="e.g. Spouse, Parent, Sibling"
+                  className={inputCls}
+                  value={formData.patient_emergency_relation}
+                  onChange={(e) => handleInputChange(e, "patient_emergency_relation")}
+                  disabled={submitting}
+                  required
+                />
+              </div>
+            </div>
+          </Section>
+
+          {/* ── Branch selection ── */}
+          <Section
+            title="Branch selection"
+            sub="Which branch this patient is registering at."
+          >
+            <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
+              <div>
+                <label className={labelCls}>
+                  Branch <Req />
+                </label>
+                <FormDropdown
+                  className={inputCls}
+                  options={branches.map((b) => ({
+                    label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                    value: b.branch_id,
+                  }))}
+                  value={formData.branch_id}
+                  onValueChange={(val) => setField("branch_id", val)}
+                  placeholder={branches.length ? "Select branch" : "No branches available"}
+                  disabled={submitting || branches.length === 0}
+                />
+              </div>
+            </div>
+          </Section>
+
+          {/* ── Insurance details ── */}
+          <Section
+            title="Insurance details"
+            sub="Add insurance information if the patient is covered."
+          >
+            <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
+              <div className="col-span-3">
+                <label className={labelCls}>Insurance patient <Req /></label>
+                <div className="flex gap-6">
+                  <label className="flex items-center gap-2 text-[13.5px] text-gray-900 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="insurance_patient"
+                      value="no"
+                      checked={formData.insurance_patient === "no"}
+                      onChange={(e) => setField("insurance_patient", e.target.value)}
+                      disabled={submitting}
+                      className="w-4 h-4 accent-blue-600"
+                    />{" "}
+                    No
                   </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Indian"
-                    className={inputClass}
-                    value={formData.patient_nationality}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_nationality")
-                    }
-                    required
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Marital status {requiredStar}
+                  <label className="flex items-center gap-2 text-[13.5px] text-gray-900 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="insurance_patient"
+                      value="yes"
+                      checked={formData.insurance_patient === "yes"}
+                      onChange={(e) => setField("insurance_patient", e.target.value)}
+                      disabled={submitting}
+                      className="w-4 h-4 accent-blue-600"
+                    />{" "}
+                    Yes
                   </label>
-                  <FormDropdown
-                    options={["Single", "Married", "Divorced",]}
-                    value={formData.patient_marital_status}
-                    onValueChange={(val) =>
-                      setField("patient_marital_status", val)
-                    }
-                    placeholder="Select"
-                    className={inputClass}
-                    required
-                  />
                 </div>
               </div>
             </div>
 
-            {/* INSURANCE DETAILS */}
-            <div className={sectionClass}>
-              <h3 className={sectionTitleClass}>Insurance details</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-6">
-                <div>
-                  <label className={labelClass}>
-                    Insurance patient {requiredStar}
-                  </label>
-                  <div className="flex gap-6">
-                    <label className="flex items-center gap-2 text-sm text-gray-900 cursor-pointer">
+            <AnimatePresence>
+              {formData.insurance_patient === "yes" && (
+                <motion.div
+                  key="insurance"
+                  layout
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <div className="grid grid-cols-3 gap-x-5 gap-y-[18px] mt-2">
+                    <div>
+                      <label className={labelCls}>Insurance provider <Req /></label>
                       <input
-                        type="radio"
-                        name="insurance_patient"
-                        value="no"
-                        checked={formData.insurance_patient === "no"}
-                        onChange={(e) => setField("insurance_patient", e.target.value)}
-                        className="w-4 h-4 accent-blue-600"
-                      />{" "}
-                      No
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-gray-900 cursor-pointer">
+                        type="text"
+                        placeholder="Enter provider name"
+                        className={inputCls}
+                        value={formData.insurance_provider}
+                        onChange={(e) => setField("insurance_provider", e.target.value)}
+                        disabled={submitting}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Insurance plan <Req /></label>
                       <input
-                        type="radio"
-                        name="insurance_patient"
-                        value="yes"
-                        checked={formData.insurance_patient === "yes"}
-                        onChange={(e) => setField("insurance_patient", e.target.value)}
-                        className="w-4 h-4 accent-blue-600"
-                      />{" "}
-                      Yes
-                    </label>
-                  </div>
-                </div>
-              </div>
-              <div
-                className={
-                  "mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6" +
-                  (formData.insurance_patient === "yes" ? "" : " hidden")
-                }
-              >
-                <div>
-                  <label className={labelClass}>
-                    Insurance provider {requiredStar}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Enter provider name"
-                    className={inputClass}
-                    value={formData.insurance_provider}
-                    onChange={(e) => setField("insurance_provider", e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Insurance plan {requiredStar}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Enter plan name"
-                    className={inputClass}
-                    value={formData.insurance_plan}
-                    onChange={(e) => setField("insurance_plan", e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Policy number {requiredStar}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Enter policy number"
-                    className={inputClass}
-                    value={formData.policy_number}
-                    onChange={(e) => setField("policy_number", e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Policy holder name {requiredStar}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Enter holder name"
-                    className={inputClass}
-                    value={formData.policy_holder_name}
-                    onChange={(e) => setField("policy_holder_name", e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Relation {requiredStar}
-                  </label>
-                  <FormDropdown
-                    options={["Self", "Spouse", "Parent", "Child", "Sibling", "Other"]}
-                    value={formData.policy_holder_relation}
-                    onValueChange={(val) => setField("policy_holder_relation", val)}
-                    placeholder="Select relation"
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Validity date {requiredStar}
-                  </label>
-                  <input
-                    type="date"
-                    className={inputClass + " text-gray-500"}
-                    value={formData.validity_date}
-                    onChange={(e) => setField("validity_date", e.target.value)}
-                  />
-                </div>
-                <div className="lg:col-span-3">
-                  <label className={labelClass}>
-                    Insurance documents {insuranceFiles.length === 0 && requiredStar}
-                  </label>
-                  <div
-                    className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center bg-gradient-to-b from-white to-gray-50/60 hover:border-blue-500 hover:bg-blue-50/30 transition-all duration-200 cursor-pointer relative"
-                    tabIndex={0}
-                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("!border-blue-500", "!bg-blue-50/30"); }}
-                    onDragLeave={(e) => { e.currentTarget.classList.remove("!border-blue-500", "!bg-blue-50/30"); }}
-                    onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove("!border-blue-500", "!bg-blue-50/30"); addInsuranceFiles(e.dataTransfer.files); }}
-                    onClick={(e) => {
-                      if (!(e.target as HTMLElement).closest(".file-remove-btn")) {
-                        document.getElementById("insurance-file-input")?.click();
-                      }
-                    }}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); document.getElementById("insurance-file-input")?.click(); } }}
-                  >
-                    <input
-                      id="insurance-file-input"
-                      type="file"
-                      accept="image/*,application/pdf"
-                      multiple
-                      className="hidden"
-                      onChange={(e) => { if (e.target.files) addInsuranceFiles(e.target.files); }}
-                    />
-                    {insuranceFiles.length === 0 ? (
-                      <div className="flex flex-col items-center gap-2">
-                        <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
-                        <span className="text-sm text-gray-500">Drop insurance documents here</span>
-                        <span className="text-xs text-gray-400">Images, PDF • Max 5 files</span>
-                      </div>
-                    ) : (
-                      <div className="flex flex-wrap gap-3">
-                        {insuranceFiles.map((file, i) => (
-                          <div key={i} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm animate-[slideUp_0.2s_ease]">
-                            {file.type.startsWith("image/") ? (
-                              <img
-                                src={URL.createObjectURL(file)}
-                                alt=""
-                                className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
-                              />
-                            ) : (
-                              <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
+                        type="text"
+                        placeholder="Enter plan name"
+                        className={inputCls}
+                        value={formData.insurance_plan}
+                        onChange={(e) => setField("insurance_plan", e.target.value)}
+                        disabled={submitting}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Policy number <Req /></label>
+                      <input
+                        type="text"
+                        placeholder="Enter policy number"
+                        className={inputCls}
+                        value={formData.policy_number}
+                        onChange={(e) => setField("policy_number", e.target.value)}
+                        disabled={submitting}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Policy holder name <Req /></label>
+                      <input
+                        type="text"
+                        placeholder="Enter holder name"
+                        className={inputCls}
+                        value={formData.policy_holder_name}
+                        onChange={(e) => setField("policy_holder_name", e.target.value)}
+                        disabled={submitting}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Relation <Req /></label>
+                      <FormDropdown
+                        className={inputCls}
+                        options={["Self", "Spouse", "Parent", "Child", "Sibling", "Other"]}
+                        value={formData.policy_holder_relation}
+                        onValueChange={(val) => setField("policy_holder_relation", val)}
+                        placeholder="Select relation"
+                        disabled={submitting}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Validity date <Req /></label>
+                      <input
+                        type="date"
+                        className={inputCls + " text-gray-500"}
+                        value={formData.validity_date}
+                        onChange={(e) => setField("validity_date", e.target.value)}
+                        disabled={submitting}
+                      />
+                    </div>
+                    <div className="col-span-3">
+                      <label className={labelCls}>
+                        Insurance documents {insuranceFiles.length === 0 && <Req />}
+                      </label>
+                      <div
+                        className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center bg-gradient-to-b from-white to-gray-50/60 hover:border-blue-500 hover:bg-blue-50/30 transition-all duration-200 cursor-pointer relative"
+                        tabIndex={0}
+                        onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("!border-blue-500", "!bg-blue-50/30"); }}
+                        onDragLeave={(e) => { e.currentTarget.classList.remove("!border-blue-500", "!bg-blue-50/30"); }}
+                        onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove("!border-blue-500", "!bg-blue-50/30"); addInsuranceFiles(e.dataTransfer.files); }}
+                        onClick={(e) => {
+                          if (!(e.target as HTMLElement).closest(".file-remove-btn")) {
+                            document.getElementById("insurance-file-input")?.click();
+                          }
+                        }}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); document.getElementById("insurance-file-input")?.click(); } }}
+                      >
+                        <input
+                          id="insurance-file-input"
+                          type="file"
+                          accept="image/*,application/pdf"
+                          multiple
+                          className="hidden"
+                          onChange={(e) => { if (e.target.files) addInsuranceFiles(e.target.files); }}
+                        />
+                        {insuranceFiles.length === 0 ? (
+                          <div className="flex flex-col items-center gap-2">
+                            <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+                            <span className="text-[13px] text-gray-500">Drop insurance documents here</span>
+                            <span className="text-[11px] text-gray-400">Images, PDF • Max 5 files</span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap gap-3">
+                            {insuranceFiles.map((file, i) => (
+                              <div key={i} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm animate-[slideUp_0.2s_ease]">
+                                {file.type.startsWith("image/") ? (
+                                  <img
+                                    src={URL.createObjectURL(file)}
+                                    alt=""
+                                    className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
+                                  </div>
+                                )}
+                                <div className="text-left min-w-0 max-w-[180px]">
+                                  <p className="text-xs font-medium truncate">{file.name}</p>
+                                  <p className="text-xs text-gray-400">{(file.size / 1024).toFixed(1)} KB</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="file-remove-btn p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors flex-shrink-0"
+                                  onClick={() => removeInsuranceFile(i)}
+                                  aria-label={`Remove ${file.name}`}
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                </button>
                               </div>
-                            )}
-                            <div className="text-left min-w-0 max-w-[180px]">
-                              <p className="text-xs font-medium truncate">{file.name}</p>
-                              <p className="text-xs text-gray-400">{(file.size / 1024).toFixed(1)} KB</p>
-                            </div>
+                            ))}
                             <button
                               type="button"
-                              className="file-remove-btn p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors flex-shrink-0"
-                              onClick={() => removeInsuranceFile(i)}
-                              aria-label={`Remove ${file.name}`}
+                              onClick={() => document.getElementById("insurance-file-input")?.click()}
+                              className="flex items-center gap-2 px-4 py-2 border border-dashed border-gray-300 rounded-xl text-sm text-gray-500 hover:text-blue-600 hover:border-blue-400 transition-colors"
                             >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+                              Add more
                             </button>
                           </div>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => document.getElementById("insurance-file-input")?.click()}
-                          className="flex items-center gap-2 px-4 py-2 border border-dashed border-gray-300 rounded-xl text-sm text-gray-500 hover:text-blue-600 hover:border-blue-400 transition-colors"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-                          Add more
-                        </button>
+                        )}
                       </div>
-                    )}
+                    </div>
                   </div>
-                </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </Section>
+
+          {/* DIAGNOSIS DETAILS — hidden until DB columns exist
+          <Section title="Diagnosis details" sub="...">
+            ...
+          </Section>
+          */}
+
+          {/* ── Account credentials ── */}
+          <Section
+            title="Account credentials"
+            sub="Login details for portal access."
+          >
+            <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
+              <div>
+                <label className={labelCls}>Username <Req /></label>
+                <input
+                  type="text"
+                  placeholder="Enter username"
+                  maxLength={50}
+                  className={inputCls}
+                  value={formData.patient_username}
+                  onChange={(e) => handleInputChange(e, "patient_username")}
+                  disabled={submitting}
+                  required
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Password <Req /></label>
+                <input
+                  type="password"
+                  placeholder="Enter password"
+                  className={inputCls}
+                  value={formData.patient_password}
+                  onChange={(e) => handleInputChange(e, "patient_password")}
+                  disabled={submitting}
+                  required
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Confirm password <Req /></label>
+                <input
+                  type="password"
+                  placeholder="Re-enter password"
+                  className={inputCls}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  disabled={submitting}
+                  required
+                />
               </div>
             </div>
+          </Section>
 
-            {/* CONTACT & ADDRESS */}
-            <div className={sectionClass}>
-              <h3 className={sectionTitleClass}>Contact & address</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6">
-                <div>
-                  <label className={labelClass}>
-                    Primary mobile {requiredStar}
-                  </label>
-                  <input
-                    type="tel"
-                    placeholder="+91 98765 43210"
-                    className={inputClass}
-                    value={formData.patient_primary_mobile}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_primary_mobile")
-                    }
-                    required
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>Alternate mobile</label>
-                  <input
-                    type="tel"
-                    className={inputClass}
-                    value={formData.patient_alternate_mobile}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_alternate_mobile")
-                    }
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>Email</label>
-                  <input
-                    type="email"
-                    placeholder="name@example.com"
-                    className={inputClass}
-                    value={formData.patient_email}
-                    onChange={(e) => handleInputChange(e, "patient_email")}
-                  />
-                </div>
-
-                {/* Emergency contact — kept under the contact lines rather
-                    than a separate section. */}
-                <div>
-                  <label className={labelClass}>
-                    Emergency mobile {requiredStar}
-                  </label>
-                  <input
-                    type="tel"
-                    placeholder="+91 98765 43210"
-                    className={inputClass}
-                    value={formData.patient_emergency_mobile}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_emergency_mobile")
-                    }
-                    required
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Emergency contact name {requiredStar}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. John Doe"
-                    className={inputClass}
-                    value={formData.patient_emergency_name}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_emergency_name")
-                    }
-                    required
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Relation {requiredStar}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Spouse, Parent, Sibling"
-                    className={inputClass}
-                    value={formData.patient_emergency_relation}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_emergency_relation")
-                    }
-                    required
-                  />
-                </div>
-
-                {/* Address — same simple single-field pattern as Addemployee.tsx */}
-                <div className="lg:col-span-3">
-                  <label className={labelClass}>
-                    Current Address {requiredStar}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Enter current address"
-                    maxLength={255}
-                    className={inputClass}
-                    value={formData.patient_current_address}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_current_address")
-                    }
-                    required
-                  />
-                </div>
-
-                <div className="lg:col-span-3 flex items-center gap-2 -mt-2">
-                  <input
-                    type="checkbox"
-                    id="sameAsCurrent"
-                    checked={sameAsCurrent}
-                    onChange={handleSameAsCurrentToggle}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                  />
-                  <label
-                    htmlFor="sameAsCurrent"
-                    className="text-sm font-medium text-gray-700 cursor-pointer select-none"
-                  >
-                    Same as Current Address
-                  </label>
-                </div>
-
-                <div className="lg:col-span-3">
-                  <label className={labelClass}>
-                    Permanent Address {requiredStar}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Enter permanent address"
-                    maxLength={255}
-                    className={inputClass}
-                    value={formData.patient_permanent_address}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_permanent_address")
-                    }
-                    disabled={sameAsCurrent}
-                    required
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* DIAGNOSIS DETAILS — hidden until DB columns exist
-            <div className={sectionClass}>
-              ...
-            </div>
-            */}
-
-            {/* LOGIN CREDENTIALS */}
-            <div className={sectionClass}>
-              <h3 className={sectionTitleClass}>Login credentials</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-6">
-                <div>
-                  <label className={labelClass}>Username {requiredStar}</label>
-                  <input
-                    type="text"
-                    placeholder="Enter username"
-                    maxLength={50}
-                    className={inputClass}
-                    value={formData.patient_username}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_username")
-                    }
-                    required
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>Password {requiredStar}</label>
-                  <input
-                    type="password"
-                    placeholder="Enter password"
-                    className={inputClass}
-                    value={formData.patient_password}
-                    onChange={(e) =>
-                      handleInputChange(e, "patient_password")
-                    }
-                    required
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Confirm Password {requiredStar}
-                  </label>
-                  <input
-                    type="password"
-                    placeholder="Re-enter password"
-                    className={inputClass}
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Actions Footer */}
-            <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-4 pt-6 border-t border-gray-100">
-              <button
-                type="button"
-                onClick={handleReset}
-                disabled={submitting}
-                className="w-full sm:w-auto px-8 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                Clear form
-              </button>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full sm:w-auto px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 active:scale-[0.98] transition-all duration-200 shadow-[0_4px_14px_0_rgba(37,99,235,0.2)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.3)] disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
-              >
-                {submitting ? (
+          {/* ── Actions ── */}
+          <div className="flex justify-end gap-3.5 pt-5 mt-1.5 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={handleReset}
+              disabled={submitting}
+              className="h-[42px] px-6 text-[13.5px] font-semibold text-gray-700 border border-gray-300 rounded-xl bg-white hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              Reset
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="h-[42px] px-6 text-[13.5px] font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+            >
+              {submitting ? (
+                <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
+                  Saving…
+                </>
+              ) : (
+                <>
                   <Plus className="w-4 h-4" />
-                )}
-                {submitting ? "Saving..." : "Save patient"}
-              </button>
-            </div>
-          </form>
-        </div>
+                  Save patient
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

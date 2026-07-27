@@ -20,6 +20,10 @@ export interface CreatePatientPayload {
   marital_status?: string;
   nationality?: string;
   patient_type?: string;
+  patient_state?: string;
+  patient_district?: string;
+  patient_area?: string;
+  patient_pincode?: number;
   photo?: string;
   branch_id: string;
   created_by: string;
@@ -93,6 +97,10 @@ export interface PatientRecord {
   patient_photo_url: string | null;
   patient_type: string | null;
   patient_active: string | null;
+  patient_state: string | null;
+  patient_district: string | null;
+  patient_area: string | null;
+  patient_pincode: number | null;
   branch: { branch_name: string | null } | null;
   user_table: { role_type: string | null; user_status: number | null } | null;
 }

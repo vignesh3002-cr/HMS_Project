@@ -2,6 +2,7 @@
 import { useNavigate } from "react-router-dom";
 import { login } from "../api/auth.api";
 import { saveToken, saveUser } from "../utils/token";
+import { toast } from "@/hooks/use-toast";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -23,7 +24,12 @@ export default function Login() {
 
       navigate("/dashboard");
     } catch (error: any) {
-      alert(error.response?.data?.message || error.message);
+      const message = error.response?.data?.message || error.message || "Login failed";
+      toast({
+        title: "Login Failed",
+        description: message,
+        variant: "destructive",
+      });
     }
   };
 
