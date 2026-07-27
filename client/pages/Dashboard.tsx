@@ -273,6 +273,8 @@ export default function Dashboard() {
       .finally(() => {
         setIsAppointmentsLoading(false);
       });
+  }, []);
+
   const fetchEmployees = useCallback(async () => {
     setIsEmployeesLoading(true);
     try {

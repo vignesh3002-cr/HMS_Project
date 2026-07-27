@@ -192,39 +192,9 @@ export default function Doctor() {
   const fetchDoctors = useCallback(async () => {
     setIsDoctorsLoading(true);
     console.log("[Doctor Page] Fetching all employees from employeeApi...");
-<<<<<<< HEAD
-    employeeApi
-      .getAll({ limit: 1000 })
-      .then((res) => {
-        console.log("[Doctor Page] Response:", res.data);
-        const allEmployees = res.data?.data?.employees || [];
-        // Filter on frontend by user_table.role_type === DOCTOR
-        const doctors = allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR");
-        setRealDoctors(doctors);
-        if (doctors.length === 0) {
-          toast({
-            title: "No doctor records found",
-            description: "The employees API returned no doctor records.",
-          });
-        }
-      })
-      .catch((err) => {
-        console.error("[Doctor Page] Error:", err);
-        console.error("[Doctor Page] Error response:", err.response?.data);
-        console.error("[Doctor Page] Error status:", err.response?.status);
-        toast({
-          title: "Failed to load doctors",
-          description: "Couldn't reach the employees API.",
-          variant: "destructive",
-        });
-      })
-      .finally(() => {
-        setIsDoctorsLoading(false);
-=======
     try {
       const res = await employeeApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
->>>>>>> c4e38228745f8b0c782b534ff175545130f36bb3
       });
       console.log("[Doctor Page] Response:", res.data);
       const allEmployees = res.data?.data?.employees || [];
