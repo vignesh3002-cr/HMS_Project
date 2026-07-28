@@ -45,6 +45,14 @@ export function CountryStateCitySelect({
   const [loadingStates, setLoadingStates] = useState(false);
   const [loadingCities, setLoadingCities] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+
+  // Typed search text per field -- lets each field act as a searchable
+  // combobox (type to filter) instead of a plain click-only list, matching
+  // FormDropdown's behavior.
+  const [countrySearch, setCountrySearch] = useState("");
+  const [stateSearch, setStateSearch] = useState("");
+  const [citySearch, setCitySearch] = useState("");
+
   const prevCountryRef = useRef<string | undefined>(country);
   const prevStateRef = useRef<string | undefined>(state);
 
@@ -155,17 +163,29 @@ export function CountryStateCitySelect({
   }, [state, resolvedCountry, states, countries]);
 
   // Helper to find selected items - more robust matching
-  const selectedCountry = countries.find(c => 
-    c.name?.toLowerCase().trim() === resolvedCountry?.toLowerCase().trim() || 
+  const selectedCountry = countries.find(c =>
+    c.name?.toLowerCase().trim() === resolvedCountry?.toLowerCase().trim() ||
     c.isoCode?.toLowerCase().trim() === resolvedCountry?.toLowerCase().trim()
   );
-  const selectedState = states.find(s => 
-    s.name?.toLowerCase().trim() === state?.toLowerCase().trim() || 
+  const selectedState = states.find(s =>
+    s.name?.toLowerCase().trim() === state?.toLowerCase().trim() ||
     s.isoCode?.toLowerCase().trim() === state?.toLowerCase().trim()
   );
-  const selectedCity = cities.find(c => 
+  const selectedCity = cities.find(c =>
     c.name?.toLowerCase().trim() === district?.toLowerCase().trim()
   );
+
+  // Keep each field's typed text in sync with its actual selected value
+  // whenever it's not being actively edited.
+  useEffect(() => {
+    if (openDropdown !== "country") setCountrySearch(selectedCountry?.name ?? "");
+  }, [selectedCountry, openDropdown]);
+  useEffect(() => {
+    if (openDropdown !== "state") setStateSearch(selectedState?.name ?? "");
+  }, [selectedState, openDropdown]);
+  useEffect(() => {
+    if (openDropdown !== "city") setCitySearch(selectedCity?.name ?? "");
+  }, [selectedCity, openDropdown]);
 
   // Handle country selection
   const handleCountryChange = (selectedCountry: ICountry) => {
@@ -173,6 +193,7 @@ export function CountryStateCitySelect({
     onCountryCodeChange?.(selectedCountry.isoCode);
     onStateChange("");
     onDistrictChange("");
+    setCountrySearch(selectedCountry.name);
     setOpenDropdown(null);
   };
 
@@ -180,19 +201,21 @@ export function CountryStateCitySelect({
   const handleStateChange = (selectedState: IState) => {
     onStateChange(selectedState.name);
     onDistrictChange("");
+    setStateSearch(selectedState.name);
     setOpenDropdown(null);
   };
 
   // Handle city selection
   const handleCityChange = (selectedCity: ICity) => {
     onDistrictChange(selectedCity.name);
+    setCitySearch(selectedCity.name);
     setOpenDropdown(null);
   };
 
   // Clear a specific field
   const clearField = (field: 'country' | 'state' | 'city') => {
     if (disabled) return;
-    
+
     switch (field) {
       case 'country':
         if (!hideCountry) {
@@ -203,14 +226,17 @@ export function CountryStateCitySelect({
         onDistrictChange("");
         setStates([]);
         setCities([]);
+        setCountrySearch("");
         break;
       case 'state':
         onStateChange("");
         onDistrictChange("");
         setCities([]);
+        setStateSearch("");
         break;
       case 'city':
         onDistrictChange("");
+        setCitySearch("");
         break;
     }
   };
@@ -219,10 +245,15 @@ export function CountryStateCitySelect({
     "w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400",
     "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
     "transition-all duration-200 disabled:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60",
-    "flex items-center justify-between"
   );
 
   const labelStyle = "block text-sm font-semibold text-gray-800 mb-1.5";
+
+  function filterByQuery<T>(items: T[], query: string, getDisplay: (item: T) => string): T[] {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((item) => getDisplay(item).toLowerCase().includes(q));
+  }
 
   // Render dropdown options
   const renderDropdownOptions = (
@@ -231,7 +262,8 @@ export function CountryStateCitySelect({
     onSelect: (item: any) => void,
     getKey: (item: any) => string,
     getDisplay: (item: any) => string,
-    isLoading: boolean
+    isLoading: boolean,
+    emptyLabel = "No options available",
   ) => {
     if (isLoading) {
       return (
@@ -245,7 +277,7 @@ export function CountryStateCitySelect({
     if (items.length === 0) {
       return (
         <div className="py-8 text-center text-sm text-gray-400">
-          No options available
+          {emptyLabel}
         </div>
       );
     }
@@ -254,6 +286,7 @@ export function CountryStateCitySelect({
       <button
         key={getKey(item)}
         type="button"
+        onMouseDown={(e) => e.preventDefault()}
         onClick={() => onSelect(item)}
         className={cn(
           "w-full px-4 py-2.5 text-left text-sm hover:bg-blue-50 transition-colors",
@@ -266,6 +299,10 @@ export function CountryStateCitySelect({
     ));
   };
 
+  const filteredCountries = filterByQuery(countries, countrySearch, (c) => c.name);
+  const filteredStates = filterByQuery(states, stateSearch, (s) => s.name);
+  const filteredCities = filterByQuery(cities, citySearch, (c) => c.name);
+
   return (
     <div className={cn("grid grid-cols-1 gap-x-6 gap-y-6", hideCountry ? "md:grid-cols-2" : "md:grid-cols-3", className)}>
       {/* Country Dropdown */}
@@ -276,53 +313,67 @@ export function CountryStateCitySelect({
           </label>
           <div className="relative">
             <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
-            
-            <button
-              type="button"
-              onClick={() => !disabled && setOpenDropdown(openDropdown === 'country' ? null : 'country')}
+
+            <input
+              type="text"
               disabled={disabled}
-              className={cn(
-                baseInputStyle,
-                "pl-10 pr-10",
-                openDropdown === 'country' && "ring-2 ring-blue-500"
-              )}
+              value={countrySearch}
+              placeholder={countryPlaceholder}
+              onFocus={() => setOpenDropdown("country")}
+              onChange={(e) => {
+                setCountrySearch(e.target.value);
+                setOpenDropdown("country");
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setOpenDropdown(null);
+                  setCountrySearch(selectedCountry?.name ?? "");
+                } else if (e.key === "Enter" && filteredCountries.length === 1) {
+                  handleCountryChange(filteredCountries[0]);
+                }
+              }}
+              className={cn(baseInputStyle, "pl-10 pr-10")}
               aria-haspopup="listbox"
               aria-expanded={openDropdown === 'country'}
-            >
-              <span className={resolvedCountry ? "text-gray-900 truncate" : "text-gray-400 truncate"}>
-                {selectedCountry?.name || countryPlaceholder}
-              </span>
-              
-              <div className="flex items-center gap-1 flex-shrink-0">
-                {resolvedCountry && !disabled && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      clearField('country');
-                    }}
-                    className="p-1 hover:bg-gray-100 rounded-full transition-colors"
-                    aria-label="Clear country"
-                  >
-                    <X className="w-4 h-4 text-gray-400" />
-                  </button>
-                )}
+            />
+
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 flex-shrink-0">
+              {resolvedCountry && !disabled && (
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => clearField('country')}
+                  className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+                  aria-label="Clear country"
+                >
+                  <X className="w-4 h-4 text-gray-400" />
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={disabled}
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setOpenDropdown(openDropdown === 'country' ? null : 'country')}
+                className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+              >
                 <ChevronDown className={cn(
-                  "w-4 h-4 text-gray-400 transition-transform duration-200",
+                  "w-4 h-4 transition-transform duration-200",
                   openDropdown === 'country' && "rotate-180"
                 )} />
-              </div>
-            </button>
+              </button>
+            </div>
 
             {openDropdown === 'country' && (
               <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-auto">
                 {renderDropdownOptions(
-                  countries,
+                  filteredCountries,
                   resolvedCountry,
                   handleCountryChange,
                   (c) => c.isoCode,
                   (c) => c.name,
-                  false
+                  false,
+                  "No countries found"
                 )}
               </div>
             )}
@@ -337,63 +388,77 @@ export function CountryStateCitySelect({
         </label>
         <div className="relative">
           <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
-          
-          <button
-            type="button"
-            onClick={() => {
-              if (!disabled && states.length > 0 && resolvedCountry) {
-                setOpenDropdown(openDropdown === 'state' ? null : 'state');
+
+          <input
+            type="text"
+            disabled={disabled || !resolvedCountry || states.length === 0}
+            value={stateSearch}
+            placeholder={!resolvedCountry ? "Select Country first" : statePlaceholder}
+            onFocus={() => {
+              if (!disabled && states.length > 0 && resolvedCountry) setOpenDropdown("state");
+            }}
+            onChange={(e) => {
+              setStateSearch(e.target.value);
+              setOpenDropdown("state");
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setOpenDropdown(null);
+                setStateSearch(selectedState?.name ?? "");
+              } else if (e.key === "Enter" && filteredStates.length === 1) {
+                handleStateChange(filteredStates[0]);
               }
             }}
-            disabled={disabled || !resolvedCountry || states.length === 0}
             className={cn(
               baseInputStyle,
               "pl-10 pr-10",
-              openDropdown === 'state' && "ring-2 ring-blue-500",
               (!resolvedCountry || states.length === 0) && "opacity-60"
             )}
             aria-haspopup="listbox"
             aria-expanded={openDropdown === 'state'}
-          >
-            <span className={state ? "text-gray-900 truncate" : "text-gray-400 truncate"}>
-              {selectedState?.name || 
-                (!resolvedCountry ? "Select Country first" : statePlaceholder)}
-            </span>
-            
-            <div className="flex items-center gap-1 flex-shrink-0">
-              {state && !disabled && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    clearField('state');
-                  }}
-                  className="p-1 hover:bg-gray-100 rounded-full transition-colors"
-                  aria-label="Clear state"
-                >
-                  <X className="w-4 h-4 text-gray-400" />
-                </button>
-              )}
-              {loadingStates ? (
-                <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
-              ) : (
+          />
+
+          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 flex-shrink-0">
+            {state && !disabled && (
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => clearField('state')}
+                className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+                aria-label="Clear state"
+              >
+                <X className="w-4 h-4 text-gray-400" />
+              </button>
+            )}
+            {loadingStates ? (
+              <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
+            ) : (
+              <button
+                type="button"
+                disabled={disabled || !resolvedCountry || states.length === 0}
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setOpenDropdown(openDropdown === 'state' ? null : 'state')}
+                className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+              >
                 <ChevronDown className={cn(
-                  "w-4 h-4 text-gray-400 transition-transform duration-200",
+                  "w-4 h-4 transition-transform duration-200",
                   openDropdown === 'state' && "rotate-180"
                 )} />
-              )}
-            </div>
-          </button>
+              </button>
+            )}
+          </div>
 
           {openDropdown === 'state' && (
             <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-auto">
               {renderDropdownOptions(
-                states,
+                filteredStates,
                 state,
                 handleStateChange,
                 (s) => s.isoCode,
                 (s) => s.name,
-                loadingStates
+                loadingStates,
+                "No states found"
               )}
             </div>
           )}
@@ -407,63 +472,77 @@ export function CountryStateCitySelect({
         </label>
         <div className="relative">
           <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
-          
-          <button
-            type="button"
-            onClick={() => {
-              if (!disabled && cities.length > 0 && state && resolvedCountry) {
-                setOpenDropdown(openDropdown === 'city' ? null : 'city');
+
+          <input
+            type="text"
+            disabled={disabled || !state || !resolvedCountry || cities.length === 0}
+            value={citySearch}
+            placeholder={!state ? "Select State first" : districtPlaceholder}
+            onFocus={() => {
+              if (!disabled && cities.length > 0 && state && resolvedCountry) setOpenDropdown("city");
+            }}
+            onChange={(e) => {
+              setCitySearch(e.target.value);
+              setOpenDropdown("city");
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setOpenDropdown(null);
+                setCitySearch(selectedCity?.name ?? "");
+              } else if (e.key === "Enter" && filteredCities.length === 1) {
+                handleCityChange(filteredCities[0]);
               }
             }}
-            disabled={disabled || !state || !resolvedCountry || cities.length === 0}
             className={cn(
               baseInputStyle,
               "pl-10 pr-10",
-              openDropdown === 'city' && "ring-2 ring-blue-500",
               (!state || !resolvedCountry || cities.length === 0) && "opacity-60"
             )}
             aria-haspopup="listbox"
             aria-expanded={openDropdown === 'city'}
-          >
-            <span className={district ? "text-gray-900 truncate" : "text-gray-400 truncate"}>
-              {selectedCity?.name || 
-                (!state ? "Select State first" : districtPlaceholder)}
-            </span>
-            
-            <div className="flex items-center gap-1 flex-shrink-0">
-              {district && !disabled && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    clearField('city');
-                  }}
-                  className="p-1 hover:bg-gray-100 rounded-full transition-colors"
-                  aria-label="Clear district"
-                >
-                  <X className="w-4 h-4 text-gray-400" />
-                </button>
-              )}
-              {loadingCities ? (
-                <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
-              ) : (
+          />
+
+          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 flex-shrink-0">
+            {district && !disabled && (
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => clearField('city')}
+                className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+                aria-label="Clear district"
+              >
+                <X className="w-4 h-4 text-gray-400" />
+              </button>
+            )}
+            {loadingCities ? (
+              <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
+            ) : (
+              <button
+                type="button"
+                disabled={disabled || !state || !resolvedCountry || cities.length === 0}
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setOpenDropdown(openDropdown === 'city' ? null : 'city')}
+                className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+              >
                 <ChevronDown className={cn(
-                  "w-4 h-4 text-gray-400 transition-transform duration-200",
+                  "w-4 h-4 transition-transform duration-200",
                   openDropdown === 'city' && "rotate-180"
                 )} />
-              )}
-            </div>
-          </button>
+              </button>
+            )}
+          </div>
 
           {openDropdown === 'city' && (
             <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-auto">
               {renderDropdownOptions(
-                cities,
+                filteredCities,
                 district,
                 handleCityChange,
                 (c) => c.name,
                 (c) => c.name,
-                loadingCities
+                loadingCities,
+                "No districts found"
               )}
             </div>
           )}

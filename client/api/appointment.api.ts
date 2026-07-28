@@ -111,9 +111,10 @@ export const appointmentApi = {
       params: { employeeId, branchId, date },
     }),
 
-  cancel: (appointmentNo: string) =>
+  cancel: (appointmentNo: string, cancelReason: string) =>
     API.delete<{ success: boolean; message: string; data: AppointmentRecord }>(
       `/appointments/${appointmentNo}`,
+      { data: { cancel_reason: cancelReason } },
     ),
 
   getOne: (appointmentNo: string) =>

@@ -170,6 +170,8 @@ interface EmployeeFormData {
   firstName: string;
   middleName: string;
   lastName: string;
+  dateOfBirth: string;
+  gender: string;
   bloodGroup: string;
   nationality: string;
   maritalStatus: string;
@@ -205,6 +207,8 @@ const emptyFormData: EmployeeFormData = {
   firstName: "",
   middleName: "",
   lastName: "",
+  dateOfBirth: "",
+  gender: "",
   bloodGroup: "",
   nationality: "",
   maritalStatus: "",
@@ -460,6 +464,8 @@ export default function AddEmployee() {
       { key: "firstName", label: "First Name" },
       { key: "lastName", label: "Last Name" },
       { key: "email", label: "Email" },
+      { key: "dateOfBirth", label: "Date of Birth" },
+      { key: "gender", label: "Gender" },
       { key: "mobileNo", label: "Mobile Number" },
       { key: "designation", label: "Designation" },
       { key: "joiningDate", label: "Joining Date" },
@@ -831,7 +837,7 @@ export default function AddEmployee() {
                 <input
                   type="date"
                   name="joiningDate"
-                  min={todayStr}
+                  max={todayStr}
                   className={inputCls + " text-gray-500"}
                   value={formData.joiningDate}
                   onChange={handleChange}

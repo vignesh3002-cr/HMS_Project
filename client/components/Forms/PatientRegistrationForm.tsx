@@ -453,6 +453,7 @@ export default function PatientRegistrationForm() {
                 <label className={labelCls}>Date of birth <Req /></label>
                 <input
                   type="date"
+                  max={new Date().toISOString().split("T")[0]}
                   className={inputCls + " text-gray-500"}
                   value={formData.patient_dob}
                   onChange={(e) => handleInputChange(e, "patient_dob")}
@@ -862,6 +863,7 @@ export default function PatientRegistrationForm() {
                       <label className={labelCls}>Validity date <Req /></label>
                       <input
                         type="date"
+                        max={new Date().toISOString().split("T")[0]}
                         className={inputCls + " text-gray-500"}
                         value={formData.validity_date}
                         onChange={(e) => setField("validity_date", e.target.value)}

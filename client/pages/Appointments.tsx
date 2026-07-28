@@ -252,12 +252,19 @@ const AppointmentSchedule: React.FC = () => {
   }, [fetchAppointments]);
 
   const handleCancelAppointment = (target: Appointment) => {
-    if (!window.confirm(`Cancel appointment ${target.id} for ${target.patient}?`)) {
+    const cancelReason = window.prompt(
+      `Cancel appointment ${target.id} for ${target.patient}?\nPlease enter a reason for cancellation:`,
+    );
+
+    if (cancelReason === null) return;
+
+    if (!cancelReason.trim()) {
+      toast({ title: "A cancellation reason is required", variant: "destructive" });
       return;
     }
 
     appointmentApi
-      .cancel(target.id)
+      .cancel(target.id, cancelReason.trim())
       .then(() => {
         setAppointments((prev) =>
           prev.map((appt) => (appt === target ? { ...appt, status: "Cancelled" } : appt)),

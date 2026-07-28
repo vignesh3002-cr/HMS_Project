@@ -344,6 +344,7 @@ export default function EditPatientForm() {
                 <label className={labelCls}>Date of birth <Req /></label>
                 <input
                   type="date"
+                  max={new Date().toISOString().split("T")[0]}
                   className={inputCls + " text-gray-500"}
                   value={formData.patient_dob}
                   onChange={(e) => handleInputChange(e, "patient_dob")}

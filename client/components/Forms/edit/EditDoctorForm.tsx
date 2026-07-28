@@ -97,6 +97,7 @@ interface EditDoctorFormData {
   experience: string;
   departmentId: string;
   designation: string;
+  
   specialization: string;
   qualification: string;
   docLicenseNo: string;
@@ -715,6 +716,7 @@ export default function EditDoctorForm() {
                 <label className={labelCls}>Joining date <Req /></label>
                 <input
                   type="date"
+                  max={new Date().toISOString().split("T")[0]}
                   className={inputCls + " text-gray-500"}
                   value={formData.joiningDate}
                   onChange={(e) => handleChange(e, "joiningDate")}
