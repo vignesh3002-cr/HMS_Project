@@ -1,8 +1,8 @@
 ﻿import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { login } from "../api/auth.api";
-import { saveToken, saveUser } from "../utils/token";
 import { toast } from "@/hooks/use-toast";
+import ElasticPulse from "@/components/ui/Elasticpulse";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -10,19 +10,30 @@ export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    if (!username || !password) {
+      toast({
+        title: "Missing Credentials",
+        description: "Please enter username and password",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsLoading(true);
 
     try {
       const response = await login(username, password);
 
       console.log("Login Response:", response);
 
-      saveToken(response.token);
-      saveUser(response.user);
+      sessionStorage.setItem("pendingUsername", username);
 
-      navigate("/dashboard");
+      navigate("/authenticate");
     } catch (error: any) {
       const message = error.response?.data?.message || error.message || "Login failed";
       toast({
@@ -30,6 +41,8 @@ export default function Login() {
         description: message,
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -156,15 +169,22 @@ export default function Login() {
             <div className="pt-1">
               <button
                 type="submit"
-                className="w-full flex items-center justify-between px-5 py-3 rounded-[4px] bg-gradient-to-br from-clinical-blue to-clinical-blue-mid shadow-[0_10px_15px_-3px_rgba(59,130,246,0.20),0_4px_6px_-4px_rgba(59,130,246,0.20)] hover:opacity-90 active:opacity-80 transition-opacity"
+                disabled={isLoading}
+                className="w-full flex items-center justify-center px-5 py-3 rounded-[4px] bg-gradient-to-br from-clinical-blue to-clinical-blue-mid shadow-[0_10px_15px_-3px_rgba(59,130,246,0.20),0_4px_6px_-4px_rgba(59,130,246,0.20)] hover:opacity-90 active:opacity-80 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span className="text-base font-bold leading-5 text-white">Login</span>
-                <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path
-                    d="M7.25 14.5V12.8889H12.8889V1.61111H7.25V0H12.8889C13.3319 0 13.7112 0.157755 14.0267 0.473264C14.3422 0.788773 14.5 1.16806 14.5 1.61111V12.8889C14.5 13.3319 14.3422 13.7112 14.0267 14.0267C13.7112 14.3422 13.3319 14.5 12.8889 14.5H7.25ZM5.63889 11.2778L4.53125 10.1097L6.58542 8.05556H0V6.44444H6.58542L4.53125 4.39028L5.63889 3.22222L9.66667 7.25L5.63889 11.2778Z"
-                    fill="white"
-                  />
-                </svg>
+                {isLoading ? (
+                  <ElasticPulse size={24} color="white" />
+                ) : (
+                  <>
+                    <span className="text-base font-bold leading-5 text-white">Login</span>
+                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path
+                        d="M7.25 14.5V12.8889H12.8889V1.61111H7.25V0H12.8889C13.3319 0 13.7112 0.157755 14.0267 0.473264C14.3422 0.788773 14.5 1.16806 14.5 1.61111V12.8889C14.5 13.3319 14.3422 13.7112 14.0267 14.0267C13.7112 14.3422 13.3319 14.5 12.8889 14.5H7.25ZM5.63889 11.2778L4.53125 10.1097L6.58542 8.05556H0V6.44444H6.58542L4.53125 4.39028L5.63889 3.22222L9.66667 7.25L5.63889 11.2778Z"
+                        fill="white"
+                      />
+                    </svg>
+                  </>
+                )}
               </button>
             </div>
           </form>

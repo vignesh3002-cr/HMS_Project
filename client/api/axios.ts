@@ -1,5 +1,5 @@
 import axios from "axios";
-import { remove, saveToken, saveUser } from "../utils/token";
+import { remove } from "../utils/token";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_BACKEND_URL,
@@ -60,25 +60,5 @@ api.interceptors.response.use(
     return Promise.reject(error);
   },
 );
-
-if (import.meta.env.DEV && !localStorage.getItem("token")) {
-  (async () => {
-    try {
-      const res = await axios.post(`${import.meta.env.VITE_BACKEND_URL}/auth/login`, {
-        username: "admin",
-        password: "Admin@123",
-      });
-      if (res.data?.success && res.data?.data?.token) {
-        const token = res.data.data.token;
-        const user = res.data.data.user_details || res.data.data.user || {};
-        saveToken(token);
-        saveUser(user);
-        console.log("[dev] Auto-login successful, token saved to localStorage");
-      }
-    } catch (e) {
-      console.warn("[dev] Auto-login failed:", e);
-    }
-  })();
-}
 
 export default api;
