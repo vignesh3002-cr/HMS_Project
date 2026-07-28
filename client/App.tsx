@@ -16,7 +16,7 @@ import EditBranch from "@/components/Forms/edit/EditBranch";
 import EditAdmin from "@/components/Forms/edit/EditAdmin";
 import AddAppointment from "@/components/Forms/AddAppointment";
 import EditAppointment from "@/components/Forms/edit/Edit Appointment";
-import PatientProfile from "@/components/Forms/view/patientProfil
+import PatientProfile from "@/components/Forms/view/patientProfile";
 import ViewAppointmentScheduled from "@/components/Forms/view/View Appointment Scheduled";
 import Appointments from "./pages/Appointments";
 import Dashboard from "./pages/Dashboard";
