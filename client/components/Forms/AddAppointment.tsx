@@ -98,6 +98,10 @@ export default function AddAppointment() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [doctors, setDoctors] = useState<EmployeeRecord[]>([]);
 
+  // Branches the selected doctor is actually mapped to (via user_branch_mapping) --
+  // restricts the Branch dropdown to only that doctor's branches instead of every branch.
+  const [doctorBranches, setDoctorBranches] = useState<{ branch_id: string; branch_name: string }[]>([]);
+
   // Available time slots
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
@@ -267,6 +271,19 @@ export default function AddAppointment() {
 
   const handleCancel = () => navigate(-1);
 
+  // Appointment Date is bookable within a rolling 2-week window (past 2
+  // weeks through the next 2 weeks), not just past/present like other forms.
+  const minSelectableDate = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 14);
+    return d.toISOString().split("T")[0];
+  })();
+  const maxSelectableDate = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    return d.toISOString().split("T")[0];
+  })();
+
   return (
     <div className="min-h-screen bg-[#F7F9FB] p-6">
       <div className="max-w-6xl mx-auto">
@@ -383,13 +400,40 @@ export default function AddAppointment() {
                 <label className={labelClass}>Branch {requiredStar}</label>
                 <FormDropdown
                   className={inputClass}
-                  options={branches.map((b) => ({
-                    label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
-                    value: b.branch_id,
-                  }))}
+                  options={(formData.doctorId && doctorBranches.length > 0 ? doctorBranches : branches).map(
+                    (b) => ({
+                      label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                      value: b.branch_id,
+                    }),
+                  )}
                   value={formData.branchId}
-                  onValueChange={(val) => setFormData((prev) => ({ ...prev, branchId: val }))}
-                  placeholder={branches.length ? "Select Branch" : "Loading branches..."}
+                  onValueChange={(val) => {
+                    setFormData((prev) => ({ ...prev, branchId: val, timeSlot: "" }));
+
+                    if (!val || !formData.doctorId) return;
+
+                    setFindingNearestDate(true);
+                    findNearestAvailableDate(formData.doctorId, val, formData.selectDate)
+                      .then((date) => {
+                        if (date) {
+                          setFormData((prev) => ({ ...prev, selectDate: date, timeSlot: "" }));
+                        } else if (date === null) {
+                          toast({
+                            title: "No available date found",
+                            description: "This doctor has no open slots in the next 14 days at this branch.",
+                            variant: "destructive",
+                          });
+                        }
+                      })
+                      .finally(() => setFindingNearestDate(false));
+                  }}
+                  placeholder={
+                    formData.doctorId && doctorBranches.length === 0
+                      ? "This doctor has no mapped branches"
+                      : branches.length
+                        ? "Select Branch"
+                        : "Loading branches..."
+                  }
                 />
               </div>
               <div>
@@ -440,7 +484,10 @@ export default function AddAppointment() {
                       timeSlot: "",
                     }));
 
-                    if (!val) return;
+                    if (!val) {
+                      setDoctorBranches([]);
+                      return;
+                    }
 
                     setFindingNearestDate(true);
 
@@ -453,6 +500,7 @@ export default function AddAppointment() {
                       .getOne(val)
                       .then((res) => {
                         const mappedBranches = res.data?.data?.branches || [];
+                        setDoctorBranches(mappedBranches);
                         const nextBranchId =
                           mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
                           mappedBranches[0]?.branch_id ||
@@ -516,6 +564,8 @@ export default function AddAppointment() {
                 <input
                   type="date"
                   name="selectDate"
+                  min={minSelectableDate}
+                  max={maxSelectableDate}
                   className={inputClass + " text-gray-500"}
                   value={formData.selectDate}
                   onChange={(e) => {

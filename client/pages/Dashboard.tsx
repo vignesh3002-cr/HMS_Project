@@ -281,6 +281,7 @@ export default function Dashboard() {
       console.log("[Dashboard] Fetching all employees from employeeApi...");
       const res = await employeeApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
+        limit: 1000,
       });
       console.log("[Dashboard] Response:", res.data);
       const allEmployees = res.data?.data?.employees || [];

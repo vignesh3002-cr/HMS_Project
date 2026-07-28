@@ -126,9 +126,14 @@ export default function EditAppointment() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [doctors, setDoctors] = useState<EmployeeRecord[]>([]);
 
+  // Branches the selected doctor is actually mapped to (via user_branch_mapping) --
+  // restricts the Branch dropdown to only that doctor's branches instead of every branch.
+  const [doctorBranches, setDoctorBranches] = useState<{ branch_id: string; branch_name: string }[]>([]);
+
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [findingNearestDate, setFindingNearestDate] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
     branchApi
@@ -212,6 +217,13 @@ export default function EditAppointment() {
           date,
           time,
         });
+
+        if (record.employee_id) {
+          employeeApi
+            .getOne(record.employee_id)
+            .then((res) => setDoctorBranches(res.data?.data?.branches || []))
+            .catch(() => {});
+        }
       })
       .catch((err) => {
         console.error("[Edit Appointment] Load error:", err);
@@ -309,6 +321,54 @@ export default function EditAppointment() {
 
   const handleCancel = () => navigate(-1);
 
+  const handleCancelAppointment = () => {
+    if (!id) return;
+
+    const cancelReason = window.prompt(
+      `Cancel appointment ${id} for ${formData.patientName}?\nPlease enter a reason for cancellation:`,
+    );
+
+    if (cancelReason === null) return;
+
+    if (!cancelReason.trim()) {
+      toast({ title: "A cancellation reason is required", variant: "destructive" });
+      return;
+    }
+
+    setCancelling(true);
+    appointmentApi
+      .cancel(id, cancelReason.trim())
+      .then(() => {
+        toast({
+          title: "Appointment cancelled",
+          description: `Appointment ${id} has been cancelled.`,
+        });
+        navigate("/appointments");
+      })
+      .catch((err: any) => {
+        console.error("[Edit Appointment] Cancel error:", err);
+        toast({
+          title: "Failed to cancel appointment",
+          description: err.response?.data?.message || "Couldn't reach the appointments API.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => setCancelling(false));
+  };
+
+  // Appointment Date is bookable within a rolling 2-week window (past 2
+  // weeks through the next 2 weeks), not just past/present like other forms.
+  const minSelectableDate = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 14);
+    return d.toISOString().split("T")[0];
+  })();
+  const maxSelectableDate = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    return d.toISOString().split("T")[0];
+  })();
+
   if (loadingAppointment) {
     return (
       <div className="min-h-screen bg-[#F7F9FB] flex items-center justify-center gap-2 text-[#6B7280] text-sm">
@@ -379,13 +439,40 @@ export default function EditAppointment() {
                 <label className={labelClass}>Branch {requiredStar}</label>
                 <FormDropdown
                   className={inputClass}
-                  options={branches.map((b) => ({
-                    label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
-                    value: b.branch_id,
-                  }))}
+                  options={(formData.doctorId && doctorBranches.length > 0 ? doctorBranches : branches).map(
+                    (b) => ({
+                      label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                      value: b.branch_id,
+                    }),
+                  )}
                   value={formData.branchId}
-                  onValueChange={(val) => setFormData((prev) => ({ ...prev, branchId: val, timeSlot: "" }))}
-                  placeholder={branches.length ? "Select Branch" : "Loading branches..."}
+                  onValueChange={(val) => {
+                    setFormData((prev) => ({ ...prev, branchId: val, timeSlot: "" }));
+
+                    if (!val || !formData.doctorId) return;
+
+                    setFindingNearestDate(true);
+                    findNearestAvailableDate(formData.doctorId, val, formData.selectDate)
+                      .then((date) => {
+                        if (date) {
+                          setFormData((prev) => ({ ...prev, selectDate: date, timeSlot: "" }));
+                        } else if (date === null) {
+                          toast({
+                            title: "No available date found",
+                            description: "This doctor has no open slots in the next 14 days at this branch.",
+                            variant: "destructive",
+                          });
+                        }
+                      })
+                      .finally(() => setFindingNearestDate(false));
+                  }}
+                  placeholder={
+                    formData.doctorId && doctorBranches.length === 0
+                      ? "This doctor has no mapped branches"
+                      : branches.length
+                        ? "Select Branch"
+                        : "Loading branches..."
+                  }
                 />
               </div>
               <div>
@@ -436,7 +523,10 @@ export default function EditAppointment() {
                       timeSlot: "",
                     }));
 
-                    if (!val) return;
+                    if (!val) {
+                      setDoctorBranches([]);
+                      return;
+                    }
 
                     setFindingNearestDate(true);
 
@@ -449,6 +539,7 @@ export default function EditAppointment() {
                       .getOne(val)
                       .then((res) => {
                         const mappedBranches = res.data?.data?.branches || [];
+                        setDoctorBranches(mappedBranches);
                         const nextBranchId =
                           mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
                           mappedBranches[0]?.branch_id ||
@@ -492,6 +583,8 @@ export default function EditAppointment() {
                 <input
                   type="date"
                   name="selectDate"
+                  min={minSelectableDate}
+                  max={maxSelectableDate}
                   className={inputClass + " text-gray-500"}
                   value={formData.selectDate}
                   onChange={(e) => {
@@ -564,15 +657,24 @@ export default function EditAppointment() {
             <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-4 mt-10 pt-6 border-t border-gray-100">
               <button
                 type="button"
+                onClick={handleCancelAppointment}
+                disabled={submitting || cancelling}
+                className="w-full sm:w-auto px-8 py-2.5 bg-white border border-red-300 text-red-600 text-sm font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-red-50 hover:border-red-400 transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {cancelling && <Loader2 className="w-4 h-4 animate-spin" />}
+                {cancelling ? "Cancelling..." : "Cancel Appointment"}
+              </button>
+              <button
+                type="button"
                 onClick={handleCancel}
-                disabled={submitting}
+                disabled={submitting || cancelling}
                 className="w-full sm:w-auto px-8 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm"
               >
-                Cancel
+                Back
               </button>
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || cancelling}
                 className="w-full sm:w-auto px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 active:scale-[0.98] transition-all duration-200 shadow-[0_4px_14px_0_rgba(37,99,235,0.2)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.3)] group disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {submitting ? (

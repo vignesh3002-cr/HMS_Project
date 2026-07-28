@@ -39,6 +39,8 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
   const { id, label, type, placeholder, options, rows } = field;
   const [openDatePicker, setOpenDatePicker] = useState(false);
   const [openCombobox, setOpenCombobox] = useState(false);
+  const [openMultiselect, setOpenMultiselect] = useState(false);
+  const [multiSearch, setMultiSearch] = useState("");
 
   switch (type) {
     case "text":
@@ -209,10 +211,21 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
         onChange(id, current);
       };
 
+      const query = multiSearch.trim().toLowerCase();
+      const filteredOptions = query
+        ? (options ?? []).filter((opt) => opt.label.toLowerCase().includes(query))
+        : options ?? [];
+
       return (
         <div className="flex flex-col gap-1.5">
           <label className={labelClass}>{label}</label>
-          <Popover>
+          <Popover
+            open={openMultiselect}
+            onOpenChange={(next) => {
+              setOpenMultiselect(next);
+              if (!next) setMultiSearch("");
+            }}
+          >
             <PopoverTrigger asChild>
               <button
                 type="button"
@@ -247,8 +260,16 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
               </button>
             </PopoverTrigger>
             <PopoverContent className="w-full min-w-[200px] rounded-lg border-[#E2E8F0] p-1.5 shadow-lg" align="start">
+              <input
+                type="text"
+                autoFocus
+                value={multiSearch}
+                onChange={(e) => setMultiSearch(e.target.value)}
+                placeholder="Type to search..."
+                className="mb-1.5 w-full rounded-md border border-[#E2E8F0] px-2.5 py-1.5 text-[13px] text-clinical-body placeholder:text-clinical-label outline-none focus:border-clinical-blue focus:ring-2 focus:ring-clinical-blue/15"
+              />
               <div className="space-y-0.5">
-                {options?.map((opt) => {
+                {filteredOptions.map((opt) => {
                   const isSelected = selectedValues.includes(String(opt.value));
                   return (
                     <label
@@ -265,7 +286,7 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
                     </label>
                   );
                 })}
-                {(!options || options.length === 0) && (
+                {filteredOptions.length === 0 && (
                   <p className="px-2 py-2 text-[13px] text-clinical-label">No options</p>
                 )}
               </div>

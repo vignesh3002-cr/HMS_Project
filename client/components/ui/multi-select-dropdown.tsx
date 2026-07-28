@@ -37,6 +37,13 @@ export function MultiSelectDropdown({
 }: MultiSelectDropdownProps) {
   const normalized = React.useMemo(() => normalizeOptions(options), [options]);
   const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+
+  const filtered = React.useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return normalized;
+    return normalized.filter((option) => option.label.toLowerCase().includes(query));
+  }, [normalized, search]);
 
   const toggleOption = (optionValue: string) => {
     const next = value.includes(optionValue)
@@ -46,7 +53,17 @@ export function MultiSelectDropdown({
   };
 
   return (
-    <Popover open={disabled ? false : open} onOpenChange={disabled ? undefined : setOpen}>
+    <Popover
+      open={disabled ? false : open}
+      onOpenChange={
+        disabled
+          ? undefined
+          : (next) => {
+              setOpen(next);
+              if (!next) setSearch("");
+            }
+      }
+    >
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -107,8 +124,16 @@ export function MultiSelectDropdown({
         className="w-[--radix-popover-trigger-width] max-h-64 slim-scrollbar overflow-y-auto rounded-xl border-gray-200 p-1.5 shadow-lg"
         align="start"
       >
+        <input
+          type="text"
+          autoFocus
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Type to search..."
+          className="mb-1.5 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        />
         <div className="space-y-0.5">
-          {normalized.map((opt) => {
+          {filtered.map((opt) => {
             const isSelected = value.includes(opt.value);
             return (
               <label
@@ -125,7 +150,7 @@ export function MultiSelectDropdown({
               </label>
             );
           })}
-          {normalized.length === 0 && (
+          {filtered.length === 0 && (
             <p className="px-3 py-2 text-sm text-gray-400">No options</p>
           )}
         </div>

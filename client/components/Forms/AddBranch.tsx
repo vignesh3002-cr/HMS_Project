@@ -563,6 +563,7 @@ export default function AddBranch() {
                 <input
                   type="date"
                   name="dateOfEstablish"
+                  max={new Date().toISOString().split("T")[0]}
                   className={inputCls + " text-gray-500"}
                   value={formData.dateOfEstablish}
                   onChange={handleChange}
@@ -988,6 +989,7 @@ export default function AddBranch() {
                     <input
                       type="date"
                       name="adminJoiningDate"
+                      max={new Date().toISOString().split("T")[0]}
                       className={inputCls + " text-gray-500"}
                       value={formData.adminJoiningDate}
                       onChange={handleChange}
