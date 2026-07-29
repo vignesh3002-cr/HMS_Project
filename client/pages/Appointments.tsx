@@ -631,10 +631,10 @@ const AppointmentSchedule: React.FC = () => {
             ) : (
               <HmsTable
                 columns={[
-                  { key: "id", label: "Appointment No", render: (r: Appointment) => (
+                  { key: "id", label: "AppointmentNo", render: (r: Appointment) => (
                     <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.id}</span>
                   )},
-                  { key: "tokenId", label: "Token Id", render: (r: Appointment) => (
+                  { key: "tokenId", label: "TokenId", render: (r: Appointment) => (
                     <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.tokenId}</span>
                   )},
                   { key: "patient", label: "Patient", render: (r: Appointment) => (
