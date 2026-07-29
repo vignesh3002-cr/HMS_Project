@@ -585,7 +585,7 @@ export default function AddBranch() {
               </div>
               <div>
                 <label className={labelCls}>
-                  Fax Number <Req />
+                  Fax Number
                 </label>
                 <input
                   type="text"
