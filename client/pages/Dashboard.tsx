@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { patientApi } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { branchApi } from "@/api/branch.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 
@@ -597,33 +598,49 @@ export default function Dashboard() {
   const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
   const visibleEnd = Math.min(endIndex, totalRecords);
 
-  // Branch progress bar state
+  // Branch progress bar state — branches come from the real /branch API;
+  // pct is each branch's share of total appointments (a real performance
+  // signal) rather than a hardcoded number.
 
-  const [animatedValues, setAnimatedValues] = useState<Record<number, number>>({});
+  const [animatedValues, setAnimatedValues] = useState<Record<string, number>>({});
   const branchRef = useRef<HTMLDivElement>(null);
   const hasAnimated = useRef(false);
 
-  const [branches, setBranches] = useState([
-    { id: 1, name: "Central Hospital (Tambaram)", pct: 0 },
-    { id: 2, name: "Central Hospital (Saidapet)", pct: 0 },
-    { id: 3, name: "Central Hospital (Egmore)", pct: 0 },
-  ]);
+  const [branches, setBranches] = useState<{ id: string; name: string; pct: number }[]>([]);
 
   useEffect(() => {
-    setTimeout(() => {
-      updateBranchPercentage(1, 60);
-      updateBranchPercentage(2, 25);
-      updateBranchPercentage(3, 40);
-    }, 900);
-  }, []);  
+    Promise.all([
+      branchApi.getAll(),
+      appointmentApi.getAll({ limit: 100 }),
+    ])
+      .then(([branchRes, apptRes]) => {
+        const branchList = branchRes.data?.data || [];
+        const appointments = apptRes.data?.data?.appointments || [];
 
-  const updateBranchPercentage = (id: number, newPct: number) => {
-    setBranches((prev) =>
-      prev.map((branch) =>
-        branch.id === id ? { ...branch, pct: newPct } : branch,
-      ),
-    );
-  };
+        const countByBranch = new Map<string, number>();
+        appointments.forEach((appt) => {
+          const id = appt.branch?.branch_id || appt.branch_id;
+          if (!id) return;
+          countByBranch.set(id, (countByBranch.get(id) || 0) + 1);
+        });
+        const totalAppointments = appointments.length;
+
+        setBranches(
+          branchList.map((b) => {
+            const count = countByBranch.get(b.branch_id) || 0;
+            const pct = totalAppointments > 0 ? Math.round((count / totalAppointments) * 100) : 0;
+            return {
+              id: b.branch_id,
+              name: b.branch_area ? `${b.branch_name} (${b.branch_area})` : (b.branch_name || b.branch_id),
+              pct,
+            };
+          }),
+        );
+      })
+      .catch((err) => {
+        console.error("[Dashboard] Failed to load branch performance:", err);
+      });
+  }, []);
 
   // Initial trigger on scroll
   useEffect(() => {
@@ -1004,7 +1021,7 @@ useEffect(() => {
                   <path d="M3.33333 11.6667H5V7.5H3.33333V11.6667ZM10 11.6667H11.6667V3.33333H10V11.6667ZM6.66667 11.6667H8.33333V9.16667H6.66667V11.6667ZM6.66667 7.5H8.33333V5.83333H6.66667V7.5ZM1.66667 15C1.20833 15.815972 14.8368 14.5104 14.184 15 13.7917 15 13.3333V1.66667C13.3333 1.20833 13.7917.815972 14.5104.489583C14.184.163194 13.7917 0 13.3333 0H1.66667C1.20833 0 .815972.163194.489583.489583C.163194.815972 0 1.20833 0 1.66667V13.3333C0 13.7917.163194 14.184.489583 14.5104C.815972 14.8368 1.20833 15 1.66667 15Z" fill="#00488D"/>
                 </svg>
               </div>
-              <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-4 max-h-[220px] overflow-y-auto hide-scrollbar pr-1">
                 {branches.map((branch) => (
                   <div key={branch.id} className="flex flex-col gap-1">
                     <div className="flex justify-between">
