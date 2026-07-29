@@ -7,28 +7,6 @@ import ElasticPulse from "@/components/ui/Elasticpulse";
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 
-function IconStats() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-      <path
-        d="M4 14H6V9H4V14ZM12 14H14V4H12V14ZM8 14H10V11H8V14ZM8 9H10V7H8V9ZM2 18C1.45 18 .979 17.804.588 17.413.196 17.021 0 16.55 0 16V2C0 1.45.196.979.588.588.979.196 1.45 0 2 0H16C16.55 0 17.021.196 17.413.588 17.804.979 18 1.45 18 2V16C18 16.55 17.804 17.021 17.413 17.413 17.021 17.804 16.55 18 16 18H2Z"
-        fill="white"
-      />
-    </svg>
-  );
-}
-
-function IconMedical() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-      <path
-        d="M2 20C1.45 20 .979 19.804.588 19.413.196 19.021 0 18.55 0 18V6C0 5.45.196 4.979.588 4.588.979 4.196 1.45 4 2 4H6V2C6 1.45 6.196.979 6.588.588 6.979.196 7.45 0 8 0H12C12.55 0 13.021.196 13.413.588 13.804.979 14 1.45 14 2V4H18C18.55 4 19.021 4.196 19.413 4.588 19.804 4.979 20 5.45 20 6V18C20 18.55 19.804 19.021 19.413 19.413 19.021 19.804 18.55 20 18 20H2ZM2 18H18V6H2V18ZM8 4H12V2H8V4ZM9 13V16H11V13H14V11H11V8H9V11H6V13H9Z"
-        fill="white"
-      />
-    </svg>
-  );
-}
-
 function IconArrowRight() {
   return (
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
@@ -48,32 +26,6 @@ function IconDevice() {
         fill="#727783"
       />
     </svg>
-  );
-}
-
-// ── Sub-components ──────────────────────────────────────────────────────────
-
-interface GlassCardProps {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-}
-
-function GlassCard({ icon, title, description }: GlassCardProps) {
-  return (
-    <div className="rounded-[10px] border border-white/15 bg-white/[0.12] backdrop-blur-xl p-6 flex flex-col gap-3.5">
-      <div className="w-10 h-10 rounded-[6px] bg-white/20 flex items-center justify-center flex-shrink-0">
-        {icon}
-      </div>
-      <div>
-        <h2 className="text-[17px] font-bold text-white tracking-[-0.3px] leading-[1.35] mb-1">
-          {title}
-        </h2>
-        <p className="text-[13px] font-medium text-[rgba(180,210,245,0.9)] leading-[1.65]">
-          {description}
-        </p>
-      </div>
-    </div>
   );
 }
 
@@ -139,6 +91,7 @@ export default function Authenticate() {
   const [isExpired, setIsExpired] = useState(false);
   const [isSendingOtp, setIsSendingOtp] = useState(true);
   const [otpSent, setOtpSent] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const inputRefs = Array.from({ length: OTP_LENGTH }, () =>
     useRef<HTMLInputElement>(null)
@@ -260,6 +213,8 @@ export default function Authenticate() {
       return;
     }
 
+    setIsLoading(true);
+
     try {
       const res = await api.post("/auth/verify-otp", { username, code });
       
@@ -278,6 +233,7 @@ export default function Authenticate() {
       setErrors(Array(OTP_LENGTH).fill(true));
       setTimeout(() => setErrors(Array(OTP_LENGTH).fill(false)), 900);
     }
+    setIsLoading(false);
   };
 
   const handleResend = async () => {
@@ -360,17 +316,25 @@ export default function Authenticate() {
 
               {/* Verify button */}
               <div className="pt-1 mb-4">
-                <button
-                  type="button"
-                  onClick={handleVerify}
-                  disabled={isExpired}
-                  className="w-full flex items-center justify-between px-5 py-3 rounded-[4px] bg-gradient-to-br from-clinical-blue to-clinical-blue-mid shadow-[0_10px_15px_-3px_rgba(59,130,246,0.20),0_4px_6px_-4px_rgba(59,130,246,0.20)] hover:opacity-90 active:opacity-80 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <span className="text-base font-bold leading-5 text-white">
-                    Verify Access
-                  </span>
-                  <IconArrowRight />
-                </button>
+<button
+  type="button"
+  onClick={handleVerify}
+  disabled={isLoading || isExpired}
+  className="w-full flex items-center justify-between px-5 py-3 rounded-[4px] bg-gradient-to-br from-clinical-blue to-clinical-blue-mid shadow-[0_10px_15px_-3px_rgba(59,130,246,0.20),0_4px_6px_-4px_rgba(59,130,246,0.20)] hover:opacity-90 active:opacity-80 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+>
+  {isLoading ? (
+    <div className="flex w-full justify-center">
+      <ElasticPulse size={20} color="white" />
+    </div>
+  ) : (
+    <>
+      <span className="text-base font-bold leading-5 text-white">
+        Verify Access
+      </span>
+      <IconArrowRight />
+    </>
+  )}
+</button>
               </div>
 
               {/* Resend */}
@@ -397,98 +361,45 @@ export default function Authenticate() {
         </div>
 
         {/* ── RIGHT: decorative panel ── */}
-        <div className="hidden md:flex flex-col flex-1 relative overflow-hidden min-h-[500px] rounded-r-xl">
+        <div className="hidden md:flex flex-col flex-1 relative overflow-hidden min-h-[500px] bg-clinical-blue-mid rounded-r-xl">
+          <div className="absolute inset-0 bg-cover bg-center bg-[url('https://api.builder.io/api/v1/image/assets/TEMP/dece4f5090fd507e2497a4bba6b015b28dc29434?width=1022')]" />
 
-          {/* CSS-generated building background */}
-          <div
-            className="absolute inset-0"
-            style={{
-              backgroundColor: "#0a3d6b",
-              backgroundImage: `
-                linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
-                linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px)
-              `,
-              backgroundSize: "80px 80px, 80px 80px, 20px 20px, 20px 20px",
-            }}
-          />
+          <div className="absolute inset-0 bg-gradient-to-br from-clinical-blue via-clinical-blue-mid/80 to-clinical-blue-mid/0" />
 
-          {/* Building silhouette */}
-          <div
-            className="absolute bottom-0 left-0 right-0"
-            style={{
-              height: 320,
-              background: "linear-gradient(to top, rgba(5,28,55,0.95) 0%, transparent 100%)",
-            }}
-          >
-            {/* Centre tower */}
-            <div
-              className="absolute bottom-0 left-1/2 -translate-x-1/2"
-              style={{
-                width: 160,
-                height: 280,
-                background: "rgba(6,38,72,0.85)",
-                boxShadow:
-                  "inset 12px 0 0 rgba(255,255,255,0.04), inset -12px 0 0 rgba(255,255,255,0.04)",
-              }}
-            />
-            {/* Wing buildings */}
-            <div
-              className="absolute bottom-0 left-0 right-0"
-              style={{
-                height: 180,
-                background: "rgba(8,44,82,0.80)",
-                clipPath:
-                  "polygon(0 100%,0 55%,18% 45%,30% 10%,42% 45%,58% 45%,70% 10%,82% 45%,100% 55%,100% 100%)",
-              }}
-            />
-          </div>
-
-          {/* Window glow dots */}
-          <div
-            className="absolute inset-0"
-            style={{
-              backgroundImage: `
-                radial-gradient(ellipse 2px 3px at 50% 22%, rgba(180,220,255,0.55) 0%, transparent 100%),
-                radial-gradient(ellipse 2px 3px at 50% 32%, rgba(180,220,255,0.40) 0%, transparent 100%),
-                radial-gradient(ellipse 2px 3px at 44% 22%, rgba(180,220,255,0.45) 0%, transparent 100%),
-                radial-gradient(ellipse 2px 3px at 56% 22%, rgba(180,220,255,0.45) 0%, transparent 100%),
-                radial-gradient(ellipse 60px 40px at 25% 70%, rgba(255,200,80,0.08) 0%, transparent 100%),
-                radial-gradient(ellipse 60px 40px at 75% 70%, rgba(255,200,80,0.08) 0%, transparent 100%)
-              `,
-            }}
-          />
-
-          {/* Sky gradient overlay */}
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                "linear-gradient(160deg, rgba(0,72,141,0.75) 0%, rgba(10,80,155,0.5) 40%, rgba(5,35,70,0.88) 100%)",
-            }}
-          />
-
-          {/* Content */}
           <div className="relative z-10 flex flex-col justify-center gap-5 p-8 h-full">
-            {/* Step indicator */}
-            <div className="flex gap-1.5 mb-1">
-              <div className="h-1 w-3 rounded-full bg-white/55" />
-              <div className="h-1 w-5 rounded-full bg-white/90" />
-              <div className="h-1 w-3 rounded-full bg-white/25" />
+            <div className="flex flex-col gap-4 p-6 rounded-lg border border-white/10 bg-white/[0.16] backdrop-blur-xl">
+              <div className="w-fit p-[10px] rounded-[4px] bg-white/20 backdrop-blur-md">
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path
+                    d="M4 14H6V9H4V14ZM12 14H14V4H12V14ZM8 14H10V11H8V14ZM8 9H10V7H8V9ZM2 18C1.45 18 0.979167 17.8042 0.5875 17.4125C0.195833 17.0208 0 16.55 0 16V2C0 1.45 0.195833 0.979167 0.5875 0.5875C0.979167 0.195833 1.45 0 2 0H16C16.55 0 17.0208 0.195833 17.4125 0.5875C17.8042 0.979167 18 1.45 18 2V16C18 16.55 17.8042 17.0208 17.4125 17.4125C17.0208 17.8042 16.55 18 16 18H2Z"
+                    fill="white"
+                  />
+                </svg>
+              </div>
+              <div className="flex flex-col gap-1">
+                <h2 className="text-xl font-bold leading-7 tracking-[-0.5px] text-white">Precision Administration</h2>
+                <p className="text-sm font-medium text-clinical-blue-light leading-[22.75px]">
+                  High-fidelity data visualization and editorial clarity for modern healthcare management.
+                </p>
+              </div>
             </div>
 
-            <GlassCard
-              icon={<IconStats />}
-              title="Precision Administration"
-              description="High-fidelity data visualization and editorial clarity for modern healthcare management."
-            />
-
-            <GlassCard
-              icon={<IconMedical />}
-              title="Empowering Clinical Excellence"
-              description="High-fidelity data visualization and editorial clarity for modern healthcare management."
-            />
+            <div className="flex flex-col gap-4 p-6 rounded-lg border border-white/10 bg-white/[0.16] backdrop-blur-xl">
+              <div className="w-fit p-[10px] rounded-[4px] bg-white/20 backdrop-blur-md">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path
+                    d="M2 20C1.45 20 0.979167 19.8042 0.5875 19.4125C0.195833 19.0208 0 18.55 0 18V6C0 5.45 0.195833 4.97917 0.5875 4.5875C0.979167 4.19583 1.45 4 2 4H6V2C6 1.45 6.19583 0.979167 6.5875 0.5875C6.97917 0.195833 7.45 0 8 0H12C12.55 0 13.0208 0.195833 13.4125 0.5875C13.8042 0.979167 14 1.45 14 2V4H18C18.55 4 19.0208 4.19583 19.4125 4.5875C19.8042 4.97917 20 5.45 20 6V18C20 18.55 19.8042 19.0208 19.4125 19.4125C19.0208 19.8042 18.55 20 18 20H2ZM2 18H18V6H2V18ZM8 4H12V2H8V4ZM9 13V16H11V13H14V11H11V8H9V11H6V13H9Z"
+                    fill="white"
+                  />
+                </svg>
+              </div>
+              <div className="flex flex-col gap-1">
+                <h2 className="text-xl font-bold leading-7 tracking-[-0.5px] text-white">Empowering Clinical Excellence</h2>
+                <p className="text-sm font-medium text-clinical-blue-light leading-[22.75px]">
+                  High-fidelity data visualization and editorial clarity for modern healthcare management.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 

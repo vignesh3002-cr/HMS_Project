@@ -1,20 +1,16 @@
 import React from 'react';
 
 export interface ElasticPulseProps {
-  /** Diameter of the dots in pixels */
   size?: number;
-  /** CSS color value (hex, rgb, etc.) */
   color?: string;
-  /** Space between dots in pixels */
   gap?: number;
-  /** Optional className for the container */
   className?: string;
 }
 
 const ElasticPulse: React.FC<ElasticPulseProps> = ({
-  size = 16,
-  color = '#004ac6',
-  gap = 32,
+  size = 12, // Reduced default size slightly
+  color = '#ffffff', // Changed to white
+  gap = 24, // Reduced gap slightly to match new size
   className = '',
 }) => {
   const containerStyle: React.CSSProperties = {
@@ -35,8 +31,10 @@ const ElasticPulse: React.FC<ElasticPulseProps> = ({
     <>
       <style>{`
         .elastic-pulse-dot {
-          animation: elastic-pulse 2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
-          will-change: transform, opacity;
+          animation: elastic-pulse 1.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+          will-change: transform, opacity, box-shadow;
+          /* Base glow */
+          box-shadow: 0 0 8px rgba(255, 255, 255, 0.4); 
         }
         .elastic-pulse-dot:nth-child(2) {
           animation-delay: 0.2s;
@@ -46,18 +44,21 @@ const ElasticPulse: React.FC<ElasticPulseProps> = ({
         }
         @keyframes elastic-pulse {
           0%, 100% {
-            transform: scale(1);
-            opacity: 0.3;
+            transform: scale(0.7);
+            opacity: 0.4;
+            box-shadow: 0 0 4px rgba(255, 255, 255, 0.2); /* Dim glow */
           }
           50% {
-            transform: scale(2.2);
+            transform: scale(1.3); /* Expand outward */
             opacity: 1;
+            box-shadow: 0 0 16px rgba(255, 255, 255, 0.9); /* Bright glow */
           }
         }
         @media (prefers-reduced-motion: reduce) {
           .elastic-pulse-dot {
             animation: none;
-            opacity: 0.6;
+            opacity: 0.8;
+            box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
           }
         }
       `}</style>

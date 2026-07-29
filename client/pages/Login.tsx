@@ -50,6 +50,10 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center p-4 md:p-8 bg-clinical-page-bg font-manrope">
       <div className="w-full max-w-5xl flex flex-col md:flex-row rounded-xl overflow-hidden shadow-[0_25px_50px_-12px_rgba(30,58,138,0.08)] border border-[rgba(194,198,212,0.10)]">
         <div className="bg-white flex flex-col justify-center w-full md:w-[468px] flex-shrink-0 p-8 md:p-10 relative">
+          {/* Logo */}
+          <span className="absolute top-7 left-10 text-[20px] font-extrabold text-clinical-blue tracking-[-0.5px]">
+            HMS
+          </span>
           <div className="mb-7">
             <h1 className="text-[32px] leading-[30px] tracking-[-0.6px] font-extrabold text-clinical-blue mb-2">
               Welcome Back
@@ -167,25 +171,36 @@ export default function Login() {
             </div>
 
             <div className="pt-1">
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full flex items-center justify-center px-5 py-3 rounded-[4px] bg-gradient-to-br from-clinical-blue to-clinical-blue-mid shadow-[0_10px_15px_-3px_rgba(59,130,246,0.20),0_4px_6px_-4px_rgba(59,130,246,0.20)] hover:opacity-90 active:opacity-80 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isLoading ? (
-                  <ElasticPulse size={24} color="white" />
-                ) : (
-                  <>
-                    <span className="text-base font-bold leading-5 text-white">Login</span>
-                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path
-                        d="M7.25 14.5V12.8889H12.8889V1.61111H7.25V0H12.8889C13.3319 0 13.7112 0.157755 14.0267 0.473264C14.3422 0.788773 14.5 1.16806 14.5 1.61111V12.8889C14.5 13.3319 14.3422 13.7112 14.0267 14.0267C13.7112 14.3422 13.3319 14.5 12.8889 14.5H7.25ZM5.63889 11.2778L4.53125 10.1097L6.58542 8.05556H0V6.44444H6.58542L4.53125 4.39028L5.63889 3.22222L9.66667 7.25L5.63889 11.2778Z"
-                        fill="white"
-                      />
-                    </svg>
-                  </>
-                )}
-              </button>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full flex items-center justify-between px-5 py-3 rounded-[4px] bg-gradient-to-br from-clinical-blue to-clinical-blue-mid shadow-[0_10px_15px_-3px_rgba(59,130,246,0.20),0_4px_6px_-4px_rgba(59,130,246,0.20)] hover:opacity-90 active:opacity-80 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? (
+                <div className="flex w-full justify-center">
+                  <ElasticPulse size={20} color="white" />
+                </div>
+              ) : (
+                <>
+                  <span className="text-base font-bold leading-5 text-white">
+                    Login
+                  </span>
+
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 15 15"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M7.25 14.5V12.8889H12.8889V1.61111H7.25V0H12.8889C13.3319 0 13.7112 0.157755 14.0267 0.473264C14.3422 0.788773 14.5 1.16806 14.5 1.61111V12.8889C14.5 13.3319 14.3422 13.7112 14.0267 14.0267C13.7112 14.3422 13.3319 14.5 12.8889 14.5H7.25ZM5.63889 11.2778L4.53125 10.1097L6.58542 8.05556H0V6.44444H6.58542L4.53125 4.39028L5.63889 3.22222L9.66667 7.25L5.63889 11.2778Z"
+                      fill="white"
+                    />
+                  </svg>
+                </>
+              )}
+            </button>
             </div>
           </form>
         </div>
