@@ -311,6 +311,54 @@ export default function Dashboard() {
     }
   }, [toast, selectedBranchId, isAllBranches]);
 
+  // Branch progress bar state — branches come from the real /branch API.
+  // Each branch's pct is driven purely by its own real appointment count
+  // for today (not a share of the other branches' totals), scaled so that
+  // 15 appointments booked at a branch = 17% on that branch's bar.
+  const [branches, setBranches] = useState<{ id: string; name: string; pct: number }[]>([]);
+
+  // 15 appointments -> 17%, linearly, capped at 100%.
+  const APPOINTMENTS_PER_UNIT = 15;
+  const PCT_PER_UNIT = 17;
+
+  const fetchBranchPerformance = useCallback(async () => {
+    try {
+      const branchRes = await branchApi.getAll();
+      const branchList = branchRes.data?.data || [];
+
+      // Today's real calendar date — the bars track today's live load per
+      // branch, not a running all-time total.
+      const today = format(new Date(), "yyyy-MM-dd");
+
+      // Use each branch's real `total` count from the API (not a
+      // truncated page of rows) so the percentage reflects every
+      // appointment scheduled today at that branch, not just the first
+      // page fetched.
+      const counts = await Promise.all(
+        branchList.map((b) =>
+          appointmentApi
+            .getAll({ branchId: b.branch_id, date: today, limit: 1 })
+            .then((res) => res.data?.data?.total ?? 0)
+            .catch(() => 0),
+        ),
+      );
+
+      setBranches(
+        branchList.map((b, index) => {
+          const count = counts[index];
+          const pct = Math.min(100, Math.round((count / APPOINTMENTS_PER_UNIT) * PCT_PER_UNIT));
+          return {
+            id: b.branch_id,
+            name: b.branch_area ? `${b.branch_name} (${b.branch_area})` : (b.branch_name || b.branch_id),
+            pct,
+          };
+        }),
+      );
+    } catch (err) {
+      console.error("[Dashboard] Failed to load branch performance:", err);
+    }
+  }, []);
+
   const fetchAppointments = useCallback(async () => {
     setIsAppointmentsLoading(true);
     try {
@@ -322,6 +370,8 @@ export default function Dashboard() {
       });
       const rows = res.data?.data?.appointments || [];
       setRealAppointments(rows.map(mapAppointmentRecord));
+      setAppointmentCount(res.data?.data?.total ?? rows.length);
+      fetchBranchPerformance();
     } catch (err: any) {
       console.error("[Dashboard] Failed to load appointments:", err);
       toast({
@@ -332,7 +382,7 @@ export default function Dashboard() {
     } finally {
       setIsAppointmentsLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches]);
+  }, [toast, selectedBranchId, isAllBranches, fetchBranchPerformance]);
 
   useEffect(() => {
     fetchAppointments();
@@ -598,49 +648,9 @@ export default function Dashboard() {
   const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
   const visibleEnd = Math.min(endIndex, totalRecords);
 
-  // Branch progress bar state — branches come from the real /branch API;
-  // pct is each branch's share of total appointments (a real performance
-  // signal) rather than a hardcoded number.
-
   const [animatedValues, setAnimatedValues] = useState<Record<string, number>>({});
   const branchRef = useRef<HTMLDivElement>(null);
   const hasAnimated = useRef(false);
-
-  const [branches, setBranches] = useState<{ id: string; name: string; pct: number }[]>([]);
-
-  useEffect(() => {
-    Promise.all([
-      branchApi.getAll(),
-      appointmentApi.getAll({ limit: 100 }),
-    ])
-      .then(([branchRes, apptRes]) => {
-        const branchList = branchRes.data?.data || [];
-        const appointments = apptRes.data?.data?.appointments || [];
-
-        const countByBranch = new Map<string, number>();
-        appointments.forEach((appt) => {
-          const id = appt.branch?.branch_id || appt.branch_id;
-          if (!id) return;
-          countByBranch.set(id, (countByBranch.get(id) || 0) + 1);
-        });
-        const totalAppointments = appointments.length;
-
-        setBranches(
-          branchList.map((b) => {
-            const count = countByBranch.get(b.branch_id) || 0;
-            const pct = totalAppointments > 0 ? Math.round((count / totalAppointments) * 100) : 0;
-            return {
-              id: b.branch_id,
-              name: b.branch_area ? `${b.branch_name} (${b.branch_area})` : (b.branch_name || b.branch_id),
-              pct,
-            };
-          }),
-        );
-      })
-      .catch((err) => {
-        console.error("[Dashboard] Failed to load branch performance:", err);
-      });
-  }, []);
 
   // Initial trigger on scroll
   useEffect(() => {
