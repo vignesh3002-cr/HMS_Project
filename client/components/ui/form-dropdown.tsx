@@ -81,11 +81,12 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
 
     const filtered = React.useMemo(() => {
       const query = search.trim().toLowerCase();
-      if (!query) return normalized;
+      const isUnmodifiedSelection = selectedOption && search === selectedOption.label;
+      if (!query || isUnmodifiedSelection) return normalized;
       return normalized.filter((option) =>
         option.label.toLowerCase().includes(query),
       );
-    }, [normalized, search]);
+    }, [normalized, search, selectedOption]);
 
     function handleSelect(option: FormDropdownOption) {
       onValueChange?.(option.value);
@@ -128,6 +129,7 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
               setOpen(true);
               onFocus?.(event);
             }}
+            onClick={() => setOpen(true)}
             onChange={(event) => {
               setSearch(event.target.value);
               if (!open) setOpen(true);
@@ -140,8 +142,8 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
             disabled={disabled}
             tabIndex={-1}
             onClick={() => {
-              inputRef.current?.focus();
               setOpen((prev) => !prev);
+              inputRef.current?.focus();
             }}
             className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors focus:outline-none"
           >
