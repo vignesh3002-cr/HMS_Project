@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { MultiSelectDropdown } from "@/components/ui/multi-select-dropdown";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
+import TimepickerWheel from "@/components/ui/timepicker-wheel";
 import { State as CSState, City } from "country-state-city";
 import type { IState } from "country-state-city";
 import { branchApi, Branch } from "@/api/branch.api";
@@ -1011,30 +1012,26 @@ export default function EditDoctorForm() {
                           disabled={submitting}
                         />
                       </div>
-                      <div className="w-36">
+                      <div className="w-44">
                         <label className="block text-[12.5px] font-semibold text-gray-600 mb-1">
                           Start Time
                         </label>
-                        <FormDropdown
-                          className={inputCls}
-                          options={TIME_OPTIONS}
+                        <TimepickerWheel
                           value={entry.start_time}
-                          onValueChange={(val) =>
+                          onChange={(val) =>
                             updateScheduleEntry(entry.id, "start_time", val)
                           }
                           placeholder="Start Time"
                           disabled={submitting}
                         />
                       </div>
-                      <div className="w-36">
+                      <div className="w-44">
                         <label className="block text-[12.5px] font-semibold text-gray-600 mb-1">
                           End Time
                         </label>
-                        <FormDropdown
-                          className={inputCls}
-                          options={TIME_OPTIONS}
+                        <TimepickerWheel
                           value={entry.end_time}
-                          onValueChange={(val) =>
+                          onChange={(val) =>
                             updateScheduleEntry(entry.id, "end_time", val)
                           }
                           placeholder="End Time"

@@ -811,7 +811,7 @@ export default function AddBranch() {
             )}
 
             {formData.adminMode === "NEW" && (
-              <div className="space-y-5 p-4 bg-blue-50 rounded-xl border border-blue-200">
+              <div className="space-y-5 p-4 bg-gray-50 rounded-xl border border-gray-200">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <h5 className="text-[13px] font-semibold text-gray-800 flex items-center gap-2">
                     <UserPlus className="w-4 h-4 text-blue-600" />
@@ -822,7 +822,7 @@ export default function AddBranch() {
                   </span>
                 </div>
 
-                <div className="flex items-start gap-8 pb-5 border-b border-blue-200/70">
+                <div className="flex items-start gap-8 pb-5 border-b border-gray-200">
                   <AvatarUpload
                     value={formData.adminPhotoUrl}
                     onChange={(url) => setFormData((p) => ({ ...p, adminPhotoUrl: url }))}
@@ -1030,7 +1030,7 @@ export default function AddBranch() {
                 </div>
 
                 {/* Address & location */}
-                <div className="pt-1 border-t border-blue-200/70">
+                <div className="pt-1 border-t border-gray-200">
                   <h6 className="text-[11.5px] font-bold text-gray-500 uppercase tracking-wide my-3">
                     Address and location
                   </h6>
@@ -1149,7 +1149,7 @@ export default function AddBranch() {
                 </div>
 
                 {/* Emergency contact */}
-                <div className="pt-1 border-t border-blue-200/70">
+                <div className="pt-1 border-t border-gray-200">
                   <h6 className="text-[11.5px] font-bold text-gray-500 uppercase tracking-wide my-3">
                     Emergency contact
                   </h6>
@@ -1205,7 +1205,7 @@ export default function AddBranch() {
                 </div>
 
                 {/* Account credentials */}
-                <div className="pt-1 border-t border-green-200/70">
+                <div className="pt-1 border-t border-gray-200">
                   <h6 className="text-[11.5px] font-bold text-gray-500 uppercase tracking-wide my-3">
                     Account credentials
                   </h6>

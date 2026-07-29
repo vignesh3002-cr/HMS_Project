@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { MultiSelectDropdown } from "@/components/ui/multi-select-dropdown";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
+import TimepickerWheel from "@/components/ui/timepicker-wheel";
 import { State as CSState, City } from "country-state-city";
 import type { IState } from "country-state-city";
 import { employeeApi, CreateEmployeePayload, WorkingHourDto } from "@/api/employee.api";
@@ -1296,12 +1297,9 @@ export default function AddEmployee() {
                           <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5">
                             Start time
                           </label>
-                          <FormDropdown
-                            name={`start-${entry.id}`}
-                            className={inputCls + " !h-9 !w-[150px]"}
-                            options={TIME_OPTIONS}
+                          <TimepickerWheel
                             value={entry.start_time}
-                            onValueChange={(v) => updateSlot(entry.id, "start_time", v)}
+                            onChange={(v) => updateSlot(entry.id, "start_time", v)}
                             placeholder="Start time"
                             disabled={submitting}
                           />
@@ -1312,12 +1310,9 @@ export default function AddEmployee() {
                           <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5">
                             End time
                           </label>
-                          <FormDropdown
-                            name={`end-${entry.id}`}
-                            className={inputCls + " !h-9 !w-[150px]"}
-                            options={TIME_OPTIONS}
+                          <TimepickerWheel
                             value={entry.end_time}
-                            onValueChange={(v) => updateSlot(entry.id, "end_time", v)}
+                            onChange={(v) => updateSlot(entry.id, "end_time", v)}
                             placeholder="End time"
                             disabled={submitting}
                           />
