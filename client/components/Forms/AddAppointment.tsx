@@ -1,8 +1,17 @@
 import { useState, useEffect, useRef, ChangeEvent, FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { startOfWeek, endOfWeek, addWeeks, format } from "date-fns";
 import { ArrowLeft, CalendarPlus, Plus, Search, Loader2, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { branchApi, Branch } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
@@ -35,17 +44,21 @@ const emptyFormData: AppointmentFormData = {
   patientComment: "",
 };
 
-// Looks forward day-by-day (up to 2 weeks) from startDateStr for the first
-// date this doctor/branch has a real open slot, so picking a doctor doesn't
-// leave the form pointed at a day they're fully booked or not scheduled on.
+// Looks forward day-by-day (up to and including maxDateStr) from startDateStr
+// for the first date this doctor/branch has a real open slot, so picking a
+// doctor doesn't leave the form pointed at a day they're fully booked, not
+// scheduled on, or outside the bookable current/next-week window.
 async function findNearestAvailableDate(
   doctorId: string,
   branchId: string,
   startDateStr: string,
+  maxDateStr: string,
 ): Promise<string | null> {
   const start = new Date(`${startDateStr}T00:00:00Z`);
+  const max = new Date(`${maxDateStr}T00:00:00Z`);
+  const maxDays = Math.max(0, Math.round((max.getTime() - start.getTime()) / 86400000));
 
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i <= maxDays; i++) {
     const d = new Date(start);
     d.setUTCDate(d.getUTCDate() + i);
     const dateStr = d.toISOString().split("T")[0];
@@ -85,6 +98,7 @@ export default function AddAppointment() {
 
   const [formData, setFormData] = useState<AppointmentFormData>(emptyFormData);
   const [submitting, setSubmitting] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   // Patient search
   const [patientSearch, setPatientSearch] = useState("");
@@ -226,7 +240,7 @@ export default function AddAppointment() {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     if (!formData.patientId) {
@@ -238,6 +252,10 @@ export default function AddAppointment() {
       return;
     }
 
+    setShowConfirm(true);
+  };
+
+  const handleConfirmCreate = async () => {
     setSubmitting(true);
     try {
       await appointmentApi.create({
@@ -257,6 +275,7 @@ export default function AddAppointment() {
         title: "Appointment created",
         description: "The appointment has been scheduled successfully.",
       });
+      setShowConfirm(false);
       navigate("/appointments");
     } catch (error: any) {
       toast({
@@ -264,6 +283,7 @@ export default function AddAppointment() {
         description: error?.response?.data?.message || error.message || "Something went wrong",
         variant: "destructive",
       });
+      setShowConfirm(false);
     } finally {
       setSubmitting(false);
     }
@@ -271,18 +291,13 @@ export default function AddAppointment() {
 
   const handleCancel = () => navigate(-1);
 
-  // Appointment Date is bookable within a rolling 2-week window (past 2
-  // weeks through the next 2 weeks), not just past/present like other forms.
-  const minSelectableDate = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 14);
-    return d.toISOString().split("T")[0];
-  })();
-  const maxSelectableDate = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 14);
-    return d.toISOString().split("T")[0];
-  })();
+  // Appointment Date is bookable only within the current week through the
+  // end of next week -- no previous-week slots.
+  const minSelectableDate = format(startOfWeek(new Date(), { weekStartsOn: 1 }), "yyyy-MM-dd");
+  const maxSelectableDate = format(
+    endOfWeek(addWeeks(new Date(), 1), { weekStartsOn: 1 }),
+    "yyyy-MM-dd",
+  );
 
   return (
     <div className="min-h-screen bg-[#F7F9FB] p-6">
@@ -413,14 +428,14 @@ export default function AddAppointment() {
                     if (!val || !formData.doctorId) return;
 
                     setFindingNearestDate(true);
-                    findNearestAvailableDate(formData.doctorId, val, formData.selectDate)
+                    findNearestAvailableDate(formData.doctorId, val, formData.selectDate, maxSelectableDate)
                       .then((date) => {
                         if (date) {
                           setFormData((prev) => ({ ...prev, selectDate: date, timeSlot: "" }));
                         } else if (date === null) {
                           toast({
                             title: "No available date found",
-                            description: "This doctor has no open slots in the next 14 days at this branch.",
+                            description: "This doctor has no open slots this week or next week at this branch.",
                             variant: "destructive",
                           });
                         }
@@ -511,7 +526,7 @@ export default function AddAppointment() {
 
                         setFormData((prev) => ({ ...prev, branchId: nextBranchId }));
 
-                        return findNearestAvailableDate(val, nextBranchId, formData.selectDate);
+                        return findNearestAvailableDate(val, nextBranchId, formData.selectDate, maxSelectableDate);
                       })
                       .then((date) => {
                         if (date) {
@@ -519,7 +534,7 @@ export default function AddAppointment() {
                         } else if (date === null) {
                           toast({
                             title: "No available date found",
-                            description: "This doctor has no open slots in the next 14 days at their branch.",
+                            description: "This doctor has no open slots this week or next week at their branch.",
                             variant: "destructive",
                           });
                         }
@@ -676,6 +691,36 @@ export default function AddAppointment() {
           </form>
         </div>
       </div>
+
+      <AlertDialog open={showConfirm} onOpenChange={(open) => !submitting && setShowConfirm(open)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Appointment</AlertDialogTitle>
+            <AlertDialogDescription>
+              You want to confirm appointment?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <button
+              type="button"
+              onClick={() => setShowConfirm(false)}
+              disabled={submitting}
+              className="w-full sm:w-auto px-8 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              No
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmCreate}
+              disabled={submitting}
+              className="w-full sm:w-auto px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 active:scale-[0.98] transition-all duration-200 shadow-[0_4px_14px_0_rgba(37,99,235,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+              {submitting ? "Confirming..." : "Yes"}
+            </button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

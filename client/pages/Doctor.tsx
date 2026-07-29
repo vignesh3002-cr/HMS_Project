@@ -359,9 +359,12 @@ export default function Doctor() {
     }
   }, [searchQuery, appliedValues]);
 
+  // Grid view has no page-navigation controls (unlike the list view's
+  // HmsTable), so it must show every doctor matching the current
+  // search/filters rather than just the first `rowsPerPage` of them.
   const displayCards = infiniteScroll
     ? filteredData.slice(0, visibleCount)
-    : currentRows;
+    : filteredData;
 
   // ---- ACTION HANDLERS ----
   const handleView = (id: number | string) => navigate(`/doctor/view/${id}`);
@@ -621,7 +624,7 @@ export default function Doctor() {
               </div>
               <div className="mt-auto shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur gap-2">
                 <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
-                  {infiniteScroll ? `Showing ${Math.min(visibleCount, totalRecords)} of ${totalRecords} doctors` : `Showing ${visibleStart} to ${visibleEnd} of ${totalRecords} doctors`}
+                  {infiniteScroll ? `Showing ${Math.min(visibleCount, totalRecords)} of ${totalRecords} doctors` : `Showing all ${totalRecords} doctors`}
                 </span>
               </div>
               </>

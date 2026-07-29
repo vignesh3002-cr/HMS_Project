@@ -99,9 +99,7 @@ const bottomNavItems = [
 
 
 
-// Cosmetic-only values the real /employees endpoint doesn't return (avatar
-// initials/colors, department badge colors) — cycled per row so real data
-// still renders with the same visual style as the static fallback rows.
+
 const AVATAR_PALETTE = [
   { avatarColor: "#00488D", initBg: "#D6E3FF" },
   { avatarColor: "#7B3200", initBg: "#FFDBCB" },
@@ -139,10 +137,6 @@ function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
   };
 }
 
-// Real appointment_time/appointment_date come back from Prisma as ISO
-// strings whose UTC components hold the actual stored date/time (both
-// columns are timezone-less in Postgres) — read with UTC getters so the
-// displayed value doesn't shift with the browser's local timezone.
 function formatDateOnly(iso: string): string {
   const d = new Date(iso);
   const day = String(d.getUTCDate()).padStart(2, "0");
@@ -240,8 +234,7 @@ export default function Dashboard() {
   const { toast } = useToast();
   const { selectedBranchId, isAllBranches } = useBranchFilter();
 
-  // Real doctors/staff fetched from the backend. No dummy fallback — an
-  // empty/failed fetch just leaves these null and the tab shows no rows.
+ 
   const [realDoctors, setRealDoctors] = useState<Record<string, unknown>[] | null>(null);
   const [realStaff, setRealStaff] = useState<Record<string, unknown>[] | null>(null);
   const [isEmployeesLoading, setIsEmployeesLoading] = useState(true);
@@ -709,7 +702,7 @@ useEffect(() => {
   };
 
   const handleView = (id: string | number) => {
-    navigate(`/destination-view/${id}`);
+    navigate(`/doctor/day-view/${id}`);
   };
 
   return (
