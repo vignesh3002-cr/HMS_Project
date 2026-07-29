@@ -579,6 +579,8 @@ export default function AddEmployee() {
         first_name: formData.firstName,
         middle_name: formData.middleName || undefined,
         last_name: formData.lastName,
+        dob: formData.dateOfBirth || undefined,
+        gender: formData.gender || undefined,
         email: formData.email,
         mobile_no: formData.mobileNo,
         blood_group: formData.bloodGroup || undefined,
@@ -737,6 +739,31 @@ export default function AddEmployee() {
                   maxLength={50}
                   className={inputCls}
                   value={formData.lastName}
+                  onChange={handleChange}
+                  disabled={submitting}
+                />
+              </div>
+
+              <div>
+                <label className={labelCls}>Gender <Req /></label>
+                <FormDropdown
+                  name="gender"
+                  className={inputCls}
+                  options={["Male", "Female", "Other"]}
+                  value={formData.gender}
+                  onValueChange={(v) => setFormData((p) => ({ ...p, gender: v }))}
+                  placeholder="Select gender"
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Date of birth <Req /></label>
+                <input
+                  type="date"
+                  name="dateOfBirth"
+                  max={todayStr}
+                  className={inputCls + " text-gray-500"}
+                  value={formData.dateOfBirth}
                   onChange={handleChange}
                   disabled={submitting}
                 />
