@@ -22,6 +22,7 @@ import Appointments from "./pages/Appointments";
 import Dashboard from "./pages/Dashboard";
 import Departments from "./pages/Departments";
 import Login from "./pages/Login";
+import Authenticate from "./pages/Authenticate";
 import NotFound from "./pages/NotFound";
 import Patients from "./pages/Patients";
 import ProtectedRoute from "./routes/ProtectedRoute";
@@ -87,6 +88,7 @@ const App = () => (
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={<Login />} />
+          <Route path="/authenticate" element={<Authenticate />} />
           
           {/* Protected Routes with Layout */}
           <Route element={<AppLayout />}>
