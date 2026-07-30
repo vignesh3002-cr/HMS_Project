@@ -20,8 +20,19 @@ import { filterDataByValues } from "@/components/Filter/utils";
 import ExportReport from "@/components/ui/ExportReport";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
+import { appointmentApi } from "@/api/appointment.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { useBranchFilter } from "@/context/BranchFilterContext";
+
+// Fixed daily slot capacity per doctor -- once a doctor's real (non-cancelled,
+// non-no-show) appointment count for the selected day reaches this, the
+// progress bar reports "slots full" regardless of how the doctor's actual
+// schedule is configured.
+const DOCTOR_DAILY_SLOT_CAPACITY = 30;
+
+// Appointments in these statuses don't occupy a slot anymore, so they're
+// excluded when counting how many of a doctor's slots are actually in use.
+const NON_OCCUPYING_STATUSES = new Set(["CANCELLED", "NO_SHOW"]);
 
 
 // ============================================================
@@ -89,7 +100,11 @@ function formatBranch(branch: EmployeeRecord["branch"]): string {
   return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
 }
 
-function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
+function mapEmployeeToDoctorData(
+  emp: EmployeeRecord,
+  index: number,
+  appointmentCounts: Record<string, number>,
+) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
   return {
@@ -104,8 +119,8 @@ function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
     deptColor: "#475C7F",
     branch: formatBranch(emp.branch),
     status: (emp.emp_status === true || emp.user_table?.user_status === 1) ? "Active" : "Leave",
-    appointments: 0,
-    total: 0,
+    appointments: appointmentCounts[emp.employee_id] ?? 0,
+    total: DOCTOR_DAILY_SLOT_CAPACITY,
     photo: "",
   };
 }
@@ -195,6 +210,7 @@ export default function Doctor() {
     try {
       const res = await employeeApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
+        limit: 1000,
       });
       console.log("[Doctor Page] Response:", res.data);
       const allEmployees = res.data?.data?.employees || [];
@@ -224,10 +240,54 @@ export default function Doctor() {
     fetchDoctors();
   }, [fetchDoctors]);
 
+  // Real per-doctor appointment counts, keyed by employee_id -- fetched from
+  // the appointments API (not derivable from the employees list) and used to
+  // drive the Appointment progress bar below. This counts every active
+  // (non-cancelled, non-no-show) appointment for the doctor regardless of
+  // date -- a running total out of DOCTOR_DAILY_SLOT_CAPACITY, not scoped to
+  // whatever date is picked via the date nav above.
+  const [appointmentCounts, setAppointmentCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!realDoctors || realDoctors.length === 0) {
+      setAppointmentCounts({});
+      return;
+    }
+
+    let cancelled = false;
+
+    Promise.all(
+      realDoctors.map(async (doc) => {
+        try {
+          const res = await appointmentApi.getAll({
+            employeeId: doc.employee_id,
+            limit: 100,
+          });
+          const appointments = res.data?.data?.appointments || [];
+          const occupiedCount = appointments.filter(
+            (a) => !NON_OCCUPYING_STATUSES.has(a.status || ""),
+          ).length;
+          return [doc.employee_id, occupiedCount] as const;
+        } catch (err) {
+          console.error(`[Doctor Page] Failed to load appointment count for ${doc.employee_id}:`, err);
+          return [doc.employee_id, 0] as const;
+        }
+      }),
+    ).then((entries) => {
+      if (!cancelled) setAppointmentCounts(Object.fromEntries(entries));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [realDoctors]);
+
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
     // Use real data from API if available, otherwise fallback to static data
-    const sourceData = realDoctors ? realDoctors.map(mapEmployeeToDoctorData) : [];
+    const sourceData = realDoctors
+      ? realDoctors.map((emp, index) => mapEmployeeToDoctorData(emp, index, appointmentCounts))
+      : [];
     let result: Record<string, string | number>[] = [...sourceData];
 
     if (searchQuery) {
@@ -243,7 +303,7 @@ export default function Doctor() {
     result = filterDataByValues(result, appliedValues);
 
     return result;
-  }, [searchQuery, appliedValues, realDoctors]);
+  }, [searchQuery, appliedValues, realDoctors, appointmentCounts]);
 
   // ---- SORTING (list only) ----
   const handleSort = (field: string) => {
@@ -299,9 +359,12 @@ export default function Doctor() {
     }
   }, [searchQuery, appliedValues]);
 
+  // Grid view has no page-navigation controls (unlike the list view's
+  // HmsTable), so it must show every doctor matching the current
+  // search/filters rather than just the first `rowsPerPage` of them.
   const displayCards = infiniteScroll
     ? filteredData.slice(0, visibleCount)
-    : currentRows;
+    : filteredData;
 
   // ---- ACTION HANDLERS ----
   const handleView = (id: number | string) => navigate(`/doctor/view/${id}`);
@@ -561,7 +624,7 @@ export default function Doctor() {
               </div>
               <div className="mt-auto shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur gap-2">
                 <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
-                  {infiniteScroll ? `Showing ${Math.min(visibleCount, totalRecords)} of ${totalRecords} doctors` : `Showing ${visibleStart} to ${visibleEnd} of ${totalRecords} doctors`}
+                  {infiniteScroll ? `Showing ${Math.min(visibleCount, totalRecords)} of ${totalRecords} doctors` : `Showing all ${totalRecords} doctors`}
                 </span>
               </div>
               </>

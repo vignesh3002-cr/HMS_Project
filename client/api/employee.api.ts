@@ -20,6 +20,8 @@ export interface CreateEmployeePayload {
   first_name: string;
   middle_name?: string;
   last_name: string;
+  dob?: string;
+  gender?: string;
   email: string;
   mobile_no: string;
   blood_group?: string;
@@ -112,7 +114,20 @@ export interface EmployeeDetailResponse {
     license_no: string | null;
     consultation_minutes: number | null;
   } | null;
-  doctorSchedules?: unknown[];
+  doctorSchedules?: DoctorScheduleRecord[];
+}
+
+export interface DoctorScheduleRecord {
+  schedule_id: string | number;
+  employee_id: string;
+  branch_id: string;
+  day_of_week: string | null;
+  shift_name: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  consultation_minutes: number | null;
+  is_active: boolean | null;
+  branch?: { branch_name: string } | null;
 }
 
 export interface CreateEmployeeResponse {

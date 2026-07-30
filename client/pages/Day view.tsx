@@ -354,6 +354,12 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     setIsViewMenuOpen(false);
     if (view === "week") {
       navigate("/appointments/week-view");
+    } else if (view === "list") {
+      if (onViewChange) {
+        onViewChange(view);
+      } else {
+        navigate("/appointments");
+      }
     } else {
       onViewChange?.(view);
     }

@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { patientApi } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { branchApi } from "@/api/branch.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 
@@ -99,9 +100,7 @@ const bottomNavItems = [
 
 
 
-// Cosmetic-only values the real /employees endpoint doesn't return (avatar
-// initials/colors, department badge colors) — cycled per row so real data
-// still renders with the same visual style as the static fallback rows.
+
 const AVATAR_PALETTE = [
   { avatarColor: "#00488D", initBg: "#D6E3FF" },
   { avatarColor: "#7B3200", initBg: "#FFDBCB" },
@@ -139,10 +138,6 @@ function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
   };
 }
 
-// Real appointment_time/appointment_date come back from Prisma as ISO
-// strings whose UTC components hold the actual stored date/time (both
-// columns are timezone-less in Postgres) — read with UTC getters so the
-// displayed value doesn't shift with the browser's local timezone.
 function formatDateOnly(iso: string): string {
   const d = new Date(iso);
   const day = String(d.getUTCDate()).padStart(2, "0");
@@ -240,8 +235,7 @@ export default function Dashboard() {
   const { toast } = useToast();
   const { selectedBranchId, isAllBranches } = useBranchFilter();
 
-  // Real doctors/staff fetched from the backend. No dummy fallback — an
-  // empty/failed fetch just leaves these null and the tab shows no rows.
+ 
   const [realDoctors, setRealDoctors] = useState<Record<string, unknown>[] | null>(null);
   const [realStaff, setRealStaff] = useState<Record<string, unknown>[] | null>(null);
   const [isEmployeesLoading, setIsEmployeesLoading] = useState(true);
@@ -281,6 +275,7 @@ export default function Dashboard() {
       console.log("[Dashboard] Fetching all employees from employeeApi...");
       const res = await employeeApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
+        limit: 1000,
       });
       console.log("[Dashboard] Response:", res.data);
       const allEmployees = res.data?.data?.employees || [];
@@ -316,6 +311,54 @@ export default function Dashboard() {
     }
   }, [toast, selectedBranchId, isAllBranches]);
 
+  // Branch progress bar state — branches come from the real /branch API.
+  // Each branch's pct is driven purely by its own real appointment count
+  // for today (not a share of the other branches' totals), scaled so that
+  // 15 appointments booked at a branch = 17% on that branch's bar.
+  const [branches, setBranches] = useState<{ id: string; name: string; pct: number }[]>([]);
+
+  // 15 appointments -> 17%, linearly, capped at 100%.
+  const APPOINTMENTS_PER_UNIT = 15;
+  const PCT_PER_UNIT = 17;
+
+  const fetchBranchPerformance = useCallback(async () => {
+    try {
+      const branchRes = await branchApi.getAll();
+      const branchList = branchRes.data?.data || [];
+
+      // Today's real calendar date — the bars track today's live load per
+      // branch, not a running all-time total.
+      const today = format(new Date(), "yyyy-MM-dd");
+
+      // Use each branch's real `total` count from the API (not a
+      // truncated page of rows) so the percentage reflects every
+      // appointment scheduled today at that branch, not just the first
+      // page fetched.
+      const counts = await Promise.all(
+        branchList.map((b) =>
+          appointmentApi
+            .getAll({ branchId: b.branch_id, date: today, limit: 1 })
+            .then((res) => res.data?.data?.total ?? 0)
+            .catch(() => 0),
+        ),
+      );
+
+      setBranches(
+        branchList.map((b, index) => {
+          const count = counts[index];
+          const pct = Math.min(100, Math.round((count / APPOINTMENTS_PER_UNIT) * PCT_PER_UNIT));
+          return {
+            id: b.branch_id,
+            name: b.branch_area ? `${b.branch_name} (${b.branch_area})` : (b.branch_name || b.branch_id),
+            pct,
+          };
+        }),
+      );
+    } catch (err) {
+      console.error("[Dashboard] Failed to load branch performance:", err);
+    }
+  }, []);
+
   const fetchAppointments = useCallback(async () => {
     setIsAppointmentsLoading(true);
     try {
@@ -327,6 +370,8 @@ export default function Dashboard() {
       });
       const rows = res.data?.data?.appointments || [];
       setRealAppointments(rows.map(mapAppointmentRecord));
+      setAppointmentCount(res.data?.data?.total ?? rows.length);
+      fetchBranchPerformance();
     } catch (err: any) {
       console.error("[Dashboard] Failed to load appointments:", err);
       toast({
@@ -337,7 +382,7 @@ export default function Dashboard() {
     } finally {
       setIsAppointmentsLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches]);
+  }, [toast, selectedBranchId, isAllBranches, fetchBranchPerformance]);
 
   useEffect(() => {
     fetchAppointments();
@@ -603,33 +648,9 @@ export default function Dashboard() {
   const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
   const visibleEnd = Math.min(endIndex, totalRecords);
 
-  // Branch progress bar state
-
-  const [animatedValues, setAnimatedValues] = useState<Record<number, number>>({});
+  const [animatedValues, setAnimatedValues] = useState<Record<string, number>>({});
   const branchRef = useRef<HTMLDivElement>(null);
   const hasAnimated = useRef(false);
-
-  const [branches, setBranches] = useState([
-    { id: 1, name: "Central Hospital (Tambaram)", pct: 0 },
-    { id: 2, name: "Central Hospital (Saidapet)", pct: 0 },
-    { id: 3, name: "Central Hospital (Egmore)", pct: 0 },
-  ]);
-
-  useEffect(() => {
-    setTimeout(() => {
-      updateBranchPercentage(1, 60);
-      updateBranchPercentage(2, 25);
-      updateBranchPercentage(3, 40);
-    }, 900);
-  }, []);  
-
-  const updateBranchPercentage = (id: number, newPct: number) => {
-    setBranches((prev) =>
-      prev.map((branch) =>
-        branch.id === id ? { ...branch, pct: newPct } : branch,
-      ),
-    );
-  };
 
   // Initial trigger on scroll
   useEffect(() => {
@@ -708,7 +729,7 @@ useEffect(() => {
   };
 
   const handleView = (id: string | number) => {
-    navigate(`/destination-view/${id}`);
+    navigate(`/doctor/day-view/${id}`);
   };
 
   return (
@@ -1010,7 +1031,7 @@ useEffect(() => {
                   <path d="M3.33333 11.6667H5V7.5H3.33333V11.6667ZM10 11.6667H11.6667V3.33333H10V11.6667ZM6.66667 11.6667H8.33333V9.16667H6.66667V11.6667ZM6.66667 7.5H8.33333V5.83333H6.66667V7.5ZM1.66667 15C1.20833 15.815972 14.8368 14.5104 14.184 15 13.7917 15 13.3333V1.66667C13.3333 1.20833 13.7917.815972 14.5104.489583C14.184.163194 13.7917 0 13.3333 0H1.66667C1.20833 0 .815972.163194.489583.489583C.163194.815972 0 1.20833 0 1.66667V13.3333C0 13.7917.163194 14.184.489583 14.5104C.815972 14.8368 1.20833 15 1.66667 15Z" fill="#00488D"/>
                 </svg>
               </div>
-              <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-4 max-h-[220px] overflow-y-auto hide-scrollbar pr-1">
                 {branches.map((branch) => (
                   <div key={branch.id} className="flex flex-col gap-1">
                     <div className="flex justify-between">

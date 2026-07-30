@@ -17,12 +17,12 @@ import EditAdmin from "@/components/Forms/edit/EditAdmin";
 import AddAppointment from "@/components/Forms/AddAppointment";
 import EditAppointment from "@/components/Forms/edit/Edit Appointment";
 import PatientProfile from "@/components/Forms/view/patientProfile";
-import AppointmentBooking from "@/components/Forms/view/AppointmentBooking";
 import ViewAppointmentScheduled from "@/components/Forms/view/View Appointment Scheduled";
 import Appointments from "./pages/Appointments";
 import Dashboard from "./pages/Dashboard";
 import Departments from "./pages/Departments";
 import Login from "./pages/Login";
+import Authenticate from "./pages/Authenticate";
 import NotFound from "./pages/NotFound";
 import Patients from "./pages/Patients";
 import ProtectedRoute from "./routes/ProtectedRoute";
@@ -52,6 +52,7 @@ const protectedRoutes = [
   { path: "/doctor", element: <Doctor /> },
   { path: "/doctor/view/:id", element: <Scheduled /> },
   { path: "/doctor/view", element: <Scheduled /> },
+  { path: "/doctor/day-view/:id", element: <DayScheduled /> },
   { path: "/doctor/day-view", element: <DayScheduled /> },
   { path: "/appointments", element: <Appointments /> },
   { path: "/appointments/day-view", element: <DayView /> },
@@ -73,7 +74,7 @@ const protectedRoutes = [
   { path: "/doctor/edit/:id", element: <EditDoctorForm /> },
   { path: "/appointments/add", element: <AddAppointment /> },
   { path: "/appointments/edit/:id", element: <EditAppointment /> },
-  { path: "/appointments/book", element: <AppointmentBooking /> },
+  { path: "/appointments/book", element: <AddAppointment /> },
   { path: "/appointments/view/:id", element: <ViewAppointmentScheduled /> },
 
 ];
@@ -87,6 +88,7 @@ const App = () => (
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={<Login />} />
+          <Route path="/authenticate" element={<Authenticate />} />
           
           {/* Protected Routes with Layout */}
           <Route element={<AppLayout />}>

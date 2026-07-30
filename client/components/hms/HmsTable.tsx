@@ -191,12 +191,12 @@ export default function HmsTable<T>({
                 return (
                   <th
                     key={column.key}
-                    className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-8" : ""} ${
+                    className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-5" : ""} ${
                       column.sortable !== false ? "cursor-pointer select-none" : ""
                     } ${column.headerClassName || ""}`}
                   >
                     <div
-                      className="flex items-center gap-1"
+                      className="flex items-center gap-1 whitespace-nowrap"
                       onClick={() => column.sortable !== false && onSort(column.key)}
                     >
                       <span>{column.label}</span>
@@ -221,7 +221,7 @@ export default function HmsTable<T>({
                   {columns.map((column, colIdx) => (
                     <td
                       key={column.key}
-                      className={`px-5 py-4 ${colIdx === 0 ? "pl-8" : ""} ${column.className || ""}`}
+                      className={`px-5 py-4 whitespace-nowrap ${colIdx === 0 ? "pl-5" : ""} ${column.className || ""}`}
                     >
                       {column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? "")}
                     </td>
@@ -247,12 +247,12 @@ export default function HmsTable<T>({
                 return (
                   <th
                     key={column.key}
-                    className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-8" : ""} ${
+                    className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-5" : ""} ${
                       column.sortable !== false ? "cursor-pointer select-none" : ""
                     } ${column.headerClassName || ""}`}
                   >
                     <div
-                      className="flex items-center gap-1"
+                      className="flex items-center gap-1 whitespace-nowrap"
                       onClick={() => column.sortable !== false && onSort(column.key)}
                     >
                       <span>{column.label}</span>
@@ -277,7 +277,7 @@ export default function HmsTable<T>({
                   {columns.map((column, colIdx) => (
                     <td
                       key={column.key}
-                      className={`px-5 py-4 ${colIdx === 0 ? "pl-8" : ""} ${column.className || ""}`}
+                      className={`px-5 py-4 whitespace-nowrap ${colIdx === 0 ? "pl-5" : ""} ${column.className || ""}`}
                     >
                       {column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? "")}
                     </td>

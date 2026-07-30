@@ -1,18 +1,105 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { format } from "date-fns";
+import { User, IdCard, Phone, Mail, MapPin, Cake, Droplet, VenusAndMars, Briefcase } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
+import { employeeApi, type EmployeeDetailResponse, type DoctorScheduleRecord } from "@/api/employee.api";
+
+function formatDoctorFullName(e: EmployeeDetailResponse["employee"] | null): string {
+  if (!e) return "Doctor";
+  return `Dr. ${[e.first_name, e.middle_name, e.last_name].filter(Boolean).join(" ")}`;
+}
+
+// doctor_schedule.start_time/end_time come back as UTC-anchored time values
+// -- read with UTC getters so the displayed hour doesn't shift with the
+// browser's local timezone.
+function formatScheduleTime(time: string | null): string {
+  if (!time) return "";
+  const d = new Date(time);
+  if (isNaN(d.getTime())) return "";
+  const hours = d.getUTCHours();
+  const minutes = String(d.getUTCMinutes()).padStart(2, "0");
+  const period = hours >= 12 ? "PM" : "AM";
+  const h12 = hours % 12 || 12;
+  return `${String(h12).padStart(2, "0")}:${minutes} ${period}`;
+}
 
 const WEEK_DAYS = [
-  ["Monday", "13/05/26"],
-  ["Tuesday", "14/05/26"],
-  ["Wednesday", "15/05/26"],
-  ["Thursday", "16/05/26"],
-  ["Friday", "17/05/26"],
-  ["Saturday", "18/05/26"],
-  ["Sunday", "19/05/26"],
+  ["Monday"],
+  ["Tuesday"],
+  ["Wednesday"],
+  ["Thursday"],
+  ["Friday"],
+  ["Saturday"],
+  ["Sunday"],
 ];
+
+// Monday-Sunday dates (dd/mm/yy) for the week containing `reference`.
+const getWeekDates = (reference) => {
+  const day = reference.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const monday = new Date(reference);
+  monday.setDate(monday.getDate() + mondayOffset);
+
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yy = String(d.getFullYear() % 100).padStart(2, "0");
+    return `${dd}/${mm}/${yy}`;
+  });
+};
+
+const shiftDate = (dateStr, days) => {
+  const [dd, mm, yy] = dateStr.split("/").map(Number);
+  const date = new Date(2000 + yy, mm - 1, dd);
+  date.setDate(date.getDate() + days);
+  const newDd = String(date.getDate()).padStart(2, "0");
+  const newMm = String(date.getMonth() + 1).padStart(2, "0");
+  const newYy = String(date.getFullYear() % 100).padStart(2, "0");
+  return `${newDd}/${newMm}/${newYy}`;
+};
+
+const parseDate = (dateStr) => {
+  const [dd, mm, yy] = dateStr.split("/").map(Number);
+  return new Date(2000 + yy, mm - 1, dd);
+};
+
+const isSameDay = (a, b) =>
+  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+const dateKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+
+const buildCalendarDays = (year, month) => {
+  const firstDay = new Date(year, month, 1);
+  const startOffset = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+  const cells = [];
+
+  for (let i = startOffset - 1; i >= 0; i--) {
+    cells.push({ date: new Date(year, month - 1, daysInPrevMonth - i), inMonth: false });
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push({ date: new Date(year, month, d), inMonth: true });
+  }
+  while (cells.length % 7 !== 0 || cells.length < 42) {
+    const last = cells[cells.length - 1].date;
+    cells.push({ date: new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1), inMonth: false });
+  }
+
+  return cells;
+};
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+const getMonthYearLabel = (year, month) => `${MONTH_NAMES[month]} ${year}`;
 
 const BRANCH_LOCATIONS = ["Tambaram", "Egmore", "Saidapet"];
 
@@ -25,53 +112,48 @@ const formatTime12 = (time) => {
   return `${String(hour12).padStart(2, "0")}:${minuteStr} ${period}`;
 };
 
-const INITIAL_SCHEDULE = [
-  [
-    ["10:30 AM - 12:30 PM", "green"],
-    ["10:30 AM - 12:30 PM", "blue"],
-    ["09:30 AM - 11:30 AM", "green"],
-    ["09:30 AM - 11:30 AM", "orange"],
-    ["09:30 AM - 11:30 AM", "orange"],
-    ["Week Off", "off"],
-    ["06:00 PM - 09:00 PM", "orange"],
-  ],
-  [
-    ["02:30 PM - 04:30 PM", "blue"],
-    ["01:00 PM - 03:00 PM", "orange"],
-    ["06:00 PM - 09:00 PM", "orange"],
-    ["02:00 PM - 05:30 PM", "green"],
-    ["04:00 PM - 06:00 PM", "green"],
-    ["Week Off", "off"],
-    ["Week Off", "off"],
-  ],
-  [
-    ["06:30 PM - 09:30 PM", "green"],
-    ["07:00 PM - 09:30 PM", "blue"],
-    ["Week Off", "off"],
-    ["07:00 PM - 09:30 PM", "blue"],
-    ["Week Off", "off"],
-    ["Week Off", "off"],
-    ["+", "empty"],
-  ],
-  [
-    ["+", "empty"],
-    ["+", "empty"],
-    ["+", "empty"],
-    ["+", "empty"],
-    ["+", "empty"],
-    ["Week Off", "off"],
-    ["+", "empty"],
-  ],
-];
-
-const createEmptySchedule = () =>
-  Array.from({ length: INITIAL_SCHEDULE.length }, () =>
-    Array.from({ length: 7 }, () => ["+", "empty"]),
-  );
-
 export default function DoctorProfile() {
   const navigate = useNavigate();
+  const { id } = useParams();
   const [activeTab, setActiveTab] = useState("day");
+
+  const [doctorDetail, setDoctorDetail] = useState<EmployeeDetailResponse | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    employeeApi
+      .getOne(id)
+      .then((res) => setDoctorDetail(res.data?.data ?? null))
+      .catch((err) => {
+        console.error("[Day Scheduled] Failed to load doctor:", err);
+        setDoctorDetail(null);
+      });
+  }, [id]);
+
+  const doctorEmployee = doctorDetail?.employee ?? null;
+  const doctorName = formatDoctorFullName(doctorEmployee);
+  const doctorSpecialization = doctorDetail?.doctorProfile?.specialization || doctorEmployee?.specialization || "—";
+  const doctorQualification = doctorDetail?.doctorProfile?.qualification || doctorEmployee?.qualification || "—";
+  const doctorBranchNames = doctorDetail?.branches?.length
+    ? doctorDetail.branches.map((b) => b.branch_name)
+    : doctorEmployee?.branch?.branch_name
+      ? [doctorEmployee.branch.branch_name]
+      : [];
+  const doctorIsAvailable = doctorEmployee?.emp_status === true || doctorDetail?.user?.user_status === 1;
+  // Only a real photo URL from the backend is used -- no stock/fallback
+  // image, so the avatar block simply doesn't render when the doctor has
+  // no employee_photo_URL on file.
+  const doctorPhoto = doctorEmployee?.employee_photo_URL || "";
+  const doctorLicenseNo = doctorDetail?.doctorProfile?.license_no || doctorEmployee?.license_no || "—";
+  const doctorPhone = doctorEmployee?.mobile_no || "—";
+  const doctorEmail = doctorEmployee?.email || "—";
+  const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanant_address || "—";
+  const doctorBloodGroup = doctorEmployee?.blood_group || "—";
+  const doctorExperience = doctorEmployee?.employee_no_experence != null ? `${doctorEmployee.employee_no_experence}+ yrs` : "—";
+  const doctorDOB = (doctorEmployee as any)?.dob
+    ? format(new Date((doctorEmployee as any).dob), "dd MMM yyyy")
+    : "—";
+  const doctorGender = (doctorEmployee as any)?.gender || "—";
   const [addSlotOpen, setAddSlotOpen] = useState(false);
   const [addSlotDay, setAddSlotDay] = useState("");
   const [addSlotPos, setAddSlotPos] = useState(null);
@@ -86,9 +168,47 @@ export default function DoctorProfile() {
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
   const [isToCalendarOpen, setIsToCalendarOpen] = useState(false);
 
-  const [weekOffset] = useState(0);
-  const [scheduleByWeek, setScheduleByWeek] = useState({ 0: INITIAL_SCHEDULE });
-  const schedule = scheduleByWeek[weekOffset] ?? createEmptySchedule();
+  // Real weekly availability, grouped by day_of_week from the doctor's
+  // active doctor_schedule rows (part of the same employeeApi.getOne(id)
+  // response fetched above) -- no fake/placeholder slots.
+  const doctorSchedules: DoctorScheduleRecord[] = doctorDetail?.doctorSchedules ?? [];
+
+  const scheduleByDay = useMemo(() => {
+    const map: Record<string, { time: string; branch: string }[]> = {};
+    WEEK_DAYS.forEach(([day]) => {
+      map[day.toUpperCase()] = [];
+    });
+    doctorSchedules.forEach((s) => {
+      const key = (s.day_of_week || "").toUpperCase();
+      if (!(key in map)) return;
+      map[key].push({
+        time: `${formatScheduleTime(s.start_time)} - ${formatScheduleTime(s.end_time)}`,
+        branch: s.branch?.branch_name || "",
+      });
+    });
+    return map;
+  }, [doctorSchedules]);
+
+  const maxScheduleRows = Math.max(
+    1,
+    ...WEEK_DAYS.map(([day]) => scheduleByDay[day.toUpperCase()]?.length || 0),
+  );
+
+  // Local-only overlay so "+ Add slot"/"Cancel slot" still feel interactive
+  // in this view -- there's no schedule-mutation API wired up here, so these
+  // edits aren't persisted, only real backend rows are shown by default.
+  const [scheduleOverrides, setScheduleOverrides] = useState<
+    Record<string, [string, string, string?]>
+  >({});
+
+  const schedule = Array.from({ length: maxScheduleRows }, (_, rowIndex) =>
+    WEEK_DAYS.map(([day], colIndex) => {
+      const overrideKey = `${rowIndex}-${colIndex}`;
+      if (scheduleOverrides[overrideKey]) return scheduleOverrides[overrideKey];
+      const entry = scheduleByDay[day.toUpperCase()]?.[rowIndex];
+      return entry ? ([entry.time, "blue", entry.branch] as [string, string, string]) : ["+", "empty"];
+    }),
+  );
 
   const showAlert = (message) => {
     alert(message);
@@ -140,19 +260,10 @@ export default function DoctorProfile() {
 
     if (addSlotPos) {
       const { row, col } = addSlotPos;
-      setScheduleByWeek((prev) => {
-        const weekSchedule = prev[weekOffset] ?? createEmptySchedule();
-        return {
-          ...prev,
-          [weekOffset]: weekSchedule.map((scheduleRow, rowIdx) =>
-            rowIdx !== row
-              ? scheduleRow
-              : scheduleRow.map((cell, colIdx) =>
-                  colIdx !== col ? cell : [timeLabel, "blue", slotBranch]
-                )
-          ),
-        };
-      });
+      setScheduleOverrides((prev) => ({
+        ...prev,
+        [`${row}-${col}`]: [timeLabel, "blue", slotBranch],
+      }));
     }
 
     setAddSlotOpen(false);
@@ -174,17 +285,10 @@ export default function DoctorProfile() {
   const confirmCancelSlot = () => {
     if (cancelSlotPos) {
       const { row, col } = cancelSlotPos;
-      setScheduleByWeek((prev) => {
-        const weekSchedule = prev[weekOffset] ?? createEmptySchedule();
-        return {
-          ...prev,
-          [weekOffset]: weekSchedule.map((scheduleRow, rowIdx) =>
-            rowIdx !== row
-              ? scheduleRow
-              : scheduleRow.map((cell, colIdx) => (colIdx !== col ? cell : ["+", "empty"]))
-          ),
-        };
-      });
+      setScheduleOverrides((prev) => ({
+        ...prev,
+        [`${row}-${col}`]: ["+", "empty"],
+      }));
     }
 
     setCancelSlotOpen(false);
@@ -208,12 +312,16 @@ export default function DoctorProfile() {
         </button>
         <section className="bg-white border border-[#edf0f4] rounded-[10px] p-4 flex gap-[18px] mb-4 max-[700px]:flex-col">
 
-          <div className="w-32 h-32 rounded-lg overflow-hidden shrink-0 bg-gray-200 max-[700px]:w-[105px] max-[700px]:h-[105px]">
-            <img
-              src="https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?auto=format&fit=crop&w=500&q=80"
-              alt="Doctor"
-              className="w-full h-full object-cover"
-            />
+          <div className="w-32 h-32 rounded-lg overflow-hidden shrink-0 bg-gray-200 flex items-center justify-center max-[700px]:w-[105px] max-[700px]:h-[105px]">
+            {doctorPhoto ? (
+              <img
+                src={doctorPhoto}
+                alt={doctorName}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <User className="w-1/2 h-1/2 text-gray-400" strokeWidth={1.5} />
+            )}
           </div>
 
           <div className="flex-1">
@@ -223,17 +331,17 @@ export default function DoctorProfile() {
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h1 className="text-xl font-bold text-[#182235] max-[500px]:text-lg">
-                    Dr. John Smith
+                    {doctorName}
                   </h1>
 
                   <span className="inline-flex items-center gap-[5px] bg-[#edf5ff] text-[#2266c8] border border-[#d5e6ff] px-[9px] py-1 rounded-full text-[11px]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#2675df]" />
-                    Cardiology
+                    {doctorSpecialization}
                   </span>
                 </div>
 
                 <p className="mt-[5px] text-[#707784] text-[13px]">
-                  MBBS, M.D, Cardiology
+                  {doctorQualification}
                 </p>
               </div>
 
@@ -250,13 +358,12 @@ export default function DoctorProfile() {
 
               <div className="text-[#555e6d]">
                 <span className="mr-1.5">▣</span>
-                Hospital : Central Hospital
-                (Tambaram, Egmore, Saidapet)
+                Hospital : {doctorBranchNames.length ? doctorBranchNames.join(", ") : "—"}
               </div>
 
-              <div className="text-[#0b955e] flex items-center gap-[7px]">
-                <span className="w-2 h-2 rounded-full bg-[#16a866]" />
-                Available
+              <div className={`flex items-center gap-[7px] ${doctorIsAvailable ? "text-[#0b955e]" : "text-[#9aa1ab]"}`}>
+                <span className={`w-2 h-2 rounded-full ${doctorIsAvailable ? "bg-[#16a866]" : "bg-[#9aa1ab]"}`} />
+                {doctorIsAvailable ? "Available" : "Unavailable"}
               </div>
 
             </div>
@@ -283,21 +390,21 @@ export default function DoctorProfile() {
           <div className="grid grid-cols-4 gap-x-6 gap-y-5 max-[900px]:grid-cols-2 max-[500px]:grid-cols-1">
 
             {[
-              ["▣", "Medical Licence Number", "ML566659898"],
-              ["⌕", "Phone Number", "+91 90020 90456"],
-              ["✉", "Email", "john@example.com"],
-              ["⌖", "Location", "4150 Hiney Road, Las Vegas, NV 89109"],
-              ["▣", "DOB", "25 Jan 1990"],
-              ["♧", "Blood group", "A1B+"],
-              ["⚥", "Gender", "Male"],
-              ["▣", "Experience", "12+yrs"],
-            ].map(([icon, title, value]) => (
+              { Icon: IdCard, title: "Medical Licence Number", value: doctorLicenseNo },
+              { Icon: Phone, title: "Phone Number", value: doctorPhone },
+              { Icon: Mail, title: "Email", value: doctorEmail },
+              { Icon: MapPin, title: "Location", value: doctorLocation },
+              { Icon: Cake, title: "DOB", value: doctorDOB },
+              { Icon: Droplet, title: "Blood group", value: doctorBloodGroup },
+              { Icon: VenusAndMars, title: "Gender", value: doctorGender },
+              { Icon: Briefcase, title: "Experience", value: doctorExperience },
+            ].map(({ Icon, title, value }) => (
               <div
                 key={title}
                 className="flex items-start gap-3"
               >
-                <div className="w-[23px] h-[23px] flex items-center justify-center text-[17px] text-gray-900 shrink-0">
-                  {icon}
+                <div className="w-[23px] h-[23px] flex items-center justify-center text-gray-900 shrink-0">
+                  <Icon className="w-[17px] h-[17px]" strokeWidth={1.75} />
                 </div>
 
                 <div className="flex flex-col gap-[3px]">
@@ -334,7 +441,11 @@ export default function DoctorProfile() {
           {["day", "week"].map((tab) => (
             <button
               key={tab}
-              onClick={() => (tab === "week" ? navigate("/doctor/view") : setActiveTab(tab))}
+              onClick={() =>
+                tab === "week"
+                  ? navigate(id ? `/doctor/view/${id}` : "/doctor/view")
+                  : setActiveTab(tab)
+              }
               className={`h-[39px] px-[17px] border-0 bg-transparent text-xs cursor-pointer ${
                 activeTab === tab
                   ? "text-[#004a91] border-b-2 border-[#004a91]"

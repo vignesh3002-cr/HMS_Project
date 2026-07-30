@@ -57,9 +57,6 @@ const statusStyles: Record<string, string> = {
   "No Show": "bg-gray-100 text-gray-600",
 };
 
-// Backend appointment_history.status values (see APPOINTMENT_STATUS in
-// Backend/HMS_Backend/src/modules/appointment/appointment.constants.ts)
-// mapped to the labels this page already renders/styles.
 const STATUS_LABELS: Record<string, string> = {
   BOOKED: "Scheduled",
   CONFIRMED: "Conformed",
@@ -104,10 +101,6 @@ function formatDoctorName(e: AppointmentRecord["employees"]): string {
   return `Dr. ${[e.first_name, e.middle_name, e.last_name].filter(Boolean).join(" ")}`;
 }
 
-// appointment_date/appointment_time are stored as UTC-anchored Date/Time
-// values (see appointment.utils.ts on the backend), so formatting must read
-// UTC getters directly -- local getters would shift the day/hour in
-// timezones behind UTC.
 function formatAppointmentDate(date: string): string {
   const d = new Date(date);
   if (isNaN(d.getTime())) return "—";
@@ -146,7 +139,7 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
   };
 }
 
-// Action menu for the three-dot button on each appointment row
+
 function ActionMenu({
   onView,
   onEdit,
@@ -215,9 +208,7 @@ const AppointmentSchedule: React.FC = () => {
   const { toast } = useToast();
   const { selectedBranchId, isAllBranches } = useBranchFilter();
 
-  // Appointment data fetched from GET /appointments (mutable so status
-  // changes like cancellation can be reflected). No dummy fallback — an
-  // empty/failed fetch just shows an empty state.
+  
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
 
@@ -252,12 +243,19 @@ const AppointmentSchedule: React.FC = () => {
   }, [fetchAppointments]);
 
   const handleCancelAppointment = (target: Appointment) => {
-    if (!window.confirm(`Cancel appointment ${target.id} for ${target.patient}?`)) {
+    const cancelReason = window.prompt(
+      `Cancel appointment ${target.id} for ${target.patient}?\nPlease enter a reason for cancellation:`,
+    );
+
+    if (cancelReason === null) return;
+
+    if (!cancelReason.trim()) {
+      toast({ title: "A cancellation reason is required", variant: "destructive" });
       return;
     }
 
     appointmentApi
-      .cancel(target.id)
+      .cancel(target.id, cancelReason.trim())
       .then(() => {
         setAppointments((prev) =>
           prev.map((appt) => (appt === target ? { ...appt, status: "Cancelled" } : appt)),
@@ -633,10 +631,10 @@ const AppointmentSchedule: React.FC = () => {
             ) : (
               <HmsTable
                 columns={[
-                  { key: "id", label: "Appointment No", render: (r: Appointment) => (
+                  { key: "id", label: "AppointmentNo", render: (r: Appointment) => (
                     <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.id}</span>
                   )},
-                  { key: "tokenId", label: "Token Id", render: (r: Appointment) => (
+                  { key: "tokenId", label: "TokenId", render: (r: Appointment) => (
                     <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.tokenId}</span>
                   )},
                   { key: "patient", label: "Patient", render: (r: Appointment) => (

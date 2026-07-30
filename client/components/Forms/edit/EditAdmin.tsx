@@ -704,6 +704,7 @@ export default function EditAdmin() {
                 <input
                   type="date"
                   name="joiningDate"
+                  max={new Date().toISOString().split("T")[0]}
                   className={inputCls + " text-gray-500"}
                   value={formData.joiningDate}
                   onChange={handleChange}

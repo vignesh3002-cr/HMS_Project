@@ -1,8 +1,17 @@
 import { useState, useEffect, ChangeEvent, FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { startOfWeek, endOfWeek, addWeeks, format } from "date-fns";
 import { ArrowLeft, CalendarPlus, Loader2, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { branchApi, Branch } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
@@ -53,17 +62,21 @@ function toTimeInputValue(time: string): string {
   return `${hh}:${mm}`;
 }
 
-// Looks forward day-by-day (up to 2 weeks) from startDateStr for the first
-// date this doctor/branch has a real open slot, so picking a doctor doesn't
-// leave the form pointed at a day they're fully booked or not scheduled on.
+// Looks forward day-by-day (up to and including maxDateStr) from startDateStr
+// for the first date this doctor/branch has a real open slot, so picking a
+// doctor doesn't leave the form pointed at a day they're fully booked, not
+// scheduled on, or outside the bookable current/next-week window.
 async function findNearestAvailableDate(
   doctorId: string,
   branchId: string,
   startDateStr: string,
+  maxDateStr: string,
 ): Promise<string | null> {
   const start = new Date(`${startDateStr}T00:00:00Z`);
+  const max = new Date(`${maxDateStr}T00:00:00Z`);
+  const maxDays = Math.max(0, Math.round((max.getTime() - start.getTime()) / 86400000));
 
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i <= maxDays; i++) {
     const d = new Date(start);
     d.setUTCDate(d.getUTCDate() + i);
     const dateStr = d.toISOString().split("T")[0];
@@ -110,11 +123,9 @@ export default function EditAppointment() {
   const [formData, setFormData] = useState<AppointmentFormData>(emptyFormData);
   const [loadingAppointment, setLoadingAppointment] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
-  // The appointment's original doctor/branch/date/time -- its own slot is
-  // "booked" by itself, so it won't show up in the available-slots list
-  // unless the user changes doctor/branch/date; kept so we can still offer
-  // it as a selectable option when nothing has changed.
+
   const [originalSlot, setOriginalSlot] = useState<{
     doctorId: string;
     branchId: string;
@@ -126,9 +137,14 @@ export default function EditAppointment() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [doctors, setDoctors] = useState<EmployeeRecord[]>([]);
 
+  // Branches the selected doctor is actually mapped to (via user_branch_mapping) --
+  // restricts the Branch dropdown to only that doctor's branches instead of every branch.
+  const [doctorBranches, setDoctorBranches] = useState<{ branch_id: string; branch_name: string }[]>([]);
+
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [findingNearestDate, setFindingNearestDate] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
     branchApi
@@ -212,6 +228,13 @@ export default function EditAppointment() {
           date,
           time,
         });
+
+        if (record.employee_id) {
+          employeeApi
+            .getOne(record.employee_id)
+            .then((res) => setDoctorBranches(res.data?.data?.branches || []))
+            .catch(() => {});
+        }
       })
       .catch((err) => {
         console.error("[Edit Appointment] Load error:", err);
@@ -268,7 +291,7 @@ export default function EditAppointment() {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     if (!id) return;
@@ -277,6 +300,12 @@ export default function EditAppointment() {
       toast({ title: "Please select a time slot", variant: "destructive" });
       return;
     }
+
+    setShowConfirm(true);
+  };
+
+  const handleConfirmUpdate = async () => {
+    if (!id) return;
 
     setSubmitting(true);
     try {
@@ -295,6 +324,7 @@ export default function EditAppointment() {
         title: "Appointment rescheduled",
         description: `Appointment ${id} has been rescheduled.`,
       });
+      setShowConfirm(false);
       navigate("/appointments");
     } catch (error: any) {
       toast({
@@ -302,12 +332,56 @@ export default function EditAppointment() {
         description: error?.response?.data?.message || error.message || "Something went wrong",
         variant: "destructive",
       });
+      setShowConfirm(false);
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleCancel = () => navigate(-1);
+
+  const handleCancelAppointment = () => {
+    if (!id) return;
+
+    const cancelReason = window.prompt(
+      `Cancel appointment ${id} for ${formData.patientName}?\nPlease enter a reason for cancellation:`,
+    );
+
+    if (cancelReason === null) return;
+
+    if (!cancelReason.trim()) {
+      toast({ title: "A cancellation reason is required", variant: "destructive" });
+      return;
+    }
+
+    setCancelling(true);
+    appointmentApi
+      .cancel(id, cancelReason.trim())
+      .then(() => {
+        toast({
+          title: "Appointment cancelled",
+          description: `Appointment ${id} has been cancelled.`,
+        });
+        navigate("/appointments");
+      })
+      .catch((err: any) => {
+        console.error("[Edit Appointment] Cancel error:", err);
+        toast({
+          title: "Failed to cancel appointment",
+          description: err.response?.data?.message || "Couldn't reach the appointments API.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => setCancelling(false));
+  };
+
+  // Appointment Date is bookable only within the current week through the
+  // end of next week -- no previous-week slots.
+  const minSelectableDate = format(startOfWeek(new Date(), { weekStartsOn: 1 }), "yyyy-MM-dd");
+  const maxSelectableDate = format(
+    endOfWeek(addWeeks(new Date(), 1), { weekStartsOn: 1 }),
+    "yyyy-MM-dd",
+  );
 
   if (loadingAppointment) {
     return (
@@ -379,13 +453,40 @@ export default function EditAppointment() {
                 <label className={labelClass}>Branch {requiredStar}</label>
                 <FormDropdown
                   className={inputClass}
-                  options={branches.map((b) => ({
-                    label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
-                    value: b.branch_id,
-                  }))}
+                  options={(formData.doctorId && doctorBranches.length > 0 ? doctorBranches : branches).map(
+                    (b) => ({
+                      label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                      value: b.branch_id,
+                    }),
+                  )}
                   value={formData.branchId}
-                  onValueChange={(val) => setFormData((prev) => ({ ...prev, branchId: val, timeSlot: "" }))}
-                  placeholder={branches.length ? "Select Branch" : "Loading branches..."}
+                  onValueChange={(val) => {
+                    setFormData((prev) => ({ ...prev, branchId: val, timeSlot: "" }));
+
+                    if (!val || !formData.doctorId) return;
+
+                    setFindingNearestDate(true);
+                    findNearestAvailableDate(formData.doctorId, val, formData.selectDate, maxSelectableDate)
+                      .then((date) => {
+                        if (date) {
+                          setFormData((prev) => ({ ...prev, selectDate: date, timeSlot: "" }));
+                        } else if (date === null) {
+                          toast({
+                            title: "No available date found",
+                            description: "This doctor has no open slots this week or next week at this branch.",
+                            variant: "destructive",
+                          });
+                        }
+                      })
+                      .finally(() => setFindingNearestDate(false));
+                  }}
+                  placeholder={
+                    formData.doctorId && doctorBranches.length === 0
+                      ? "This doctor has no mapped branches"
+                      : branches.length
+                        ? "Select Branch"
+                        : "Loading branches..."
+                  }
                 />
               </div>
               <div>
@@ -436,7 +537,10 @@ export default function EditAppointment() {
                       timeSlot: "",
                     }));
 
-                    if (!val) return;
+                    if (!val) {
+                      setDoctorBranches([]);
+                      return;
+                    }
 
                     setFindingNearestDate(true);
 
@@ -449,6 +553,7 @@ export default function EditAppointment() {
                       .getOne(val)
                       .then((res) => {
                         const mappedBranches = res.data?.data?.branches || [];
+                        setDoctorBranches(mappedBranches);
                         const nextBranchId =
                           mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
                           mappedBranches[0]?.branch_id ||
@@ -459,7 +564,7 @@ export default function EditAppointment() {
 
                         setFormData((prev) => ({ ...prev, branchId: nextBranchId }));
 
-                        return findNearestAvailableDate(val, nextBranchId, formData.selectDate);
+                        return findNearestAvailableDate(val, nextBranchId, formData.selectDate, maxSelectableDate);
                       })
                       .then((date) => {
                         if (date) {
@@ -467,7 +572,7 @@ export default function EditAppointment() {
                         } else if (date === null) {
                           toast({
                             title: "No available date found",
-                            description: "This doctor has no open slots in the next 14 days at their branch.",
+                            description: "This doctor has no open slots this week or next week at their branch.",
                             variant: "destructive",
                           });
                         }
@@ -492,6 +597,8 @@ export default function EditAppointment() {
                 <input
                   type="date"
                   name="selectDate"
+                  min={minSelectableDate}
+                  max={maxSelectableDate}
                   className={inputClass + " text-gray-500"}
                   value={formData.selectDate}
                   onChange={(e) => {
@@ -562,17 +669,18 @@ export default function EditAppointment() {
 
             {/* Actions Footer */}
             <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-4 mt-10 pt-6 border-t border-gray-100">
+              
               <button
                 type="button"
                 onClick={handleCancel}
-                disabled={submitting}
+                disabled={submitting || cancelling}
                 className="w-full sm:w-auto px-8 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm"
               >
-                Cancel
+                Back
               </button>
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || cancelling}
                 className="w-full sm:w-auto px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 active:scale-[0.98] transition-all duration-200 shadow-[0_4px_14px_0_rgba(37,99,235,0.2)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.3)] group disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {submitting ? (
@@ -580,12 +688,42 @@ export default function EditAppointment() {
                 ) : (
                   <Check className="w-4 h-4" />
                 )}
-                {submitting ? "Rescheduling..." : "Confirm Appointment"}
+                {submitting ? "Rescheduling..." : "Edit Appointment"}
               </button>
             </div>
           </form>
         </div>
       </div>
+
+      <AlertDialog open={showConfirm} onOpenChange={(open) => !submitting && setShowConfirm(open)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Edit Appointment</AlertDialogTitle>
+            <AlertDialogDescription>
+              You want to Edit appointment?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <button
+              type="button"
+              onClick={() => setShowConfirm(false)}
+              disabled={submitting}
+              className="w-full sm:w-auto px-8 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              No
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmUpdate}
+              disabled={submitting}
+              className="w-full sm:w-auto px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 active:scale-[0.98] transition-all duration-200 shadow-[0_4px_14px_0_rgba(37,99,235,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+              {submitting ? "Updating..." : "Yes"}
+            </button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
