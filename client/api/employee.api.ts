@@ -20,6 +20,8 @@ export interface CreateEmployeePayload {
   first_name: string;
   middle_name?: string;
   last_name: string;
+  dob?: string;
+  gender?: string;
   email: string;
   mobile_no: string;
   blood_group?: string;

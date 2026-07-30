@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from "react";
+﻿import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
@@ -15,6 +15,8 @@ import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { employeeApi } from "@/api/employee.api";
+import { FilterPopover, useFilterPanel } from "@/components/Filter";
+import type { FilterField } from "@/components/Filter/types";
 
 interface Schedule {
   patients: number;
@@ -86,6 +88,19 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
 
+  // Multi-doctor filter -- same FilterPopover used on the other pages.
+  // Selecting doctors here narrows the grid down to exactly those doctors,
+  // same as the toolbar search.
+  const {
+    values: filterValues,
+    appliedValues,
+    isOpen: isFilterOpen,
+    setIsOpen: setIsFilterOpen,
+    handleChange: handleFilterChange,
+    handleApply: handleApplyFilter,
+    handleClear: handleClearFilter,
+  } = useFilterPanel();
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (viewMenuRef.current && !viewMenuRef.current.contains(e.target as Node)) {
@@ -106,6 +121,12 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     setIsViewMenuOpen(false);
     if (view === "day") {
       navigate("/appointments/day-view");
+    } else if (view === "list") {
+      if (onViewChange) {
+        onViewChange(view);
+      } else {
+        navigate("/appointments");
+      }
     } else {
       onViewChange?.(view);
     }
@@ -219,8 +240,27 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     ? "This Week"
     : `${format(weekStart, "dd MMM")} - ${format(addDays(weekStart, 6), "dd MMM")}`;
 
-  const isDoctorDimmed = (doctorName: string) =>
-    Boolean(searchTerm) && !doctorName.toLowerCase().includes(searchTerm.toLowerCase());
+  // Doctor filter options, built from the real (deduped) doctor rows -- lets
+  // the toolbar Filter popover pick any number of specific doctors.
+  const doctorFilterFields: FilterField[] = useMemo(() => [
+    {
+      id: "doctorNames",
+      label: "Doctor",
+      type: "multiselect",
+      options: doctors.map((doctor) => ({ label: doctor.name, value: doctor.name })),
+    },
+  ], [doctors]);
+
+  // Only doctors matching the search and the multi-select Filter popover get
+  // a row at all -- narrowing down to specific doctors hides every other
+  // doctor's row entirely instead of just dimming it.
+  const selectedDoctorNames: string[] = Array.isArray(appliedValues.doctorNames) ? appliedValues.doctorNames : [];
+
+  const visibleDoctors = doctors.filter((doctor) => {
+    if (searchTerm && !doctor.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+    if (selectedDoctorNames.length > 0 && !selectedDoctorNames.includes(doctor.name)) return false;
+    return true;
+  });
 
   const totalAppointments = weekAppointments.length;
 
@@ -326,6 +366,18 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#424752]" />
         </div>
 
+        {/* Filter doctors */}
+        <FilterPopover
+          title="Filter Doctors"
+          fields={doctorFilterFields}
+          values={filterValues}
+          onChange={handleFilterChange}
+          onApply={handleApplyFilter}
+          onClear={handleClearFilter}
+          open={isFilterOpen}
+          onOpenChange={setIsFilterOpen}
+        />
+
         {/* Week navigation */}
         <div role="group" aria-label="Week navigation" className="flex items-center">
           <button
@@ -385,6 +437,10 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
               <div className="flex items-center justify-center py-16 text-[#6B7280] text-sm">
                 No appointments found for this week.
               </div>
+            ) : visibleDoctors.length === 0 ? (
+              <div className="flex items-center justify-center py-16 text-[#6B7280] text-sm">
+                No doctors match your search or filters.
+              </div>
             ) : (
             <table className="w-full min-w-[1070px] table-fixed border-collapse">
 
@@ -411,12 +467,10 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
           <tbody>
 
-            {doctors.map((doctor) => (
+            {visibleDoctors.map((doctor) => (
               <tr
                 key={doctor.name}
-                className={`border-b border-[#c3c6d7] last:border-b-0 transition-opacity ${
-                  isDoctorDimmed(doctor.name) ? "opacity-30" : ""
-                }`}
+                className="border-b border-[#c3c6d7] last:border-b-0"
               >
                 <td className="sticky left-0 z-10 w-[160px] border-r border-[#c3c6d7] bg-[#f2f4f6] px-4 py-3 align-top">
 

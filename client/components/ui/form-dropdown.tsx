@@ -21,6 +21,7 @@ export interface FormDropdownProps
   value?: string;
   onValueChange?: (value: string) => void;
   emptyMessage?: string;
+  leftIcon?: React.ReactNode;
 }
 
 function normalizeOptions(
@@ -42,6 +43,7 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
       disabled,
       onFocus,
       onBlur,
+      leftIcon,
       ...inputProps
     },
     ref,
@@ -81,11 +83,12 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
 
     const filtered = React.useMemo(() => {
       const query = search.trim().toLowerCase();
-      if (!query) return normalized;
+      const isUnmodifiedSelection = selectedOption && search === selectedOption.label;
+      if (!query || isUnmodifiedSelection) return normalized;
       return normalized.filter((option) =>
         option.label.toLowerCase().includes(query),
       );
-    }, [normalized, search]);
+    }, [normalized, search, selectedOption]);
 
     function handleSelect(option: FormDropdownOption) {
       onValueChange?.(option.value);
@@ -111,7 +114,13 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
     return (
       <div ref={containerRef} className={cn("relative w-full")}>
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          {leftIcon ? (
+            <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+              {leftIcon}
+            </div>
+          ) : (
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          )}
           <input
             {...inputProps}
             ref={handleMergeRefs}
@@ -123,11 +132,15 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
             disabled={disabled}
             placeholder={placeholder}
             value={search}
-            className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 pl-9 pr-9"
+            className={cn(
+              "w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 pl-9 pr-9",
+              inputProps.className,
+            )}
             onFocus={(event) => {
               setOpen(true);
               onFocus?.(event);
             }}
+            onClick={() => setOpen(true)}
             onChange={(event) => {
               setSearch(event.target.value);
               if (!open) setOpen(true);
@@ -139,10 +152,7 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
             type="button"
             disabled={disabled}
             tabIndex={-1}
-            onClick={() => {
-              inputRef.current?.focus();
-              setOpen((prev) => !prev);
-            }}
+            onClick={() => setOpen((prev) => !prev)}
             className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors focus:outline-none"
           >
             <ChevronDown

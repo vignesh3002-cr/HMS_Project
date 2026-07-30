@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { patientApi } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { branchApi } from "@/api/branch.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 
@@ -99,9 +100,7 @@ const bottomNavItems = [
 
 
 
-// Cosmetic-only values the real /employees endpoint doesn't return (avatar
-// initials/colors, department badge colors) — cycled per row so real data
-// still renders with the same visual style as the static fallback rows.
+
 const AVATAR_PALETTE = [
   { avatarColor: "#00488D", initBg: "#D6E3FF" },
   { avatarColor: "#7B3200", initBg: "#FFDBCB" },
@@ -139,10 +138,6 @@ function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
   };
 }
 
-// Real appointment_time/appointment_date come back from Prisma as ISO
-// strings whose UTC components hold the actual stored date/time (both
-// columns are timezone-less in Postgres) — read with UTC getters so the
-// displayed value doesn't shift with the browser's local timezone.
 function formatDateOnly(iso: string): string {
   const d = new Date(iso);
   const day = String(d.getUTCDate()).padStart(2, "0");
@@ -240,8 +235,7 @@ export default function Dashboard() {
   const { toast } = useToast();
   const { selectedBranchId, isAllBranches } = useBranchFilter();
 
-  // Real doctors/staff fetched from the backend. No dummy fallback — an
-  // empty/failed fetch just leaves these null and the tab shows no rows.
+ 
   const [realDoctors, setRealDoctors] = useState<Record<string, unknown>[] | null>(null);
   const [realStaff, setRealStaff] = useState<Record<string, unknown>[] | null>(null);
   const [isEmployeesLoading, setIsEmployeesLoading] = useState(true);
@@ -317,6 +311,60 @@ export default function Dashboard() {
     }
   }, [toast, selectedBranchId, isAllBranches]);
 
+  // Branch progress bar state — branches come from the real /branch API.
+  // Each branch's pct/color is driven purely by its own real total
+  // appointment count (not a share of the other branches' totals), bucketed
+  // into fixed tiers rather than scaled linearly.
+  const [branches, setBranches] = useState<{ id: string; name: string; pct: number; color: string }[]>([]);
+
+  // Appointment count -> progress bar percentage + color tiers:
+  //   1-6   booked -> 5%   green   (6 grouped into the 1-5 tier)
+  //   7-12  booked -> 25%  yellow
+  //   13-19 booked -> 65%  orange
+  //   20+   booked -> 100% red     (uncapped above 30, stays red)
+  function getAppointmentProgress(count: number): { pct: number; color: string } {
+    if (count <= 0) return { pct: 0, color: "#00488D" };
+    if (count <= 6) return { pct: 5, color: "#22C55E" };
+    if (count <= 12) return { pct: 25, color: "#EAB308" };
+    if (count <= 19) return { pct: 65, color: "#F97316" };
+    return { pct: 100, color: "#EF4444" };
+  }
+
+  const fetchBranchPerformance = useCallback(async () => {
+    try {
+      const branchRes = await branchApi.getAll();
+      const branchList = branchRes.data?.data || [];
+
+      // Use each branch's real `total` count from the API (not a
+      // truncated page of rows) so the percentage reflects every
+      // appointment ever booked at that branch, not just the first
+      // page fetched.
+      const counts = await Promise.all(
+        branchList.map((b) =>
+          appointmentApi
+            .getAll({ branchId: b.branch_id, limit: 1 })
+            .then((res) => res.data?.data?.total ?? 0)
+            .catch(() => 0),
+        ),
+      );
+
+      setBranches(
+        branchList.map((b, index) => {
+          const count = counts[index];
+          const { pct, color } = getAppointmentProgress(count);
+          return {
+            id: b.branch_id,
+            name: b.branch_area ? `${b.branch_name} (${b.branch_area})` : (b.branch_name || b.branch_id),
+            pct,
+            color,
+          };
+        }),
+      );
+    } catch (err) {
+      console.error("[Dashboard] Failed to load branch performance:", err);
+    }
+  }, []);
+
   const fetchAppointments = useCallback(async () => {
     setIsAppointmentsLoading(true);
     try {
@@ -328,6 +376,8 @@ export default function Dashboard() {
       });
       const rows = res.data?.data?.appointments || [];
       setRealAppointments(rows.map(mapAppointmentRecord));
+      setAppointmentCount(res.data?.data?.total ?? rows.length);
+      fetchBranchPerformance();
     } catch (err: any) {
       console.error("[Dashboard] Failed to load appointments:", err);
       toast({
@@ -338,7 +388,7 @@ export default function Dashboard() {
     } finally {
       setIsAppointmentsLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches]);
+  }, [toast, selectedBranchId, isAllBranches, fetchBranchPerformance]);
 
   useEffect(() => {
     fetchAppointments();
@@ -604,33 +654,9 @@ export default function Dashboard() {
   const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
   const visibleEnd = Math.min(endIndex, totalRecords);
 
-  // Branch progress bar state
-
-  const [animatedValues, setAnimatedValues] = useState<Record<number, number>>({});
+  const [animatedValues, setAnimatedValues] = useState<Record<string, number>>({});
   const branchRef = useRef<HTMLDivElement>(null);
   const hasAnimated = useRef(false);
-
-  const [branches, setBranches] = useState([
-    { id: 1, name: "Central Hospital (Tambaram)", pct: 0 },
-    { id: 2, name: "Central Hospital (Saidapet)", pct: 0 },
-    { id: 3, name: "Central Hospital (Egmore)", pct: 0 },
-  ]);
-
-  useEffect(() => {
-    setTimeout(() => {
-      updateBranchPercentage(1, 60);
-      updateBranchPercentage(2, 25);
-      updateBranchPercentage(3, 40);
-    }, 900);
-  }, []);  
-
-  const updateBranchPercentage = (id: number, newPct: number) => {
-    setBranches((prev) =>
-      prev.map((branch) =>
-        branch.id === id ? { ...branch, pct: newPct } : branch,
-      ),
-    );
-  };
 
   // Initial trigger on scroll
   useEffect(() => {
@@ -709,7 +735,7 @@ useEffect(() => {
   };
 
   const handleView = (id: string | number) => {
-    navigate(`/destination-view/${id}`);
+    navigate(`/doctor/day-view/${id}`);
   };
 
   return (
@@ -1011,15 +1037,15 @@ useEffect(() => {
                   <path d="M3.33333 11.6667H5V7.5H3.33333V11.6667ZM10 11.6667H11.6667V3.33333H10V11.6667ZM6.66667 11.6667H8.33333V9.16667H6.66667V11.6667ZM6.66667 7.5H8.33333V5.83333H6.66667V7.5ZM1.66667 15C1.20833 15.815972 14.8368 14.5104 14.184 15 13.7917 15 13.3333V1.66667C13.3333 1.20833 13.7917.815972 14.5104.489583C14.184.163194 13.7917 0 13.3333 0H1.66667C1.20833 0 .815972.163194.489583.489583C.163194.815972 0 1.20833 0 1.66667V13.3333C0 13.7917.163194 14.184.489583 14.5104C.815972 14.8368 1.20833 15 1.66667 15Z" fill="#00488D"/>
                 </svg>
               </div>
-              <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-4 max-h-[220px] overflow-y-auto hide-scrollbar pr-1">
                 {branches.map((branch) => (
                   <div key={branch.id} className="flex flex-col gap-1">
                     <div className="flex justify-between">
                       <span className="text-[#191C1E] text-[9px] font-semibold tracking-[0.9px] capitalize">{branch.name}</span>
-                      <span className="text-[#00488D] text-[9px] font-semibold tracking-[0.9px] uppercase">{animatedValues[branch.id] ?? 0}%</span>
+                      <span className="text-[9px] font-semibold tracking-[0.9px] uppercase" style={{ color: branch.color }}>{animatedValues[branch.id] ?? 0}%</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-[#ECEEF0] overflow-hidden">
-                      <div className="h-full rounded-full bg-[#00488D] transition-all duration-200" style={{ width: `${animatedValues[branch.id] ?? 0}%` }} />
+                      <div className="h-full rounded-full" style={{ width: `${animatedValues[branch.id] ?? 0}%`, background: branch.color }} />
                     </div>
                   </div>
                 ))}

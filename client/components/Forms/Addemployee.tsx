@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { MultiSelectDropdown } from "@/components/ui/multi-select-dropdown";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
+import TimepickerWheel from "@/components/ui/timepicker-wheel";
 import { State as CSState, City } from "country-state-city";
 import type { IState } from "country-state-city";
 import { employeeApi, CreateEmployeePayload, WorkingHourDto } from "@/api/employee.api";
@@ -579,6 +580,8 @@ export default function AddEmployee() {
         first_name: formData.firstName,
         middle_name: formData.middleName || undefined,
         last_name: formData.lastName,
+        dob: formData.dateOfBirth || undefined,
+        gender: formData.gender || undefined,
         email: formData.email,
         mobile_no: formData.mobileNo,
         blood_group: formData.bloodGroup || undefined,
@@ -737,6 +740,31 @@ export default function AddEmployee() {
                   maxLength={50}
                   className={inputCls}
                   value={formData.lastName}
+                  onChange={handleChange}
+                  disabled={submitting}
+                />
+              </div>
+
+              <div>
+                <label className={labelCls}>Gender <Req /></label>
+                <FormDropdown
+                  name="gender"
+                  className={inputCls}
+                  options={["Male", "Female", "Other"]}
+                  value={formData.gender}
+                  onValueChange={(v) => setFormData((p) => ({ ...p, gender: v }))}
+                  placeholder="Select gender"
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Date of birth <Req /></label>
+                <input
+                  type="date"
+                  name="dateOfBirth"
+                  max={todayStr}
+                  className={inputCls + " text-gray-500"}
+                  value={formData.dateOfBirth}
                   onChange={handleChange}
                   disabled={submitting}
                 />
@@ -1269,12 +1297,9 @@ export default function AddEmployee() {
                           <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5">
                             Start time
                           </label>
-                          <FormDropdown
-                            name={`start-${entry.id}`}
-                            className={inputCls + " !h-9 !w-[150px]"}
-                            options={TIME_OPTIONS}
+                          <TimepickerWheel
                             value={entry.start_time}
-                            onValueChange={(v) => updateSlot(entry.id, "start_time", v)}
+                            onChange={(v) => updateSlot(entry.id, "start_time", v)}
                             placeholder="Start time"
                             disabled={submitting}
                           />
@@ -1285,12 +1310,9 @@ export default function AddEmployee() {
                           <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5">
                             End time
                           </label>
-                          <FormDropdown
-                            name={`end-${entry.id}`}
-                            className={inputCls + " !h-9 !w-[150px]"}
-                            options={TIME_OPTIONS}
+                          <TimepickerWheel
                             value={entry.end_time}
-                            onValueChange={(v) => updateSlot(entry.id, "end_time", v)}
+                            onChange={(v) => updateSlot(entry.id, "end_time", v)}
                             placeholder="End time"
                             disabled={submitting}
                           />
