@@ -104,6 +104,7 @@ function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
     branch: formatBranch(emp.branch),
     status: (emp.emp_status === true || emp.user_table?.user_status === 1) ? "Active" : "Leave",
     qualification: emp.qualification || "—",
+    mobile: emp.mobile_no || "—",
     photo: "",
   };
 }
@@ -233,7 +234,7 @@ export default function Doctor() {
 
     if (searchQuery) {
       result = result.filter((doctor) =>
-        ["name", "id", "dept", "branch", "status"]
+        ["name", "id", "dept", "branch", "status", "mobile"]
           .map((f) => String(doctor[f] ?? ""))
           .join(" ")
           .toLowerCase()
@@ -456,6 +457,12 @@ export default function Doctor() {
                   { key: "dept", label: "Department", render: (r: any) => (
                     <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: String(r.deptBg), color: String(r.deptColor) }}>{String(r.dept)}</span>
                   )},
+                  { key: "qualification", label: "Qualification", render: (r: any) => (
+                    <span className="text-[#191C1E] hms-content-text leading-4">{String(r.qualification)}</span>
+                  )},
+                  { key: "mobile", label: "Mobile No", render: (r: any) => (
+                    <span className="text-[#191C1E] hms-content-text leading-4">{String(r.mobile)}</span>
+                  )},
                   { key: "status", label: "Status", render: (r: any) => {
                     const s = String(r.status);
                     const isActive = s === "Active";
@@ -466,10 +473,7 @@ export default function Doctor() {
                       </span>
                     );
                   }},
-                  { key: "qualification", label: "Qualification", render: (r: any) => (
-                    <span className="text-[#191C1E] hms-content-text leading-4">{String(r.qualification)}</span>
-                  )},
-                  { key: "actions", label: "Actions", sortable: false, render: (r: any) => (
+                  { key: "actions", label: "Actions", sortable: false, className: "w-px", headerClassName: "w-px", render: (r: any) => (
                     <div className="flex items-center gap-1">
                       <button onClick={() => handleView(r.id)} title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
