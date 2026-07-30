@@ -312,32 +312,37 @@ export default function Dashboard() {
   }, [toast, selectedBranchId, isAllBranches]);
 
   // Branch progress bar state — branches come from the real /branch API.
-  // Each branch's pct is driven purely by its own real appointment count
-  // for today (not a share of the other branches' totals), scaled so that
-  // 15 appointments booked at a branch = 17% on that branch's bar.
-  const [branches, setBranches] = useState<{ id: string; name: string; pct: number }[]>([]);
+  // Each branch's pct/color is driven purely by its own real total
+  // appointment count (not a share of the other branches' totals), bucketed
+  // into fixed tiers rather than scaled linearly.
+  const [branches, setBranches] = useState<{ id: string; name: string; pct: number; color: string }[]>([]);
 
-  // 15 appointments -> 17%, linearly, capped at 100%.
-  const APPOINTMENTS_PER_UNIT = 15;
-  const PCT_PER_UNIT = 17;
+  // Appointment count -> progress bar percentage + color tiers:
+  //   1-6   booked -> 5%   green   (6 grouped into the 1-5 tier)
+  //   7-12  booked -> 25%  yellow
+  //   13-19 booked -> 65%  orange
+  //   20+   booked -> 100% red     (uncapped above 30, stays red)
+  function getAppointmentProgress(count: number): { pct: number; color: string } {
+    if (count <= 0) return { pct: 0, color: "#00488D" };
+    if (count <= 6) return { pct: 5, color: "#22C55E" };
+    if (count <= 12) return { pct: 25, color: "#EAB308" };
+    if (count <= 19) return { pct: 65, color: "#F97316" };
+    return { pct: 100, color: "#EF4444" };
+  }
 
   const fetchBranchPerformance = useCallback(async () => {
     try {
       const branchRes = await branchApi.getAll();
       const branchList = branchRes.data?.data || [];
 
-      // Today's real calendar date — the bars track today's live load per
-      // branch, not a running all-time total.
-      const today = format(new Date(), "yyyy-MM-dd");
-
       // Use each branch's real `total` count from the API (not a
       // truncated page of rows) so the percentage reflects every
-      // appointment scheduled today at that branch, not just the first
+      // appointment ever booked at that branch, not just the first
       // page fetched.
       const counts = await Promise.all(
         branchList.map((b) =>
           appointmentApi
-            .getAll({ branchId: b.branch_id, date: today, limit: 1 })
+            .getAll({ branchId: b.branch_id, limit: 1 })
             .then((res) => res.data?.data?.total ?? 0)
             .catch(() => 0),
         ),
@@ -346,11 +351,12 @@ export default function Dashboard() {
       setBranches(
         branchList.map((b, index) => {
           const count = counts[index];
-          const pct = Math.min(100, Math.round((count / APPOINTMENTS_PER_UNIT) * PCT_PER_UNIT));
+          const { pct, color } = getAppointmentProgress(count);
           return {
             id: b.branch_id,
             name: b.branch_area ? `${b.branch_name} (${b.branch_area})` : (b.branch_name || b.branch_id),
             pct,
+            color,
           };
         }),
       );
@@ -1036,10 +1042,10 @@ useEffect(() => {
                   <div key={branch.id} className="flex flex-col gap-1">
                     <div className="flex justify-between">
                       <span className="text-[#191C1E] text-[9px] font-semibold tracking-[0.9px] capitalize">{branch.name}</span>
-                      <span className="text-[#00488D] text-[9px] font-semibold tracking-[0.9px] uppercase">{animatedValues[branch.id] ?? 0}%</span>
+                      <span className="text-[9px] font-semibold tracking-[0.9px] uppercase" style={{ color: branch.color }}>{animatedValues[branch.id] ?? 0}%</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-[#ECEEF0] overflow-hidden">
-                      <div className="h-full rounded-full bg-[#00488D] transition-all duration-200" style={{ width: `${animatedValues[branch.id] ?? 0}%` }} />
+                      <div className="h-full rounded-full" style={{ width: `${animatedValues[branch.id] ?? 0}%`, background: branch.color }} />
                     </div>
                   </div>
                 ))}
