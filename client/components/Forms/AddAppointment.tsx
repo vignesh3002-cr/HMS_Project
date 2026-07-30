@@ -482,7 +482,7 @@ export default function AddAppointment() {
 
                     // department_id and specialization are entered as two
                     // independent fields on the doctor's record (see
-                    // EditDoctorForm.tsx), so they can end up out of sync for
+                    // Addemployee.tsx), so they can end up out of sync for
                     // some doctors -- prefer whichever department's name
                     // actually matches the doctor's specialization, and only
                     // fall back to the (possibly mismatched) department_id

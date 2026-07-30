@@ -11,11 +11,14 @@ export interface LoginResponse {
 
 export const login = async (
   username: string,
-  password: string
+  password: string,
+  rememberMe: boolean
+
 ): Promise<LoginResponse> => {
   const res = await API.post("/auth/login", {
     username,
     password,
+    rememberMe
   });
 
   if (!res.data.success) {

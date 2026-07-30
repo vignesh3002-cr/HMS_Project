@@ -1,6 +1,6 @@
 import { useState, ChangeEvent, FormEvent, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Building2, Loader2, Plus, UserCheck, UserPlus } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft, Building2, Check, Loader2, Plus, ShieldCheck, UserCheck, UserPlus } from "lucide-react";
 import {
   branchApi,
   Branch,
@@ -8,14 +8,26 @@ import {
   CreateBranchPayload,
   NewBranchAdminPayload,
   AssignableUser,
+  CurrentBranchAdmin,
 } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
+import { employeeApi } from "@/api/employee.api";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
-import { CountryStateCitySelect } from "@/components/ui/CountryStateCitySelect";
+
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import { State as CSState, City } from "country-state-city";
 import type { IState } from "country-state-city";
+
+export const medicalServiceTypes = [
+  "Single Specialty",
+  "Multi Specialty",
+  "Super Specialty",
+  "General Hospital",
+  "Cancer Care Center",
+  "Primary Care Clinic",
+  "Day Care Center",
+];
 
 interface BranchFormData {
   branchCode: string;
@@ -39,11 +51,11 @@ interface BranchFormData {
   panNo: string;
   websiteAddress: string;
   medicalServices: string;
+}
 
+interface AdminFormData {
   adminMode: BranchAdminMode;
   adminUserId: string;
-
-  // "Create New Admin" — mirrors Addemployee.tsx's full field set.
   adminPhotoUrl: string | null;
   adminFirstName: string;
   adminMiddleName: string;
@@ -72,7 +84,7 @@ interface BranchFormData {
   confirmPassword: string;
 }
 
-const emptyFormData: BranchFormData = {
+const emptyBranchData: BranchFormData = {
   branchCode: "",
   branchName: "",
   branchType: "",
@@ -94,10 +106,11 @@ const emptyFormData: BranchFormData = {
   panNo: "",
   websiteAddress: "",
   medicalServices: "",
+};
 
+const emptyAdminData: AdminFormData = {
   adminMode: "NEW",
   adminUserId: "",
-
   adminPhotoUrl: null,
   adminFirstName: "",
   adminMiddleName: "",
@@ -133,7 +146,6 @@ const branchRequired: { key: keyof BranchFormData; label: string }[] = [
   { key: "area", label: "Area" },
   { key: "state", label: "State" },
   { key: "district", label: "District" },
-  { key: "country", label: "Country" },
   { key: "licenseNumber", label: "License Number" },
   { key: "emergencyNumber", label: "Emergency Number" },
   { key: "dateOfEstablish", label: "Date of Establish" },
@@ -149,7 +161,7 @@ const branchRequired: { key: keyof BranchFormData; label: string }[] = [
   { key: "websiteAddress", label: "Website Address" },
 ];
 
-const adminRequired: Record<BranchAdminMode, { key: keyof BranchFormData; label: string }[]> = {
+const adminRequired: Record<BranchAdminMode, { key: keyof AdminFormData; label: string }[]> = {
   EXISTING: [{ key: "adminUserId", label: "Branch Admin" }],
   NEW: [
     { key: "adminFirstName", label: "Admin First Name" },
@@ -212,14 +224,21 @@ function Section({
   );
 }
 
+function getInitials(name: string): string {
+  const words = name.trim().split(/\s+/);
+  return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
+}
+
 export default function AddBranch() {
   const navigate = useNavigate();
+  const { id: branchId } = useParams<{ id: string }>();
+  const isEditMode = Boolean(branchId);
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
-  const [formData, setFormData] = useState<BranchFormData>({
-    ...emptyFormData,
-    adminMode: "NEW",
-  });
+  const [loading, setLoading] = useState(isEditMode);
+  const [branchData, setBranchData] = useState<BranchFormData>(emptyBranchData);
+  const [adminData, setAdminData] = useState<AdminFormData>(emptyAdminData);
+  const [currentAdmin, setCurrentAdmin] = useState<CurrentBranchAdmin | null>(null);
   const [assignableAdmins, setAssignableAdmins] = useState<AssignableUser[]>([]);
   const [loadingAdmins, setLoadingAdmins] = useState(false);
   const [allBranches, setAllBranches] = useState<Branch[]>([]);
@@ -228,23 +247,28 @@ export default function AddBranch() {
   const [indianStates, setIndianStates] = useState<IState[]>([]);
   const [districtOptions, setDistrictOptions] = useState<string[]>([]);
   const [sameAsCurrent, setSameAsCurrent] = useState(false);
+  const [branchDistrictOptions, setBranchDistrictOptions] = useState<string[]>([]);
 
   const handleChange = (
     e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    if (name.startsWith("admin")) {
+      setAdminData((prev) => ({ ...prev, [name]: value }));
+    } else {
+      setBranchData((prev) => ({ ...prev, [name]: value }));
+    }
   };
 
   const handleAdminModeChange = (mode: BranchAdminMode) => {
-    setFormData((prev) => ({ ...prev, adminMode: mode }));
+    setAdminData((prev) => ({ ...prev, adminMode: mode }));
   };
 
   const handleSameAsCurrent = (e: ChangeEvent<HTMLInputElement>) => {
     const checked = e.target.checked;
     setSameAsCurrent(checked);
     if (checked) {
-      setFormData((p) => ({ ...p, adminPermanentAddress: p.adminCurrentAddress }));
+      setAdminData((p) => ({ ...p, adminPermanentAddress: p.adminCurrentAddress }));
     }
   };
 
@@ -271,10 +295,10 @@ export default function AddBranch() {
   };
 
   useEffect(() => {
-    if (formData.adminMode === "EXISTING") {
+    if (adminData.adminMode === "EXISTING") {
       fetchAssignableAdmins();
     }
-  }, [formData.adminMode]);
+  }, [adminData.adminMode]);
 
   // Branch list — used to label which branch an assignable admin currently belongs to.
   useEffect(() => {
@@ -300,8 +324,8 @@ export default function AddBranch() {
   }, []);
 
   useEffect(() => {
-    if (formData.adminState) {
-      const s = indianStates.find((s) => s.name === formData.adminState);
+    if (adminData.adminState) {
+      const s = indianStates.find((s) => s.name === adminData.adminState);
       if (s)
         setDistrictOptions(
           City.getCitiesOfState("IN", s.isoCode)
@@ -311,12 +335,100 @@ export default function AddBranch() {
     } else {
       setDistrictOptions([]);
     }
-  }, [formData.adminState, indianStates]);
+  }, [adminData.adminState, indianStates]);
+
+  useEffect(() => {
+    if (branchData.state) {
+      const s = indianStates.find((s) => s.name === branchData.state);
+      if (s)
+        setBranchDistrictOptions(
+          City.getCitiesOfState("IN", s.isoCode)
+            .map((c) => c.name)
+            .sort(),
+        );
+    } else {
+      setBranchDistrictOptions([]);
+    }
+  }, [branchData.state, indianStates]);
+
+  useEffect(() => {
+    setBranchData((prev) => ({
+      ...prev,
+      country: "India",
+      countryId: "IN",
+    }));
+  }, []);
+
+  // Edit mode — fetch the branch's full details (all columns + currently
+  // assigned admin) via GET /branch/:branchId and prefill both branchData and
+  // the read-only "Currently Assigned Admin" card. Admin mode defaults to
+  // "EXISTING" pre-selected on the current admin, so saving branch-only edits
+  // doesn't force filling out a brand-new admin's full profile.
+  useEffect(() => {
+    if (!branchId) return;
+
+    branchApi
+      .getById(branchId)
+      .then((res) => {
+        const branch = res.data?.data;
+
+        if (branch) {
+          setBranchData((prev) => ({
+            ...prev,
+            branchCode: branch.branch_code || "",
+            branchName: branch.branch_name || "",
+            branchType: branch.branch_type || "",
+            area: branch.branch_area || "",
+            state: branch.state_name || "",
+            district: branch.district || "",
+            country: branch.country || "India",
+            countryId: "IN",
+            pincode: branch.branch_pincode != null ? String(branch.branch_pincode) : "",
+            licenseNumber: branch.branch_license_no || "",
+            emergencyNumber: branch.emergency_no || "",
+            email: branch.branch_email || "",
+            address: branch.address || "",
+            dateOfEstablish: branch.date_of_establish
+              ? String(branch.date_of_establish).slice(0, 10)
+              : "",
+            totalBeds: branch.total_beds != null ? String(branch.total_beds) : "",
+            totalEmployees: branch.total_no_emp || "",
+            faxNo: branch.fax_no || "",
+            gstNo: branch.gst_no || "",
+            panNo: branch.pan_no || "",
+            websiteAddress: branch.website_address || "",
+            medicalServices: branch.medical_services || "",
+          }));
+
+          const admin = branch.current_admin ?? null;
+          setCurrentAdmin(admin);
+          setAdminData((prev) => ({
+            ...prev,
+            adminMode: "EXISTING",
+            adminUserId: admin?.user_id ?? "",
+          }));
+        } else {
+          toast({
+            title: "Branch not found",
+            description: "Could not find this branch.",
+            variant: "destructive",
+          });
+        }
+      })
+      .catch(() => {
+        toast({
+          title: "Failed to load branch",
+          description: "Could not fetch branch details.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => setLoading(false));
+  }, [branchId, toast]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
-    if (formData.password !== formData.confirmPassword && formData.adminMode === "NEW") {
+    if (adminData.password !== adminData.confirmPassword && adminData.adminMode === "NEW") {
       toast({
         title: "Password mismatch",
         description: "Password and Confirm Password must match.",
@@ -325,8 +437,11 @@ export default function AddBranch() {
       return;
     }
 
-    const requiredFields = [...branchRequired, ...adminRequired[formData.adminMode]];
-    const missing = requiredFields.find((f) => !String(formData[f.key] ?? "").trim());
+    const requiredFields = [...branchRequired, ...adminRequired[adminData.adminMode]];
+    const missing = requiredFields.find((f) => {
+      const val = f.key.startsWith("admin") ? adminData[f.key as keyof AdminFormData] : branchData[f.key as keyof BranchFormData];
+      return !String(val ?? "").trim();
+    });
     if (missing) {
       toast({
         title: "Missing required field",
@@ -337,8 +452,8 @@ export default function AddBranch() {
     }
 
     if (
-      formData.adminMode === "NEW" &&
-      formData.adminDepartmentId === OTHER_DEPARTMENT_VALUE &&
+      adminData.adminMode === "NEW" &&
+      adminData.adminDepartmentId === OTHER_DEPARTMENT_VALUE &&
       !customDepartment.trim()
     ) {
       toast({
@@ -352,89 +467,185 @@ export default function AddBranch() {
     setSubmitting(true);
 
     try {
-      const payload: CreateBranchPayload = {
-        branch_code: formData.branchCode,
-        branch_name: formData.branchName,
-        branch_type: formData.branchType,
-        email: formData.email,
-        emergency_number: formData.emergencyNumber,
-        address: formData.address,
-        district: formData.district,
-        state_name: formData.state,
-        country: formData.country,
-        country_id: formData.countryId,
-        area: formData.area,
-        pincode: formData.pincode ? Number(formData.pincode) : undefined,
-        license_number: formData.licenseNumber,
-        total_beds: formData.totalBeds ? Number(formData.totalBeds) : undefined,
-        total_no_emp: formData.totalEmployees || undefined,
-        fax_no: formData.faxNo || undefined,
-        gst_no: formData.gstNo || undefined,
-        pan_no: formData.panNo || undefined,
-        website_address: formData.websiteAddress || undefined,
-        date_of_establish: formData.dateOfEstablish || undefined,
-        medical_services: formData.medicalServices,
+      if (isEditMode && branchId) {
+        const branchPayload: Partial<CreateBranchPayload> = {
+          branch_code: branchData.branchCode,
+          branch_name: branchData.branchName,
+          branch_type: branchData.branchType,
+          email: branchData.email,
+          emergency_number: branchData.emergencyNumber,
+          address: branchData.address,
+          district: branchData.district,
+          state_name: branchData.state,
+          country: branchData.country,
+          area: branchData.area,
+          pincode: branchData.pincode ? Number(branchData.pincode) : undefined,
+          license_number: branchData.licenseNumber,
+          total_beds: branchData.totalBeds ? Number(branchData.totalBeds) : undefined,
+          total_no_emp: branchData.totalEmployees || undefined,
+          fax_no: branchData.faxNo || undefined,
+          gst_no: branchData.gstNo || undefined,
+          pan_no: branchData.panNo || undefined,
+          website_address: branchData.websiteAddress || undefined,
+          date_of_establish: branchData.dateOfEstablish || undefined,
+          medical_services: branchData.medicalServices,
+        };
 
-        admin_mode: formData.adminMode,
-      };
-
-      if (formData.adminMode === "EXISTING") {
-        payload.admin_user_id = formData.adminUserId;
-      } else if (formData.adminMode === "NEW") {
-        let departmentId = formData.adminDepartmentId;
-        if (departmentId === OTHER_DEPARTMENT_VALUE) {
-          const created = await departmentApi.create({
-            department_name: customDepartment.trim(),
-          });
-          departmentId = created.data.data.department_id;
-          setDepartments((p) => [...p, created.data.data]);
+        const response = await branchApi.update(branchId, branchPayload);
+        if (!response.data.success) {
+          throw new Error(response.data.message);
         }
 
-        const adminPayload: NewBranchAdminPayload = {
-          first_name: formData.adminFirstName,
-          middle_name: formData.adminMiddleName || undefined,
-          last_name: formData.adminLastName || undefined,
-          email: formData.adminEmail,
-          mobile_no: formData.adminMobile,
-          username: formData.adminUsername,
-          password: formData.password,
-          department_id: departmentId || undefined,
-          blood_group: formData.adminBloodGroup || undefined,
-          nationality: formData.adminNationality || undefined,
-          marital_status: formData.adminMaritalStatus || undefined,
-          aadhaar_no: formData.adminAadhaarNo || undefined,
-          pan_no: formData.adminPanNo || undefined,
-          passport_no: formData.adminPassportNo || undefined,
-          permanent_address: formData.adminPermanentAddress || undefined,
-          current_address: formData.adminCurrentAddress || undefined,
-          employee_photo_URL: formData.adminPhotoUrl || undefined,
-          employee_state: formData.adminState || undefined,
-          employee_district: formData.adminDistrict || undefined,
-          employee_area: formData.adminArea || undefined,
-          employee_pincode: formData.adminPincode ? Number(formData.adminPincode) : undefined,
-          emergency_contact_name: formData.adminEmergencyContactName || undefined,
-          emergency_contact_relationship: formData.adminEmergencyContactRelation || undefined,
-          emergency_contact_number: formData.adminEmergencyContactNumber || undefined,
-          joining_date: formData.adminJoiningDate || undefined,
+        if (adminData.adminMode === "EXISTING") {
+          // Only call out to reassign if the selection actually changed —
+          // resubmitting with the same admin already assigned is a no-op.
+          if (adminData.adminUserId && adminData.adminUserId !== currentAdmin?.user_id) {
+            const assignRes = await branchApi.assignAdmin(branchId, adminData.adminUserId);
+            if (!assignRes.data.success) {
+              throw new Error(assignRes.data.message);
+            }
+          }
+        } else {
+          let departmentId = adminData.adminDepartmentId;
+          if (departmentId === OTHER_DEPARTMENT_VALUE) {
+            const created = await departmentApi.create({
+              department_name: customDepartment.trim(),
+            });
+            departmentId = created.data.data.department_id;
+            setDepartments((p) => [...p, created.data.data]);
+          }
+
+          // Free up whoever currently administers this branch before handing
+          // it to a brand-new admin — a branch has exactly one active admin.
+          if (currentAdmin) {
+            await branchApi.unassignAdmin(currentAdmin.user_id);
+          }
+
+          const empRes = await employeeApi.create({
+            username: adminData.adminUsername,
+            password: adminData.password,
+            role_type: "BRANCH_ADMIN",
+            first_name: adminData.adminFirstName,
+            middle_name: adminData.adminMiddleName || undefined,
+            last_name: adminData.adminLastName || "",
+            email: adminData.adminEmail,
+            mobile_no: adminData.adminMobile,
+            blood_group: adminData.adminBloodGroup || undefined,
+            nationality: adminData.adminNationality || undefined,
+            marital_status: adminData.adminMaritalStatus || undefined,
+            aadhaar_no: adminData.adminAadhaarNo || undefined,
+            pan_no: adminData.adminPanNo || undefined,
+            passport_no: adminData.adminPassportNo || undefined,
+            permanent_address: adminData.adminPermanentAddress || undefined,
+            current_address: adminData.adminCurrentAddress || undefined,
+            employee_photo_URL: adminData.adminPhotoUrl || undefined,
+            employee_state: adminData.adminState || undefined,
+            employee_district: adminData.adminDistrict || undefined,
+            employee_area: adminData.adminArea || undefined,
+            employee_pincode: adminData.adminPincode ? Number(adminData.adminPincode) : undefined,
+            emergency_contact_name: adminData.adminEmergencyContactName || undefined,
+            emergency_contact_relationship: adminData.adminEmergencyContactRelation || undefined,
+            emergency_contact_number: adminData.adminEmergencyContactNumber || undefined,
+            department_id: departmentId,
+            designation: "Branch Admin",
+            joining_date: adminData.adminJoiningDate,
+            emp_status: true,
+            branch_ids: [branchId],
+          });
+          if (!empRes.data.success) {
+            throw new Error(empRes.data.message);
+          }
+        }
+
+        toast({
+          title: "Branch updated",
+          description: `${branchData.branchName} was updated successfully.`,
+        });
+      } else {
+        const payload: CreateBranchPayload = {
+          branch_code: branchData.branchCode,
+          branch_name: branchData.branchName,
+          branch_type: branchData.branchType,
+          email: branchData.email,
+          emergency_number: branchData.emergencyNumber,
+          address: branchData.address,
+          district: branchData.district,
+          state_name: branchData.state,
+          country: branchData.country,
+          country_id: branchData.countryId,
+          area: branchData.area,
+          pincode: branchData.pincode ? Number(branchData.pincode) : undefined,
+          license_number: branchData.licenseNumber,
+          total_beds: branchData.totalBeds ? Number(branchData.totalBeds) : undefined,
+          total_no_emp: branchData.totalEmployees || undefined,
+          fax_no: branchData.faxNo || undefined,
+          gst_no: branchData.gstNo || undefined,
+          pan_no: branchData.panNo || undefined,
+          website_address: branchData.websiteAddress || undefined,
+          date_of_establish: branchData.dateOfEstablish || undefined,
+          medical_services: branchData.medicalServices,
+
+          admin_mode: adminData.adminMode,
         };
-        payload.admin = adminPayload;
+
+        if (adminData.adminMode === "EXISTING") {
+          payload.admin_user_id = adminData.adminUserId;
+        } else if (adminData.adminMode === "NEW") {
+          let departmentId = adminData.adminDepartmentId;
+          if (departmentId === OTHER_DEPARTMENT_VALUE) {
+            const created = await departmentApi.create({
+              department_name: customDepartment.trim(),
+            });
+            departmentId = created.data.data.department_id;
+            setDepartments((p) => [...p, created.data.data]);
+          }
+
+          const adminPayload: NewBranchAdminPayload = {
+            first_name: adminData.adminFirstName,
+            middle_name: adminData.adminMiddleName || undefined,
+            last_name: adminData.adminLastName || undefined,
+            email: adminData.adminEmail,
+            mobile_no: adminData.adminMobile,
+            username: adminData.adminUsername,
+            password: adminData.password,
+            department_id: departmentId || undefined,
+            blood_group: adminData.adminBloodGroup || undefined,
+            nationality: adminData.adminNationality || undefined,
+            marital_status: adminData.adminMaritalStatus || undefined,
+            aadhaar_no: adminData.adminAadhaarNo || undefined,
+            pan_no: adminData.adminPanNo || undefined,
+            passport_no: adminData.adminPassportNo || undefined,
+            permanent_address: adminData.adminPermanentAddress || undefined,
+            current_address: adminData.adminCurrentAddress || undefined,
+            employee_photo_URL: adminData.adminPhotoUrl || undefined,
+            employee_state: adminData.adminState || undefined,
+            employee_district: adminData.adminDistrict || undefined,
+            employee_area: adminData.adminArea || undefined,
+            employee_pincode: adminData.adminPincode ? Number(adminData.adminPincode) : undefined,
+            emergency_contact_name: adminData.adminEmergencyContactName || undefined,
+            emergency_contact_relationship: adminData.adminEmergencyContactRelation || undefined,
+            emergency_contact_number: adminData.adminEmergencyContactNumber || undefined,
+            joining_date: adminData.adminJoiningDate || undefined,
+          };
+          payload.admin = adminPayload;
+        }
+
+        const response = await branchApi.create(payload);
+
+        if (!response.data.success) {
+          throw new Error(response.data.message);
+        }
+
+        toast({
+          title: "Branch created",
+          description: `${branchData.branchName} was added successfully.`,
+        });
       }
-
-      const response = await branchApi.create(payload);
-
-      if (!response.data.success) {
-        throw new Error(response.data.message);
-      }
-
-      toast({
-        title: "Branch created",
-        description: `${formData.branchName} was added successfully.`,
-      });
 
       navigate(-1);
     } catch (error: any) {
       toast({
-        title: "Failed to create branch",
+        title: isEditMode ? "Failed to update branch" : "Failed to create branch",
         description:
           error.response?.data?.message ?? error.message ?? "Something went wrong.",
         variant: "destructive",
@@ -445,13 +656,23 @@ export default function AddBranch() {
   };
 
   const handleReset = () => {
-    setFormData(emptyFormData);
+    if (isEditMode) {
+      // Blowing away branchData here would also clear the read-only Branch
+      // Code — reloading is the only sane way to get back to loaded values.
+      toast({
+        title: "Reset",
+        description: "Please reload the page to reset to original values.",
+      });
+      return;
+    }
+    setBranchData(emptyBranchData);
+    setAdminData(emptyAdminData);
     setCustomDepartment("");
     setSameAsCurrent(false);
   };
 
   const adminModeOptions = [
-    { value: "EXISTING", label: "Existing User", icon: UserCheck },
+    { value: "EXISTING", label: "Reassign User", icon: UserCheck },
     { value: "NEW", label: "Create New Admin", icon: UserPlus },
   ];
 
@@ -470,6 +691,16 @@ export default function AddBranch() {
     };
   });
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-8 px-4 flex items-center justify-center">
+        <div className="w-full max-w-5xl bg-white rounded-2xl shadow-sm border border-gray-100 p-8 flex items-center justify-center">
+          <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-5xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100">
@@ -486,7 +717,9 @@ export default function AddBranch() {
           <div className="w-9 h-9 flex items-center justify-center rounded-xl bg-blue-50 text-blue-600">
             <Building2 className="w-5 h-5" />
           </div>
-          <h4 className="hms-heading text-gray-900 tracking-tight">Add Branch</h4>
+          <h4 className="hms-heading text-gray-900 tracking-tight">
+            {isEditMode ? "Edit Branch" : "Add Branch"}
+          </h4>
         </div>
 
         {/* ── Body ── */}
@@ -504,9 +737,9 @@ export default function AddBranch() {
                   name="branchCode"
                   placeholder="Enter Branch Code"
                   className={inputCls}
-                  value={formData.branchCode}
+                  value={branchData.branchCode}
                   onChange={handleChange}
-                  disabled={submitting}
+                  disabled={isEditMode || submitting}
                 />
               </div>
               <div>
@@ -516,7 +749,7 @@ export default function AddBranch() {
                   name="branchName"
                   placeholder="Enter Branch Name"
                   className={inputCls}
-                  value={formData.branchName}
+                  value={branchData.branchName}
                   onChange={handleChange}
                   disabled={submitting}
                 />
@@ -527,8 +760,8 @@ export default function AddBranch() {
                   name="branchType"
                   className={inputCls}
                   options={["Main", "Child"]}
-                  value={formData.branchType}
-                  onValueChange={(val) => setFormData((prev) => ({ ...prev, branchType: val }))}
+                  value={branchData.branchType}
+                  onValueChange={(val) => setBranchData((prev) => ({ ...prev, branchType: val }))}
                   placeholder="Select Branch Type"
                   disabled={submitting}
                 />
@@ -541,7 +774,7 @@ export default function AddBranch() {
                   name="licenseNumber"
                   placeholder="Enter License Number"
                   className={inputCls}
-                  value={formData.licenseNumber}
+                  value={branchData.licenseNumber}
                   onChange={handleChange}
                   disabled={submitting}
                 />
@@ -553,7 +786,7 @@ export default function AddBranch() {
                   name="emergencyNumber"
                   placeholder="Enter Emergency Number"
                   className={inputCls}
-                  value={formData.emergencyNumber}
+                  value={branchData.emergencyNumber}
                   onChange={handleChange}
                   disabled={submitting}
                 />
@@ -565,7 +798,7 @@ export default function AddBranch() {
                   name="dateOfEstablish"
                   max={new Date().toISOString().split("T")[0]}
                   className={inputCls + " text-gray-500"}
-                  value={formData.dateOfEstablish}
+                  value={branchData.dateOfEstablish}
                   onChange={handleChange}
                   disabled={submitting}
                 />
@@ -578,7 +811,7 @@ export default function AddBranch() {
                   name="email"
                   placeholder="Enter Email"
                   className={inputCls}
-                  value={formData.email}
+                  value={branchData.email}
                   onChange={handleChange}
                   disabled={submitting}
                 />
@@ -592,7 +825,7 @@ export default function AddBranch() {
                   name="faxNo"
                   placeholder="Enter Fax Number"
                   className={inputCls}
-                  value={formData.faxNo}
+                  value={branchData.faxNo}
                   onChange={handleChange}
                   disabled={submitting}
                 />
@@ -606,7 +839,7 @@ export default function AddBranch() {
                   name="websiteAddress"
                   placeholder="Enter Website Address"
                   className={inputCls}
-                  value={formData.websiteAddress}
+                  value={branchData.websiteAddress}
                   onChange={handleChange}
                   disabled={submitting}
                 />
@@ -617,39 +850,59 @@ export default function AddBranch() {
           {/* ── Location ── */}
           <Section
             title="Location"
-            sub="Country, state, district and residential details."
+            sub="Address, state, district and pincode details."
           >
             <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
-              <div className="col-span-3">
-                <CountryStateCitySelect
-                  country={formData.country}
-                  state={formData.state}
-                  district={formData.district}
-                  onCountryChange={(country) => setFormData((prev) => ({ ...prev, country }))}
-                  onCountryCodeChange={(isoCode) => setFormData((prev) => ({ ...prev, countryId: isoCode }))}
-                  onStateChange={(state) => setFormData((prev) => ({ ...prev, state }))}
-                  onDistrictChange={(district) => setFormData((prev) => ({ ...prev, district }))}
+              <div>
+                <label className={labelCls}>Address <Req /></label>
+                <input
+                  type="text"
+                  name="address"
+                  placeholder="Enter building no and street name"
+                  className={inputCls}
+                  value={branchData.address}
+                  onChange={handleChange}
                   disabled={submitting}
-                  required
                 />
               </div>
-
-              <div>
+                            <div>
                 <label className={labelCls}>Area <Req /></label>
                 <input
                   type="text"
                   name="area"
                   placeholder="Enter Area"
                   className={inputCls}
-                  value={formData.area}
+                  value={branchData.area}
                   onChange={handleChange}
                   disabled={submitting}
                 />
               </div>
               <div>
-                <label className={labelCls}>
-                  Pincode <Req />
-                </label>
+                <label className={labelCls}>State <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={indianStates.map((s) => s.name)}
+                  value={branchData.state}
+                  onValueChange={(v) =>
+                    setBranchData((p) => ({ ...p, state: v, district: "" }))
+                  }
+                  placeholder="Select state"
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>District <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={branchDistrictOptions}
+                  value={branchData.district}
+                  onValueChange={(v) => setBranchData((p) => ({ ...p, district: v }))}
+                  placeholder={branchData.state ? "Select district" : "Select state first"}
+                  disabled={submitting || !branchData.state}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Pincode <Req /></label>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -657,20 +910,7 @@ export default function AddBranch() {
                   name="pincode"
                   placeholder="Enter Pincode"
                   className={inputCls}
-                  value={formData.pincode}
-                  onChange={handleChange}
-                  disabled={submitting}
-                />
-              </div>
-
-              <div className="col-span-3">
-                <label className={labelCls}>Address <Req /></label>
-                <input
-                  type="text"
-                  name="address"
-                  placeholder="Enter Address"
-                  className={inputCls}
-                  value={formData.address}
+                  value={branchData.pincode}
                   onChange={handleChange}
                   disabled={submitting}
                 />
@@ -691,7 +931,7 @@ export default function AddBranch() {
                   name="totalBeds"
                   placeholder="Enter Total Beds"
                   className={inputCls}
-                  value={formData.totalBeds}
+                  value={branchData.totalBeds}
                   onChange={handleChange}
                   disabled={submitting}
                 />
@@ -705,7 +945,7 @@ export default function AddBranch() {
                   name="totalEmployees"
                   placeholder="Enter Total Employees"
                   className={inputCls}
-                  value={formData.totalEmployees}
+                  value={branchData.totalEmployees}
                   onChange={handleChange}
                   disabled={submitting}
                 />
@@ -717,7 +957,7 @@ export default function AddBranch() {
                   name="gstNo"
                   placeholder="Enter GST Number"
                   className={inputCls}
-                  value={formData.gstNo}
+                  value={branchData.gstNo}
                   onChange={handleChange}
                   disabled={submitting}
                 />
@@ -730,20 +970,19 @@ export default function AddBranch() {
                   name="panNo"
                   placeholder="Enter PAN Number"
                   className={inputCls}
-                  value={formData.panNo}
+                  value={branchData.panNo}
                   onChange={handleChange}
                   disabled={submitting}
                 />
               </div>
-              <div className="col-span-2">
+              <div className="col-span-1">
                 <label className={labelCls}>Medical Services <Req /></label>
-                <textarea
-                  name="medicalServices"
-                  rows={1}
-                  placeholder="Enter Medical Services"
-                  className={inputCls + " !h-10 pt-2 resize-none"}
-                  value={formData.medicalServices}
-                  onChange={handleChange}
+                <FormDropdown
+                  className={inputCls}
+                  options={medicalServiceTypes}
+                  value={branchData.medicalServices}
+                  onValueChange={(v) => setBranchData((p) => ({ ...p, medicalServices: v }))}
+                  placeholder="Select Medical Services"
                   disabled={submitting}
                 />
               </div>
@@ -755,6 +994,74 @@ export default function AddBranch() {
             title="Branch admin"
             sub="Assign an existing branch admin or create a new one for this branch."
           >
+            {isEditMode && (
+              <div className="mb-5">
+                <h5 className={labelCls}>Currently Assigned Admin</h5>
+                {currentAdmin ? (
+                  <div className="flex items-start gap-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
+                    <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm flex-shrink-0 overflow-hidden">
+                      {currentAdmin.employee_photo_URL ? (
+                        <img
+                          src={currentAdmin.employee_photo_URL}
+                          alt=""
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        getInitials(currentAdmin.full_name || currentAdmin.username || "?")
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-3">
+                        <ShieldCheck className="w-4 h-4 text-blue-600" />
+                        <span className="text-[13px] font-semibold text-gray-800">
+                          Current Admin
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-x-5 gap-y-[18px]">
+                        <div>
+                          <label className={labelCls}>Name</label>
+                          <input className={inputCls} value={currentAdmin.full_name || "—"} disabled />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Employee ID</label>
+                          <input className={inputCls} value={currentAdmin.employee_id ?? "—"} disabled />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Username</label>
+                          <input className={inputCls} value={currentAdmin.username ?? "—"} disabled />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Email</label>
+                          <input className={inputCls} value={currentAdmin.email ?? "—"} disabled />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Mobile</label>
+                          <input className={inputCls} value={currentAdmin.mobile_no ?? "—"} disabled />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Assigned Since</label>
+                          <input
+                            className={inputCls}
+                            value={
+                              currentAdmin.assigned_date
+                                ? new Date(currentAdmin.assigned_date).toLocaleDateString()
+                                : "—"
+                            }
+                            disabled
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[13px] text-gray-500 p-4 bg-gray-50 rounded-xl border border-gray-200">
+                    No branch admin is currently assigned to this branch.
+                  </p>
+                )}
+                <div className="border-t border-gray-200 mt-5" />
+              </div>
+            )}
+
             <div className="grid grid-cols-3 gap-3 mb-5">
               {adminModeOptions.map(({ value, label, icon: Icon }) => (
                 <button
@@ -762,7 +1069,7 @@ export default function AddBranch() {
                   key={value}
                   onClick={() => handleAdminModeChange(value as BranchAdminMode)}
                   className={`relative p-4 rounded-xl border-2 transition-all duration-200 flex flex-col items-center gap-2 text-center ${
-                    formData.adminMode === value
+                    adminData.adminMode === value
                       ? "border-blue-500 bg-blue-50 text-blue-700"
                       : "border-gray-200 hover:border-gray-300 text-gray-700"
                   }`}
@@ -774,7 +1081,7 @@ export default function AddBranch() {
               ))}
             </div>
 
-            {formData.adminMode === "EXISTING" && (
+            {adminData.adminMode === "EXISTING" && (
               <div className="space-y-3 p-4 bg-gray-50 rounded-xl border border-gray-200">
                 <h5 className="text-[13px] font-semibold text-gray-800 flex items-center gap-2">
                   <UserCheck className="w-4 h-4 text-blue-600" />
@@ -786,8 +1093,8 @@ export default function AddBranch() {
                     name="adminUserId"
                     className={inputCls}
                     options={adminDropdownOptions}
-                    value={formData.adminUserId}
-                    onValueChange={(val) => setFormData((prev) => ({ ...prev, adminUserId: val }))}
+                    value={adminData.adminUserId}
+                    onValueChange={(val) => setAdminData((prev) => ({ ...prev, adminUserId: val }))}
                     placeholder="Search and select admin user..."
                     disabled={submitting}
                     emptyMessage={loadingAdmins ? "Loading..." : "No admins available."}
@@ -810,7 +1117,7 @@ export default function AddBranch() {
               </div>
             )}
 
-            {formData.adminMode === "NEW" && (
+            {adminData.adminMode === "NEW" && (
               <div className="space-y-5 p-4 bg-gray-50 rounded-xl border border-gray-200">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <h5 className="text-[13px] font-semibold text-gray-800 flex items-center gap-2">
@@ -824,8 +1131,8 @@ export default function AddBranch() {
 
                 <div className="flex items-start gap-8 pb-5 border-b border-gray-200">
                   <AvatarUpload
-                    value={formData.adminPhotoUrl}
-                    onChange={(url) => setFormData((p) => ({ ...p, adminPhotoUrl: url }))}
+                    value={adminData.adminPhotoUrl}
+                    onChange={(url) => setAdminData((p) => ({ ...p, adminPhotoUrl: url }))}
                     label="Admin photo"
                     hint="Click or drag an image to upload (Max 1MB)"
                     size={64}
@@ -841,7 +1148,7 @@ export default function AddBranch() {
                       name="adminFirstName"
                       placeholder="Enter First Name"
                       className={inputCls}
-                      value={formData.adminFirstName}
+                      value={adminData.adminFirstName}
                       onChange={handleChange}
                       disabled={submitting}
                     />
@@ -855,7 +1162,7 @@ export default function AddBranch() {
                       name="adminMiddleName"
                       placeholder="Enter Middle Name"
                       className={inputCls}
-                      value={formData.adminMiddleName}
+                      value={adminData.adminMiddleName}
                       onChange={handleChange}
                       disabled={submitting}
                     />
@@ -867,7 +1174,7 @@ export default function AddBranch() {
                       name="adminLastName"
                       placeholder="Enter Last Name"
                       className={inputCls}
-                      value={formData.adminLastName}
+                      value={adminData.adminLastName}
                       onChange={handleChange}
                       disabled={submitting}
                     />
@@ -880,8 +1187,8 @@ export default function AddBranch() {
                     <FormDropdown
                       className={inputCls}
                       options={["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]}
-                      value={formData.adminBloodGroup}
-                      onValueChange={(v) => setFormData((p) => ({ ...p, adminBloodGroup: v }))}
+                      value={adminData.adminBloodGroup}
+                      onValueChange={(v) => setAdminData((p) => ({ ...p, adminBloodGroup: v }))}
                       placeholder="Select blood group"
                       disabled={submitting}
                     />
@@ -895,7 +1202,7 @@ export default function AddBranch() {
                       name="adminNationality"
                       placeholder="Enter nationality"
                       className={inputCls}
-                      value={formData.adminNationality}
+                      value={adminData.adminNationality}
                       onChange={handleChange}
                       disabled={submitting}
                     />
@@ -907,8 +1214,8 @@ export default function AddBranch() {
                     <FormDropdown
                       className={inputCls}
                       options={["Single", "Married", "Divorced"]}
-                      value={formData.adminMaritalStatus}
-                      onValueChange={(v) => setFormData((p) => ({ ...p, adminMaritalStatus: v }))}
+                      value={adminData.adminMaritalStatus}
+                      onValueChange={(v) => setAdminData((p) => ({ ...p, adminMaritalStatus: v }))}
                       placeholder="Select marital status"
                       disabled={submitting}
                     />
@@ -924,7 +1231,7 @@ export default function AddBranch() {
                       placeholder="Enter aadhaar number"
                       maxLength={20}
                       className={inputCls}
-                      value={formData.adminAadhaarNo}
+                      value={adminData.adminAadhaarNo}
                       onChange={handleChange}
                       disabled={submitting}
                     />
@@ -939,7 +1246,7 @@ export default function AddBranch() {
                       placeholder="Enter PAN number"
                       maxLength={20}
                       className={inputCls}
-                      value={formData.adminPanNo}
+                      value={adminData.adminPanNo}
                       onChange={handleChange}
                       disabled={submitting}
                     />
@@ -954,7 +1261,7 @@ export default function AddBranch() {
                       placeholder="Enter passport number"
                       maxLength={20}
                       className={inputCls}
-                      value={formData.adminPassportNo}
+                      value={adminData.adminPassportNo}
                       onChange={handleChange}
                       disabled={submitting}
                     />
@@ -967,7 +1274,7 @@ export default function AddBranch() {
                       name="adminEmail"
                       placeholder="Enter Email"
                       className={inputCls}
-                      value={formData.adminEmail}
+                      value={adminData.adminEmail}
                       onChange={handleChange}
                       disabled={submitting}
                     />
@@ -979,7 +1286,7 @@ export default function AddBranch() {
                       name="adminMobile"
                       placeholder="Enter Mobile Number"
                       className={inputCls}
-                      value={formData.adminMobile}
+                      value={adminData.adminMobile}
                       onChange={handleChange}
                       disabled={submitting}
                     />
@@ -991,7 +1298,7 @@ export default function AddBranch() {
                       name="adminJoiningDate"
                       max={new Date().toISOString().split("T")[0]}
                       className={inputCls + " text-gray-500"}
-                      value={formData.adminJoiningDate}
+                      value={adminData.adminJoiningDate}
                       onChange={handleChange}
                       disabled={submitting}
                     />
@@ -1007,15 +1314,15 @@ export default function AddBranch() {
                         ...departments.map((d) => ({ label: d.department_name, value: d.department_id })),
                         { label: "Others", value: OTHER_DEPARTMENT_VALUE },
                       ]}
-                      value={formData.adminDepartmentId}
+                      value={adminData.adminDepartmentId}
                       onValueChange={(v) => {
-                        setFormData((p) => ({ ...p, adminDepartmentId: v }));
+                        setAdminData((p) => ({ ...p, adminDepartmentId: v }));
                         if (v !== OTHER_DEPARTMENT_VALUE) setCustomDepartment("");
                       }}
                       placeholder={departments.length ? "Select department" : "Loading…"}
                       disabled={submitting}
                     />
-                    {formData.adminDepartmentId === OTHER_DEPARTMENT_VALUE && (
+                    {adminData.adminDepartmentId === OTHER_DEPARTMENT_VALUE && (
                       <input
                         type="text"
                         placeholder="Type your department"
@@ -1042,9 +1349,9 @@ export default function AddBranch() {
                       <FormDropdown
                         className={inputCls}
                         options={indianStates.map((s) => s.name)}
-                        value={formData.adminState}
+                        value={adminData.adminState}
                         onValueChange={(v) =>
-                          setFormData((p) => ({ ...p, adminState: v, adminDistrict: "" }))
+                          setAdminData((p) => ({ ...p, adminState: v, adminDistrict: "" }))
                         }
                         placeholder="Select state"
                         disabled={submitting}
@@ -1057,10 +1364,10 @@ export default function AddBranch() {
                       <FormDropdown
                         className={inputCls}
                         options={districtOptions}
-                        value={formData.adminDistrict}
-                        onValueChange={(v) => setFormData((p) => ({ ...p, adminDistrict: v }))}
-                        placeholder={formData.adminState ? "Select district" : "Select state first"}
-                        disabled={submitting || !formData.adminState}
+                        value={adminData.adminDistrict}
+                        onValueChange={(v) => setAdminData((p) => ({ ...p, adminDistrict: v }))}
+                        placeholder={adminData.adminState ? "Select district" : "Select state first"}
+                        disabled={submitting || !adminData.adminState}
                       />
                     </div>
                     <div>
@@ -1073,7 +1380,7 @@ export default function AddBranch() {
                         placeholder="Enter area"
                         maxLength={50}
                         className={inputCls}
-                        value={formData.adminArea}
+                        value={adminData.adminArea}
                         onChange={handleChange}
                         disabled={submitting}
                       />
@@ -1091,7 +1398,7 @@ export default function AddBranch() {
                         placeholder="Enter pincode"
                         maxLength={10}
                         className={inputCls}
-                        value={formData.adminPincode}
+                        value={adminData.adminPincode}
                         onChange={handleChange}
                         disabled={submitting}
                       />
@@ -1107,7 +1414,7 @@ export default function AddBranch() {
                         placeholder="Enter current address"
                         maxLength={255}
                         className={inputCls}
-                        value={formData.adminCurrentAddress}
+                        value={adminData.adminCurrentAddress}
                         onChange={handleChange}
                         disabled={submitting}
                       />
@@ -1140,7 +1447,7 @@ export default function AddBranch() {
                         placeholder="Enter permanent address"
                         maxLength={255}
                         className={inputCls}
-                        value={formData.adminPermanentAddress}
+                        value={adminData.adminPermanentAddress}
                         onChange={handleChange}
                         disabled={submitting || sameAsCurrent}
                       />
@@ -1164,7 +1471,7 @@ export default function AddBranch() {
                         placeholder="Enter contact name"
                         maxLength={100}
                         className={inputCls}
-                        value={formData.adminEmergencyContactName}
+                        value={adminData.adminEmergencyContactName}
                         onChange={handleChange}
                         disabled={submitting}
                       />
@@ -1179,7 +1486,7 @@ export default function AddBranch() {
                         placeholder="e.g. spouse, parent"
                         maxLength={50}
                         className={inputCls}
-                        value={formData.adminEmergencyContactRelation}
+                        value={adminData.adminEmergencyContactRelation}
                         onChange={handleChange}
                         disabled={submitting}
                       />
@@ -1196,7 +1503,7 @@ export default function AddBranch() {
                         placeholder="Enter contact number"
                         maxLength={15}
                         className={inputCls}
-                        value={formData.adminEmergencyContactNumber}
+                        value={adminData.adminEmergencyContactNumber}
                         onChange={handleChange}
                         disabled={submitting}
                       />
@@ -1217,7 +1524,7 @@ export default function AddBranch() {
                         name="adminUsername"
                         placeholder="Enter Username"
                         className={inputCls}
-                        value={formData.adminUsername}
+                        value={adminData.adminUsername}
                         onChange={handleChange}
                         disabled={submitting}
                       />
@@ -1229,7 +1536,7 @@ export default function AddBranch() {
                         name="password"
                         placeholder="Enter Password"
                         className={inputCls}
-                        value={formData.password}
+                        value={adminData.password}
                         onChange={handleChange}
                         disabled={submitting}
                       />
@@ -1241,7 +1548,7 @@ export default function AddBranch() {
                         name="confirmPassword"
                         placeholder="Confirm Password"
                         className={inputCls}
-                        value={formData.confirmPassword}
+                        value={adminData.confirmPassword}
                         onChange={handleChange}
                         disabled={submitting}
                       />
@@ -1270,7 +1577,12 @@ export default function AddBranch() {
               {submitting ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Adding Branch…
+                  {isEditMode ? "Updating Branch…" : "Adding Branch…"}
+                </>
+              ) : isEditMode ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  Update Branch
                 </>
               ) : (
                 <>

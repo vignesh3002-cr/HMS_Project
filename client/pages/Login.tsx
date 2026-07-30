@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { login } from "../api/auth.api";
 import { toast } from "@/hooks/use-toast";
 import ElasticPulse from "@/components/ui/Elasticpulse";
+import { saveToken, saveUser } from "../utils/token";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -27,13 +28,21 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      const response = await login(username, password);
+      const response = await login(username, password, rememberMe);
 
       console.log("Login Response:", response);
 
-      sessionStorage.setItem("pendingUsername", username);
+      // OTP flow temporarily disabled - skipping the OTP page and logging in directly
+      // sessionStorage.setItem("pendingUsername", username);
+      // sessionStorage.setItem(
+      //   "rememberMe",
+      //   String(rememberMe)
+      // );
+      // navigate("/authenticate");
 
-      navigate("/authenticate");
+      saveToken(response.token);
+      saveUser(response.user);
+      navigate("/dashboard");
     } catch (error: any) {
       const message = error.response?.data?.message || error.message || "Login failed";
       toast({

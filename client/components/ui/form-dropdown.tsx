@@ -133,8 +133,9 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
             placeholder={placeholder}
             value={search}
             className={cn(
-              "w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 pl-9 pr-9",
-              inputProps.className,
+              "w-full py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200",
+               inputProps.className,
+               "pl-9 pr-9",
             )}
             onFocus={(event) => {
               setOpen(true);

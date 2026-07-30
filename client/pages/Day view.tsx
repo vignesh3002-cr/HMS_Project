@@ -6,9 +6,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
 import { useToast } from "@/hooks/use-toast";
-import { doctorApi, type DoctorRecord } from "@/api/doctor.api";
 import { appointmentApi, type AppointmentRecord, type AvailableSlot } from "@/api/appointment.api";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
+import { FilterPopover, useFilterPanel } from "@/components/Filter";
+import type { FilterField } from "@/components/Filter/types";
 
 /* ============================= Types ============================= */
 
@@ -29,13 +30,6 @@ interface AppointmentSlot {
 interface ScheduleRow {
   time: string;
   slots: (AppointmentSlot | null)[];
-}
-
-interface DoctorDirectoryEntry {
-  initials: string;
-  color: string;
-  name: string;
-  spec: string;
 }
 
 type ScheduleViewType = "list" | "day" | "week";
@@ -215,15 +209,6 @@ function mapEmployeeToDayColumn(emp: EmployeeRecord): DayDoctorColumn {
   };
 }
 
-function mapDoctorRecord(doc: DoctorRecord, index: number): DoctorDirectoryEntry {
-  return {
-    initials: getInitials(doc.doctor_name),
-    color: AVATAR_PALETTE[index % AVATAR_PALETTE.length].initials,
-    name: doc.doctor_name,
-    spec: doc.specialization || doc.department || "General",
-  };
-}
-
 /* ============================= Main component ============================= */
 
 const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) => {
@@ -238,6 +223,19 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
+
+  // Multi-doctor filter -- same FilterPopover used on the other pages.
+  // Selecting doctors here narrows the grid down to exactly those doctors,
+  // same as the toolbar search.
+  const {
+    values: filterValues,
+    appliedValues,
+    isOpen: isFilterOpen,
+    setIsOpen: setIsFilterOpen,
+    handleChange: handleFilterChange,
+    handleApply: handleApplyFilter,
+    handleClear: handleClearFilter,
+  } = useFilterPanel();
 
   // Real appointments for the selected date, fetched from GET /appointments
   // -- the doctor columns and hourly slot counts below are both derived from
@@ -310,10 +308,46 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     });
   }, [doctorColumns, selectedDate]);
 
+  // Doctor filter options, built from the real doctor list -- lets the
+  // toolbar Filter popover pick any number of specific doctors.
+  const doctorFilterFields: FilterField[] = useMemo(() => [
+    {
+      id: "doctorIds",
+      label: "Doctor",
+      type: "multiselect",
+      options: doctorColumns.map((doc) => ({ label: doc.name, value: doc.employeeId })),
+    },
+  ], [doctorColumns]);
+
+  // Only doctors matching the toolbar search, the picked doctor (if any),
+  // and the multi-select Filter popover get a column at all -- narrowing
+  // down to specific doctors hides every other doctor's column entirely
+  // instead of just dimming it.
+  const visibleDoctorColumns = useMemo(() => {
+    const term = toolbarSearchTerm.trim().toLowerCase();
+    const selectedIds: string[] = Array.isArray(appliedValues.doctorIds) ? appliedValues.doctorIds : [];
+
+    return doctorColumns.filter((doc) => {
+      const gridName = doc.name.toLowerCase();
+
+      if (term && !gridName.includes(term)) return false;
+
+      if (selectedDoctorName) {
+        const pickedName = selectedDoctorName.toLowerCase();
+        const matches = pickedName.includes(gridName) || gridName.includes(pickedName);
+        if (!matches) return false;
+      }
+
+      if (selectedIds.length > 0 && !selectedIds.includes(doc.employeeId)) return false;
+
+      return true;
+    });
+  }, [doctorColumns, toolbarSearchTerm, selectedDoctorName, appliedValues]);
+
   const scheduleRows: ScheduleRow[] = useMemo(() => {
     return TIME_ROW_HOURS.map((hour, idx) => ({
       time: TIME_ROW_LABELS[idx],
-      slots: doctorColumns.map((doc) => {
+      slots: visibleDoctorColumns.map((doc) => {
         const count = dayAppointments.filter((appt) => {
           if (appt.employees?.employee_id !== doc.employeeId) return false;
           const t = new Date(appt.appointment_time);
@@ -332,7 +366,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         return hasOpenSlot ? slot(0, "New slot available", 0, false) : EMPTY;
       }),
     }));
-  }, [doctorColumns, dayAppointments, availableSlotsByDoctor]);
+  }, [visibleDoctorColumns, dayAppointments, availableSlotsByDoctor]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -365,37 +399,6 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     }
   };
 
-  const [realDoctorDirectory, setRealDoctorDirectory] = useState<DoctorDirectoryEntry[] | null>(null);
-
-  useEffect(() => {
-    doctorApi
-      .getAll()
-      .then((res) => {
-        const records = res.data?.data;
-        if (records && records.length > 0) {
-          setRealDoctorDirectory(records.map(mapDoctorRecord));
-        } else {
-          toast({
-            title: "Using fallback data",
-            description: "No doctor records returned yet — showing sample data.",
-            variant: "destructive",
-          });
-        }
-      })
-      .catch(() => {
-        toast({
-          title: "Using fallback data",
-          description: "Couldn't reach the doctors API — showing sample data.",
-          variant: "destructive",
-        });
-      });
-  }, []);
-
-  const activeDoctorDirectory = realDoctorDirectory ?? [];
-  const filteredDoctorDirectory = activeDoctorDirectory.filter((doc) =>
-    doc.name.toLowerCase().includes(searchTerm.toLowerCase()),
-  );
-
   const dateLabel = isToday(selectedDate)
     ? "Today"
     : isYesterday(selectedDate)
@@ -405,22 +408,6 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         : format(selectedDate, "dd/MM/yyyy");
 
   const totalAppointments = dayAppointments.length;
-
-  const isDoctorDimmed = (gridDoctorName: string) => {
-    const gridName = gridDoctorName.toLowerCase();
-
-    if (toolbarSearchTerm && !gridName.includes(toolbarSearchTerm.toLowerCase())) {
-      return true;
-    }
-
-    if (selectedDoctorName) {
-      const pickedName = selectedDoctorName.toLowerCase();
-      const matches = pickedName.includes(gridName) || gridName.includes(pickedName);
-      if (!matches) return true;
-    }
-
-    return false;
-  };
 
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
@@ -522,6 +509,18 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           <SearchIcon className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#424752]" />
         </div>
 
+        {/* Filter doctors */}
+        <FilterPopover
+          title="Filter Doctors"
+          fields={doctorFilterFields}
+          values={filterValues}
+          onChange={handleFilterChange}
+          onApply={handleApplyFilter}
+          onClear={handleClearFilter}
+          open={isFilterOpen}
+          onOpenChange={setIsFilterOpen}
+        />
+
         {/* Date navigation */}
         <div role="group" aria-label="Date navigation" className="flex items-center">
           <button
@@ -570,25 +569,32 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         {/* Schedule grid */}
         <section
           aria-label="Doctor appointment schedule grid"
-          className="min-w-0 flex-1 overflow-x-auto rounded-xl border border-[#E5E7EB] bg-white shadow-sm"
+          className="max-w-full overflow-x-auto rounded-xl border border-[#E5E7EB] bg-white shadow-sm"
         >
           {isLoadingDay || isLoadingDoctors ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
+            <div className="flex min-w-[400px] flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
               <Loader2 size={24} className="animate-spin text-[#00488D]" />
               Loading schedule...
             </div>
           ) : doctorColumns.length === 0 ? (
-            <div className="flex items-center justify-center py-16 text-[#6B7280] text-sm">
+            <div className="flex min-w-[400px] items-center justify-center py-16 text-[#6B7280] text-sm">
               No doctors found.
             </div>
+          ) : visibleDoctorColumns.length === 0 ? (
+            <div className="flex min-w-[400px] items-center justify-center py-16 text-[#6B7280] text-sm">
+              No doctors match your search or filters.
+            </div>
           ) : (
-          <div role="table" className="w-full min-w-[620px] md:min-w-[691px]">
+          <div
+            role="table"
+            style={{ width: `${70 + visibleDoctorColumns.length * 90}px` }}
+          >
             {/* Header row */}
             <div className="border-b border-[#c3c6d7] bg-white">
               <div
                 role="row"
                 className="grid min-h-[39px]"
-                style={{ gridTemplateColumns: `70px repeat(${doctorColumns.length}, 90px)` }}
+                style={{ gridTemplateColumns: `70px repeat(${visibleDoctorColumns.length}, 90px)` }}
               >
                 <div
                   role="columnheader"
@@ -599,14 +605,14 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                   </span>
                 </div>
 
-                {doctorColumns.map((doc, i) => (
+                {visibleDoctorColumns.map((doc, i) => (
                   <div
                     key={doc.employeeId}
                     role="columnheader"
                     title={`${doc.name} - ${doc.spec}`}
-                    className={`flex w-full flex-col items-center justify-center gap-0.5 overflow-hidden pb-1.5 pl-1.5 pr-[7px] pt-1.5 text-center transition-opacity ${
-                      i !== doctorColumns.length - 1 ? "border-r border-[#c3c6d7]" : ""
-                    } ${isDoctorDimmed(doc.name) ? "opacity-30" : ""}`}
+                    className={`flex w-full flex-col items-center justify-center gap-0.5 overflow-hidden pb-1.5 pl-1.5 pr-[7px] pt-1.5 text-center ${
+                      i !== visibleDoctorColumns.length - 1 ? "border-r border-[#c3c6d7]" : ""
+                    }`}
                   >
                     <span className="line-clamp-2 w-full break-words font-['Manrope',sans-serif] text-[10px] font-bold leading-[13px] text-[#004ac6]">
                       {doc.name}
@@ -628,7 +634,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                 <div
                   role="row"
                   className="grid"
-                  style={{ gridTemplateColumns: `70px repeat(${doctorColumns.length}, 90px)` }}
+                  style={{ gridTemplateColumns: `70px repeat(${visibleDoctorColumns.length}, 90px)` }}
                 >
                   <div
                     role="rowheader"
@@ -643,9 +649,9 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                     <div
                       key={i}
                       role="cell"
-                      className={`h-[60px] pb-1 pl-1 pr-[5px] pt-1 transition-opacity ${
+                      className={`h-[60px] pb-1 pl-1 pr-[5px] pt-1 ${
                         i !== row.slots.length - 1 ? "border-r border-[#c3c6d7]" : ""
-                      } ${isDoctorDimmed(doctorColumns[i].name) ? "opacity-30" : ""}`}
+                      }`}
                     >
                       {cell ? (
                         <AppointmentCard cell={cell} />
