@@ -111,6 +111,20 @@ export const appointmentApi = {
       params: { employeeId, branchId, date },
     }),
 
+  getDoctorSlotSummary: (employeeId: string, date: string) =>
+    API.get<{
+      success: boolean;
+      data: {
+        date: string;
+        day_of_week: string;
+        total_slots: number;
+        booked_count: number;
+        percentage: number;
+      };
+    }>("/appointments/doctor-slot-summary", {
+      params: { employeeId, date },
+    }),
+
   cancel: (appointmentNo: string, cancelReason: string) =>
     API.delete<{ success: boolean; message: string; data: AppointmentRecord }>(
       `/appointments/${appointmentNo}`,

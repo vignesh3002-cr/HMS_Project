@@ -19,7 +19,6 @@ import Appointments from "./pages/Appointments";
 import Dashboard from "./pages/Dashboard";
 import Departments from "./pages/Departments";
 import Login from "./pages/Login";
-import Authenticate from "./pages/Authenticate";
 import NotFound from "./pages/NotFound";
 import Patients from "./pages/Patients";
 import ProtectedRoute from "./routes/ProtectedRoute";
@@ -29,6 +28,9 @@ import Staff from "./pages/Staff";
 import Scheduled from "./pages/Scheduled";
 import DayScheduled from "./pages/Day Scheduled";
 import DayView from "./pages/Day view";
+import { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { getToken } from "./utils/token";
 import WeekView from "./pages/Week view";
 
 
@@ -75,6 +77,23 @@ const protectedRoutes = [
   { path: "/appointments/view/:id", element: <ViewAppointmentScheduled /> },
 
 ];
+const RememberMeCheck = () => {
+
+  const navigate = useNavigate();
+
+  useEffect(() => {
+
+    const token = getToken();
+
+    if (token) {
+      navigate("/dashboard");
+    }
+
+  }, [navigate]);
+
+
+  return null;
+};
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -82,10 +101,11 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
+        <RememberMeCheck />
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={<Login />} />
-          <Route path="/authenticate" element={<Authenticate />} />
+          
           
           {/* Protected Routes with Layout */}
           <Route element={<AppLayout />}>
