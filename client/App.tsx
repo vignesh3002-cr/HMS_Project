@@ -29,7 +29,7 @@ import Scheduled from "./pages/Scheduled";
 import DayScheduled from "./pages/Day Scheduled";
 import DayView from "./pages/Day view";
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { getToken } from "./utils/token";
 import WeekView from "./pages/Week view";
 
@@ -80,8 +80,15 @@ const protectedRoutes = [
 const RememberMeCheck = () => {
 
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
+
+    // Only skip the login screen when the user actually landed on it — this
+    // check used to fire on ANY full page load (refresh, typed URL, link
+    // opened in a new tab) and would redirect to /dashboard regardless of
+    // which page was requested, hijacking navigation to every other route.
+    if (location.pathname !== "/") return;
 
     const token = getToken();
 
@@ -89,7 +96,7 @@ const RememberMeCheck = () => {
       navigate("/dashboard");
     }
 
-  }, [navigate]);
+  }, [navigate, location.pathname]);
 
 
   return null;
