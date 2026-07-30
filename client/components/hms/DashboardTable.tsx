@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { StatusBadge } from "@/components/hms/StatusBadge";
 
 // Type definition for table row data - each row is an object with string or number values
 export type TableRow = Record<string, string | number>;
@@ -158,8 +159,6 @@ export function DoctorsTableView({ rows, sortField, sortDirection, onSort, onEdi
       emptyMessage="No doctors found matching the current filters."
       // Custom render function for doctor rows
       renderRow={(row) => {
-        const status = String(row.status);
-        const isActive = status === "Active";
         return (
           <>
             {/* Name column with avatar and ID */}
@@ -184,10 +183,7 @@ export function DoctorsTableView({ rows, sortField, sortDirection, onSort, onEdi
             <td className="px-5 py-4 text-[#191C1E] hms-content-text leading-4">{String(row.branch)}</td>
             {/* Status column with dynamic styling based on active/inactive */}
             <td className="px-5 py-4">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
-                <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />
-                {status}
-              </span>
+              <StatusBadge status={String(row.status)} />
             </td>
             {/* Action buttons - Edit and View. Doctor rows pass the real
                 employee_id (not the numeric-stripped getRowId) since the
@@ -232,8 +228,6 @@ export function StaffTableView({ rows, sortField, sortDirection, onSort, onEdit,
       emptyMessage="No staff found matching the current filters."
       // Similar render function to DoctorsTableView
       renderRow={(row) => {
-        const status = String(row.status);
-        const isActive = status === "Active";
         return (
           <>
             <td className="px-5 py-4 pl-8">
@@ -254,10 +248,7 @@ export function StaffTableView({ rows, sortField, sortDirection, onSort, onEdit,
             </td>
             <td className="px-5 py-4 text-[#191C1E] hms-content-text leading-4">{String(row.branch)}</td>
             <td className="px-5 py-4">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
-                <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />
-                {status}
-              </span>
+              <StatusBadge status={String(row.status)} />
             </td>
             <td className="px-5 py-4">
               <ActionButtons onEdit={onEdit} onView={onView} id={getRowId(row)} />
@@ -300,8 +291,6 @@ export function AppointmentsTableView({ rows, sortField, sortDirection, onSort, 
       emptyMessage="No appointments found matching the current filters."
       // Complex render function for appointment rows
       renderRow={(row) => {
-        const status = String(row.status);
-        const isActive = status === "Active";
 
         return (
           <>
@@ -361,21 +350,7 @@ export function AppointmentsTableView({ rows, sortField, sortDirection, onSort, 
 
             {/* Status column with active/inactive styling */}
             <td className="px-5 py-4">
-              <span
-                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
-                style={{
-                  background: isActive ? "#F0FDF4" : "#FFF7ED",
-                  color: isActive ? "#16A34A" : "#F97316",
-                }}
-              >
-                <span
-                  className="w-1.5 h-1.5 rounded-full"
-                  style={{
-                    background: isActive ? "#22C55E" : "#F97316",
-                  }}
-                />
-                {status}
-              </span>
+              <StatusBadge status={String(row.status)} />
             </td>
 
             {/* Action buttons for appointment */}

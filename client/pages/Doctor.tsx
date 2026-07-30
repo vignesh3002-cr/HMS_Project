@@ -22,6 +22,7 @@ import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { appointmentApi } from "@/api/appointment.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
+import { StatusBadge } from "@/components/hms/StatusBadge";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 
 // Fixed daily slot capacity per doctor -- once a doctor's real (non-cancelled,
@@ -515,16 +516,9 @@ export default function Doctor() {
                   { key: "dept", label: "Department", render: (r: any) => (
                     <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: String(r.deptBg), color: String(r.deptColor) }}>{String(r.dept)}</span>
                   )},
-                  { key: "status", label: "Status", render: (r: any) => {
-                    const s = String(r.status);
-                    const isActive = s === "Active";
-                    return (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />
-                        {s}
-                      </span>
-                    );
-                  }},
+                  { key: "status", label: "Status", render: (r: any) => (
+                    <StatusBadge status={String(r.status)} />
+                  )},
                   { key: "appointments", label: "Appointment", render: (r: any) => {
                     const appts = Number(r.appointments);
                     const total = Number(r.total);

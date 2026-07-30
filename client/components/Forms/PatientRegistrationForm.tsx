@@ -33,6 +33,10 @@ interface FormData {
   patient_pincode: string;
   patient_current_address: string;
   patient_permanent_address: string;
+  patient_permanent_area: string;
+  patient_permanent_state: string;
+  patient_permanent_district: string;
+  patient_permanent_pincode: string;
   patient_username: string;
   patient_password: string;
   patient_emergency_mobile: string;
@@ -86,6 +90,10 @@ const emptyFormData: FormData = {
   patient_pincode: "",
   patient_current_address: "",
   patient_permanent_address: "",
+  patient_permanent_area: "",
+  patient_permanent_state: "",
+  patient_permanent_district: "",
+  patient_permanent_pincode: "",
   patient_username: "",
   patient_password: "",
   patient_emergency_mobile: "",
@@ -150,6 +158,7 @@ export default function PatientRegistrationForm() {
   const [insuranceFiles, setInsuranceFiles] = useState<File[]>([]);
   const [indianStates, setIndianStates] = useState<IState[]>([]);
   const [districtOptions, setDistrictOptions] = useState<string[]>([]);
+  const [permanentDistrictOptions, setPermanentDistrictOptions] = useState<string[]>([]);
   // Re-typed password — must match before submit is allowed. Username has
   // no confirm field; it's a single required field (matches Addemployee.tsx).
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -197,8 +206,32 @@ export default function PatientRegistrationForm() {
     }
   }, [formData.patient_state, indianStates]);
 
+  useEffect(() => {
+    if (formData.patient_permanent_state) {
+      const s = indianStates.find((s) => s.name === formData.patient_permanent_state);
+      if (s)
+        setPermanentDistrictOptions(
+          City.getCitiesOfState("IN", s.isoCode)
+            .map((c) => c.name)
+            .sort(),
+        );
+    } else {
+      setPermanentDistrictOptions([]);
+    }
+  }, [formData.patient_permanent_state, indianStates]);
+
   const setField = (key: keyof FormData, value: string) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
+  };
+
+  // Fields that live-mirror into their Permanent Address counterpart while
+  // "Same as Current Address" is ticked — matches Addemployee.tsx, where only
+  // plain text/number inputs mirror continuously; State/District (FormDropdown)
+  // are copied once, at the moment the checkbox is ticked, not on every change.
+  const CURRENT_TO_PERMANENT_KEY: Partial<Record<keyof FormData, keyof FormData>> = {
+    patient_current_address: "patient_permanent_address",
+    patient_area: "patient_permanent_area",
+    patient_pincode: "patient_permanent_pincode",
   };
 
   const handleInputChange = (
@@ -210,10 +243,9 @@ export default function PatientRegistrationForm() {
     setFormData((prev) => {
       const next = { ...prev, [key]: value };
 
-      // Keep Permanent Address mirrored to Current Address while the
-      // "Same as Current Address" checkbox is ticked.
-      if (key === "patient_current_address" && sameAsCurrent) {
-        next.patient_permanent_address = value;
+      if (sameAsCurrent) {
+        const permKey = CURRENT_TO_PERMANENT_KEY[key];
+        if (permKey) (next as any)[permKey] = value;
       }
 
       return next;
@@ -227,6 +259,10 @@ export default function PatientRegistrationForm() {
       setFormData((prev) => ({
         ...prev,
         patient_permanent_address: prev.patient_current_address,
+        patient_permanent_area: prev.patient_area,
+        patient_permanent_state: prev.patient_state,
+        patient_permanent_district: prev.patient_district,
+        patient_permanent_pincode: prev.patient_pincode,
       }));
     }
   };
@@ -549,6 +585,34 @@ export default function PatientRegistrationForm() {
             sub="State, district and residential details."
           >
             <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
+
+              <div className="col-span-1">
+                <label className={labelCls}>Current address <Req /></label>
+                <input
+                  type="text"
+                  placeholder="Enter building no and street name"
+                  maxLength={255}
+                  className={inputCls}
+                  value={formData.patient_current_address}
+                  onChange={(e) => handleInputChange(e, "patient_current_address")}
+                  disabled={submitting}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className={labelCls}>Area <Req /></label>
+                <input
+                  name="patient_area"
+                  placeholder="Enter area"
+                  maxLength={50}
+                  className={inputCls}
+                  value={formData.patient_area}
+                  onChange={(e) => handleInputChange(e, "patient_area")}
+                  disabled={submitting}
+                />
+              </div>
+
               <div>
                 <label className={labelCls}>State <Req /></label>
                 <FormDropdown
@@ -573,18 +637,6 @@ export default function PatientRegistrationForm() {
                   disabled={submitting || !formData.patient_state}
                 />
               </div>
-              <div>
-                <label className={labelCls}>Area <Req /></label>
-                <input
-                  name="patient_area"
-                  placeholder="Enter area"
-                  maxLength={50}
-                  className={inputCls}
-                  value={formData.patient_area}
-                  onChange={(e) => handleInputChange(e, "patient_area")}
-                  disabled={submitting}
-                />
-              </div>
 
               <div>
                 <label className={labelCls}>Pincode <Req /></label>
@@ -601,19 +653,6 @@ export default function PatientRegistrationForm() {
                 />
               </div>
 
-              <div className="col-span-3">
-                <label className={labelCls}>Current address <Req /></label>
-                <input
-                  type="text"
-                  placeholder="Enter current address"
-                  maxLength={255}
-                  className={inputCls}
-                  value={formData.patient_current_address}
-                  onChange={(e) => handleInputChange(e, "patient_current_address")}
-                  disabled={submitting}
-                  required
-                />
-              </div>
 
               <div className="col-span-3 flex items-center gap-2">
                 <input
@@ -632,17 +671,76 @@ export default function PatientRegistrationForm() {
                 </label>
               </div>
 
-              <div className="col-span-3">
+              <div className="col-span-1">
                 <label className={labelCls}>Permanent address <Req /></label>
                 <input
                   type="text"
-                  placeholder="Enter permanent address"
+                  placeholder="Enter building no and street name"
                   maxLength={255}
                   className={inputCls}
                   value={formData.patient_permanent_address}
                   onChange={(e) => handleInputChange(e, "patient_permanent_address")}
                   disabled={submitting || sameAsCurrent}
                   required
+                />
+              </div>
+
+              <div>
+                <label className={labelCls}>Permanent area <Req /></label>
+                <input
+                  type="text"
+                  placeholder="Enter area"
+                  maxLength={50}
+                  className={inputCls}
+                  value={formData.patient_permanent_area}
+                  onChange={(e) => handleInputChange(e, "patient_permanent_area")}
+                  disabled={submitting || sameAsCurrent}
+                />
+              </div>
+
+              <div>
+                <label className={labelCls}>Permanent state <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={indianStates.map((s) => s.name)}
+                  value={formData.patient_permanent_state}
+                  onValueChange={(v) =>
+                    setFormData((p) => ({
+                      ...p,
+                      patient_permanent_state: v,
+                      patient_permanent_district: "",
+                    }))
+                  }
+                  placeholder="Select state"
+                  disabled={submitting || sameAsCurrent}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Permanent district <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={permanentDistrictOptions}
+                  value={formData.patient_permanent_district}
+                  onValueChange={(v) => setField("patient_permanent_district", v)}
+                  placeholder={
+                    formData.patient_permanent_state ? "Select district" : "Select state first"
+                  }
+                  disabled={submitting || sameAsCurrent || !formData.patient_permanent_state}
+                />
+              </div>
+
+              <div>
+                <label className={labelCls}>Permanent pincode <Req /></label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  placeholder="Enter pincode"
+                  maxLength={10}
+                  className={inputCls}
+                  value={formData.patient_permanent_pincode}
+                  onChange={(e) => handleInputChange(e, "patient_permanent_pincode")}
+                  disabled={submitting || sameAsCurrent}
                 />
               </div>
             </div>

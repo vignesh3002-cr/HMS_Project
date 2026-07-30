@@ -13,6 +13,7 @@ import { filterDataByValues } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { useBranchFilter } from "@/context/BranchFilterContext";
+import { StatusBadge } from "@/components/hms/StatusBadge";
 
 interface StaffMember {
   initials: string;
@@ -22,7 +23,7 @@ interface StaffMember {
   dept: string;
   deptClass: string;
   branch: string[];
-  status: "active" | "leave" | "inactive";
+  status: "active" | "inactive";
 }
 
 interface MedicalStaffRow {
@@ -30,10 +31,12 @@ interface MedicalStaffRow {
   name: string;
   phone: string;
   id: string;
+  designation: string;
   dept: string;
   deptClass: string;
   branch: string;
-  status: "active" | "leave" | "inactive";
+  roleType: string;
+  status: "active" | "inactive";
 }
 
 interface AdministrativeStaffRow {
@@ -44,14 +47,14 @@ interface AdministrativeStaffRow {
   roleType: string;
   phone: string;
   dept: string;
-  role: string;
-  roleColor: "purple" | "indigo";
+  designation: string;
+  designationColor: "purple" | "indigo";
   branch: string;
   access: string;
   accessColor: "purple" | "indigo";
   login: string;
   loginDot: "green" | "orange";
-  status: "active" | "leave";
+  status: "active" | "inactive";
 }
 
 interface SupportStaffRow {
@@ -60,30 +63,14 @@ interface SupportStaffRow {
   phone: string;
   id: string;
   dept: string;
+  designation: string;
   deptClass: "blue" | "purple" | "yellow" | "green" | "red";
   branch: string;
-  status: "active" | "leave";
+  roleType: string;
+  status: "active" | "inactive";
 }
 
-const statusConfig = {
-  active: {
-    label: "Active",
-    className: "bg-green-50 text-green-600",
-    dot: "bg-green-500",
-  },
-  leave: {
-    label: "Leave",
-    className: "bg-orange-50 text-orange-500",
-    dot: "bg-orange-500",
-  },
-  inactive: {
-    label: "Inactive",
-    className: "bg-slate-100 text-slate-600",
-    dot: "bg-slate-400",
-  },
-};
-
-const TABS = ["All staff", "Medical", "Administrative", "Support"];
+const TABS = ["All staff", "Medical Staff", "Admin", "Staff"];
 
 const supportBadgeColors: Record<SupportStaffRow["deptClass"], string> = {
   blue: "bg-blue-100 text-blue-700",
@@ -126,12 +113,28 @@ function classifyStaffDesignation(designation: string | null | undefined): "admi
   return STAFF_DESIGNATION_CATEGORY[key] ?? "administrative";
 }
 
-function getStaffCategory(emp: EmployeeRecord): "medical" | "administrative" | "support" {
+function getDesignationLabel(emp: EmployeeRecord): string {
   const roleType = (emp.user_table?.role_type || "STAFF").toUpperCase();
+  const designation = emp.designation || "";
+  switch (roleType) {
+    case "DOCTOR": return "Doctor";
+    case "NURSE": return "Nurse";
+    case "PHARMACIST": return "Pharmacist";
+    case "LAB_TECHNICIAN": return "Laboratory Technician";
+    case "BRANCH_ADMIN": return "Branch Admin";
+    case "ADMIN": return designation || "Admin";
+    case "STAFF": return designation || "Staff";
+    default: return designation || roleType;
+  }
+}
+
+function getStaffCategory(emp: EmployeeRecord): "medical" | "admin" | "staff" | "doctor" {
+  const roleType = (emp.user_table?.role_type || "STAFF").toUpperCase();
+  if (roleType === "DOCTOR") return "doctor";
   if (roleType === "NURSE" || roleType === "PHARMACIST" || roleType === "LAB_TECHNICIAN") return "medical";
-  if (roleType === "ADMIN" || roleType === "BRANCH_ADMIN") return "administrative";
-  if (roleType === "STAFF") return classifyStaffDesignation(emp.designation);
-  return "medical";
+  if (roleType === "ADMIN" || roleType === "BRANCH_ADMIN") return "admin";
+  if (roleType === "STAFF") return classifyStaffDesignation(emp.designation) === "administrative" ? "admin" : "staff";
+  return "staff";
 }
 
 function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
@@ -148,10 +151,12 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
       name: fullName,
       phone: emp.mobile_no,
       id: emp.employee_id,
+      designation: getDesignationLabel(emp),
       dept: deptName,
       deptClass: "bg-[#D6E3FF] text-[#475C7F]",
       branch: branchName,
-      status: isActive ? "active" : "leave",
+      roleType,
+      status: isActive ? "active" : "inactive",
     } as MedicalStaffRow;
   } else if (roleType === "ADMIN" || roleType === "BRANCH_ADMIN") {
     return {
@@ -162,35 +167,35 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
       roleType,
       phone: emp.mobile_no,
       dept: deptName,
-      role: emp.designation || (roleType === "BRANCH_ADMIN" ? "Branch Admin" : "Admin"),
-      roleColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
+      designation: getDesignationLabel(emp),
+      designationColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
       branch: branchName,
       access: "Full Access",
       accessColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
       login: isActive ? "Online" : "Offline",
       loginDot: isActive ? "green" : "orange",
-      status: isActive ? "active" : "leave",
+      status: isActive ? "active" : "inactive",
     } as AdministrativeStaffRow;
   } else if (roleType === "STAFF") {
     const isAdmin = classifyStaffDesignation(emp.designation) === "administrative";
     if (isAdmin) {
-      return {
-        initials: getInitials(fullName),
-        avatar: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
-        name: fullName,
-        id: emp.employee_id,
-        roleType,
-        phone: emp.mobile_no,
-        dept: deptName,
-        role: emp.designation || "Staff",
-        roleColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
-        branch: branchName,
-        access: "Full Access",
-        accessColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
-        login: isActive ? "Online" : "Offline",
-        loginDot: isActive ? "green" : "orange",
-        status: isActive ? "active" : "leave",
-      } as AdministrativeStaffRow;
+        return {
+          initials: getInitials(fullName),
+          avatar: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
+          name: fullName,
+          id: emp.employee_id,
+          roleType,
+          phone: emp.mobile_no,
+          dept: deptName,
+          designation: getDesignationLabel(emp),
+          designationColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
+          branch: branchName,
+          access: "Full Access",
+          accessColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
+          login: isActive ? "Online" : "Offline",
+          loginDot: isActive ? "green" : "orange",
+          status: isActive ? "active" : "inactive",
+        } as AdministrativeStaffRow;
     } else {
       return {
         initials: getInitials(fullName),
@@ -198,9 +203,11 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
         phone: emp.mobile_no,
         id: emp.employee_id,
         dept: deptName,
+        designation: getDesignationLabel(emp),
         deptClass: "blue",
         branch: branchName,
-        status: isActive ? "active" : "leave",
+        roleType,
+        status: isActive ? "active" : "inactive",
       } as SupportStaffRow;
     }
   }
@@ -209,10 +216,12 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
     name: fullName,
     phone: emp.mobile_no,
     id: emp.employee_id,
+    designation: getDesignationLabel(emp),
     dept: deptName,
     deptClass: "bg-[#D6E3FF] text-[#475C7F]",
     branch: branchName,
-    status: isActive ? "active" : "leave",
+    roleType,
+    status: isActive ? "active" : "inactive",
   } as MedicalStaffRow;
 }
 
@@ -221,18 +230,15 @@ const badgeClass = (color: "purple" | "indigo") =>
     ? "bg-purple-200/60 text-purple-800"
     : "bg-indigo-100 text-indigo-700";
 
-const StatusBadge = ({ status }: { status: string }) => (
-  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${(statusConfig as any)[status]?.className || statusConfig.active.className}`}>
-    <span className={`w-1.5 h-1.5 rounded-full ${(statusConfig as any)[status]?.dot || statusConfig.active.dot}`} />
-    {(statusConfig as any)[status]?.label || "Active"}
-  </span>
-);
+
 
 const ActionIcons = ({ id, roleType }: { id?: string; roleType?: string } = {}) => {
   const navigate = useNavigate();
-  // Only Branch Admin rows have an edit destination today (EditAdmin.tsx is
-  // scoped to Branch Admin only) — other roles keep the icon inert.
-  const canEdit = roleType === "BRANCH_ADMIN" && !!id;
+  // Every role now edits through the same AddEmployee.tsx form (Create/Edit
+  // mode) — Doctors keep the /doctor/edit/:id path, everyone else uses
+  // /staff/edit/:id; both routes render the same component.
+  const canEdit = !!id;
+  const editPath = roleType === "DOCTOR" ? `/doctor/edit/${id}` : `/staff/edit/${id}`;
 
   return (
     <div className="flex items-center gap-1">
@@ -244,7 +250,7 @@ const ActionIcons = ({ id, roleType }: { id?: string; roleType?: string } = {}) 
       </button>
       <button
         title="Edit"
-        onClick={canEdit ? () => navigate(`/staff/edit/${id}`) : undefined}
+        onClick={canEdit ? () => navigate(editPath) : undefined}
         disabled={!canEdit}
         className={`p-1.5 rounded transition-colors duration-200 group ${canEdit ? "hover:bg-blue-50 cursor-pointer" : "opacity-40 cursor-not-allowed"}`}
       >
@@ -317,9 +323,9 @@ export default function Staff() {
   } = useFilterPanel();
 
   const activeTabName = TABS[activeTab];
-  const isMedicalTab = activeTabName === "Medical";
-  const isAdministrativeTab = activeTabName === "Administrative";
-  const isSupportTab = activeTabName === "Support";
+  const isMedicalTab = activeTabName === "Medical Staff";
+  const isAdminTab = activeTabName === "Admin";
+  const isStaffTab = activeTabName === "Staff";
 
   const [realStaff, setRealStaff] = useState<EmployeeRecord[] | null>(null);
   const [isStaffLoading, setIsStaffLoading] = useState(true);
@@ -388,20 +394,20 @@ export default function Staff() {
     {
       id: "status", label: "Status", type: "multiselect", options: [
         { label: "Active", value: "active" },
-        { label: "Leave", value: "leave" },
         { label: "Inactive", value: "inactive" },
         { label: "Resigned", value: "Resigned" },
         { label: "Suspended", value: "Suspended" },
       ],
     },
-    { id: "role", label: "Role", type: "multiselect", options: [
-      { label: "Cardiologist", value: "Cardiologist" },
-      { label: "Oncologist", value: "Oncologist" },
-      { label: "Pediatrician", value: "Pediatrician" },
-      { label: "Neurologist", value: "Neurologist" },
-      { label: "Head Nurse", value: "Head Nurse" },
-      { label: "Radiologist", value: "Radiologist" },
-      { label: "General Surgeon", value: "General Surgeon" },
+    { id: "designation", label: "Designation", type: "multiselect", options: [
+      { label: "Doctor", value: "Doctor" },
+      { label: "Nurse", value: "Nurse" },
+      { label: "Pharmacist", value: "Pharmacist" },
+      { label: "Laboratory Technician", value: "Laboratory Technician" },
+      { label: "Head Admin", value: "Head Admin" },
+      { label: "Branch Admin", value: "Branch Admin" },
+      { label: "Staff Admin", value: "Staff Admin" },
+      { label: "Receptionist", value: "Receptionist" },
     ]},
   ];
 
@@ -431,11 +437,11 @@ export default function Staff() {
       ? []
       : isMedicalTab
         ? realStaff.filter((e) => getStaffCategory(e) === "medical")
-        : isAdministrativeTab
-          ? realStaff.filter((e) => getStaffCategory(e) === "administrative")
-          : isSupportTab
-            ? realStaff.filter((e) => getStaffCategory(e) === "support")
-            : realStaff;
+        : isAdminTab
+          ? realStaff.filter((e) => getStaffCategory(e) === "admin")
+          : isStaffTab
+            ? realStaff.filter((e) => getStaffCategory(e) === "staff")
+            : realStaff.filter((e) => getStaffCategory(e) !== "doctor");
 
     const sourceData: (StaffMember | MedicalStaffRow | AdministrativeStaffRow | SupportStaffRow)[] =
       employeesForTab.map((e, i) => mapEmployeeToStaffData(e, i));
@@ -455,7 +461,7 @@ export default function Staff() {
     result = filterDataByValues(result, appliedValues);
 
     return result;
-  }, [searchQuery, appliedValues, isMedicalTab, isAdministrativeTab, isSupportTab, realStaff]);
+  }, [searchQuery, appliedValues, isMedicalTab, isAdminTab, isStaffTab, realStaff]);
 
   // ---- SORTING ----
   const handleSort = (field: string) => {
@@ -495,7 +501,7 @@ export default function Staff() {
   ];
 
   const hmsColumnsByTab = (): any[] => {
-    if (isAdministrativeTab) {
+    if (isAdminTab) {
       return [
         { key: "name", label: "Name", render: (r: any) => (
           <div className="flex items-center gap-3">
@@ -503,8 +509,8 @@ export default function Staff() {
             <div><div className="hms-name-text">{r.name}</div><div className="hms-id-text">{r.id}</div></div>
           </div>
         )},
-        { key: "role", label: "Role/Department", render: (r: any) => (
-          <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${badgeClass(r.roleColor)}`}>{r.role}</span>
+        { key: "designation", label: "Designation", render: (r: any) => (
+          <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${badgeClass(r.designationColor)}`}>{r.designation}</span>
         )},
         { key: "branch", label: "Branch", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.branch}</span> },
         { key: "access", label: "Access Level", render: (r: any) => (
@@ -520,7 +526,7 @@ export default function Staff() {
         { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} /> },
       ];
     }
-    if (isSupportTab) {
+    if (isStaffTab) {
       return [
         { key: "name", label: "Name", render: (r: any) => (
           <div className="flex items-center gap-3">
@@ -529,6 +535,9 @@ export default function Staff() {
           </div>
         )},
         { key: "phone", label: "Phone Number", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.phone}</span> },
+        { key: "designation", label: "Designation", render: (r: any) => (
+          <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${supportBadgeColors[r.deptClass]}`}>{r.designation}</span>
+        )},
         { key: "dept", label: "Department", render: (r: any) => (
           <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${supportBadgeColors[r.deptClass]}`}>{r.dept}</span>
         )},
@@ -546,6 +555,9 @@ export default function Staff() {
         </div>
       )},
       { key: "phone", label: "Phone Number", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.phone}</span> },
+      { key: "designation", label: "Designation", render: (r: any) => (
+        <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize bg-emerald-100 text-emerald-700">{r.designation}</span>
+      )},
       { key: "dept", label: "Department", render: (r: any) => (
         <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize ${r.deptClass}`}>{r.dept}</span>
       )},

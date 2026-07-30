@@ -16,7 +16,7 @@ export type WorkingHourPayload = WorkingHourDto;
 export interface CreateEmployeePayload {
   username: string;
   password: string;
-  role_type: "DOCTOR" | "NURSE" | "LAB_TECHNICIAN" | "PHARMACIST" | "BRANCH_ADMIN" | "Admin";
+  role_type: "DOCTOR" | "NURSE" | "LAB_TECHNICIAN" | "PHARMACIST" | "BRANCH_ADMIN" | "Admin" | "STAFF";
   first_name: string;
   middle_name?: string;
   last_name: string;
@@ -37,6 +37,10 @@ export interface CreateEmployeePayload {
   employee_district?: string;
   employee_area?: string;
   employee_pincode?: number;
+  permanent_employee_state?: string;
+  permanent_employee_district?: string;
+  permanent_employee_area?: string;
+  permanent_employee_pincode?: number;
   employee_no_experence?: number;
   emergency_contact_name?: string;
   emergency_contact_relationship?: string;
@@ -97,6 +101,8 @@ export interface EmployeeRecord {
   employee_area?: string | null;
   employee_pincode?: string | number | null;
   employee_no_experence?: string | number | null;
+  emp_gender?: string | null;
+  emp_DOB?: string | null;
 }
 
 export interface EmployeeDetailResponse {
@@ -189,6 +195,13 @@ export interface UpdateEmployeePayload {
   employee_district?: string;
   employee_area?: string;
   employee_pincode?: number;
+  permanent_employee_state?: string;
+  permanent_employee_district?: string;
+  permanent_employee_area?: string;
+  permanent_employee_pincode?: number;
+  gender?: string;
+  dob?: string;
+  age?: number;
   employee_no_experence?: number;
   branch_ids?: string[];
   consultation_minutes?: number;

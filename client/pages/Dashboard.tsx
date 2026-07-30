@@ -14,6 +14,7 @@ import { patientApi } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { branchApi } from "@/api/branch.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
+import { StatusBadge } from "@/components/hms/StatusBadge";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 
 const navItems = [
@@ -936,15 +937,9 @@ useEffect(() => {
                   { key: "date", label: "Timing", render: (r: any) => (
                     <div className="text-[#191C1E] hms-content-text leading-4"><div>{r.date}</div><div className="text-[#8C8D8F] hms-department-text">{r.time}</div></div>
                   )},
-                  { key: "status", label: "Status", render: (r: any) => {
-                    const isActive = !["Cancelled", "No Show"].includes(String(r.status));
-                    return (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />
-                        {r.status}
-                      </span>
-                    );
-                  }},
+                  { key: "status", label: "Status", render: (r: any) => (
+                    <StatusBadge status={String(r.status)} />
+                  )},
                   { key: "actions", label: "Action", sortable: false, render: (r: any) => (
                     <div className="flex items-center gap-1">
                       <button title="View" onClick={() => handleView(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
@@ -972,15 +967,9 @@ useEffect(() => {
                     <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: r.deptBg, color: r.deptColor }}>{r.dept}</span>
                   )},
                   { key: "branch", label: "Branch", render: (r: any) => <span className="text-[#191C1E] hms-content-text leading-4">{r.branch}</span> },
-                  { key: "status", label: "Status", render: (r: any) => {
-                    const isActive = String(r.status) === "Active";
-                    return (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />
-                        {r.status}
-                      </span>
-                    );
-                  }},
+                  { key: "status", label: "Status", render: (r: any) => (
+                    <StatusBadge status={String(r.status)} />
+                  )},
                   { key: "actions", label: "Actions", sortable: false, render: (r: any) => (
                     <div className="flex items-center gap-1">
                       <button title="View" onClick={() => handleView(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
