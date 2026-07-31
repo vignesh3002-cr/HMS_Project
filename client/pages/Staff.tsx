@@ -490,7 +490,7 @@ export default function Staff() {
             <div><div className="hms-name-text">{r.name}</div><div className="hms-id-text">{r.id}</div></div>
           </div>
         )},
-        { key: "designation", label: "Designation", render: (r: any) => (
+        { key: "designation", label: "Department", render: (r: any) => (
           <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${badgeClass(r.designationColor)}`}>{r.designation}</span>
         )},
         { key: "branch", label: "Branch", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.branch}</span> },
@@ -516,11 +516,8 @@ export default function Staff() {
           </div>
         )},
         { key: "phone", label: "Phone Number", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.phone}</span> },
-        { key: "designation", label: "Designation", render: (r: any) => (
+        { key: "designation", label: "Department", render: (r: any) => (
           <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${supportBadgeColors[r.deptClass]}`}>{r.designation}</span>
-        )},
-        { key: "dept", label: "Department", render: (r: any) => (
-          <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${supportBadgeColors[r.deptClass]}`}>{r.dept}</span>
         )},
         { key: "branch", label: "Branch", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.branch}</span> },
         { key: "status", label: "Status", render: (r: any) => <StatusBadge status={r.status} /> },
@@ -536,11 +533,8 @@ export default function Staff() {
         </div>
       )},
       { key: "phone", label: "Phone Number", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.phone}</span> },
-      { key: "designation", label: "Designation", render: (r: any) => (
+      { key: "designation", label: "Department", render: (r: any) => (
         <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize bg-emerald-100 text-emerald-700">{r.designation}</span>
-      )},
-      { key: "dept", label: "Department", render: (r: any) => (
-        <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize bg-[#E6E8EA] text-[#475C7F]">{r.role ?? r.dept}</span>
       )},
       { key: "branch", label: "Branch", render: (r: any) => (
         <span className="text-[#191C1E] hms-content-text">

@@ -540,9 +540,10 @@ export default function Doctor() {
                   { key: "dept", label: "Department", render: (r: any) => (
                     <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: String(r.deptBg), color: String(r.deptColor) }}>{String(r.dept)}</span>
                   )},
-                  { key: "qualification", label: "Qualification", render: (r: any) => (
-                    <span className="text-[#191C1E] hms-content-text leading-4">{String(r.qualification)}</span>
-                  )},
+                  { key: "slots", label: "Slots", sortable: false, render: (r: any) => {
+                    const summary = slotSummaries[String(r.id)];
+                    return <SlotProgress booked={summary?.booked ?? 0} total={summary?.total ?? 0} />;
+                  }},
                   { key: "mobile", label: "Mobile No", render: (r: any) => (
                     <span className="text-[#191C1E] hms-content-text leading-4">{String(r.mobile)}</span>
                   )},
