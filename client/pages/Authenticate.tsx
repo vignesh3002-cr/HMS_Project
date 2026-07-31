@@ -101,6 +101,8 @@ export default function Authenticate() {
   useEffect(() => {
     const sendOtp = async () => {
       const username = sessionStorage.getItem("pendingUsername");
+      const rememberMe =
+        sessionStorage.getItem("rememberMe") === "true";
       if (!username) {
         toast({
           title: "Error",
@@ -197,6 +199,7 @@ export default function Authenticate() {
 
   const handleVerify = async () => {
     const code = digits.join("");
+    
     if (code.length < OTP_LENGTH) {
       const nextErrors = digits.map((d) => !d);
       setErrors(nextErrors);
@@ -207,6 +210,13 @@ export default function Authenticate() {
     }
 
     const username = sessionStorage.getItem("pendingUsername");
+    const rememberMe =
+      sessionStorage.getItem("rememberMe") === "true";
+
+
+   console.log("OTP entered:", code);
+   console.log("Username:", username);
+   console.log("Remember Me:", rememberMe);
     if (!username) {
       toast({ title: "Error", description: "Session expired. Please login again.", variant: "destructive" });
       navigate("/");
@@ -216,11 +226,11 @@ export default function Authenticate() {
     setIsLoading(true);
 
     try {
-      const res = await api.post("/auth/verify-otp", { username, code });
+      const res = await api.post("/auth/verify-otp", { username, code, rememberMe });
       
-      if (res.data.success) {
+      if (res.data.success) { 
         const { token, user } = res.data.data;
-        saveToken(token);
+        saveToken(token, rememberMe);
         saveUser(user);
         sessionStorage.removeItem("pendingUsername");
         navigate("/dashboard");

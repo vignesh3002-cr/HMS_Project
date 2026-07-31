@@ -6,7 +6,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
 import { useToast } from "@/hooks/use-toast";
-import { doctorApi, type DoctorRecord } from "@/api/doctor.api";
 import { appointmentApi, type AppointmentRecord, type AvailableSlot } from "@/api/appointment.api";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
@@ -31,13 +30,6 @@ interface AppointmentSlot {
 interface ScheduleRow {
   time: string;
   slots: (AppointmentSlot | null)[];
-}
-
-interface DoctorDirectoryEntry {
-  initials: string;
-  color: string;
-  name: string;
-  spec: string;
 }
 
 type ScheduleViewType = "list" | "day" | "week";
@@ -214,15 +206,6 @@ function mapEmployeeToDayColumn(emp: EmployeeRecord): DayDoctorColumn {
     branchId: emp.branch_id,
     name: `Dr. ${[emp.first_name, emp.middle_name, emp.last_name].filter(Boolean).join(" ")}`,
     spec: emp.department_master?.department_name || emp.specialization || "General",
-  };
-}
-
-function mapDoctorRecord(doc: DoctorRecord, index: number): DoctorDirectoryEntry {
-  return {
-    initials: getInitials(doc.doctor_name),
-    color: AVATAR_PALETTE[index % AVATAR_PALETTE.length].initials,
-    name: doc.doctor_name,
-    spec: doc.specialization || doc.department || "General",
   };
 }
 
@@ -415,37 +398,6 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       onViewChange?.(view);
     }
   };
-
-  const [realDoctorDirectory, setRealDoctorDirectory] = useState<DoctorDirectoryEntry[] | null>(null);
-
-  useEffect(() => {
-    doctorApi
-      .getAll()
-      .then((res) => {
-        const records = res.data?.data;
-        if (records && records.length > 0) {
-          setRealDoctorDirectory(records.map(mapDoctorRecord));
-        } else {
-          toast({
-            title: "Using fallback data",
-            description: "No doctor records returned yet — showing sample data.",
-            variant: "destructive",
-          });
-        }
-      })
-      .catch(() => {
-        toast({
-          title: "Using fallback data",
-          description: "Couldn't reach the doctors API — showing sample data.",
-          variant: "destructive",
-        });
-      });
-  }, []);
-
-  const activeDoctorDirectory = realDoctorDirectory ?? [];
-  const filteredDoctorDirectory = activeDoctorDirectory.filter((doc) =>
-    doc.name.toLowerCase().includes(searchTerm.toLowerCase()),
-  );
 
   const dateLabel = isToday(selectedDate)
     ? "Today"

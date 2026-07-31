@@ -1,18 +1,27 @@
 import { useState, useEffect, useRef, ChangeEvent, FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, UserRound, Loader2, Plus, X } from "lucide-react";
+import { ArrowLeft, UserRound, Loader2, Plus, Check, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { MultiSelectDropdown } from "@/components/ui/multi-select-dropdown";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import TimepickerWheel from "@/components/ui/timepicker-wheel";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 import { State as CSState, City } from "country-state-city";
 import type { IState } from "country-state-city";
-import { employeeApi, CreateEmployeePayload, WorkingHourDto } from "@/api/employee.api";
-import { branchApi, Branch } from "@/api/branch.api";
+import { employeeApi, CreateEmployeePayload, UpdateEmployeePayload, WorkingHourDto } from "@/api/employee.api";
+import { branchApi, Branch, AssignableUser } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
-import { AssignableUser } from "@/api/branch.api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -21,11 +30,13 @@ type BackendRoleType =
   | "NURSE"
   | "LAB_TECHNICIAN"
   | "PHARMACIST"
-  | "BRANCH_ADMIN";
+  | "BRANCH_ADMIN"
+  | "STAFF";
 
 function toDisplayRole(roleType: BackendRoleType): string {
   if (roleType === "LAB_TECHNICIAN") return "Lab Technician";
   if (roleType === "BRANCH_ADMIN") return "Branch Admin";
+  if (roleType === "STAFF") return "Staff";
   return roleType
     .split("_")
     .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
@@ -35,6 +46,7 @@ function toDisplayRole(roleType: BackendRoleType): string {
 function toBackendRole(displayRole: string): BackendRoleType {
   if (displayRole === "Lab Technician") return "LAB_TECHNICIAN";
   if (displayRole === "Branch Admin") return "BRANCH_ADMIN";
+  if (displayRole === "Staff") return "STAFF";
   return displayRole.toUpperCase().replace(/ /g, "_") as BackendRoleType;
 }
 
@@ -44,6 +56,7 @@ const VALID_BACKEND_ROLES: BackendRoleType[] = [
   "LAB_TECHNICIAN",
   "PHARMACIST",
   "BRANCH_ADMIN",
+  "STAFF",
 ];
 
 const OTHER_DEPARTMENT_VALUE = "__OTHER__";
@@ -86,6 +99,48 @@ interface ScheduleEntry {
 function deriveShiftName(startTime: string): string {
   const hour = Number(startTime.split(":")[0]);
   return hour < 12 ? "Morning" : "Evening";
+}
+
+// doctor_schedule.start_time/end_time come back as UTC-anchored time values —
+// read with UTC getters (same convention as formatScheduleTime/toTimeInputValue
+// in Scheduled.tsx / Edit Appointment.tsx) so the displayed hour doesn't shift
+// with the browser's local timezone. A naive string .slice(0, 5) here would
+// grab "1970-" off the front of the ISO string instead of the actual time.
+function toTimeInputValue(time: string | null | undefined): string {
+  if (!time) return "";
+  const d = new Date(time);
+  if (isNaN(d.getTime())) return "";
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+const NONE_BRANCH_VALUE = "";
+
+// Staff designations that read as "administrative" work rather than manual/
+// support work — used only to pick a title for the generic Staff role.
+const STAFF_ADMIN_DESIGNATIONS = ["Office Assistant"];
+
+function getEditTitle(roleType: BackendRoleType, designation: string): string {
+  switch (roleType) {
+    case "DOCTOR":
+      return "Edit Doctor";
+    case "NURSE":
+      return "Edit Nurse";
+    case "PHARMACIST":
+      return "Edit Pharmacist";
+    case "LAB_TECHNICIAN":
+      return "Edit Laboratory Technician";
+    case "BRANCH_ADMIN":
+      return "Edit Branch Admin";
+    case "STAFF":
+      if (!designation || designation === "Other") return "Edit Staff";
+      return STAFF_ADMIN_DESIGNATIONS.includes(designation)
+        ? "Edit Staff Admin"
+        : "Edit Supporting Staff";
+    default:
+      return "Edit Employee";
+  }
 }
 
 interface RoleConfig {
@@ -162,6 +217,23 @@ const ROLE_CONFIG: Record<string, RoleConfig> = {
     isMedical: false,
     showSchedule: false,
   },
+  Staff: {
+    designations: [
+      "Housekeeping",
+      "Security",
+      "Ward Assistant",
+      "Office Assistant",
+      "Attender",
+      "Driver",
+      "Maintenance Staff",
+      "Other",
+    ],
+    qualifications: [],
+    licenseLabel: "License no",
+    licensePlaceholder: "",
+    isMedical: false,
+    showSchedule: false,
+  },
 };
 
 interface EmployeeFormData {
@@ -185,10 +257,14 @@ interface EmployeeFormData {
   aadhaarNo: string;
   panNo: string;
   passportNo: string;
-  state: string;
-  district: string;
-  area: string;
-  pincode: string;
+  currentState: string;
+  currentDistrict: string;
+  currentArea: string;
+  currentPincode: string;
+  permanentState: string;
+  permanentDistrict: string;
+  permanentArea: string;
+  permanentPincode: string;
   experience: string;
   departmentId: string;
   designation: string;
@@ -222,10 +298,14 @@ const emptyFormData: EmployeeFormData = {
   aadhaarNo: "",
   panNo: "",
   passportNo: "",
-  state: "",
-  district: "",
-  area: "",
-  pincode: "",
+  currentState: "",
+  currentDistrict: "",
+  currentArea: "",
+  currentPincode: "",
+  permanentState: "",
+  permanentDistrict: "",
+  permanentArea: "",
+  permanentPincode: "",
   experience: "",
   departmentId: "",
   designation: "",
@@ -276,10 +356,13 @@ function Section({
 
 export default function AddEmployee() {
   const navigate = useNavigate();
+  const { id: employeeId } = useParams<{ id: string }>();
+  const isEditMode = Boolean(employeeId);
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
 
   const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(isEditMode);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [assignableAdmins, setAssignableAdmins] = useState<AssignableUser[]>([]);
@@ -290,11 +373,20 @@ export default function AddEmployee() {
     VALID_BACKEND_ROLES.map(toDisplayRole),
   );
   const [indianStates, setIndianStates] = useState<IState[]>([]);
-  const [districtOptions, setDistrictOptions] = useState<string[]>([]);
+  const [currentDistrictOptions, setCurrentDistrictOptions] = useState<string[]>([]);
+  const [permanentDistrictOptions, setPermanentDistrictOptions] = useState<string[]>([]);
   const [sameAsCurrent, setSameAsCurrent] = useState(false);
   const [schedule, setSchedule] = useState<ScheduleEntry[]>([]);
   const [consultationMinutes, setConsultationMinutes] = useState("20");
   const nextSlotId = useRef(0);
+
+  // ── Edit-mode-only state ──────────────────────────────────────────────────
+  const [isActive, setIsActive] = useState(true);
+  const [adminUserId, setAdminUserId] = useState<string | null>(null);
+  const [originalBranchId, setOriginalBranchId] = useState<string>(NONE_BRANCH_VALUE);
+  const [showReassignModal, setShowReassignModal] = useState(false);
+  const [reassignTargetBranchName, setReassignTargetBranchName] = useState("");
+  const [reassignOccupantName, setReassignOccupantName] = useState("");
 
   // ── Bootstrap ──────────────────────────────────────────────────────────────
 
@@ -332,18 +424,32 @@ export default function AddEmployee() {
   }, []);
 
   useEffect(() => {
-    if (formData.state) {
-      const s = indianStates.find((s) => s.name === formData.state);
+    if (formData.currentState) {
+      const s = indianStates.find((s) => s.name === formData.currentState);
       if (s)
-        setDistrictOptions(
+        setCurrentDistrictOptions(
           City.getCitiesOfState("IN", s.isoCode)
             .map((c) => c.name)
             .sort(),
         );
     } else {
-      setDistrictOptions([]);
+      setCurrentDistrictOptions([]);
     }
-  }, [formData.state, indianStates]);
+  }, [formData.currentState, indianStates]);
+
+  useEffect(() => {
+    if (formData.permanentState) {
+      const s = indianStates.find((s) => s.name === formData.permanentState);
+      if (s)
+        setPermanentDistrictOptions(
+          City.getCitiesOfState("IN", s.isoCode)
+            .map((c) => c.name)
+            .sort(),
+        );
+    } else {
+      setPermanentDistrictOptions([]);
+    }
+  }, [formData.permanentState, indianStates]);
 
   useEffect(() => {
     branchApi
@@ -370,6 +476,141 @@ export default function AddEmployee() {
       })
       .catch(() => {});
   }, []);
+
+  // Edit mode — fetch the employee's full record (role determines which
+  // fields actually apply) and prefill everything: personal/contact/address
+  // fields for every role, plus schedule/consultation minutes for Doctors.
+  useEffect(() => {
+    if (!employeeId) return;
+
+    employeeApi
+      .getById(employeeId)
+      .then((res) => {
+        const payload = res.data?.data;
+        const employee = payload?.employee;
+        const user = payload?.user;
+
+        if (!employee) {
+          toast({
+            title: "Employee not found",
+            description: "Could not find this employee.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        const roleType = (
+          VALID_BACKEND_ROLES.includes(user?.role_type as BackendRoleType)
+            ? user!.role_type
+            : "DOCTOR"
+        ) as BackendRoleType;
+
+        setAdminUserId(employee.user_id ?? user?.user_id ?? null);
+
+        // `branches` includes every mapping this user has ever had — only the
+        // active ones (status 1) reflect where they're really assigned today.
+        const activeBranchIds =
+          (payload?.branches as { branch_id: string; status: number }[] | undefined)
+            ?.filter((b) => b.status === 1)
+            .map((b) => b.branch_id) ?? [];
+        const branchIds = activeBranchIds.length
+          ? activeBranchIds
+          : employee.branch_id
+          ? [employee.branch_id]
+          : [];
+
+        setFormData({
+          username: user?.username || "",
+          password: "",
+          roleType,
+          firstName: employee.first_name || "",
+          middleName: employee.middle_name || "",
+          lastName: employee.last_name || "",
+          dateOfBirth: employee.emp_DOB ? String(employee.emp_DOB).slice(0, 10) : "",
+          gender: employee.emp_gender || "",
+          bloodGroup: employee.blood_group || "",
+          nationality: employee.nationality || "",
+          maritalStatus: employee.marital_status || "",
+          mobileNo: employee.mobile_no || "",
+          permanentAddress: employee.parmanant_address || "",
+          currentAddress: employee.current_address || "",
+          emergencyContactName: employee.emergency_contact_name || "",
+          emergencyContactRelation: employee.emergency_contact_relationship || "",
+          emergencyContactNumber: employee.emergency_contact_number || "",
+          aadhaarNo: employee.aadhaar_no || "",
+          panNo: employee.pan_no || "",
+          passportNo: employee.passport_no || "",
+          currentState: employee.employee_state || "",
+          currentDistrict: employee.employee_district || "",
+          currentArea: employee.employee_area || "",
+          currentPincode: employee.employee_pincode != null ? String(employee.employee_pincode) : "",
+          // Permanent-address structured fields aren't persisted server-side
+          // either (create silently drops them today) — nothing to prefill.
+          permanentState: "",
+          permanentDistrict: "",
+          permanentArea: "",
+          permanentPincode: "",
+          experience: employee.employee_no_experence != null ? String(employee.employee_no_experence) : "",
+          departmentId: employee.department_id || "",
+          designation: employee.designation || "",
+          specialization: employee.specialization || "",
+          qualification: employee.qualification || "",
+          docLicenseNo: employee.license_no || "",
+          joiningDate: employee.joining_date ? String(employee.joining_date).slice(0, 10) : "",
+          branchIds,
+          email: employee.email || "",
+          photoUrl: employee.employee_photo_URL || employee.photo || null,
+        });
+
+        setIsActive(employee.emp_status === true || user?.user_status === 1);
+
+        if (employee.current_address && employee.current_address === employee.parmanant_address) {
+          setSameAsCurrent(true);
+          // Auto-checking above only compared the address line — mirror the
+          // rest of the current fields too, otherwise state/district/area/
+          // pincode are left blank (and disabled) while address/area/pincode
+          // showed correctly, making the section look broken.
+          setFormData((p) => ({
+            ...p,
+            permanentArea: p.currentArea,
+            permanentState: p.currentState,
+            permanentDistrict: p.currentDistrict,
+            permanentPincode: p.currentPincode,
+          }));
+        }
+
+        if (roleType === "BRANCH_ADMIN") {
+          setOriginalBranchId(branchIds[0] ?? NONE_BRANCH_VALUE);
+        }
+
+        if (roleType === "DOCTOR") {
+          const dbSchedules: any[] = payload?.doctorSchedules || [];
+          if (dbSchedules.length > 0) {
+            setSchedule(
+              dbSchedules.map((s: any) => ({
+                id: `db-${s.schedule_id}`,
+                day_of_week: s.day_of_week || "",
+                start_time: toTimeInputValue(s.start_time) || "09:00",
+                end_time: toTimeInputValue(s.end_time) || "17:00",
+                branch_id: s.branch_id || "",
+              })),
+            );
+          }
+          const profile: any = payload?.doctorProfile;
+          if (profile?.consultation_minutes) {
+            setConsultationMinutes(String(profile.consultation_minutes));
+          }
+        }
+      })
+      .catch(() => {
+        toast({
+          title: "Failed to load employee",
+          description: "Couldn't reach the employees API.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => setLoading(false));
+  }, [employeeId, toast]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
@@ -401,6 +642,13 @@ export default function AddEmployee() {
     };
   });
 
+  // A Branch Admin can be fully unassigned while editing (mirrors the old
+  // EditAdmin.tsx) — not offered on create, where an admin always needs a home.
+  const singleBranchOptions =
+    isEditMode && formData.roleType === "BRANCH_ADMIN"
+      ? [{ label: "None", value: NONE_BRANCH_VALUE }, ...branchOptions]
+      : branchOptions;
+
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const handleChange = (
@@ -409,7 +657,10 @@ export default function AddEmployee() {
     const { name, value } = e.target;
     setFormData((p) => {
       const next = { ...p, [name]: value };
-      if (name === "currentAddress" && sameAsCurrent) next.permanentAddress = value;
+      if (sameAsCurrent && name.startsWith("current")) {
+        const permKey = "permanent" + name.slice(7) as keyof EmployeeFormData;
+        if (permKey in next) (next as any)[permKey] = value;
+      }
       return next;
     });
   };
@@ -436,7 +687,14 @@ export default function AddEmployee() {
     const checked = e.target.checked;
     setSameAsCurrent(checked);
     if (checked)
-      setFormData((p) => ({ ...p, permanentAddress: p.currentAddress }));
+      setFormData((p) => ({
+        ...p,
+        permanentAddress: p.currentAddress,
+        permanentArea: p.currentArea,
+        permanentState: p.currentState,
+        permanentDistrict: p.currentDistrict,
+        permanentPincode: p.currentPincode,
+      }));
   };
 
   const addSlot = () => {
@@ -457,75 +715,10 @@ export default function AddEmployee() {
 
   // ── Submit ─────────────────────────────────────────────────────────────────
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-
-    const required: { key: keyof EmployeeFormData; label: string }[] = [
-      { key: "roleType", label: "Role" },
-      { key: "firstName", label: "First Name" },
-      { key: "lastName", label: "Last Name" },
-      { key: "email", label: "Email" },
-      { key: "dateOfBirth", label: "Date of Birth" },
-      { key: "gender", label: "Gender" },
-      { key: "mobileNo", label: "Mobile Number" },
-      { key: "designation", label: "Designation" },
-      { key: "joiningDate", label: "Joining Date" },
-      { key: "username", label: "Username" },
-      { key: "password", label: "Password" },
-    ];
-
-    const missing = required.find((f) => {
-      const v = formData[f.key];
-      return Array.isArray(v) ? v.length === 0 : !String(v).trim();
-    });
-    if (missing) {
-      toast({
-        title: "Missing required field",
-        description: `Please fill in "${missing.label}".`,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (formData.branchIds.length === 0) {
-      toast({
-        title: "Missing required field",
-        description: 'Please select at least one "Branch".',
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!confirmPassword.trim()) {
-      toast({
-        title: "Missing required field",
-        description: "Please confirm your password.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (formData.password !== confirmPassword) {
-      toast({
-        title: "Password mismatch",
-        description: "Password and confirm password do not match.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (formData.roleType === "DOCTOR") {
-      const bad = schedule.find((s) => !s.day_of_week);
-      if (bad) {
-        toast({
-          title: "Incomplete schedule",
-          description: "Please select a day for every schedule time slot.",
-          variant: "destructive",
-        });
-        return;
-      }
-    }
-
+  // Does the actual create/update call. `branchAction` is only meaningful for
+  // a Branch Admin edit whose branch selection changed — assign/unassign runs
+  // first so the employee record and the branch mapping never disagree.
+  const saveEmployee = async (branchAction?: "assign" | "unassign") => {
     setSubmitting(true);
     try {
       let departmentId = formData.departmentId;
@@ -533,16 +726,6 @@ export default function AddEmployee() {
       if (departmentId === ALL_DEPARTMENTS_VALUE) {
         departmentId = departments[0]?.department_id || "";
       } else if (departmentId === OTHER_DEPARTMENT_VALUE) {
-        if (!customDepartment.trim()) {
-          toast({
-            title: "Missing required field",
-            description: `Please type a ${isMedical ? "specialization" : "department"} name for "Others".`,
-            variant: "destructive",
-          });
-          setSubmitting(false);
-          return;
-        }
-
         const r = await departmentApi.create({
           department_name: customDepartment.trim(),
         });
@@ -558,7 +741,6 @@ export default function AddEmployee() {
             "No department selected. Please create or select a department.",
           variant: "destructive",
         });
-        setSubmitting(false);
         return;
       }
 
@@ -572,11 +754,8 @@ export default function AddEmployee() {
         end_time: s.end_time,
       }));
 
-      const response = await employeeApi.create({
+      const sharedFields = {
         employee_photo_URL: formData.photoUrl || undefined,
-        username: formData.username,
-        password: formData.password,
-        role_type: formData.roleType,
         first_name: formData.firstName,
         middle_name: formData.middleName || undefined,
         last_name: formData.lastName,
@@ -595,10 +774,10 @@ export default function AddEmployee() {
         emergency_contact_name: formData.emergencyContactName || undefined,
         emergency_contact_relationship: formData.emergencyContactRelation || undefined,
         emergency_contact_number: formData.emergencyContactNumber || undefined,
-        employee_state: formData.state || undefined,
-        employee_district: formData.district || undefined,
-        employee_area: formData.area || undefined,
-        employee_pincode: formData.pincode ? Number(formData.pincode) : undefined,
+        employee_state: formData.currentState || undefined,
+        employee_district: formData.currentDistrict || undefined,
+        employee_area: formData.currentArea || undefined,
+        employee_pincode: formData.currentPincode ? Number(formData.currentPincode) : undefined,
         employee_no_experence: formData.experience
           ? Number(formData.experience)
           : undefined,
@@ -613,22 +792,62 @@ export default function AddEmployee() {
         qualification: formData.qualification || undefined,
         license_no: formData.docLicenseNo || undefined,
         joining_date: formData.joiningDate,
-        emp_status: true,
-        branch_ids: formData.branchIds,
         consultation_minutes: Number(consultationMinutes) || 20,
         working_hours: formData.roleType === "DOCTOR" ? workingHours : undefined,
-      } as CreateEmployeePayload);
+      };
 
-      if (!response.data.success) throw new Error(response.data.message);
+      if (isEditMode && employeeId) {
+        if (branchAction === "assign" && adminUserId) {
+          await branchApi.assignAdmin(formData.branchIds[0] ?? "", adminUserId);
+        } else if (branchAction === "unassign" && adminUserId) {
+          await branchApi.unassignAdmin(adminUserId);
+        }
 
-      toast({
-        title: "Employee added",
-        description: `${formData.firstName} ${formData.lastName} was added successfully.`,
-      });
+        const isSupportingStaff = formData.roleType === "STAFF";
+
+        const response = await employeeApi.update(employeeId, {
+          ...sharedFields,
+          ...(isSupportingStaff ? {} : { username: formData.username }),
+          password: formData.password.trim() ? formData.password : undefined,
+          branch_ids: formData.branchIds,
+          emp_status: isActive,
+        } as UpdateEmployeePayload);
+
+        if (!response.data.success) throw new Error(response.data.message);
+
+        setOriginalBranchId(formData.branchIds[0] ?? NONE_BRANCH_VALUE);
+
+        toast({
+          title: "Employee updated",
+          description: `${formData.firstName} ${formData.lastName} was updated successfully.`,
+        });
+      } else {
+        const isSupportingStaff = formData.roleType === "STAFF";
+        const response = await employeeApi.create({
+          ...sharedFields,
+          username: isSupportingStaff ? `staff_${Date.now()}` : formData.username,
+          password: isSupportingStaff ? `Staff@${Date.now()}` : formData.password,
+          role_type: formData.roleType,
+          permanent_employee_state: formData.permanentState || undefined,
+          permanent_employee_district: formData.permanentDistrict || undefined,
+          permanent_employee_area: formData.permanentArea || undefined,
+          permanent_employee_pincode: formData.permanentPincode ? Number(formData.permanentPincode) : undefined,
+          emp_status: true,
+          branch_ids: formData.branchIds,
+        } as CreateEmployeePayload);
+
+        if (!response.data.success) throw new Error(response.data.message);
+
+        toast({
+          title: "Employee added",
+          description: `${formData.firstName} ${formData.lastName} was added successfully.`,
+        });
+      }
+
       navigate(-1);
     } catch (err: any) {
       toast({
-        title: "Failed to add employee",
+        title: isEditMode ? "Failed to update employee" : "Failed to add employee",
         description:
           err.response?.data?.message ?? err.message ?? "Something went wrong.",
         variant: "destructive",
@@ -638,7 +857,160 @@ export default function AddEmployee() {
     }
   };
 
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+
+    const isSupportingStaff = formData.roleType === "STAFF";
+
+    const required: { key: keyof EmployeeFormData; label: string }[] = [
+      { key: "roleType", label: "Role" },
+      { key: "firstName", label: "First Name" },
+      { key: "lastName", label: "Last Name" },
+      { key: "email", label: "Email" },
+      { key: "mobileNo", label: "Mobile Number" },
+      { key: "designation", label: "Designation" },
+      { key: "joiningDate", label: "Joining Date" },
+      ...(isSupportingStaff ? [] : [{ key: "username" as const, label: "Username" }]),
+      ...(isEditMode
+        ? []
+        : [
+            { key: "dateOfBirth" as const, label: "Date of Birth" },
+            { key: "gender" as const, label: "Gender" },
+            ...(isSupportingStaff ? [] : [{ key: "password" as const, label: "Password" }]),
+          ]),
+    ];
+
+    const missing = required.find((f) => {
+      const v = formData[f.key];
+      return Array.isArray(v) ? v.length === 0 : !String(v).trim();
+    });
+    if (missing) {
+      toast({
+        title: "Missing required field",
+        description: `Please fill in "${missing.label}".`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // A Branch Admin can be edited down to "no branch" (unassigned) — every
+    // other case, including creating a Branch Admin, still needs a branch.
+    const branchRequired = !(isEditMode && formData.roleType === "BRANCH_ADMIN");
+    if (branchRequired && formData.branchIds.length === 0) {
+      toast({
+        title: "Missing required field",
+        description: 'Please select at least one "Branch".',
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const changingPassword = !isSupportingStaff && (!isEditMode || formData.password.trim().length > 0);
+    if (changingPassword) {
+      if (!confirmPassword.trim()) {
+        toast({
+          title: "Missing required field",
+          description: "Please confirm your password.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (formData.password !== confirmPassword) {
+        toast({
+          title: "Password mismatch",
+          description: "Password and confirm password do not match.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    if (formData.roleType === "DOCTOR") {
+      const bad = schedule.find((s) => !s.day_of_week);
+      if (bad) {
+        toast({
+          title: "Incomplete schedule",
+          description: "Please select a day for every schedule time slot.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    if (
+      formData.departmentId === OTHER_DEPARTMENT_VALUE &&
+      !customDepartment.trim()
+    ) {
+      toast({
+        title: "Missing required field",
+        description: `Please type a ${isMedical ? "specialization" : "department"} name for "Others".`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (isEditMode && formData.roleType === "BRANCH_ADMIN") {
+      const targetBranchId = formData.branchIds[0] ?? NONE_BRANCH_VALUE;
+      const branchChanged = targetBranchId !== originalBranchId;
+
+      if (branchChanged) {
+        if (!targetBranchId) {
+          await saveEmployee("unassign");
+          return;
+        }
+
+        setSubmitting(true);
+        try {
+          const branchRes = await branchApi.getById(targetBranchId);
+          const occupant = branchRes.data?.data?.current_admin;
+          if (occupant && occupant.user_id !== adminUserId) {
+            setReassignOccupantName(occupant.full_name || occupant.username || "the current admin");
+            setReassignTargetBranchName(
+              branches.find((b) => b.branch_id === targetBranchId)?.branch_name || targetBranchId,
+            );
+            setShowReassignModal(true);
+            return;
+          }
+        } catch (error: any) {
+          toast({
+            title: "Failed to check branch",
+            description: error.response?.data?.message ?? error.message ?? "Something went wrong.",
+            variant: "destructive",
+          });
+          return;
+        } finally {
+          setSubmitting(false);
+        }
+
+        await saveEmployee("assign");
+        return;
+      }
+    }
+
+    await saveEmployee();
+  };
+
+  const handleConfirmReassign = async () => {
+    setShowReassignModal(false);
+    await saveEmployee("assign");
+  };
+
+  const handleCancelReassign = () => {
+    setShowReassignModal(false);
+    setFormData((p) => ({ ...p, branchIds: originalBranchId ? [originalBranchId] : [] }));
+  };
+
   const handleReset = () => {
+    if (isEditMode) {
+      // Blowing formData back to empty would also wipe the locked Role and
+      // any prefilled data with no way back short of reloading.
+      toast({
+        title: "Reset",
+        description: "Please reload the page to reset to original values.",
+      });
+      return;
+    }
     setFormData(emptyFormData);
     setSameAsCurrent(false);
     setSchedule([]);
@@ -646,6 +1018,16 @@ export default function AddEmployee() {
     setConfirmPassword("");
     setCustomDepartment("");
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-8 px-4 flex items-center justify-center">
+        <div className="w-full max-w-5xl bg-white rounded-2xl shadow-sm border border-gray-100 p-8 flex items-center justify-center">
+          <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
@@ -664,7 +1046,7 @@ export default function AddEmployee() {
             <UserRound className="w-5 h-5" />
           </div>
           <h4 className="hms-heading text-gray-900 tracking-tight">
-            Add Employee
+            {isEditMode ? getEditTitle(formData.roleType, formData.designation) : "Add Employee"}
           </h4>
         </div>
 
@@ -681,20 +1063,55 @@ export default function AddEmployee() {
               size={96}
             />
             <div className="w-px self-stretch bg-gray-200" aria-hidden />
-            <div className="w-[36rem] max-w-full">
-              <label className={labelCls}>
-                Role <Req />
-              </label>
-              <FormDropdown
-                name="role"
-                className={inputCls}
-                options={roleOptions}
-                value={displayRole}
-                onValueChange={handleRoleChange}
-                placeholder={roleOptions.length ? "Select role" : "Loading roles…"}
-                disabled={submitting || roleOptions.length === 0}
-              />
-            </div>
+
+            {!isEditMode && (
+              <div className="w-[36rem] max-w-full">
+                <label className={labelCls}>
+                  Role <Req />
+                </label>
+                <FormDropdown
+                  name="role"
+                  className={inputCls}
+                  options={roleOptions}
+                  value={displayRole}
+                  onValueChange={handleRoleChange}
+                  placeholder={roleOptions.length ? "Select role" : "Loading roles…"}
+                  disabled={submitting || roleOptions.length === 0}
+                />
+              </div>
+            )}
+
+            {isEditMode && (
+                <div className="w-64">
+                  <label className={labelCls}>Status <Req /></label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsActive(true)}
+                      disabled={submitting}
+                      className={`h-10 rounded-xl border-2 text-[13px] font-semibold transition-colors ${
+                        isActive
+                          ? "border-green-500 bg-green-50 text-green-700"
+                          : "border-gray-200 text-gray-600 hover:border-gray-300"
+                      }`}
+                    >
+                      Active
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsActive(false)}
+                      disabled={submitting}
+                      className={`h-10 rounded-xl border-2 text-[13px] font-semibold transition-colors ${
+                        !isActive
+                          ? "border-red-400 bg-red-50 text-red-700"
+                          : "border-gray-200 text-gray-600 hover:border-gray-300"
+                      }`}
+                    >
+                      Inactive
+                    </button>
+                  </div>
+                </div>
+            )}
           </div>
 
           {/* Role hint banner */}
@@ -767,6 +1184,24 @@ export default function AddEmployee() {
                   value={formData.dateOfBirth}
                   onChange={handleChange}
                   disabled={submitting}
+                />
+              </div>
+
+              <div>
+                <label className={labelCls}>Age</label>
+                <input
+                  name="age"
+                  placeholder="Auto-calculated"
+                  className={inputCls + " bg-gray-50 text-gray-500"}
+                  value={
+                    formData.dateOfBirth
+                      ? Math.floor(
+                          (Date.now() - new Date(formData.dateOfBirth).getTime()) /
+                            31557600000,
+                        ).toString()
+                      : ""
+                  }
+                  disabled
                 />
               </div>
 
@@ -875,21 +1310,49 @@ export default function AddEmployee() {
             </div>
           </Section>
 
-          {/* ── Address and location ── */}
+          {/* ── Current Address ── */}
           <Section
-            title="Address and location"
-            sub="State, district and residential details."
+            title="Current Address"
+            sub="Employee's current residential location."
           >
             <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
               <div>
+                <label className={labelCls}>Address <Req /></label>
+                <input
+                  name="currentAddress"
+                  placeholder="Enter building no and street name"
+                  maxLength={255}
+                  className={inputCls}
+                  value={formData.currentAddress}
+                  onChange={handleChange}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Area <Req /></label>
+                <input
+                  name="currentArea"
+                  placeholder="Enter area"
+                  maxLength={50}
+                  className={inputCls}
+                  value={formData.currentArea}
+                  onChange={handleChange}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
                 <label className={labelCls}>State <Req /></label>
                 <FormDropdown
-                  name="state"
                   className={inputCls}
                   options={indianStates.map((s) => s.name)}
-                  value={formData.state}
+                  value={formData.currentState}
                   onValueChange={(v) =>
-                    setFormData((p) => ({ ...p, state: v, district: "" }))
+                    setFormData((p) => ({
+                      ...p,
+                      currentState: v,
+                      currentDistrict: "",
+                      ...(sameAsCurrent ? { permanentState: v, permanentDistrict: "" } : {}),
+                    }))
                   }
                   placeholder="Select state"
                   disabled={submitting}
@@ -898,55 +1361,105 @@ export default function AddEmployee() {
               <div>
                 <label className={labelCls}>District <Req /></label>
                 <FormDropdown
-                  name="district"
                   className={inputCls}
-                  options={districtOptions}
-                  value={formData.district}
+                  options={currentDistrictOptions}
+                  value={formData.currentDistrict}
                   onValueChange={(v) =>
-                    setFormData((p) => ({ ...p, district: v }))
+                    setFormData((p) => ({
+                      ...p,
+                      currentDistrict: v,
+                      ...(sameAsCurrent ? { permanentDistrict: v } : {}),
+                    }))
                   }
-                  placeholder={formData.state ? "Select district" : "Select state first"}
-                  disabled={submitting || !formData.state}
+                  placeholder={formData.currentState ? "Select district" : "Select state first"}
+                  disabled={submitting || !formData.currentState}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Pincode <Req /></label>
+                <input
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  name="currentPincode"
+                  placeholder="Enter pincode"
+                  maxLength={10}
+                  className={inputCls}
+                  value={formData.currentPincode}
+                  onChange={handleChange}
+                  disabled={submitting}
+                />
+              </div>
+            </div>
+          </Section>
+
+          {/* ── Permanent Address ── */}
+          <Section
+            title="Permanent Address"
+            sub="Permanent residential address of the employee."
+          >
+            <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
+              <div>
+                <label className={labelCls}>Address <Req /></label>
+                <input
+                  name="permanentAddress"
+                  placeholder="Enter building no and street name"
+                  maxLength={255}
+                  className={inputCls}
+                  value={formData.permanentAddress}
+                  onChange={handleChange}
+                  disabled={submitting || sameAsCurrent}
                 />
               </div>
               <div>
                 <label className={labelCls}>Area <Req /></label>
                 <input
-                  name="area"
+                  name="permanentArea"
                   placeholder="Enter area"
                   maxLength={50}
                   className={inputCls}
-                  value={formData.area}
+                  value={formData.permanentArea}
                   onChange={handleChange}
-                  disabled={submitting}
+                  disabled={submitting || sameAsCurrent}
                 />
               </div>
-
+              <div>
+                <label className={labelCls}>State <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={indianStates.map((s) => s.name)}
+                  value={formData.permanentState}
+                  onValueChange={(v) =>
+                    setFormData((p) => ({ ...p, permanentState: v, permanentDistrict: "" }))
+                  }
+                  placeholder="Select state"
+                  disabled={submitting || sameAsCurrent}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>District <Req /></label>
+                <FormDropdown
+                  className={inputCls}
+                  options={permanentDistrictOptions}
+                  value={formData.permanentDistrict}
+                  onValueChange={(v) =>
+                    setFormData((p) => ({ ...p, permanentDistrict: v }))
+                  }
+                  placeholder={formData.permanentState ? "Select district" : "Select state first"}
+                  disabled={submitting || sameAsCurrent || !formData.permanentState}
+                />
+              </div>
               <div>
                 <label className={labelCls}>Pincode <Req /></label>
                 <input
-                  name="pincode"
                   inputMode="numeric"
                   pattern="[0-9]*"
+                  name="permanentPincode"
                   placeholder="Enter pincode"
                   maxLength={10}
                   className={inputCls}
-                  value={formData.pincode}
+                  value={formData.permanentPincode}
                   onChange={handleChange}
-                  disabled={submitting}
-                />
-              </div>
-
-              <div className="col-span-3">
-                <label className={labelCls}>Current address <Req /></label>
-                <input
-                  name="currentAddress"
-                  placeholder="Enter current address"
-                  maxLength={255}
-                  className={inputCls}
-                  value={formData.currentAddress}
-                  onChange={handleChange}
-                  disabled={submitting}
+                  disabled={submitting || sameAsCurrent}
                 />
               </div>
 
@@ -963,21 +1476,8 @@ export default function AddEmployee() {
                   htmlFor="sameAsCurrent"
                   className="text-[13px] text-gray-700 cursor-pointer select-none"
                 >
-                  Same as permanent address
+                  Same as current address
                 </label>
-              </div>
-
-              <div className="col-span-3">
-                <label className={labelCls}>Permanent address <Req /></label>
-                <input
-                  name="permanentAddress"
-                  placeholder="Enter permanent address"
-                  maxLength={255}
-                  className={inputCls}
-                  value={formData.permanentAddress}
-                  onChange={handleChange}
-                  disabled={submitting || sameAsCurrent}
-                />
               </div>
             </div>
           </Section>
@@ -1015,7 +1515,7 @@ export default function AddEmployee() {
                   disabled={submitting}
                 />
               </div>
-              <div /> {/* spacer */}
+              
 
               <div>
                 <label className={labelCls}>
@@ -1073,7 +1573,7 @@ export default function AddEmployee() {
             sub={
               isMedical
                 ? `Specialization, qualification and license apply to the ${displayRole} role.`
-                : displayRole === "Branch Admin"
+                : displayRole === "Branch Admin" || displayRole === "Staff"
                 ? `Department selection is available for the ${displayRole} role.`
                 : `${displayRole} role does not require specialization, qualification or a license number.`
             }
@@ -1097,7 +1597,7 @@ export default function AddEmployee() {
               </div>
 
               <AnimatePresence>
-                {(isMedical || displayRole === "Branch Admin") && (
+                {(isMedical || displayRole === "Branch Admin" || formData.roleType === "STAFF") && (
                   <motion.div
                     key="specialization"
                     layout
@@ -1113,6 +1613,9 @@ export default function AddEmployee() {
                       name="departmentId"
                       className={inputCls}
                       options={[
+                        ...(displayRole === "Branch Admin" || formData.roleType === "STAFF"
+                          ? [{ label: "All Departments", value: ALL_DEPARTMENTS_VALUE }]
+                          : []),
                         ...departments.map((d) => ({ label: d.department_name, value: d.department_id })),
                         { label: "Others", value: OTHER_DEPARTMENT_VALUE },
                       ]}
@@ -1218,7 +1721,7 @@ export default function AddEmployee() {
                   <FormDropdown
                     name="branchId"
                     className={inputCls}
-                    options={branchOptions}
+                    options={singleBranchOptions}
                     value={formData.branchIds[0] ?? ""}
                     onValueChange={(v) =>
                       setFormData((p) => ({ ...p, branchIds: v ? [v] : [] }))
@@ -1368,9 +1871,10 @@ export default function AddEmployee() {
           </AnimatePresence>
 
           {/* ── Account credentials ── */}
+          {formData.roleType !== "STAFF" && (
           <Section
             title="Account credentials"
-            sub="Login details for portal access."
+            sub={isEditMode ? "Leave the password fields blank to keep the current password." : "Login details for portal access."}
           >
             <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
               <div>
@@ -1386,11 +1890,13 @@ export default function AddEmployee() {
                 />
               </div>
               <div>
-                <label className={labelCls}>Password <Req /></label>
+                <label className={labelCls}>
+                  {isEditMode ? "New password" : "Password"} {isEditMode ? <Opt /> : <Req />}
+                </label>
                 <input
                   type="password"
                   name="password"
-                  placeholder="Enter password"
+                  placeholder={isEditMode ? "Leave blank to keep unchanged" : "Enter password"}
                   maxLength={50}
                   className={inputCls}
                   value={formData.password}
@@ -1399,10 +1905,12 @@ export default function AddEmployee() {
                 />
               </div>
               <div>
-                <label className={labelCls}>Confirm password <Req /></label>
+                <label className={labelCls}>
+                  {isEditMode ? "Confirm new password" : "Confirm password"} {isEditMode ? <Opt /> : <Req />}
+                </label>
                 <input
                   type="password"
-                  placeholder="Confirm password"
+                  placeholder={isEditMode ? "Re-enter new password" : "Confirm password"}
                   maxLength={50}
                   className={inputCls}
                   value={confirmPassword}
@@ -1412,6 +1920,7 @@ export default function AddEmployee() {
               </div>
             </div>
           </Section>
+          )}
 
           {/* ── Actions ── */}
           <div className="flex justify-end gap-3.5 pt-5 mt-1.5 border-t border-gray-100">
@@ -1431,7 +1940,12 @@ export default function AddEmployee() {
               {submitting ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Adding…
+                  {isEditMode ? "Saving…" : "Adding…"}
+                </>
+              ) : isEditMode ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  Save changes
                 </>
               ) : (
                 "Add employee"
@@ -1440,6 +1954,23 @@ export default function AddEmployee() {
           </div>
         </form>
       </div>
+
+      <AlertDialog open={showReassignModal} onOpenChange={setShowReassignModal}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace this branch's admin?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {reassignTargetBranchName} is currently assigned to {reassignOccupantName}. Assigning{" "}
+              {formData.firstName || "this admin"} will remove {reassignOccupantName} from this branch.
+              Do you want to continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelReassign}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmReassign}>Yes, replace</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

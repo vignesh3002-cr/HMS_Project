@@ -23,6 +23,7 @@ import { filterDataByValues } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
+import { StatusBadge } from "@/components/hms/StatusBadge";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 
 function getPatientFullName(p: PatientRecord): string {
@@ -535,16 +536,9 @@ export default function PatientsManagement() {
                       <div><div className="hms-name-text">{String(r.doctor ?? "")}</div><div className="hms-id-text">{String(r.doctorId ?? "")}</div></div>
                     </div>
                   )},
-                  { key: "status", label: "Status", render: (r: any) => {
-                    const s = String(r.status);
-                    const isActive = s === "Active";
-                    return (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#F3F4F6", color: isActive ? "#16A34A" : "#6B7280" }}>
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#9CA3AF" }} />
-                        {s}
-                      </span>
-                    );
-                  }},
+                  { key: "status", label: "Status", render: (r: any) => (
+                    <StatusBadge status={String(r.status)} />
+                  )},
                   { key: "actions", label: "Actions", sortable: false, render: (r: any) => (
                     <div className="flex items-center gap-1">
                       <button onClick={() => handleView(String(r.id))} title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">

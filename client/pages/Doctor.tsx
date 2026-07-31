@@ -22,6 +22,7 @@ import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { appointmentApi } from "@/api/appointment.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
+import { StatusBadge } from "@/components/hms/StatusBadge";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 
 // ============================================================
@@ -539,23 +540,12 @@ export default function Doctor() {
                   { key: "dept", label: "Department", render: (r: any) => (
                     <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: String(r.deptBg), color: String(r.deptColor) }}>{String(r.dept)}</span>
                   )},
-                  { key: "qualification", label: "Slots", sortable: false, render: (r: any) => {
-                    const summary = slotSummaries[String(r.id)] ?? { total: 0, booked: 0 };
-                    return <SlotProgress booked={summary.booked} total={summary.total} />;
-                  }},
+                  { key: "qualification", label: "Qualification", render: (r: any) => (
+                    <span className="text-[#191C1E] hms-content-text leading-4">{String(r.qualification)}</span>
+                  )},
                   { key: "mobile", label: "Mobile No", render: (r: any) => (
                     <span className="text-[#191C1E] hms-content-text leading-4">{String(r.mobile)}</span>
                   )},
-                  { key: "status", label: "Status", render: (r: any) => {
-                    const s = String(r.status);
-                    const isActive = s === "Active";
-                    return (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: isActive ? "#F0FDF4" : "#FFF7ED", color: isActive ? "#16A34A" : "#F97316" }}>
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: isActive ? "#22C55E" : "#F97316" }} />
-                        {s}
-                      </span>
-                    );
-                  }},
                   { key: "actions", label: "Actions", sortable: false, className: "w-px", headerClassName: "w-px", render: (r: any) => (
                     <div className="flex items-center gap-1">
                       <button onClick={() => handleView(r.id)} title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">

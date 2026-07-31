@@ -3,6 +3,7 @@ import { remove } from "../utils/token";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_BACKEND_URL,
+  withCredentials: true,
 });
 
 let activeBranchId: string | null = null;

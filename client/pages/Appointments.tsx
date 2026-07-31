@@ -21,6 +21,7 @@ import { filterDataByValues } from "@/components/Filter/utils";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { useToast } from "@/hooks/use-toast";
 import { RefreshButton } from "@/components/hms/RefreshButton";
+import { StatusBadge } from "@/components/hms/StatusBadge";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 
 import DayView from "./Day view";
@@ -46,16 +47,6 @@ interface Appointment {
 }
 
 
-const statusStyles: Record<string, string> = {
-  Scheduled: "bg-blue-50 text-blue-600",
-  Conformed: "bg-green-50 text-green-600",
-  Cancelled: "bg-red-50 text-red-600",
-  Rescheduled: "bg-amber-50 text-amber-600",
-  "Checked In": "bg-indigo-50 text-indigo-600",
-  "In Consultation": "bg-purple-50 text-purple-600",
-  Completed: "bg-emerald-50 text-emerald-600",
-  "No Show": "bg-gray-100 text-gray-600",
-};
 
 const STATUS_LABELS: Record<string, string> = {
   BOOKED: "Scheduled",
@@ -75,14 +66,6 @@ const APPOINTMENT_AVATAR_COLORS = [
   "bg-purple-100 text-purple-600",
   "bg-rose-100 text-rose-600",
 ];
-
-function toTitleCase(text: string): string {
-  return text
-    .toLowerCase()
-    .split(" ")
-    .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1) : word))
-    .join(" ");
-}
 
 function getInitials(name: string): string {
   const words = name.replace(/^Dr\.?\s*/i, "").trim().split(/\s+/).filter(Boolean);
@@ -654,7 +637,7 @@ const AppointmentSchedule: React.FC = () => {
                   { key: "date", label: "Appointment Date", className: "!whitespace-normal", render: (r: Appointment) => (
                     <div className="hms-content-text text-[#191C1E] leading-4"><div>{r.date}</div><div className="text-[11px] font-medium text-[#8C8D8F] mt-1">{r.time}</div></div>
                   )},
-                  { key: "status", label: "Status", className: "!whitespace-normal !pr-2", render: (r: Appointment) => (
+                  { key: "status", label: "Status", render: (r: Appointment) => (
                     <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${statusStyles[r.status] ?? "bg-indigo-50 text-indigo-600"}`}>{toTitleCase(r.status)}</span>
                   )},
                   { key: "actions", label: "Action", sortable: false, className: "w-px !whitespace-normal !pl-3", headerClassName: "w-px !pl-3", render: (r: Appointment) => (
