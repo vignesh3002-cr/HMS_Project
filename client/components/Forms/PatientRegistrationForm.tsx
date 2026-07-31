@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Loader2, Plus, UserRound } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import { State as CSState, City } from "country-state-city";
 import type { IState } from "country-state-city";
@@ -162,6 +163,9 @@ export default function PatientRegistrationForm() {
   // Re-typed password — must match before submit is allowed. Username has
   // no confirm field; it's a single required field (matches Addemployee.tsx).
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
   const addInsuranceFiles = (files: FileList | File[]) => {
     const arr = Array.from(files).filter(
@@ -335,6 +339,10 @@ export default function PatientRegistrationForm() {
     //   }
     // }
 
+    setShowSubmitConfirm(true);
+  };
+
+  const handleConfirmSubmit = async () => {
     setSubmitting(true);
 
     try {
@@ -388,14 +396,31 @@ export default function PatientRegistrationForm() {
       });
     } finally {
       setSubmitting(false);
+      setShowSubmitConfirm(false);
     }
   };
 
   const handleReset = () => {
+    setShowResetConfirm(true);
+  };
+
+  const handleConfirmReset = () => {
+    setShowResetConfirm(false);
     setFormData(emptyFormData);
     setSameAsCurrent(false);
     setConfirmPassword("");
     setInsuranceFiles([]);
+  };
+
+  const isDirty =
+    JSON.stringify(formData) !== JSON.stringify(emptyFormData) || insuranceFiles.length > 0;
+
+  const handleBack = () => {
+    if (isDirty) {
+      setShowLeaveConfirm(true);
+      return;
+    }
+    navigate(-1);
   };
 
   return (
@@ -405,7 +430,7 @@ export default function PatientRegistrationForm() {
         <div className="flex items-center gap-3 px-8 py-5 border-b border-gray-100">
           <button
             type="button"
-            onClick={() => navigate(-1)}
+            onClick={handleBack}
             className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-gray-50 transition-colors text-gray-500"
             aria-label="Go back"
           >
@@ -1128,6 +1153,43 @@ export default function PatientRegistrationForm() {
           </div>
         </form>
       </div>
+
+      <ConfirmationDialog
+        open={showSubmitConfirm}
+        onConfirm={handleConfirmSubmit}
+        onCancel={() => setShowSubmitConfirm(false)}
+        type="question"
+        title="Add patient?"
+        description="Are you sure you want to register this new patient?"
+        confirmText="Save patient"
+        cancelText="Cancel"
+        loading={submitting}
+      />
+
+      <ConfirmationDialog
+        open={showResetConfirm}
+        type="info"
+        title="Reset Form?"
+        description="All entered values will be cleared."
+        confirmText="Reset"
+        cancelText="Cancel"
+        onConfirm={handleConfirmReset}
+        onCancel={() => setShowResetConfirm(false)}
+      />
+
+      <ConfirmationDialog
+        open={showLeaveConfirm}
+        type="info"
+        title="Leave this page?"
+        description="You have unsaved changes. If you leave now, your changes will be lost."
+        confirmText="Leave"
+        cancelText="Stay"
+        onConfirm={() => {
+          setShowLeaveConfirm(false);
+          navigate(-1);
+        }}
+        onCancel={() => setShowLeaveConfirm(false)}
+      />
     </div>
   );
 }

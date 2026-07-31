@@ -8,6 +8,7 @@ import { BranchSelector } from "@/components/hms/BranchSelector";
 import { BranchFilterProvider } from "@/context/BranchFilterContext";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import {
   LayoutDashboard,
   Users,
@@ -49,6 +50,8 @@ export function AppLayout() {
   const isFormPage = location.pathname.includes("/add") || 
                      location.pathname.includes("/edit/");
 
+const [logoutOpen, setLogoutOpen] = useState(false);
+
 const logout = () => {
 
     remove();
@@ -57,6 +60,11 @@ const logout = () => {
 
     navigate("/");
 
+};
+
+const handleLogout = () => {
+  setLogoutOpen(false);
+  logout();
 };
 
   const navItems = [
@@ -238,7 +246,7 @@ useEffect(() => {
             <UserProfileDropdown
               userName={userData.username || "HMS"}
               userSubtext={userData.user_id || "Admin user"}
-              onLogout={logout}
+              onLogout={() => setLogoutOpen(true)}
             />
 
           </div>
@@ -249,6 +257,17 @@ useEffect(() => {
           <Outlet />
         </main>
       </div>
+
+      <ConfirmationDialog
+        open={logoutOpen}
+        type="danger"
+        title="Log Out?"
+        description="Are you sure you want to log out? Any unsaved changes may be lost."
+        confirmText="Log Out"
+        cancelText="Stay"
+        onConfirm={handleLogout}
+        onCancel={() => setLogoutOpen(false)}
+      />
 
       <QuickAddFab />
     </div>

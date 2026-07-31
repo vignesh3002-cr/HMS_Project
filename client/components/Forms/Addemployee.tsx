@@ -7,16 +7,7 @@ import { FormDropdown } from "@/components/ui/form-dropdown";
 import { MultiSelectDropdown } from "@/components/ui/multi-select-dropdown";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import TimepickerWheel from "@/components/ui/timepicker-wheel";
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogCancel,
-  AlertDialogAction,
-} from "@/components/ui/alert-dialog";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { State as CSState, City } from "country-state-city";
 import type { IState } from "country-state-city";
 import { employeeApi, CreateEmployeePayload, UpdateEmployeePayload, WorkingHourDto } from "@/api/employee.api";
@@ -379,6 +370,13 @@ export default function AddEmployee() {
   const [schedule, setSchedule] = useState<ScheduleEntry[]>([]);
   const [consultationMinutes, setConsultationMinutes] = useState("20");
   const nextSlotId = useRef(0);
+  // Snapshot of the schedule as loaded from the backend in edit mode — lets us
+  // skip sending `working_hours` on submit when it's untouched. The backend's
+  // update path deletes-and-recreates every doctor_schedule row whenever
+  // working_hours is present, which 500s with a foreign key violation for any
+  // slot that already has appointment_history booked against it, so we must
+  // avoid triggering that path unless the schedule actually changed.
+  const initialScheduleRef = useRef<ScheduleEntry[] | null>(null);
 
   // ── Edit-mode-only state ──────────────────────────────────────────────────
   const [isActive, setIsActive] = useState(true);
@@ -387,6 +385,12 @@ export default function AddEmployee() {
   const [showReassignModal, setShowReassignModal] = useState(false);
   const [reassignTargetBranchName, setReassignTargetBranchName] = useState("");
   const [reassignOccupantName, setReassignOccupantName] = useState("");
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"save" | "unassign">("save");
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [originalFormData, setOriginalFormData] = useState<EmployeeFormData | null>(null);
+  const [originalIsActive, setOriginalIsActive] = useState(true);
 
   // ── Bootstrap ──────────────────────────────────────────────────────────────
 
@@ -415,6 +419,14 @@ export default function AddEmployee() {
           if (allRoles.includes(display))
             setFormData((p) => ({ ...p, roleType: roleParam as BackendRoleType }));
         }
+
+        setOriginalFormData({
+          ...emptyFormData,
+          roleType:
+            roleParam && allRoles.includes(toDisplayRole(roleParam as BackendRoleType))
+              ? (roleParam as BackendRoleType)
+              : emptyFormData.roleType,
+        });
       })
       .catch(() => {});
   }, [searchParams]);
@@ -519,7 +531,7 @@ export default function AddEmployee() {
           ? [employee.branch_id]
           : [];
 
-        setFormData({
+        const loadedFormData: EmployeeFormData = {
           username: user?.username || "",
           password: "",
           roleType,
@@ -560,9 +572,12 @@ export default function AddEmployee() {
           branchIds,
           email: employee.email || "",
           photoUrl: employee.employee_photo_URL || employee.photo || null,
-        });
+        };
+
+        setFormData(loadedFormData);
 
         setIsActive(employee.emp_status === true || user?.user_status === 1);
+        setOriginalIsActive(employee.emp_status === true || user?.user_status === 1);
 
         if (employee.current_address && employee.current_address === employee.parmanant_address) {
           setSameAsCurrent(true);
@@ -570,13 +585,17 @@ export default function AddEmployee() {
           // rest of the current fields too, otherwise state/district/area/
           // pincode are left blank (and disabled) while address/area/pincode
           // showed correctly, making the section look broken.
-          setFormData((p) => ({
-            ...p,
-            permanentArea: p.currentArea,
-            permanentState: p.currentState,
-            permanentDistrict: p.currentDistrict,
-            permanentPincode: p.currentPincode,
-          }));
+          const syncedFormData = {
+            ...loadedFormData,
+            permanentArea: loadedFormData.currentArea,
+            permanentState: loadedFormData.currentState,
+            permanentDistrict: loadedFormData.currentDistrict,
+            permanentPincode: loadedFormData.currentPincode,
+          };
+          setFormData(syncedFormData);
+          setOriginalFormData(syncedFormData);
+        } else {
+          setOriginalFormData(loadedFormData);
         }
 
         if (roleType === "BRANCH_ADMIN") {
@@ -586,15 +605,17 @@ export default function AddEmployee() {
         if (roleType === "DOCTOR") {
           const dbSchedules: any[] = payload?.doctorSchedules || [];
           if (dbSchedules.length > 0) {
-            setSchedule(
-              dbSchedules.map((s: any) => ({
-                id: `db-${s.schedule_id}`,
-                day_of_week: s.day_of_week || "",
-                start_time: toTimeInputValue(s.start_time) || "09:00",
-                end_time: toTimeInputValue(s.end_time) || "17:00",
-                branch_id: s.branch_id || "",
-              })),
-            );
+            const loadedSchedule = dbSchedules.map((s: any) => ({
+              id: `db-${s.schedule_id}`,
+              day_of_week: s.day_of_week || "",
+              start_time: toTimeInputValue(s.start_time) || "09:00",
+              end_time: toTimeInputValue(s.end_time) || "17:00",
+              branch_id: s.branch_id || "",
+            }));
+            setSchedule(loadedSchedule);
+            initialScheduleRef.current = loadedSchedule;
+          } else {
+            initialScheduleRef.current = [];
           }
           const profile: any = payload?.doctorProfile;
           if (profile?.consultation_minutes) {
@@ -754,6 +775,16 @@ export default function AddEmployee() {
         end_time: s.end_time,
       }));
 
+      const scheduleSignature = (entries: ScheduleEntry[]) =>
+        entries
+          .map((s) => `${s.day_of_week}|${s.start_time}|${s.end_time}|${s.branch_id}`)
+          .sort()
+          .join(";");
+      const scheduleUnchanged =
+        isEditMode &&
+        initialScheduleRef.current !== null &&
+        scheduleSignature(schedule) === scheduleSignature(initialScheduleRef.current);
+
       const sharedFields = {
         employee_photo_URL: formData.photoUrl || undefined,
         first_name: formData.firstName,
@@ -793,7 +824,8 @@ export default function AddEmployee() {
         license_no: formData.docLicenseNo || undefined,
         joining_date: formData.joiningDate,
         consultation_minutes: Number(consultationMinutes) || 20,
-        working_hours: formData.roleType === "DOCTOR" ? workingHours : undefined,
+        working_hours:
+          formData.roleType === "DOCTOR" && !scheduleUnchanged ? workingHours : undefined,
       };
 
       if (isEditMode && employeeId) {
@@ -805,11 +837,16 @@ export default function AddEmployee() {
 
         const isSupportingStaff = formData.roleType === "STAFF";
 
+        // Doctors can't have their branch changed through this endpoint — the
+        // backend rejects any branch_ids diff for a DOCTOR (branch transfers
+        // need to preserve appointment history via a dedicated transfer flow
+        // that doesn't exist yet), so omit it entirely rather than sending a
+        // value that's guaranteed to 400.
         const response = await employeeApi.update(employeeId, {
           ...sharedFields,
           ...(isSupportingStaff ? {} : { username: formData.username }),
           password: formData.password.trim() ? formData.password : undefined,
-          branch_ids: formData.branchIds,
+          ...(formData.roleType === "DOCTOR" ? {} : { branch_ids: formData.branchIds }),
           emp_status: isActive,
         } as UpdateEmployeePayload);
 
@@ -956,7 +993,8 @@ export default function AddEmployee() {
 
       if (branchChanged) {
         if (!targetBranchId) {
-          await saveEmployee("unassign");
+          setPendingAction("unassign");
+          setShowSubmitConfirm(true);
           return;
         }
 
@@ -983,12 +1021,19 @@ export default function AddEmployee() {
           setSubmitting(false);
         }
 
-        await saveEmployee("assign");
+        setPendingAction("save");
+        setShowSubmitConfirm(true);
         return;
       }
     }
 
-    await saveEmployee();
+    setPendingAction("save");
+    setShowSubmitConfirm(true);
+  };
+
+  const handleConfirmSubmit = () => {
+    setShowSubmitConfirm(false);
+    saveEmployee(pendingAction === "unassign" ? "unassign" : undefined);
   };
 
   const handleConfirmReassign = async () => {
@@ -1002,13 +1047,16 @@ export default function AddEmployee() {
   };
 
   const handleReset = () => {
+    setShowResetConfirm(true);
+  };
+
+  const handleConfirmReset = () => {
+    setShowResetConfirm(false);
+
     if (isEditMode) {
       // Blowing formData back to empty would also wipe the locked Role and
       // any prefilled data with no way back short of reloading.
-      toast({
-        title: "Reset",
-        description: "Please reload the page to reset to original values.",
-      });
+      window.location.reload();
       return;
     }
     setFormData(emptyFormData);
@@ -1017,6 +1065,18 @@ export default function AddEmployee() {
     setConsultationMinutes("20");
     setConfirmPassword("");
     setCustomDepartment("");
+  };
+
+  const isDirty =
+    (!!originalFormData && JSON.stringify(formData) !== JSON.stringify(originalFormData)) ||
+    isActive !== originalIsActive;
+
+  const handleBack = () => {
+    if (isDirty) {
+      setShowLeaveConfirm(true);
+      return;
+    }
+    navigate(-1);
   };
 
   if (loading) {
@@ -1036,7 +1096,7 @@ export default function AddEmployee() {
         <div className="flex items-center gap-3 px-8 py-5 border-b border-gray-100">
           <button
             type="button"
-            onClick={() => navigate(-1)}
+            onClick={handleBack}
             className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-gray-50 transition-colors text-gray-500"
             aria-label="Go back"
           >
@@ -1706,17 +1766,26 @@ export default function AddEmployee() {
               <div className="col-span-2">
                 <label className={labelCls}>Branch <Req /></label>
                 {formData.roleType === "DOCTOR" ? (
-                  <MultiSelectDropdown
-                    options={branchOptions}
-                    value={formData.branchIds}
-                    onValueChange={(vals) =>
-                      setFormData((p) => ({ ...p, branchIds: vals }))
-                    }
-                    placeholder={
-                      branches.length ? "Select branch(es)" : "No branches available"
-                    }
-                    disabled={submitting || branches.length === 0}
-                  />
+                  <>
+                    <MultiSelectDropdown
+                      options={branchOptions}
+                      value={formData.branchIds}
+                      onValueChange={(vals) =>
+                        setFormData((p) => ({ ...p, branchIds: vals }))
+                      }
+                      placeholder={
+                        branches.length ? "Select branch(es)" : "No branches available"
+                      }
+                      disabled={submitting || branches.length === 0 || isEditMode}
+                    />
+                    {isEditMode && (
+                      <p className="text-[11px] text-gray-400 mt-1">
+                        A doctor's branch can't be changed from here — it requires a
+                        dedicated transfer flow to preserve appointment history, which
+                        isn't available yet.
+                      </p>
+                    )}
+                  </>
                 ) : (
                   <FormDropdown
                     name="branchId"
@@ -1955,22 +2024,77 @@ export default function AddEmployee() {
         </form>
       </div>
 
-      <AlertDialog open={showReassignModal} onOpenChange={setShowReassignModal}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Replace this branch's admin?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {reassignTargetBranchName} is currently assigned to {reassignOccupantName}. Assigning{" "}
-              {formData.firstName || "this admin"} will remove {reassignOccupantName} from this branch.
-              Do you want to continue?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={handleCancelReassign}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmReassign}>Yes, replace</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmationDialog
+        open={showReassignModal}
+        onConfirm={handleConfirmReassign}
+        onCancel={handleCancelReassign}
+        type="warning"
+        title="Replace this branch's admin?"
+        description={
+          <>
+            {reassignTargetBranchName} is currently assigned to {reassignOccupantName}. Assigning{" "}
+            {formData.firstName || "this admin"} will remove {reassignOccupantName} from this branch.
+            Do you want to continue?
+          </>
+        }
+        confirmText="Yes, replace"
+        cancelText="Cancel"
+      />
+
+      <ConfirmationDialog
+        open={showSubmitConfirm}
+        onConfirm={handleConfirmSubmit}
+        onCancel={() => setShowSubmitConfirm(false)}
+        type={isEditMode ? "warning" : "question"}
+        title={
+          pendingAction === "unassign"
+            ? "Unassign from branch?"
+            : isEditMode
+              ? "Save changes?"
+              : "Add employee?"
+        }
+        description={
+          pendingAction === "unassign"
+            ? `${formData.firstName || "This admin"} will be unassigned from all branches. Are you sure?`
+            : isEditMode
+              ? `Are you sure you want to save the changes to ${formData.firstName} ${formData.lastName}?`
+              : "Are you sure you want to add this new employee?"
+        }
+        confirmText={
+          pendingAction === "unassign" ? "Unassign" : isEditMode ? "Save changes" : "Add employee"
+        }
+        cancelText="Cancel"
+        loading={submitting}
+      />
+
+      <ConfirmationDialog
+        open={showResetConfirm}
+        type="info"
+        title="Reset Form?"
+        description={
+          isEditMode
+            ? "All fields will be reset to their original values."
+            : "All entered values will be cleared."
+        }
+        confirmText="Reset"
+        cancelText="Cancel"
+        onConfirm={handleConfirmReset}
+        onCancel={() => setShowResetConfirm(false)}
+      />
+
+      <ConfirmationDialog
+        open={showLeaveConfirm}
+        type="info"
+        title="Leave this page?"
+        description="You have unsaved changes. If you leave now, your changes will be lost."
+        confirmText="Leave"
+        cancelText="Stay"
+        onConfirm={() => {
+          setShowLeaveConfirm(false);
+          navigate(-1);
+        }}
+        onCancel={() => setShowLeaveConfirm(false)}
+      />
     </div>
   );
 }

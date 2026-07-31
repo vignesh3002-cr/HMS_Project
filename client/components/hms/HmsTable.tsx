@@ -1,5 +1,5 @@
 import { type ReactNode, useState, useRef, useEffect } from "react";
-import { ChevronDown, Check } from "lucide-react";
+import { ChevronDown, Check, ArrowUpDown, ArrowDownUp } from "lucide-react";
 
 export interface HmsColumn<T> {
   key: string;
@@ -201,8 +201,12 @@ export default function HmsTable<T>({
                     >
                       <span>{column.label}</span>
                       {column.sortable !== false && (
-                        <span className="inline-flex h-3 w-3 items-center justify-center text-[7px] shrink-0">
-                          {isSorted ? (sortDirection === "asc" ? "\u2191" : "\u2193") : "\u2195"}
+                        <span className="inline-flex h-3 w-3 items-center justify-center shrink-0">
+                          {isSorted && sortDirection === "desc" ? (
+                            <ArrowDownUp className="w-3 h-3" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3" />
+                          )}
                         </span>
                       )}
                     </div>
@@ -257,8 +261,12 @@ export default function HmsTable<T>({
                     >
                       <span>{column.label}</span>
                       {column.sortable !== false && (
-                        <span className="inline-flex h-3 w-3 items-center justify-center text-[7px] shrink-0">
-                          {isSorted ? (sortDirection === "asc" ? "\u2191" : "\u2193") : "\u2195"}
+                        <span className="inline-flex h-3 w-3 items-center justify-center shrink-0">
+                          {isSorted && sortDirection === "desc" ? (
+                            <ArrowDownUp className="w-3 h-3" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3" />
+                          )}
                         </span>
                       )}
                     </div>

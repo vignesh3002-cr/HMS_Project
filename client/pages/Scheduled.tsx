@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-  import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { format } from "date-fns";
 import { User, IdCard, Phone, Mail, MapPin, Cake, Droplet, VenusAndMars, Briefcase } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import CalendarPicker from "@/components/hms/Calender";
 import { employeeApi, type EmployeeDetailResponse, type DoctorScheduleRecord } from "@/api/employee.api";
 import { appointmentApi, type AvailableSlotsResult } from "@/api/appointment.api";
@@ -132,6 +133,7 @@ export default function DoctorProfile() {
   const [toDate, setToDate] = useState(null);
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
   const [isToCalendarOpen, setIsToCalendarOpen] = useState(false);
+  const [clearScheduleConfirm, setClearScheduleConfirm] = useState(false);
   const [weekDates, setWeekDates] = useState(() => getWeekDates(new Date()));
   const [calendarViewYear, setCalendarViewYear] = useState(() => new Date().getFullYear());
   const [calendarViewMonth, setCalendarViewMonth] = useState(() => new Date().getMonth());
@@ -270,9 +272,12 @@ export default function DoctorProfile() {
   };
 
   const clearSchedule = () => {
-    if (window.confirm("Are you sure you want to clear the schedule?")) {
-      alert("Schedule cleared");
-    }
+    setClearScheduleConfirm(true);
+  };
+
+  const handleConfirmClearSchedule = () => {
+    alert("Schedule cleared");
+    setClearScheduleConfirm(false);
   };
 
   const previousWeek = () => {
@@ -1083,7 +1088,16 @@ export default function DoctorProfile() {
           </div>
         </div>
       )}
-
+      <ConfirmationDialog
+        open={clearScheduleConfirm}
+        onConfirm={handleConfirmClearSchedule}
+        onCancel={() => setClearScheduleConfirm(false)}
+        type="warning"
+        title="Clear Schedule?"
+        description="Are you sure you want to clear the schedule? This action cannot be undone."
+        confirmText="Clear"
+        cancelText="Cancel"
+      />
     </div>
   );
 }

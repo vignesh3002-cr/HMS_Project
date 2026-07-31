@@ -14,6 +14,8 @@ import { departmentApi, Department } from "@/api/department.api";
 import { employeeApi } from "@/api/employee.api";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { getUser } from "@/utils/token";
 
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import { State as CSState, City } from "country-state-city";
@@ -192,6 +194,11 @@ const adminRequired: Record<BranchAdminMode, { key: keyof AdminFormData; label: 
 
 const OTHER_DEPARTMENT_VALUE = "__OTHER__";
 
+// Only these roles are authorized to call GET /branch/assignable-admins on the
+// backend — fetching for anyone else always 403s, so we gate the call (and
+// hide the "Reassign existing user" option) on the client to match.
+const TOP_LEVEL_ADMIN_ROLES = ["ADMIN", "Admin", "HEAD_ADMIN", "SUPER_ADMIN"];
+
 // ─── Shared style tokens — matches Addemployee.tsx conventions ───────────────
 
 const inputCls =
@@ -248,6 +255,16 @@ export default function AddBranch() {
   const [districtOptions, setDistrictOptions] = useState<string[]>([]);
   const [sameAsCurrent, setSameAsCurrent] = useState(false);
   const [branchDistrictOptions, setBranchDistrictOptions] = useState<string[]>([]);
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [originalBranchData, setOriginalBranchData] = useState<BranchFormData | null>(null);
+  const [originalAdminData, setOriginalAdminData] = useState<AdminFormData | null>(null);
+
+  const currentUserRole = getUser()?.role_type || getUser()?.role || "";
+  const canReassignAdmin = TOP_LEVEL_ADMIN_ROLES.some(
+    (r) => r.toLowerCase() === String(currentUserRole).toLowerCase(),
+  );
 
   const handleChange = (
     e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
@@ -263,6 +280,15 @@ export default function AddBranch() {
   const handleAdminModeChange = (mode: BranchAdminMode) => {
     setAdminData((prev) => ({ ...prev, adminMode: mode }));
   };
+
+  // Non-top-level-admin users can't reassign admins (backend 403s), so force
+  // them onto "Create New Admin" instead of leaving them stuck on a blank,
+  // unfetchable "Reassign User" panel (e.g. the EXISTING default in edit mode).
+  useEffect(() => {
+    if (!canReassignAdmin && adminData.adminMode === "EXISTING") {
+      setAdminData((prev) => ({ ...prev, adminMode: "NEW" }));
+    }
+  }, [canReassignAdmin, adminData.adminMode]);
 
   const handleSameAsCurrent = (e: ChangeEvent<HTMLInputElement>) => {
     const checked = e.target.checked;
@@ -295,10 +321,10 @@ export default function AddBranch() {
   };
 
   useEffect(() => {
-    if (adminData.adminMode === "EXISTING") {
+    if (adminData.adminMode === "EXISTING" && canReassignAdmin) {
       fetchAssignableAdmins();
     }
-  }, [adminData.adminMode]);
+  }, [adminData.adminMode, canReassignAdmin]);
 
   // Branch list — used to label which branch an assignable admin currently belongs to.
   useEffect(() => {
@@ -357,6 +383,8 @@ export default function AddBranch() {
       country: "India",
       countryId: "IN",
     }));
+    setOriginalBranchData({ ...emptyBranchData, country: "India", countryId: "IN" });
+    setOriginalAdminData(emptyAdminData);
   }, []);
 
   // Edit mode — fetch the branch's full details (all columns + currently
@@ -407,6 +435,37 @@ export default function AddBranch() {
             adminMode: "EXISTING",
             adminUserId: admin?.user_id ?? "",
           }));
+
+          setOriginalBranchData({
+            branchCode: branch.branch_code || "",
+            branchName: branch.branch_name || "",
+            branchType: branch.branch_type || "",
+            area: branch.branch_area || "",
+            state: branch.state_name || "",
+            district: branch.district || "",
+            country: branch.country || "India",
+            countryId: "IN",
+            pincode: branch.branch_pincode != null ? String(branch.branch_pincode) : "",
+            licenseNumber: branch.branch_license_no || "",
+            emergencyNumber: branch.emergency_no || "",
+            email: branch.branch_email || "",
+            address: branch.address || "",
+            dateOfEstablish: branch.date_of_establish
+              ? String(branch.date_of_establish).slice(0, 10)
+              : "",
+            totalBeds: branch.total_beds != null ? String(branch.total_beds) : "",
+            totalEmployees: branch.total_no_emp || "",
+            faxNo: branch.fax_no || "",
+            gstNo: branch.gst_no || "",
+            panNo: branch.pan_no || "",
+            websiteAddress: branch.website_address || "",
+            medicalServices: branch.medical_services || "",
+          });
+          setOriginalAdminData({
+            ...emptyAdminData,
+            adminMode: "EXISTING",
+            adminUserId: admin?.user_id ?? "",
+          });
         } else {
           toast({
             title: "Branch not found",
@@ -464,6 +523,10 @@ export default function AddBranch() {
       return;
     }
 
+    setShowSubmitConfirm(true);
+  };
+
+  const handleConfirmSubmit = async () => {
     setSubmitting(true);
 
     try {
@@ -652,17 +715,21 @@ export default function AddBranch() {
       });
     } finally {
       setSubmitting(false);
+      setShowSubmitConfirm(false);
     }
   };
 
   const handleReset = () => {
+    setShowResetConfirm(true);
+  };
+
+  const handleConfirmReset = () => {
+    setShowResetConfirm(false);
+
     if (isEditMode) {
       // Blowing away branchData here would also clear the read-only Branch
       // Code — reloading is the only sane way to get back to loaded values.
-      toast({
-        title: "Reset",
-        description: "Please reload the page to reset to original values.",
-      });
+      window.location.reload();
       return;
     }
     setBranchData(emptyBranchData);
@@ -671,10 +738,24 @@ export default function AddBranch() {
     setSameAsCurrent(false);
   };
 
-  const adminModeOptions = [
-    { value: "EXISTING", label: "Reassign User", icon: UserCheck },
-    { value: "NEW", label: "Create New Admin", icon: UserPlus },
-  ];
+  const isDirty =
+    (!!originalBranchData && JSON.stringify(branchData) !== JSON.stringify(originalBranchData)) ||
+    (!!originalAdminData && JSON.stringify(adminData) !== JSON.stringify(originalAdminData));
+
+  const handleBack = () => {
+    if (isDirty) {
+      setShowLeaveConfirm(true);
+      return;
+    }
+    navigate(-1);
+  };
+
+  const adminModeOptions = canReassignAdmin
+    ? [
+        { value: "EXISTING", label: "Reassign User", icon: UserCheck },
+        { value: "NEW", label: "Create New Admin", icon: UserPlus },
+      ]
+    : [{ value: "NEW", label: "Create New Admin", icon: UserPlus }];
 
   const branchNameById = new Map(allBranches.map((b) => [b.branch_id, b.branch_name || b.branch_id]));
 
@@ -708,7 +789,7 @@ export default function AddBranch() {
         <div className="flex items-center gap-3 px-8 py-5 border-b border-gray-100">
           <button
             type="button"
-            onClick={() => navigate(-1)}
+            onClick={handleBack}
             className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-gray-50 transition-colors text-gray-500"
             aria-label="Go back"
           >
@@ -1594,6 +1675,51 @@ export default function AddBranch() {
           </div>
         </form>
       </div>
+
+      <ConfirmationDialog
+        open={showSubmitConfirm}
+        onConfirm={handleConfirmSubmit}
+        onCancel={() => setShowSubmitConfirm(false)}
+        type={isEditMode ? "warning" : "question"}
+        title={isEditMode ? "Update Branch?" : "Add Branch?"}
+        description={
+          isEditMode
+            ? `Are you sure you want to save the changes to branch "${branchData.branchName || branchData.branchCode}"?`
+            : "Are you sure you want to create this new branch?"
+        }
+        confirmText={isEditMode ? "Update" : "Add Branch"}
+        cancelText="Cancel"
+        loading={submitting}
+      />
+
+      <ConfirmationDialog
+        open={showResetConfirm}
+        type="info"
+        title="Reset Form?"
+        description={
+          isEditMode
+            ? "All fields will be reset to their original values."
+            : "All entered values will be cleared."
+        }
+        confirmText="Reset"
+        cancelText="Cancel"
+        onConfirm={handleConfirmReset}
+        onCancel={() => setShowResetConfirm(false)}
+      />
+
+      <ConfirmationDialog
+        open={showLeaveConfirm}
+        type="info"
+        title="Leave this page?"
+        description="You have unsaved changes. If you leave now, your changes will be lost."
+        confirmText="Leave"
+        cancelText="Stay"
+        onConfirm={() => {
+          setShowLeaveConfirm(false);
+          navigate(-1);
+        }}
+        onCancel={() => setShowLeaveConfirm(false)}
+      />
     </div>
   );
 }

@@ -1,22 +1,15 @@
 import { useState, useEffect, useRef, ChangeEvent, FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { startOfWeek, endOfWeek, addWeeks, format } from "date-fns";
+import { startOfWeek, endOfWeek, addWeeks, format, parseISO } from "date-fns";
 import { ArrowLeft, CalendarPlus, Plus, Search, Loader2, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { branchApi, Branch } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
-import { appointmentApi, type AvailableSlot } from "@/api/appointment.api";
+import { appointmentApi, type AvailableSlot, type AppointmentResponse } from "@/api/appointment.api";
 
 interface AppointmentFormData {
   patientId: string;
@@ -99,6 +92,8 @@ export default function AddAppointment() {
   const [formData, setFormData] = useState<AppointmentFormData>(emptyFormData);
   const [submitting, setSubmitting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [bookingResult, setBookingResult] = useState<AppointmentResponse | null>(null);
 
   // Patient search
   const [patientSearch, setPatientSearch] = useState("");
@@ -258,7 +253,7 @@ export default function AddAppointment() {
   const handleConfirmCreate = async () => {
     setSubmitting(true);
     try {
-      await appointmentApi.create({
+      const res = await appointmentApi.create({
         patient_id: formData.patientId,
         patient_name: formData.patientName,
         patient_number: formData.patientNumber,
@@ -271,12 +266,8 @@ export default function AddAppointment() {
         patient_type: formData.patientType || undefined,
       });
 
-      toast({
-        title: "Appointment created",
-        description: "The appointment has been scheduled successfully.",
-      });
       setShowConfirm(false);
-      navigate("/appointments");
+      setBookingResult(res.data.data);
     } catch (error: any) {
       toast({
         title: "Failed to create appointment",
@@ -289,7 +280,34 @@ export default function AddAppointment() {
     }
   };
 
-  const handleCancel = () => navigate(-1);
+  const handleBookingDone = () => {
+    setBookingResult(null);
+    navigate("/appointments");
+  };
+
+  const handleCancel = () => {
+    if (isDirty) {
+      setShowLeaveConfirm(true);
+      return;
+    }
+    navigate(-1);
+  };
+
+  const isDirty = Boolean(
+    formData.patientId ||
+      formData.patientName ||
+      formData.branchId ||
+      formData.departmentId ||
+      formData.doctorId ||
+      formData.timeSlot ||
+      formData.patientType ||
+      formData.patientComment
+  );
+
+  const selectedDoctor = doctors.find((doc) => doc.employee_id === formData.doctorId);
+  const selectedDoctorName = selectedDoctor
+    ? `Dr. ${selectedDoctor.first_name}${selectedDoctor.middle_name ? ` ${selectedDoctor.middle_name}` : ""} ${selectedDoctor.last_name}`
+    : "";
 
   // Appointment Date is bookable only within the current week through the
   // end of next week -- no previous-week slots.
@@ -692,35 +710,75 @@ export default function AddAppointment() {
         </div>
       </div>
 
-      <AlertDialog open={showConfirm} onOpenChange={(open) => !submitting && setShowConfirm(open)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Appointment</AlertDialogTitle>
-            <AlertDialogDescription>
-              You want to confirm appointment?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <button
-              type="button"
-              onClick={() => setShowConfirm(false)}
-              disabled={submitting}
-              className="w-full sm:w-auto px-8 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              No
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirmCreate}
-              disabled={submitting}
-              className="w-full sm:w-auto px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 active:scale-[0.98] transition-all duration-200 shadow-[0_4px_14px_0_rgba(37,99,235,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-              {submitting ? "Confirming..." : "Yes"}
-            </button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmationDialog
+        open={showConfirm}
+        onConfirm={handleConfirmCreate}
+        onCancel={() => setShowConfirm(false)}
+        type="question"
+        title="Confirm Appointment"
+        description="Are you sure you want to book this appointment?"
+        confirmText="Yes"
+        cancelText="No"
+        loading={submitting}
+      />
+
+      <ConfirmationDialog
+        open={showLeaveConfirm}
+        type="info"
+        title="Leave this page?"
+        description="You have unsaved changes. If you leave now, your changes will be lost."
+        confirmText="Leave"
+        cancelText="Stay"
+        onConfirm={() => {
+          setShowLeaveConfirm(false);
+          navigate(-1);
+        }}
+        onCancel={() => setShowLeaveConfirm(false)}
+      />
+
+      <ConfirmationDialog
+        open={Boolean(bookingResult)}
+        onConfirm={handleBookingDone}
+        onCancel={handleBookingDone}
+        hideCancelButton
+        type="success"
+        title="Appointment Booked"
+        description={
+          bookingResult ? (
+            <div className="w-full rounded-xl bg-gray-50 border border-gray-100 p-4 text-left text-sm">
+              <div className="flex items-center justify-between py-1">
+                <span className="text-gray-500">Patient</span>
+                <span className="font-semibold text-gray-900">{formData.patientName || "-"}</span>
+              </div>
+              <div className="flex items-center justify-between py-1">
+                <span className="text-gray-500">Patient ID</span>
+                <span className="font-semibold text-gray-900">{bookingResult.patient_id}</span>
+              </div>
+              <div className="flex items-center justify-between py-1">
+                <span className="text-gray-500">Appointment ID</span>
+                <span className="font-semibold text-gray-900">{bookingResult.appointment_id}</span>
+              </div>
+              <div className="flex items-center justify-between py-1">
+                <span className="text-gray-500">Date</span>
+                <span className="font-semibold text-gray-900">
+                  {format(parseISO(bookingResult.appointment_date), "EEE, MMM d, yyyy")}
+                </span>
+              </div>
+              <div className="flex items-center justify-between py-1">
+                <span className="text-gray-500">Time</span>
+                <span className="font-semibold text-gray-900">
+                  {formatSlotLabel(bookingResult.appointment_time)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between py-1">
+                <span className="text-gray-500">Doctor</span>
+                <span className="font-semibold text-gray-900">{selectedDoctorName || "-"}</span>
+              </div>
+            </div>
+          ) : null
+        }
+        confirmText="Done"
+      />
     </div>
   );
 }
