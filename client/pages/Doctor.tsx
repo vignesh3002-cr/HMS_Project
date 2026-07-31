@@ -20,6 +20,7 @@ import { filterDataByValues } from "@/components/Filter/utils";
 import ExportReport from "@/components/ui/ExportReport";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
+import { appointmentApi } from "@/api/appointment.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 
@@ -37,6 +38,37 @@ const DoctorPhoto = ({ photo, name }: { photo: string; name: string }) => (
     )}
   </div>
 );
+
+// Doctor slot-booking progress bar (list view, replaces qualification column)
+// Green while there's still availability; red once booked count reaches
+// (or would exceed) the doctor's total slot capacity for the day.
+function getSlotBand(percentage: number) {
+  if (percentage >= 100) return { color: "#EF4444", label: "Fully booked" };
+  return { color: "#16A34A", label: "Available" };
+}
+
+function SlotProgress({ booked, total }: { booked: number; total: number }) {
+  const percentage = total > 0 ? Math.min(100, Math.round((booked / total) * 100)) : 0;
+  const band = total === 0 ? { color: "#6B7280", label: "No slots" } : getSlotBand(percentage);
+
+  return (
+    <div className="min-w-[140px]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-bold">
+          <span style={{ color: band.color }}>{booked}</span>
+          <span className="text-[#9CA3AF]">/{total}</span>
+        </span>
+        <span className="text-xs font-bold" style={{ color: band.color }}>{band.label}</span>
+      </div>
+      <div className="mt-1.5 h-1.5 w-full rounded-full bg-[#E5E7EB] overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all duration-300"
+          style={{ width: `${percentage}%`, background: band.color }}
+        />
+      </div>
+    </div>
+  );
+}
 
 // Three-dot card menu (grid only)
 function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: () => void; onDelete: () => void }) {
@@ -188,6 +220,9 @@ export default function Doctor() {
   const [realDoctors, setRealDoctors] = useState<EmployeeRecord[] | null>(null);
   const [isDoctorsLoading, setIsDoctorsLoading] = useState(true);
 
+  // Per-doctor slot booking summary for the selected date (list view progress bar)
+  const [slotSummaries, setSlotSummaries] = useState<Record<string, { total: number; booked: number }>>({});
+
   const fetchDoctors = useCallback(async () => {
     setIsDoctorsLoading(true);
     console.log("[Doctor Page] Fetching all employees from employeeApi...");
@@ -223,6 +258,53 @@ export default function Doctor() {
   useEffect(() => {
     fetchDoctors();
   }, [fetchDoctors]);
+
+  // Fetch each doctor's booked/total slot counts for the selected single day
+  // (list view only). Total slots = the doctor's real working-hours
+  // availability that day sliced into fixed 20-minute slots (backend-computed).
+  const fetchSlotSummaries = useCallback(
+    async (doctors: EmployeeRecord[], date: Date, signal: { cancelled: boolean }) => {
+      const dateStr = format(date, "yyyy-MM-dd");
+      const entries = await Promise.all(
+        doctors.map(async (doc) => {
+          try {
+            const res = await appointmentApi.getDoctorSlotSummary(doc.employee_id, dateStr);
+            const data = res.data?.data;
+            return [doc.employee_id, { total: data?.total_slots ?? 0, booked: data?.booked_count ?? 0 }] as const;
+          } catch {
+            return [doc.employee_id, { total: 0, booked: 0 }] as const;
+          }
+        }),
+      );
+      if (!signal.cancelled) setSlotSummaries(Object.fromEntries(entries));
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!realDoctors || realDoctors.length === 0 || viewMode !== "list") return;
+    const signal = { cancelled: false };
+
+    fetchSlotSummaries(realDoctors, selectedDate, signal);
+
+    // Keep the booked/total counts live: poll periodically, and refetch as
+    // soon as the tab regains focus (e.g. after booking an appointment on
+    // another page/tab), instead of only updating on next full page load.
+    const intervalId = window.setInterval(() => {
+      fetchSlotSummaries(realDoctors, selectedDate, signal);
+    }, 15000);
+
+    const handleFocus = () => fetchSlotSummaries(realDoctors, selectedDate, signal);
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+
+    return () => {
+      signal.cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
+  }, [realDoctors, selectedDate, viewMode, fetchSlotSummaries]);
 
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
@@ -457,9 +539,10 @@ export default function Doctor() {
                   { key: "dept", label: "Department", render: (r: any) => (
                     <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: String(r.deptBg), color: String(r.deptColor) }}>{String(r.dept)}</span>
                   )},
-                  { key: "qualification", label: "Qualification", render: (r: any) => (
-                    <span className="text-[#191C1E] hms-content-text leading-4">{String(r.qualification)}</span>
-                  )},
+                  { key: "qualification", label: "Slots", sortable: false, render: (r: any) => {
+                    const summary = slotSummaries[String(r.id)] ?? { total: 0, booked: 0 };
+                    return <SlotProgress booked={summary.booked} total={summary.total} />;
+                  }},
                   { key: "mobile", label: "Mobile No", render: (r: any) => (
                     <span className="text-[#191C1E] hms-content-text leading-4">{String(r.mobile)}</span>
                   )},

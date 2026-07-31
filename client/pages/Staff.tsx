@@ -3,9 +3,10 @@ import CalendarPicker from "@/components/hms/Calender";
 import { useNavigate } from "react-router-dom";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Search, FileText, ChevronDown, Plus, Loader2 } from "lucide-react";
+import { Search, Plus, Loader2 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
 import { RefreshButton } from "@/components/hms/RefreshButton";
+import ExportReport from "@/components/ui/ExportReport";
 
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
@@ -405,26 +406,6 @@ export default function Staff() {
     ]},
   ];
 
-  const [exportOpen, setExportOpen] = useState(false);
-  const exportRef = useRef<HTMLDivElement>(null);
-  const exportOptions = [
-    { id: "pdf", label: "Export as PDF", icon: FileText },
-    { id: "csv", label: "Export as CSV", icon: FileText },
-  ];
-  const handleExport = (format: string) => {
-    console.log(`Exporting as ${format}`);
-    setExportOpen(false);
-  };
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
-        setExportOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
     const employeesForTab = !realStaff
@@ -547,7 +528,7 @@ export default function Staff() {
       )},
       { key: "phone", label: "Phone Number", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.phone}</span> },
       { key: "dept", label: "Department", render: (r: any) => (
-        <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize ${r.deptClass}`}>{r.dept}</span>
+        <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize bg-[#E6E8EA] text-[#475C7F]">{r.role ?? r.dept}</span>
       )},
       { key: "branch", label: "Branch", render: (r: any) => (
         <span className="text-[#191C1E] hms-content-text">
@@ -570,38 +551,14 @@ export default function Staff() {
           <div className="flex flex-col md:flex-row md:items-center justify-between">
             <div>
               <h1 className="hms-heading">Staff Management</h1>
-              <p className="text-[#64748B] text-xs font-medium leading-4">Manage and overview all staff members across branches.</p>
+              <p className="hms-subheading">Manage and overview all staff members across branches.</p>
             </div>
-            <div className="flex items-center gap-2.5">
-              <div className="relative" ref={exportRef}>
-                <button
-                  onClick={() => setExportOpen(!exportOpen)}
-                  className="flex items-center gap-[6px] h-[34px] px-[21px] py-[11px] border border-[#D1D5DB] bg-white rounded-[10px] text-[#374151] text-[13px] font-semibold hover:bg-[#F2F4F6] transition-colors"
-                >
-                  <FileText className="w-[14px] h-[14px]" />
-                  Export report
-                  <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${exportOpen ? "rotate-180" : ""}`} />
-                </button>
-
-                {exportOpen && (
-                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-[#E5E7EB] py-1 z-10 animate-slideDown">
-                    {exportOptions.map((option) => (
-                      <button
-                        key={option.id}
-                        onClick={() => handleExport(option.id)}
-                        className="flex items-center gap-2 w-full px-4 py-2 text-[#424752] text-xs font-medium hover:bg-[#F2F4F6] transition-colors"
-                      >
-                        <option.icon className="w-4 h-4" />
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+            <div className="flex items-center gap-3">
+              <ExportReport />
 
               <button
                 onClick={handleAddStaff}
-                className="flex items-center gap-[6px] h-[34px] px-[20px] py-[10px] bg-[#004785] rounded-[10px] text-white text-[12px] font-semibold hover:bg-[#003a6b] transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 Add new staff
@@ -610,10 +567,10 @@ export default function Staff() {
           </div>
 
           {/* ==================== MAIN CARD ==================== */}
-          <div className="bg-white rounded-[16px] border border-[#E2E8F0] shadow-[0px_4px_6px_-1px_rgba(0,0,0,0.05),0px_2px_4px_-1px_rgba(0,0,0,0.03)] flex flex-col">
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col transition-all duration-300 hover:shadow-md">
 
             {/* ==================== TOOLBAR ==================== */}
-            <div className="sticky top-0 z-10 bg-white min-h-[52px] px-[24px] py-3 border-b border-[#F1F5F9] flex flex-wrap items-center justify-between gap-4">
+            <div className="px-5 py-4 border-b border-[#E5E7EB] flex flex-wrap items-center justify-between gap-4">
 
               {/* TABS */}
               <nav
@@ -669,7 +626,7 @@ export default function Staff() {
               </nav>
 
               {/* SEARCH / DATE / FILTERS */}
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-3 flex-wrap">
                 <div className="relative">
                   <input
                     type="text"

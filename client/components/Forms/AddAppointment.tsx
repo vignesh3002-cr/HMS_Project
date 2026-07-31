@@ -39,7 +39,7 @@ const emptyFormData: AppointmentFormData = {
   branchId: "",
   departmentId: "",
   doctorId: "",
-  selectDate: new Date().toISOString().split("T")[0],
+  selectDate: format(new Date(), "yyyy-MM-dd"),
   timeSlot: "",
   patientComment: "",
 };
