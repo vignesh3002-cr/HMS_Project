@@ -22,6 +22,7 @@ import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { useToast } from "@/hooks/use-toast";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 
 import DayView from "./Day view";
@@ -43,6 +44,7 @@ interface Appointment {
   doctorInitial: string;
   date: string;
   time: string;
+  sortDate: number;
   status: string;
 }
 
@@ -105,6 +107,13 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
   const patientName = formatPatientName(record.patient_bio_data);
   const doctorName = formatDoctorName(record.employees);
 
+  const dateMs = new Date(record.appointment_date).getTime();
+  const timeMs = new Date(record.appointment_time).getTime();
+  const timeOfDayMs = !isNaN(timeMs)
+    ? (timeMs % 86400000 + 86400000) % 86400000
+    : 0;
+  const sortDate = (isNaN(dateMs) ? 0 : dateMs) + timeOfDayMs;
+
   return {
     id: record.appointment_id,
     tokenId: record.token_number != null ? String(record.token_number) : "—",
@@ -118,6 +127,7 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
     doctorInitial: getInitials(doctorName),
     date: formatAppointmentDate(record.appointment_date),
     time: formatAppointmentTime(record.appointment_time),
+    sortDate,
     status: STATUS_LABELS[record.status ?? ""] ?? (record.status || "Unknown"),
   };
 }
@@ -225,45 +235,41 @@ const AppointmentSchedule: React.FC = () => {
     fetchAppointments();
   }, [fetchAppointments]);
 
-  const handleCancelAppointment = (target: Appointment) => {
-    const cancelReason = window.prompt(
-      `Cancel appointment ${target.id} for ${target.patient}?\nPlease enter a reason for cancellation:`,
-    );
+  const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
 
-    if (cancelReason === null) return;
+  const handleCancelAppointment = (target: Appointment) => {
+    setCancelReason("");
+    setCancelTarget(target);
+  };
+
+  const handleConfirmCancelAppointment = () => {
+    if (!cancelTarget) return;
 
     if (!cancelReason.trim()) {
       toast({ title: "A cancellation reason is required", variant: "destructive" });
       return;
     }
 
-    appointmentApi
-      .cancel(target.id, cancelReason.trim())
-      .then(() => {
-        setAppointments((prev) =>
-          prev.map((appt) => (appt === target ? { ...appt, status: "Cancelled" } : appt)),
-        );
-        toast({
-          title: "Appointment cancelled",
-          description: `Appointment ${target.id} has been cancelled.`,
-        });
-      })
-      .catch((err) => {
-        console.error("[Appointments Page] Cancel error:", err);
-        toast({
-          title: "Failed to cancel appointment",
-          description: "Couldn't reach the appointments API.",
-          variant: "destructive",
-        });
-      });
+    setAppointments((prev) =>
+      prev.map((appt) =>
+        appt === cancelTarget ? { ...appt, status: "Cancelled" } : appt,
+      ),
+    );
+    toast({
+      title: "Appointment cancelled",
+      description: `Appointment ${cancelTarget.id} has been cancelled.`,
+    });
+    setCancelTarget(null);
+    setCancelReason("");
   };
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
-  // Sort state
-  const [sortField, setSortField] = useState("");
+  // Sort state — defaults to Appointment Date (ascending)
+  const [sortField, setSortField] = useState("date");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   // Search state
@@ -377,19 +383,22 @@ const AppointmentSchedule: React.FC = () => {
 
   const sortedData = useMemo(() => {
     if (!sortField) return filteredData;
+    const direction = sortDirection === "asc" ? 1 : -1;
     return [...filteredData].sort((a, b) => {
+      if (sortField === "date") {
+        return (a.sortDate - b.sortDate) * direction;
+      }
       const aValue = String(a[sortField as keyof Appointment] ?? "").toLowerCase();
       const bValue = String(b[sortField as keyof Appointment] ?? "").toLowerCase();
-      if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
-      if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
-      return 0;
+      return aValue < bValue ? -direction : aValue > bValue ? direction : 0;
     });
   }, [filteredData, sortField, sortDirection]);
 
   // ---- PAGINATION ----
   const totalRecords = sortedData.length;
   const totalPages = Math.max(1, Math.ceil(totalRecords / rowsPerPage));
-  const startIndex = (currentPage - 1) * rowsPerPage;
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * rowsPerPage;
   const endIndex = startIndex + rowsPerPage;
   const currentRows = sortedData.slice(startIndex, endIndex);
   const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
@@ -652,7 +661,7 @@ const AppointmentSchedule: React.FC = () => {
                 sortField={sortField}
                 sortDirection={sortDirection}
                 onSort={handleSort}
-                currentPage={currentPage}
+                currentPage={safeCurrentPage}
                 totalPages={totalPages}
                 totalRecords={totalRecords}
                 rowsPerPage={rowsPerPage}
@@ -668,6 +677,29 @@ const AppointmentSchedule: React.FC = () => {
           </div>
         </main>
       </div>
+
+      <ConfirmationDialog
+        open={!!cancelTarget}
+        type="danger"
+        title="Cancel Appointment?"
+        description={
+          cancelTarget
+            ? `Appointment ${cancelTarget.id} for ${cancelTarget.patient} will be cancelled. Please enter a reason for cancellation.`
+            : ""
+        }
+        confirmText="Cancel Appointment"
+        cancelText="Keep Appointment"
+        onConfirm={handleConfirmCancelAppointment}
+        onCancel={() => setCancelTarget(null)}
+      >
+        <textarea
+          value={cancelReason}
+          onChange={(e) => setCancelReason(e.target.value)}
+          placeholder="Reason for cancellation (required)"
+          rows={3}
+          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      </ConfirmationDialog>
     </div>
 
   );

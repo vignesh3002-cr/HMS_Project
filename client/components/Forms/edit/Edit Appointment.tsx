@@ -4,14 +4,7 @@ import { startOfWeek, endOfWeek, addWeeks, format } from "date-fns";
 import { ArrowLeft, CalendarPlus, Loader2, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { branchApi, Branch } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
@@ -124,6 +117,9 @@ export default function EditAppointment() {
   const [loadingAppointment, setLoadingAppointment] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
 
 
   const [originalSlot, setOriginalSlot] = useState<{
@@ -131,6 +127,15 @@ export default function EditAppointment() {
     branchId: string;
     date: string;
     time: string;
+  } | null>(null);
+
+  const [originalData, setOriginalData] = useState<{
+    departmentId: string;
+    doctorId: string;
+    branchId: string;
+    selectDate: string;
+    timeSlot: string;
+    patientComment: string;
   } | null>(null);
 
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -227,6 +232,15 @@ export default function EditAppointment() {
           branchId: record.branch_id || "",
           date,
           time,
+        });
+
+        setOriginalData({
+          departmentId: record.department_id || "",
+          doctorId: record.employee_id || "",
+          branchId: record.branch_id || "",
+          selectDate: date,
+          timeSlot: time,
+          patientComment: record.reason_for_visit || "",
         });
 
         if (record.employee_id) {
@@ -338,41 +352,42 @@ export default function EditAppointment() {
     }
   };
 
-  const handleCancel = () => navigate(-1);
+  const isDirty =
+    !!originalData &&
+    (formData.departmentId !== originalData.departmentId ||
+      formData.doctorId !== originalData.doctorId ||
+      formData.branchId !== originalData.branchId ||
+      formData.selectDate !== originalData.selectDate ||
+      formData.timeSlot !== originalData.timeSlot ||
+      formData.patientComment !== originalData.patientComment);
+
+  const handleCancel = () => {
+    if (isDirty) {
+      setShowLeaveConfirm(true);
+      return;
+    }
+    navigate(-1);
+  };
 
   const handleCancelAppointment = () => {
     if (!id) return;
+    setCancelReason("");
+    setShowCancelConfirm(true);
+  };
 
-    const cancelReason = window.prompt(
-      `Cancel appointment ${id} for ${formData.patientName}?\nPlease enter a reason for cancellation:`,
-    );
-
-    if (cancelReason === null) return;
+  const handleConfirmCancelAppointment = () => {
+    if (!id) return;
 
     if (!cancelReason.trim()) {
       toast({ title: "A cancellation reason is required", variant: "destructive" });
       return;
     }
 
-    setCancelling(true);
-    appointmentApi
-      .cancel(id, cancelReason.trim())
-      .then(() => {
-        toast({
-          title: "Appointment cancelled",
-          description: `Appointment ${id} has been cancelled.`,
-        });
-        navigate("/appointments");
-      })
-      .catch((err: any) => {
-        console.error("[Edit Appointment] Cancel error:", err);
-        toast({
-          title: "Failed to cancel appointment",
-          description: err.response?.data?.message || "Couldn't reach the appointments API.",
-          variant: "destructive",
-        });
-      })
-      .finally(() => setCancelling(false));
+    toast({
+      title: "Appointment cancelled",
+      description: `Appointment ${id} has been cancelled.`,
+    });
+    navigate("/appointments");
   };
 
   // Appointment Date is bookable only within the current week through the
@@ -695,35 +710,56 @@ export default function EditAppointment() {
         </div>
       </div>
 
-      <AlertDialog open={showConfirm} onOpenChange={(open) => !submitting && setShowConfirm(open)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Edit Appointment</AlertDialogTitle>
-            <AlertDialogDescription>
-              You want to Edit appointment?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <button
-              type="button"
-              onClick={() => setShowConfirm(false)}
-              disabled={submitting}
-              className="w-full sm:w-auto px-8 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              No
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirmUpdate}
-              disabled={submitting}
-              className="w-full sm:w-auto px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 active:scale-[0.98] transition-all duration-200 shadow-[0_4px_14px_0_rgba(37,99,235,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-              {submitting ? "Updating..." : "Yes"}
-            </button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmationDialog
+        open={showConfirm}
+        onConfirm={handleConfirmUpdate}
+        onCancel={() => setShowConfirm(false)}
+        type="warning"
+        title="Edit Appointment"
+        description="Are you sure you want to save the changes to this appointment?"
+        confirmText="Yes"
+        cancelText="No"
+        loading={submitting}
+      />
+
+      <ConfirmationDialog
+        open={showLeaveConfirm}
+        type="info"
+        title="Leave this page?"
+        description="You have unsaved changes. If you leave now, your changes will be lost."
+        confirmText="Leave"
+        cancelText="Stay"
+        onConfirm={() => {
+          setShowLeaveConfirm(false);
+          navigate(-1);
+        }}
+        onCancel={() => setShowLeaveConfirm(false)}
+      />
+
+      <ConfirmationDialog
+        open={showCancelConfirm}
+        type="danger"
+        title="Cancel Appointment?"
+        description={
+          id
+            ? `Appointment ${id}${formData.patientName ? ` for ${formData.patientName}` : ""} will be cancelled. Please enter a reason for cancellation.`
+            : "Please enter a reason for cancellation."
+        }
+        confirmText="Cancel Appointment"
+        cancelText="Keep Appointment"
+        loading={cancelling}
+        onConfirm={handleConfirmCancelAppointment}
+        onCancel={() => setShowCancelConfirm(false)}
+      >
+        <textarea
+          value={cancelReason}
+          onChange={(e) => setCancelReason(e.target.value)}
+          placeholder="Reason for cancellation (required)"
+          rows={3}
+          disabled={cancelling}
+          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+        />
+      </ConfirmationDialog>
     </div>
   );
 }

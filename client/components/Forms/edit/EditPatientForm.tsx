@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Loader2, UserRound, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import { branchApi, Branch } from "@/api/branch.api";
 import { patientApi } from "@/api/patient.api";
@@ -90,6 +91,10 @@ export default function EditPatientForm() {
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [originalFormData, setOriginalFormData] = useState<FormData | null>(null);
 
   const setField = (key: keyof FormData, value: string) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
@@ -136,7 +141,7 @@ export default function EditPatientForm() {
       const response = await patientApi.getById(id);
       const patient = response.data.data;
       if (patient) {
-        setFormData({
+        const loadedFormData: FormData = {
           branch_id: patient.branch_id || "",
           patient_first_name: patient.patient_first_name || "",
           patient_middle_name: patient.patient_middle_name || "",
@@ -155,7 +160,9 @@ export default function EditPatientForm() {
           patient_emergency_name: (patient as any).patient_emergency_name || "",
           patient_emergency_relation: (patient as any).patient_emergency_relation || "",
           patient_photo_url: patient.patient_photo_url || null,
-        });
+        };
+        setFormData(loadedFormData);
+        setOriginalFormData(loadedFormData);
         if ((patient as any).patient_current_address && !(patient as any).patient_permanent_address) {
           setSameAsCurrent(true);
         }
@@ -189,6 +196,12 @@ export default function EditPatientForm() {
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
+    if (!id) return;
+
+    setShowSubmitConfirm(true);
+  };
+
+  const handleConfirmSubmit = async () => {
     if (!id) return;
 
     setSubmitting(true);
@@ -228,12 +241,30 @@ export default function EditPatientForm() {
       });
     } finally {
       setSubmitting(false);
+      setShowSubmitConfirm(false);
     }
   };
 
   const handleReset = () => {
-    setFormData(emptyFormData);
-    setSameAsCurrent(false);
+    setShowResetConfirm(true);
+  };
+
+  const handleConfirmReset = () => {
+    setShowResetConfirm(false);
+    // Reload restores the patient's original values without wiping the
+    // read-only fields the API doesn't echo back.
+    window.location.reload();
+  };
+
+  const isDirty =
+    !!originalFormData && JSON.stringify(formData) !== JSON.stringify(originalFormData);
+
+  const handleBack = () => {
+    if (isDirty) {
+      setShowLeaveConfirm(true);
+      return;
+    }
+    navigate(-1);
   };
 
   if (loading) {
@@ -253,7 +284,7 @@ export default function EditPatientForm() {
         <div className="flex items-center gap-3 px-8 py-5 border-b border-gray-100">
           <button
             type="button"
-            onClick={() => navigate(-1)}
+            onClick={handleBack}
             className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-gray-50 transition-colors text-gray-500"
             aria-label="Go back"
           >
@@ -533,6 +564,43 @@ export default function EditPatientForm() {
           </div>
         </form>
       </div>
+
+      <ConfirmationDialog
+        open={showSubmitConfirm}
+        onConfirm={handleConfirmSubmit}
+        onCancel={() => setShowSubmitConfirm(false)}
+        type="warning"
+        title="Save changes?"
+        description="Are you sure you want to save the changes to this patient?"
+        confirmText="Save changes"
+        cancelText="Cancel"
+        loading={submitting}
+      />
+
+      <ConfirmationDialog
+        open={showResetConfirm}
+        type="info"
+        title="Reset Form?"
+        description="All fields will be reset to their original values."
+        confirmText="Reset"
+        cancelText="Cancel"
+        onConfirm={handleConfirmReset}
+        onCancel={() => setShowResetConfirm(false)}
+      />
+
+      <ConfirmationDialog
+        open={showLeaveConfirm}
+        type="info"
+        title="Leave this page?"
+        description="You have unsaved changes. If you leave now, your changes will be lost."
+        confirmText="Leave"
+        cancelText="Stay"
+        onConfirm={() => {
+          setShowLeaveConfirm(false);
+          navigate(-1);
+        }}
+        onCancel={() => setShowLeaveConfirm(false)}
+      />
     </div>
   );
 }

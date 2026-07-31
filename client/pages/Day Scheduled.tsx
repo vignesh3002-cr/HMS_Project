@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { format } from "date-fns";
 import { User, IdCard, Phone, Mail, MapPin, Cake, Droplet, VenusAndMars, Briefcase } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import CalendarPicker from "@/components/hms/Calender";
 import { employeeApi, type EmployeeDetailResponse, type DoctorScheduleRecord } from "@/api/employee.api";
 
@@ -167,6 +168,7 @@ export default function DoctorProfile() {
   const [toDate, setToDate] = useState(null);
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
   const [isToCalendarOpen, setIsToCalendarOpen] = useState(false);
+  const [clearScheduleConfirm, setClearScheduleConfirm] = useState(false);
 
   // Real weekly availability, grouped by day_of_week from the doctor's
   // active doctor_schedule rows (part of the same employeeApi.getOne(id)
@@ -232,9 +234,12 @@ export default function DoctorProfile() {
   };
 
   const clearSchedule = () => {
-    if (window.confirm("Are you sure you want to clear the schedule?")) {
-      alert("Schedule cleared");
-    }
+    setClearScheduleConfirm(true);
+  };
+
+  const handleConfirmClearSchedule = () => {
+    alert("Schedule cleared");
+    setClearScheduleConfirm(false);
   };
 
   const openAddSlot = (dayName, rowIndex = null, colIndex = null) => {
@@ -891,7 +896,16 @@ export default function DoctorProfile() {
           </div>
         </div>
       )}
-
+      <ConfirmationDialog
+        open={clearScheduleConfirm}
+        onConfirm={handleConfirmClearSchedule}
+        onCancel={() => setClearScheduleConfirm(false)}
+        type="warning"
+        title="Clear Schedule?"
+        description="Are you sure you want to clear the schedule? This action cannot be undone."
+        confirmText="Clear"
+        cancelText="Cancel"
+      />
     </div>
   );
 }
