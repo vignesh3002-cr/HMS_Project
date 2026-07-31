@@ -647,7 +647,7 @@ const AppointmentSchedule: React.FC = () => {
                     <div className="hms-content-text text-[#191C1E] leading-4"><div>{r.date}</div><div className="text-[11px] font-medium text-[#8C8D8F] mt-1">{r.time}</div></div>
                   )},
                   { key: "status", label: "Status", render: (r: Appointment) => (
-                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${statusStyles[r.status] ?? "bg-indigo-50 text-indigo-600"}`}>{toTitleCase(r.status)}</span>
+                    <StatusBadge status={r.status} />
                   )},
                   { key: "actions", label: "Action", sortable: false, className: "w-px !whitespace-normal !pl-3", headerClassName: "w-px !pl-3", render: (r: Appointment) => (
                     <ActionMenu
