@@ -248,28 +248,6 @@ export default function Dashboard() {
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
   const [appointmentCount, setAppointmentCount] = useState<number>(0);
 
-
-  useEffect(() => {
-    appointmentApi
-      .getAll({ limit: 100, sortBy: "appointment_date", sortOrder: "desc" })
-      .then((res) => {
-        const rows = res.data?.data?.appointments || [];
-        setRealAppointments(rows.map(mapAppointmentRecord));
-        setAppointmentCount(res.data?.data?.total ?? rows.length);
-      })
-      .catch((err) => {
-        console.error("[Dashboard] Failed to load appointments:", err);
-        toast({
-          title: "Failed to load appointments",
-          description: "Couldn't reach the appointments API.",
-          variant: "destructive",
-        });
-      })
-      .finally(() => {
-        setIsAppointmentsLoading(false);
-      });
-  }, []);
-
   const fetchEmployees = useCallback(async () => {
     setIsEmployeesLoading(true);
     try {

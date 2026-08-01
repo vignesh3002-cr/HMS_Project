@@ -125,6 +125,20 @@ export const appointmentApi = {
       params: { employeeId, date },
     }),
 
+  getDoctorWeekSlotSummary: (employeeId: string, date: string) =>
+    API.get<{
+      success: boolean;
+      data: {
+        week_start: string;
+        week_end: string;
+        total_slots: number;
+        booked_count: number;
+        percentage: number;
+      };
+    }>("/appointments/doctor-week-slot-summary", {
+      params: { employeeId, date },
+    }),
+
   cancel: (appointmentNo: string, cancelReason: string) =>
     API.delete<{ success: boolean; message: string; data: AppointmentRecord }>(
       `/appointments/${appointmentNo}`,

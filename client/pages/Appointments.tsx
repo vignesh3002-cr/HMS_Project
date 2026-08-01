@@ -622,33 +622,34 @@ const AppointmentSchedule: React.FC = () => {
               </div>
             ) : (
               <HmsTable
+                scrollable={false}
                 columns={[
-                  { key: "id", label: "AppointmentNo", render: (r: Appointment) => (
+                  { key: "id", label: "AppointmentNo", className: "!whitespace-normal", render: (r: Appointment) => (
                     <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.id}</span>
                   )},
-                  { key: "tokenId", label: "TokenId", render: (r: Appointment) => (
+                  { key: "tokenId", label: "TokenId", className: "!whitespace-normal", render: (r: Appointment) => (
                     <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.tokenId}</span>
                   )},
-                  { key: "patient", label: "Patient", render: (r: Appointment) => (
+                  { key: "patient", label: "Patient", className: "!whitespace-normal", render: (r: Appointment) => (
                     <div className="flex items-center gap-2">
-                      <div className={`w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text ${r.avatarColor}`}>{r.patientInitial}</div>
+                      <div className={`w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0 ${r.avatarColor}`}>{r.patientInitial}</div>
                       <div><div className="hms-name-text capitalize">{r.patient}</div><div className="hms-id-text">{r.patientId}</div></div>
                     </div>
                   )},
-                  { key: "branch", label: "Branch", render: (r: Appointment) => <span className="hms-content-text text-[#191C1E]">{r.branch}</span> },
-                  { key: "doctor", label: "Doctor", render: (r: Appointment) => (
+                  { key: "branch", label: "Branch", className: "!whitespace-normal", render: (r: Appointment) => <span className="hms-content-text text-[#191C1E]">{r.branch}</span> },
+                  { key: "doctor", label: "Doctor", className: "!whitespace-normal", render: (r: Appointment) => (
                     <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center hms-avatar-text">{r.doctorInitial}</div>
+                      <div className="w-7 h-7 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center hms-avatar-text shrink-0">{r.doctorInitial}</div>
                       <div><div className="hms-name-text capitalize">{r.doctor}</div><div className="hms-id-text">{r.doctorId}</div></div>
                     </div>
                   )},
-                  { key: "date", label: "Appointment Date", render: (r: Appointment) => (
+                  { key: "date", label: "Appointment Date", className: "!whitespace-normal", render: (r: Appointment) => (
                     <div className="hms-content-text text-[#191C1E] leading-4"><div>{r.date}</div><div className="text-[11px] font-medium text-[#8C8D8F] mt-1">{r.time}</div></div>
                   )},
                   { key: "status", label: "Status", render: (r: Appointment) => (
                     <StatusBadge status={r.status} />
                   )},
-                  { key: "actions", label: "Action", sortable: false, render: (r: Appointment) => (
+                  { key: "actions", label: "Action", sortable: false, className: "w-px !whitespace-normal !pl-3", headerClassName: "w-px !pl-3", render: (r: Appointment) => (
                     <ActionMenu
                       onView={() => navigate(`/appointments/view/${r.id}`)}
                       onEdit={() => navigate(`/appointments/edit/${r.id}`)}
