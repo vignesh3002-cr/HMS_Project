@@ -264,7 +264,7 @@ export default function EditPatientForm() {
       setShowLeaveConfirm(true);
       return;
     }
-    navigate(-1);
+    navigate("/dashboard");
   };
 
   if (loading) {
@@ -597,7 +597,7 @@ export default function EditPatientForm() {
         cancelText="Stay"
         onConfirm={() => {
           setShowLeaveConfirm(false);
-          navigate(-1);
+          navigate("/dashboard");
         }}
         onCancel={() => setShowLeaveConfirm(false)}
       />

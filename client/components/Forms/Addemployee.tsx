@@ -544,7 +544,7 @@ export default function AddEmployee() {
           nationality: employee.nationality || "",
           maritalStatus: employee.marital_status || "",
           mobileNo: employee.mobile_no || "",
-          permanentAddress: employee.parmanant_address || "",
+          permanentAddress: employee.parmanent_address || "",
           currentAddress: employee.current_address || "",
           emergencyContactName: employee.emergency_contact_name || "",
           emergencyContactRelation: employee.emergency_contact_relationship || "",
@@ -556,12 +556,13 @@ export default function AddEmployee() {
           currentDistrict: employee.employee_district || "",
           currentArea: employee.employee_area || "",
           currentPincode: employee.employee_pincode != null ? String(employee.employee_pincode) : "",
-          // Permanent-address structured fields aren't persisted server-side
-          // either (create silently drops them today) — nothing to prefill.
-          permanentState: "",
-          permanentDistrict: "",
-          permanentArea: "",
-          permanentPincode: "",
+          permanentState: employee.permanent_employee_state || "",
+          permanentDistrict: employee.permanent_employee_district || "",
+          permanentArea: employee.permanent_employee_area || "",
+          permanentPincode:
+            employee.permanent_employee_pincode != null
+              ? String(employee.permanent_employee_pincode)
+              : "",
           experience: employee.employee_no_experence != null ? String(employee.employee_no_experence) : "",
           departmentId: employee.department_id || "",
           designation: employee.designation || "",
@@ -576,27 +577,37 @@ export default function AddEmployee() {
 
         setFormData(loadedFormData);
 
-        setIsActive(employee.emp_status === true || user?.user_status === 1);
-        setOriginalIsActive(employee.emp_status === true || user?.user_status === 1);
+        setIsActive(employee.emp_status === true || user?.user_status === 0);
+        setOriginalIsActive(employee.emp_status === true || user?.user_status === 0);
 
-        if (employee.current_address && employee.current_address === employee.parmanant_address) {
-          setSameAsCurrent(true);
-          // Auto-checking above only compared the address line — mirror the
-          // rest of the current fields too, otherwise state/district/area/
-          // pincode are left blank (and disabled) while address/area/pincode
-          // showed correctly, making the section look broken.
-          const syncedFormData = {
-            ...loadedFormData,
-            permanentArea: loadedFormData.currentArea,
-            permanentState: loadedFormData.currentState,
-            permanentDistrict: loadedFormData.currentDistrict,
-            permanentPincode: loadedFormData.currentPincode,
-          };
-          setFormData(syncedFormData);
-          setOriginalFormData(syncedFormData);
-        } else {
-          setOriginalFormData(loadedFormData);
-        }
+        // The "Same as current address" state isn't stored as a flag — infer
+        // it from the saved values: the checkbox was checked when the saved
+        // permanent fields mirror the current ones (permanent pincode is
+        // never persisted by the backend, so compare the fields that are).
+        const permanentMatchesCurrent =
+          !!loadedFormData.currentAddress &&
+          (loadedFormData.permanentAddress || "") === (loadedFormData.currentAddress || "") &&
+          loadedFormData.permanentState === loadedFormData.currentState &&
+          loadedFormData.permanentDistrict === loadedFormData.currentDistrict &&
+          loadedFormData.permanentArea === loadedFormData.currentArea;
+
+        setSameAsCurrent(permanentMatchesCurrent);
+
+        // When the checkbox was saved checked, mirror the current structured
+        // fields too, otherwise state/district/area/pincode would stay blank
+        // (and disabled) while the address line showed correctly.
+        const syncedFormData = permanentMatchesCurrent
+          ? {
+              ...loadedFormData,
+              permanentArea: loadedFormData.currentArea,
+              permanentState: loadedFormData.currentState,
+              permanentDistrict: loadedFormData.currentDistrict,
+              permanentPincode: loadedFormData.currentPincode,
+            }
+          : loadedFormData;
+
+        setFormData(syncedFormData);
+        setOriginalFormData(syncedFormData);
 
         if (roleType === "BRANCH_ADMIN") {
           setOriginalBranchId(branchIds[0] ?? NONE_BRANCH_VALUE);
@@ -844,6 +855,10 @@ export default function AddEmployee() {
         // value that's guaranteed to 400.
         const response = await employeeApi.update(employeeId, {
           ...sharedFields,
+          permanent_employee_state: formData.permanentState || undefined,
+          permanent_employee_district: formData.permanentDistrict || undefined,
+          permanent_employee_area: formData.permanentArea || undefined,
+          permanent_employee_pincode: formData.permanentPincode ? Number(formData.permanentPincode) : undefined,
           ...(isSupportingStaff ? {} : { username: formData.username }),
           password: formData.password.trim() ? formData.password : undefined,
           ...(formData.roleType === "DOCTOR" ? {} : { branch_ids: formData.branchIds }),
@@ -1076,7 +1091,7 @@ export default function AddEmployee() {
       setShowLeaveConfirm(true);
       return;
     }
-    navigate(-1);
+    navigate("/dashboard");
   };
 
   if (loading) {
@@ -2091,7 +2106,7 @@ export default function AddEmployee() {
         cancelText="Stay"
         onConfirm={() => {
           setShowLeaveConfirm(false);
-          navigate(-1);
+          navigate("/dashboard");
         }}
         onCancel={() => setShowLeaveConfirm(false)}
       />

@@ -62,11 +62,11 @@ export interface CreateBranchPayload {
   license_number?: string;
   total_beds?: number;
   total_no_emp?: string;
-  fax_no?: string;
+  fax_no?: string | null;
   medical_services?: string;
-  gst_no?: string;
-  pan_no?: string;
-  website_address?: string;
+  gst_no?: string | null;
+  pan_no?: string | null;
+  website_address?: string | null;
   date_of_establish?: string;
 
   admin_mode: BranchAdminMode;

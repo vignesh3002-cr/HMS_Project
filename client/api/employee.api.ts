@@ -67,7 +67,7 @@ export interface EmployeeRecord {
   nationality: string | null;
   marital_status: string | null;
   mobile_no: string;
-  parmanant_address: string | null;
+  parmanent_address: string | null;
   current_address: string | null;
   emergency_contact_name: string | null;
   emergency_contact_relationship: string | null;
@@ -110,7 +110,7 @@ export interface EmployeeDetailResponse {
     employee_photo_URL?: string | null;
     employee_no_experence?: number | null;
     current_address?: string | null;
-    parmanant_address?: string | null;
+    parmanent_address?: string | null;
   };
   user: { role_type: string; user_status: number } | null;
   branches: { branch_id: string; branch_name: string }[];

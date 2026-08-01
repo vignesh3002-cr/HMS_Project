@@ -114,7 +114,7 @@ export function BranchFilterProvider({ children }: { children: ReactNode }) {
             return prev;
           }
           const user = getUser();
-          if (user?.branch_id && mapped.some((b) => b.id === user.branch_id)) {
+          if (!isHeadAdmin && user?.branch_id && mapped.some((b) => b.id === user.branch_id)) {
             syncBranchHeader(user.branch_id);
             return user.branch_id;
           }

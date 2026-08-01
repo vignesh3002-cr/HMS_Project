@@ -290,7 +290,7 @@ export default function AddAppointment() {
       setShowLeaveConfirm(true);
       return;
     }
-    navigate(-1);
+    navigate("/dashboard");
   };
 
   const isDirty = Boolean(
@@ -731,7 +731,7 @@ export default function AddAppointment() {
         cancelText="Stay"
         onConfirm={() => {
           setShowLeaveConfirm(false);
-          navigate(-1);
+          navigate("/dashboard");
         }}
         onCancel={() => setShowLeaveConfirm(false)}
       />

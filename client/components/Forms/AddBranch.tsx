@@ -141,6 +141,9 @@ const emptyAdminData: AdminFormData = {
   confirmPassword: "",
 };
 
+const isAdminFieldKey = (name: string) =>
+  name.startsWith("admin") || name === "password" || name === "confirmPassword";
+
 const branchRequired: { key: keyof BranchFormData; label: string }[] = [
   { key: "branchCode", label: "Branch Code" },
   { key: "branchName", label: "Branch Name" },
@@ -159,7 +162,6 @@ const branchRequired: { key: keyof BranchFormData; label: string }[] = [
   { key: "gstNo", label: "GST No" },
   { key: "panNo", label: "PAN No" },
   { key: "pincode", label: "Pincode" },
-  { key: "faxNo", label: "Fax Number" },
   { key: "websiteAddress", label: "Website Address" },
 ];
 
@@ -270,7 +272,7 @@ export default function AddBranch() {
     e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
-    if (name.startsWith("admin")) {
+    if (isAdminFieldKey(name)) {
       setAdminData((prev) => ({ ...prev, [name]: value }));
     } else {
       setBranchData((prev) => ({ ...prev, [name]: value }));
@@ -498,7 +500,7 @@ export default function AddBranch() {
 
     const requiredFields = [...branchRequired, ...adminRequired[adminData.adminMode]];
     const missing = requiredFields.find((f) => {
-      const val = f.key.startsWith("admin") ? adminData[f.key as keyof AdminFormData] : branchData[f.key as keyof BranchFormData];
+      const val = isAdminFieldKey(f.key) ? adminData[f.key as keyof AdminFormData] : branchData[f.key as keyof BranchFormData];
       return !String(val ?? "").trim();
     });
     if (missing) {
@@ -546,10 +548,10 @@ export default function AddBranch() {
           license_number: branchData.licenseNumber,
           total_beds: branchData.totalBeds ? Number(branchData.totalBeds) : undefined,
           total_no_emp: branchData.totalEmployees || undefined,
-          fax_no: branchData.faxNo || undefined,
-          gst_no: branchData.gstNo || undefined,
-          pan_no: branchData.panNo || undefined,
-          website_address: branchData.websiteAddress || undefined,
+          fax_no: branchData.faxNo || null,
+          gst_no: branchData.gstNo || null,
+          pan_no: branchData.panNo || null,
+          website_address: branchData.websiteAddress || null,
           date_of_establish: branchData.dateOfEstablish || undefined,
           medical_services: branchData.medicalServices,
         };
@@ -641,10 +643,10 @@ export default function AddBranch() {
           license_number: branchData.licenseNumber,
           total_beds: branchData.totalBeds ? Number(branchData.totalBeds) : undefined,
           total_no_emp: branchData.totalEmployees || undefined,
-          fax_no: branchData.faxNo || undefined,
-          gst_no: branchData.gstNo || undefined,
-          pan_no: branchData.panNo || undefined,
-          website_address: branchData.websiteAddress || undefined,
+          fax_no: branchData.faxNo || null,
+          gst_no: branchData.gstNo || null,
+          pan_no: branchData.panNo || null,
+          website_address: branchData.websiteAddress || null,
           date_of_establish: branchData.dateOfEstablish || undefined,
           medical_services: branchData.medicalServices,
 
@@ -747,7 +749,7 @@ export default function AddBranch() {
       setShowLeaveConfirm(true);
       return;
     }
-    navigate(-1);
+    navigate("/dashboard");
   };
 
   const adminModeOptions = canReassignAdmin
@@ -1716,7 +1718,7 @@ export default function AddBranch() {
         cancelText="Stay"
         onConfirm={() => {
           setShowLeaveConfirm(false);
-          navigate(-1);
+          navigate("/dashboard");
         }}
         onCancel={() => setShowLeaveConfirm(false)}
       />

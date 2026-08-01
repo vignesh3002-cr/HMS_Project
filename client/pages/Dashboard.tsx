@@ -124,7 +124,7 @@ function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
   const fullName = `${doc.first_name} ${doc.middle_name ? doc.middle_name + " " : ""}${doc.last_name}`;
   const role = doc.user_table?.role_type || "DOCTOR";
   const branchName = formatBranch(doc.branch);
-  const isActive = doc.emp_status === true || doc.user_table?.user_status === 1;
+  const isActive = doc.emp_status === true || doc.user_table?.user_status === 0;
   return {
     avatar: getInitials(fullName),
     avatarColor: palette.avatarColor,

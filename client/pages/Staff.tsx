@@ -141,7 +141,7 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
   const roleType = (emp.user_table?.role_type || "STAFF").toUpperCase();
-  const isActive = emp.emp_status === true || emp.user_table?.user_status === 1;
+  const isActive = emp.emp_status === true || emp.user_table?.user_status === 0;
   const branchName = formatBranch(emp.branch);
   const deptName = emp.department_master?.department_name || emp.specialization || "Unassigned";
 
