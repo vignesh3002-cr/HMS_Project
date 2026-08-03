@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { BranchSelector } from "@/components/hms/BranchSelector";
 import { BranchFilterProvider } from "@/context/BranchFilterContext";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
+import { usePermissions } from "@/hooks/usePermissions";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import {
@@ -22,6 +23,8 @@ import {
   Menu,
   Bell,
   ChevronDown,
+  Shield,
+  Key,
 } from "lucide-react";
 
 
@@ -34,6 +37,9 @@ const navIcon: Record<string, React.ReactNode> = {
   Appointment: <Calendar size={16} />,
   Billing: <Receipt size={16} />,
   Protocol: <FileText size={16} />,
+  Admin: <Settings size={16} />,
+  Permissions: <Shield size={16} />,
+  Roles: <Key size={16} />,
 };
 
 const bottomNavIcon: Record<string, React.ReactNode> = {
@@ -67,22 +73,7 @@ const handleLogout = () => {
   logout();
 };
 
-  const navItems = [
-    { label: "Dashboard", to: "/dashboard" },
-    { label: "Staff", to: "/staff" },
-    { label: "Doctor", to: "/doctor" },
-    { label: "Patients", to: "/patients" },
-    { label: "Appointment", to: "/appointments" },
-    { label: "Billing", to: "/billing" },
-    { label: "Protocol", to: "/protocol", hasArrow: true },
-  ];
-
-  const bottomNavItems = [
-    { label: "Settings", to: "/settings" },
-    { label: "Support", to: "/support" },
-  ];
-
-  const [userData, setUserData] = useState({
+const [userData, setUserData] = useState({
   username: "",
   user_id: "",
   role: "",
@@ -92,6 +83,33 @@ const handleLogout = () => {
   branch_area: "",
   branch: "",
 });
+
+const isHeadAdmin = userData.role === "HEAD_ADMIN" || userData.role === "SUPER_ADMIN";
+
+const { can, loading: permissionsLoading } = usePermissions();
+const hasPermission = (perm?: string) => !perm || permissionsLoading || can(perm);
+
+const navItems = [
+  { label: "Dashboard", to: "/dashboard" },
+  { label: "Staff", to: "/staff", permission: "employee.read" },
+  { label: "Doctor", to: "/doctor", permission: "doctor.read" },
+  { label: "Patients", to: "/patients", permission: "patient.read" },
+  { label: "Appointment", to: "/appointments", permission: "appointment.read" },
+  { label: "Billing", to: "/billing" },
+  { label: "Protocol", to: "/protocol", hasArrow: true },
+  ...(isHeadAdmin
+    ? [
+        { label: "Admin", to: "/admin", hasArrow: true, permission: "permission.manage" },
+        { label: "Permissions", to: "/admin/permissions", permission: "permission.manage" },
+        { label: "Roles", to: "/admin/roles", permission: "permission.manage" },
+      ]
+    : []),
+].filter((item) => hasPermission(item.permission));
+
+const bottomNavItems = [
+  { label: "Settings", to: "/settings" },
+  { label: "Support", to: "/support" },
+];
 
 useEffect(() => {
   const syncUserData = () => {

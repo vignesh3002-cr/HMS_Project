@@ -15,6 +15,7 @@ export const ALL_BRANCHES_VALUE = "__ALL_BRANCHES__";
 
 export const HEAD_ADMIN_ROLE = "HEAD_ADMIN";
 export const BRANCH_ADMIN_ROLE = "BRANCH_ADMIN";
+export const STAFF_ADMIN_ROLE = "ADMIN";
 
 const STORAGE_KEY = "hms_selected_branch_id";
 
@@ -34,6 +35,7 @@ interface BranchFilterContextValue {
   isAllBranches: boolean;
   userRole: string;
   isBranchAdmin: boolean;
+  isStaffAdmin: boolean;
   isHeadAdmin: boolean;
   selectBranch: (branchId: string) => void;
   refreshBranches: () => void;
@@ -67,6 +69,7 @@ export function BranchFilterProvider({ children }: { children: ReactNode }) {
 
   const userRole = readUserRole();
   const isBranchAdmin = userRole === BRANCH_ADMIN_ROLE;
+  const isStaffAdmin = userRole === STAFF_ADMIN_ROLE;
   const isHeadAdmin = userRole === HEAD_ADMIN_ROLE;
 
   const syncBranchHeader = useCallback((branchId: string) => {
@@ -97,7 +100,7 @@ export function BranchFilterProvider({ children }: { children: ReactNode }) {
 
       const role = readUserRole();
 
-      if (role === BRANCH_ADMIN_ROLE) {
+      if (role === BRANCH_ADMIN_ROLE || role === STAFF_ADMIN_ROLE) {
         const assignedId = readAssignedBranchId();
         const assignedBranch = mapped.filter((b) => b.id === assignedId);
         setBranches(assignedBranch.length > 0 ? assignedBranch : mapped);
@@ -140,17 +143,17 @@ export function BranchFilterProvider({ children }: { children: ReactNode }) {
 
   const selectBranch = useCallback(
     (branchId: string) => {
-      if (isBranchAdmin) return;
+      if (isBranchAdmin || isStaffAdmin) return;
       setSelectedBranchIdState(branchId);
       localStorage.setItem(STORAGE_KEY, branchId);
       syncBranchHeader(branchId);
     },
-    [isBranchAdmin, syncBranchHeader],
+    [isBranchAdmin, isStaffAdmin, syncBranchHeader],
   );
 
   const removeBranch = useCallback(
     (branchId: string) => {
-      if (isBranchAdmin) return;
+      if (isBranchAdmin || isStaffAdmin) return;
       setBranches((prev) => prev.filter((b) => b.id !== branchId));
       setSelectedBranchIdState((prev) => {
         const next = prev === branchId ? ALL_BRANCHES_VALUE : prev;
@@ -158,7 +161,7 @@ export function BranchFilterProvider({ children }: { children: ReactNode }) {
         return next;
       });
     },
-    [isBranchAdmin, syncBranchHeader],
+    [isBranchAdmin, isStaffAdmin, syncBranchHeader],
   );
 
   const isAllBranches = selectedBranchId === ALL_BRANCHES_VALUE;
@@ -176,6 +179,7 @@ export function BranchFilterProvider({ children }: { children: ReactNode }) {
       isAllBranches,
       userRole,
       isBranchAdmin,
+      isStaffAdmin,
       isHeadAdmin,
       selectBranch,
       refreshBranches: fetchBranches,
@@ -183,7 +187,7 @@ export function BranchFilterProvider({ children }: { children: ReactNode }) {
     }),
     [
       branches, loading, error, selectedBranchId, selectedBranch,
-      isAllBranches, userRole, isBranchAdmin, isHeadAdmin,
+      isAllBranches, userRole, isBranchAdmin, isStaffAdmin, isHeadAdmin,
       selectBranch, fetchBranches, removeBranch,
     ],
   );

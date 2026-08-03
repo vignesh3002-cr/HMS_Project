@@ -14,6 +14,7 @@ import type { IState } from "country-state-city";
 import { employeeApi, CreateEmployeePayload, UpdateEmployeePayload, WorkingHourDto } from "@/api/employee.api";
 import { branchApi, Branch, AssignableUser } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
+import { getUser } from "@/utils/token";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,12 +24,14 @@ type BackendRoleType =
   | "LAB_TECHNICIAN"
   | "PHARMACIST"
   | "BRANCH_ADMIN"
-  | "STAFF";
+  | "STAFF"
+  | "ADMIN"; // STAFF_ADMIN
 
 function toDisplayRole(roleType: BackendRoleType): string {
   if (roleType === "LAB_TECHNICIAN") return "Lab Technician";
   if (roleType === "BRANCH_ADMIN") return "Branch Admin";
   if (roleType === "STAFF") return "Staff";
+  if (roleType === "ADMIN") return "Staff Admin";
   return roleType
     .split("_")
     .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
@@ -39,6 +42,7 @@ function toBackendRole(displayRole: string): BackendRoleType {
   if (displayRole === "Lab Technician") return "LAB_TECHNICIAN";
   if (displayRole === "Branch Admin") return "BRANCH_ADMIN";
   if (displayRole === "Staff") return "STAFF";
+  if (displayRole === "Staff Admin") return "ADMIN";
   return displayRole.toUpperCase().replace(/ /g, "_") as BackendRoleType;
 }
 
@@ -49,7 +53,30 @@ const VALID_BACKEND_ROLES: BackendRoleType[] = [
   "PHARMACIST",
   "BRANCH_ADMIN",
   "STAFF",
+  "ADMIN",
 ];
+
+// Role creation permissions based on caller's role
+function getCreatableRoles(callerRole: string): BackendRoleType[] {
+  const role = callerRole.toUpperCase();
+  
+  // TOP_LEVEL_ADMIN (HEAD_ADMIN, SUPER_ADMIN) - can create all roles
+  if (role === "HEAD_ADMIN" || role === "SUPER_ADMIN") {
+    return VALID_BACKEND_ROLES;
+  }
+  
+  // BRANCH_ADMIN - can create all except BRANCH_ADMIN
+  if (role === "BRANCH_ADMIN") {
+    return VALID_BACKEND_ROLES.filter(r => r !== "BRANCH_ADMIN");
+  }
+  
+  // STAFF_ADMIN (ADMIN) - can only create PATIENT
+  if (role === "ADMIN") {
+    return ["DOCTOR"]; // Actually only PATIENT but PATIENT is not in VALID_BACKEND_ROLES yet
+  }
+  
+  return [];
+}
 
 const OTHER_DEPARTMENT_VALUE = "__OTHER__";
 const ALL_DEPARTMENTS_VALUE = "__ALL__";
@@ -353,6 +380,14 @@ export default function AddEmployee() {
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
 
+  // Get current user's role for permission checks
+  const currentUser = getUser();
+  const callerRole = currentUser?.role_type || currentUser?.role || "";
+  const callerBranchId = currentUser?.branch_id || "";
+  const isBranchAdmin = callerRole === "BRANCH_ADMIN";
+  const isStaffAdmin = callerRole === "ADMIN";
+  const isTopLevelAdmin = callerRole === "HEAD_ADMIN" || callerRole === "SUPER_ADMIN";
+
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(isEditMode);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -361,9 +396,13 @@ export default function AddEmployee() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [customDepartment, setCustomDepartment] = useState("");
   const [formData, setFormData] = useState<EmployeeFormData>(emptyFormData);
+  
+  // Filter creatable roles based on caller's role
+  const creatableRoles = getCreatableRoles(callerRole);
   const [roleOptions, setRoleOptions] = useState<string[]>(() =>
-    VALID_BACKEND_ROLES.map(toDisplayRole),
+    creatableRoles.map(toDisplayRole),
   );
+  
   const [indianStates, setIndianStates] = useState<IState[]>([]);
   const [currentDistrictOptions, setCurrentDistrictOptions] = useState<string[]>([]);
   const [permanentDistrictOptions, setPermanentDistrictOptions] = useState<string[]>([]);
@@ -396,6 +435,11 @@ export default function AddEmployee() {
   // ── Bootstrap ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
+    // For BRANCH_ADMIN and STAFF_ADMIN, default branch to their assigned branch
+    if ((isBranchAdmin || isStaffAdmin) && callerBranchId && !isEditMode) {
+      setFormData((p) => ({ ...p, branchIds: [callerBranchId] }));
+    }
+
     employeeApi
       .getAll()
       .then((res) => {
@@ -413,24 +457,28 @@ export default function AddEmployee() {
         const allRoles = [
           ...new Set([...VALID_BACKEND_ROLES, ...apiRoles].map(toDisplayRole)),
         ];
-        setRoleOptions(allRoles);
+        // Filter to only creatable roles
+        const filteredRoles = allRoles.filter(r => 
+          creatableRoles.some(cr => toDisplayRole(cr) === r)
+        );
+        setRoleOptions(filteredRoles);
         const roleParam = searchParams.get("role");
         if (roleParam) {
           const display = toDisplayRole(roleParam as BackendRoleType);
-          if (allRoles.includes(display))
+          if (filteredRoles.includes(display))
             setFormData((p) => ({ ...p, roleType: roleParam as BackendRoleType }));
         }
 
         setOriginalFormData({
           ...emptyFormData,
           roleType:
-            roleParam && allRoles.includes(toDisplayRole(roleParam as BackendRoleType))
+            roleParam && filteredRoles.includes(toDisplayRole(roleParam as BackendRoleType))
               ? (roleParam as BackendRoleType)
               : emptyFormData.roleType,
         });
       })
       .catch(() => {});
-  }, [searchParams]);
+  }, [searchParams, callerRole, callerBranchId, isBranchAdmin, isStaffAdmin, isEditMode]);
 
   useEffect(() => {
     setIndianStates(CSState.getStatesOfCountry("IN"));
@@ -708,7 +756,11 @@ export default function AddEmployee() {
       departmentId: "",
       qualification: "",
       docLicenseNo: "",
-      branchIds: newRole === "DOCTOR" ? p.branchIds : p.branchIds.slice(0, 1),
+      branchIds: newRole === "DOCTOR" 
+        ? p.branchIds 
+        : (isBranchAdmin || isStaffAdmin) 
+          ? (callerBranchId ? [callerBranchId] : [])
+          : p.branchIds.slice(0, 1),
     }));
     if (newRole !== "DOCTOR") {
       setSchedule([]);
@@ -797,6 +849,11 @@ export default function AddEmployee() {
         initialScheduleRef.current !== null &&
         scheduleSignature(schedule) === scheduleSignature(initialScheduleRef.current);
 
+      // For BRANCH_ADMIN and STAFF_ADMIN creating non-DOCTOR roles, force branch to their assigned branch
+      const effectiveBranchIds = (isBranchAdmin || isStaffAdmin) && formData.roleType !== "DOCTOR" && !isEditMode
+        ? (callerBranchId ? [callerBranchId] : [])
+        : formData.branchIds;
+
       const sharedFields = {
         employee_photo_URL: formData.photoUrl || undefined,
         first_name: formData.firstName,
@@ -862,7 +919,7 @@ export default function AddEmployee() {
           permanent_employee_pincode: formData.permanentPincode ? Number(formData.permanentPincode) : undefined,
           ...(isSupportingStaff ? {} : { username: formData.username }),
           password: formData.password.trim() ? formData.password : undefined,
-          ...(formData.roleType === "DOCTOR" ? {} : { branch_ids: formData.branchIds }),
+          ...(formData.roleType === "DOCTOR" ? {} : { branch_ids: effectiveBranchIds }),
           emp_status: isActive,
         } as UpdateEmployeePayload);
 
@@ -886,7 +943,7 @@ export default function AddEmployee() {
           permanent_employee_area: formData.permanentArea || undefined,
           permanent_employee_pincode: formData.permanentPincode ? Number(formData.permanentPincode) : undefined,
           emp_status: true,
-          branch_ids: formData.branchIds,
+          branch_ids: effectiveBranchIds,
         } as CreateEmployeePayload);
 
         if (!response.data.success) throw new Error(response.data.message);
@@ -948,7 +1005,9 @@ export default function AddEmployee() {
 
     // A Branch Admin can be edited down to "no branch" (unassigned) — every
     // other case, including creating a Branch Admin, still needs a branch.
-    const branchRequired = !(isEditMode && formData.roleType === "BRANCH_ADMIN");
+    // For BRANCH_ADMIN and STAFF_ADMIN creating non-DOCTOR roles, branch is auto-set
+    const isBranchOrStaffAdminNonDoctor = (isBranchAdmin || isStaffAdmin) && formData.roleType !== "DOCTOR" && !isEditMode;
+    const branchRequired = !(isEditMode && formData.roleType === "BRANCH_ADMIN") && !isBranchOrStaffAdminNonDoctor;
     if (branchRequired && formData.branchIds.length === 0) {
       toast({
         title: "Missing required field",
@@ -1773,7 +1832,7 @@ export default function AddEmployee() {
                 )}
               </AnimatePresence>
 
-              {/* Branch — multi for Doctor, single otherwise */}
+              {/* Branch — multi for Doctor, single for TOP_LEVEL_ADMIN, hidden for BRANCH_ADMIN/STAFF_ADMIN non-DOCTOR */}
               <div className="col-span-2">
                 <label className={labelCls}>Branch <Req /></label>
                 {formData.roleType === "DOCTOR" ? (
@@ -1796,6 +1855,17 @@ export default function AddEmployee() {
                         isn't available yet.
                       </p>
                     )}
+                  </>
+                ) : (isBranchAdmin || isStaffAdmin) ? (
+                  // For BRANCH_ADMIN and STAFF_ADMIN, branch is fixed to their assigned branch
+                  <>
+                    <div className={inputCls + " bg-gray-50 text-gray-600"}>
+                      {branches.find(b => b.branch_id === callerBranchId)?.branch_name || callerBranchId || "Your assigned branch"}
+                    </div>
+                    <input type="hidden" name="branchId" value={callerBranchId} />
+                    <p className="text-[11px] text-blue-600 mt-1">
+                      Branch is automatically set to your assigned branch.
+                    </p>
                   </>
                 ) : (
                   <FormDropdown
