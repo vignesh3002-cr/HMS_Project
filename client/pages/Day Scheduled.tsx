@@ -140,7 +140,7 @@ export default function DoctorProfile() {
     : doctorEmployee?.branch?.branch_name
       ? [doctorEmployee.branch.branch_name]
       : [];
-  const doctorIsAvailable = doctorEmployee?.emp_status === true || doctorDetail?.user?.user_status === 1;
+  const doctorIsAvailable = doctorEmployee?.emp_status === true || doctorDetail?.user?.user_status === 0;
   // Only a real photo URL from the backend is used -- no stock/fallback
   // image, so the avatar block simply doesn't render when the doctor has
   // no employee_photo_URL on file.
@@ -148,7 +148,7 @@ export default function DoctorProfile() {
   const doctorLicenseNo = doctorDetail?.doctorProfile?.license_no || doctorEmployee?.license_no || "—";
   const doctorPhone = doctorEmployee?.mobile_no || "—";
   const doctorEmail = doctorEmployee?.email || "—";
-  const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanant_address || "—";
+  const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanent_address || "—";
   const doctorBloodGroup = doctorEmployee?.blood_group || "—";
   const doctorExperience = doctorEmployee?.employee_no_experence != null ? `${doctorEmployee.employee_no_experence}+ yrs` : "—";
   const doctorDOB = (doctorEmployee as any)?.dob

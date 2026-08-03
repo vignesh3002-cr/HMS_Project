@@ -135,7 +135,7 @@ function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
     deptBg: "#E6E8EA",
     deptColor: "#475C7F",
     branch: formatBranch(emp.branch),
-    status: (emp.emp_status === true || emp.user_table?.user_status === 1) ? "Active" : "Leave",
+    status: (emp.emp_status === true || emp.user_table?.user_status === 0) ? "Active" : "Leave",
     qualification: emp.qualification || "—",
     mobile: emp.mobile_no || "—",
     photo: "",

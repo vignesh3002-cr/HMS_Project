@@ -1,4 +1,5 @@
 import "./global.css";
+import "react-international-phone/style.css";
 
 import { Toaster } from "@/components/ui/toaster";
 import { createRoot } from "react-dom/client";
