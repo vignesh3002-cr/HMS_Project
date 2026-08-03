@@ -8,6 +8,7 @@ import { MultiSelectDropdown } from "@/components/ui/multi-select-dropdown";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import TimepickerWheel from "@/components/ui/timepicker-wheel";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { State as CSState, City } from "country-state-city";
 import type { IState } from "country-state-city";
 import { employeeApi, CreateEmployeePayload, UpdateEmployeePayload, WorkingHourDto } from "@/api/employee.api";
@@ -1565,16 +1566,13 @@ export default function AddEmployee() {
             <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
               <div>
                 <label className={labelCls}>Mobile number <Req /></label>
-                <input
+                <PhoneInput
                   name="mobileNo"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  placeholder="Enter mobile number"
-                  maxLength={15}
-                  className={inputCls}
                   value={formData.mobileNo}
-                  onChange={handleChange}
+                  onChange={(value) => setFormData((p) => ({ ...p, mobileNo: value }))}
+                  placeholder="Enter mobile number"
                   disabled={submitting}
+                  defaultCountry="in"
                 />
               </div>
               <div>
@@ -1627,16 +1625,14 @@ export default function AddEmployee() {
                   Emergency contact number{" "}
                   {emergencyOptional ? <Opt /> : <Req />}
                 </label>
-                <input
+                <PhoneInput
                   name="emergencyContactNumber"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  placeholder="Enter contact number"
-                  maxLength={15}
-                  className={inputCls}
                   value={formData.emergencyContactNumber}
-                  onChange={handleChange}
+                  onChange={(value) => setFormData((p) => ({ ...p, emergencyContactNumber: value }))}
+                  placeholder="Enter contact number"
+                  optional={emergencyOptional}
                   disabled={submitting}
+                  defaultCountry="in"
                 />
               </div>
             </div>

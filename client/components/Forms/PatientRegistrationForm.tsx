@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { State as CSState, City } from "country-state-city";
 import type { IState } from "country-state-city";
 import { branchApi, Branch } from "@/api/branch.api";
@@ -779,26 +780,26 @@ export default function PatientRegistrationForm() {
             <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
               <div>
                 <label className={labelCls}>Primary mobile <Req /></label>
-                <input
-                  type="tel"
-                  placeholder="+91 98765 43210"
-                  className={inputCls}
+                <PhoneInput
                   value={formData.patient_primary_mobile}
-                  onChange={(e) => handleInputChange(e, "patient_primary_mobile")}
-                  disabled={submitting}
+                  onChange={(value) => handleInputChange({ target: { name: "patient_primary_mobile", value } } as any, "patient_primary_mobile")}
+                  placeholder="+91 98765 43210"
                   required
+                  disabled={submitting}
+                  defaultCountry="in"
                 />
               </div>
               <div>
                 <label className={labelCls}>
                   Alternate mobile <Opt />
                 </label>
-                <input
-                  type="tel"
-                  className={inputCls}
+                <PhoneInput
                   value={formData.patient_alternate_mobile}
-                  onChange={(e) => handleInputChange(e, "patient_alternate_mobile")}
+                  onChange={(value) => handleInputChange({ target: { name: "patient_alternate_mobile", value } } as any, "patient_alternate_mobile")}
+                  placeholder="+91 98765 43210"
+                  optional
                   disabled={submitting}
+                  defaultCountry="in"
                 />
               </div>
               <div>
@@ -817,14 +818,13 @@ export default function PatientRegistrationForm() {
 
               <div>
                 <label className={labelCls}>Emergency mobile <Req /></label>
-                <input
-                  type="tel"
-                  placeholder="+91 98765 43210"
-                  className={inputCls}
+                <PhoneInput
                   value={formData.patient_emergency_mobile}
-                  onChange={(e) => handleInputChange(e, "patient_emergency_mobile")}
-                  disabled={submitting}
+                  onChange={(value) => handleInputChange({ target: { name: "patient_emergency_mobile", value } } as any, "patient_emergency_mobile")}
+                  placeholder="+91 98765 43210"
                   required
+                  disabled={submitting}
+                  defaultCountry="in"
                 />
               </div>
               <div>

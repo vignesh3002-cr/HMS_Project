@@ -18,6 +18,7 @@ import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { getUser } from "@/utils/token";
 
 import { AvatarUpload } from "@/components/ui/avatar-upload";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { State as CSState, City } from "country-state-city";
 import type { IState } from "country-state-city";
 
@@ -864,14 +865,14 @@ export default function AddBranch() {
               </div>
               <div>
                 <label className={labelCls}>Emergency Number <Req /></label>
-                <input
-                  type="text"
+                <PhoneInput
                   name="emergencyNumber"
-                  placeholder="Enter Emergency Number"
-                  className={inputCls}
                   value={branchData.emergencyNumber}
-                  onChange={handleChange}
+                  onChange={(value) => handleChange({ target: { name: "emergencyNumber", value } } as any)}
+                  placeholder="Enter Emergency Number"
+                  required
                   disabled={submitting}
+                  defaultCountry="in"
                 />
               </div>
               <div>
@@ -1364,14 +1365,14 @@ export default function AddBranch() {
                   </div>
                   <div>
                     <label className={labelCls}>Mobile <Req /></label>
-                    <input
-                      type="text"
+                    <PhoneInput
                       name="adminMobile"
-                      placeholder="Enter Mobile Number"
-                      className={inputCls}
                       value={adminData.adminMobile}
-                      onChange={handleChange}
+                      onChange={(value) => handleChange({ target: { name: "adminMobile", value } } as any)}
+                      placeholder="Enter Mobile Number"
+                      required
                       disabled={submitting}
+                      defaultCountry="in"
                     />
                   </div>
                   <div>
