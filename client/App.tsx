@@ -16,6 +16,7 @@ import AddAppointment from "@/components/Forms/AddAppointment";
 import EditAppointment from "@/components/Forms/edit/Edit Appointment";
 import PatientProfile from "@/components/Forms/view/patientProfile";
 import ViewAppointmentScheduled from "@/components/Forms/view/View Appointment Scheduled";
+import Profile from "@/components/Forms/view/view profile ";
 import Appointments from "./pages/Appointments";
 import Dashboard from "./pages/Dashboard";
 import Departments from "./pages/Departments";
@@ -51,6 +52,7 @@ const queryClient = new QueryClient({
 // Define protected routes for better maintainability
 const protectedRoutes = [
   { path: "/dashboard", element: <Dashboard /> },
+  { path: "/profile", element: <Profile /> },
   { path: "/patients", element: <Patients /> },
   { path: "/doctor", element: <Doctor /> },
   { path: "/doctor/view/:id", element: <Scheduled /> },

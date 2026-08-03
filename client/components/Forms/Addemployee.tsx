@@ -1157,7 +1157,7 @@ export default function AddEmployee() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 py-8 px-4 flex items-center justify-center">
-        <div className="w-full max-w-5xl bg-white rounded-2xl shadow-sm border border-gray-100 p-8 flex items-center justify-center">
+        <div className="w-full bg-white rounded-2xl shadow-sm border border-gray-100 p-8 flex items-center justify-center">
           <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
         </div>
       </div>
@@ -1166,7 +1166,7 @@ export default function AddEmployee() {
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-5xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100">
+      <div className="w-full bg-white rounded-2xl shadow-sm border border-gray-100">
         {/* ── Header ── */}
         <div className="flex items-center gap-3 px-8 py-5 border-b border-gray-100">
           <button

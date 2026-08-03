@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, ChangeEvent, FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { startOfWeek, endOfWeek, addWeeks, format, parseISO } from "date-fns";
 import { ArrowLeft, CalendarPlus, Plus, Search, Loader2, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -87,16 +87,35 @@ const requiredStar = <span className="text-red-600 ml-0.5">*</span>;
 
 export default function AddAppointment() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
 
-  const [formData, setFormData] = useState<AppointmentFormData>(emptyFormData);
+  // Arriving from Patients grid view's schedule icon carries the chosen
+  // patient in nav state so the form opens with the patient locked in and
+  // the user only needs to pick a doctor.
+  const preselectedPatient = (location.state as { patient?: PatientRecord } | null)?.patient;
+
+  const [formData, setFormData] = useState<AppointmentFormData>(() =>
+    preselectedPatient
+      ? {
+          ...emptyFormData,
+          patientId: preselectedPatient.patient_id,
+          patientName: `${preselectedPatient.patient_first_name}${preselectedPatient.patient_middle_name ? ` ${preselectedPatient.patient_middle_name}` : ""}${preselectedPatient.patient_last_name ? ` ${preselectedPatient.patient_last_name}` : ""}`,
+          patientNumber: preselectedPatient.patient_primary_mobile || "",
+        }
+      : emptyFormData,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [bookingResult, setBookingResult] = useState<AppointmentResponse | null>(null);
 
   // Patient search
-  const [patientSearch, setPatientSearch] = useState("");
+  const [patientSearch, setPatientSearch] = useState(
+    preselectedPatient
+      ? `${preselectedPatient.patient_id} - ${preselectedPatient.patient_first_name}${preselectedPatient.patient_last_name ? ` ${preselectedPatient.patient_last_name}` : ""}`
+      : "",
+  );
   const [patientResults, setPatientResults] = useState<PatientRecord[]>([]);
   const [searchingPatient, setSearchingPatient] = useState(false);
   const [showPatientDropdown, setShowPatientDropdown] = useState(false);

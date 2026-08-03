@@ -40,8 +40,6 @@
 /* sticky top-0 z-10 bg-slate-100 */ 
 }
   .hide-scrollbar {
-    @apply overflow-x-auto;
-    overflow-y: hidden;
     /* Hide scrollbar for IE, Edge and Firefox */
     -ms-overflow-style: none;  /* IE and Edge */
     scrollbar-width: none;  /* Firefox */

@@ -7,7 +7,6 @@ import { cn } from "@/lib/utils";
 import { BranchSelector } from "@/components/hms/BranchSelector";
 import { BranchFilterProvider } from "@/context/BranchFilterContext";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
-import { usePermissions } from "@/hooks/usePermissions";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import {
@@ -23,8 +22,6 @@ import {
   Menu,
   Bell,
   ChevronDown,
-  Shield,
-  Key,
 } from "lucide-react";
 
 
@@ -37,9 +34,6 @@ const navIcon: Record<string, React.ReactNode> = {
   Appointment: <Calendar size={16} />,
   Billing: <Receipt size={16} />,
   Protocol: <FileText size={16} />,
-  Admin: <Settings size={16} />,
-  Permissions: <Shield size={16} />,
-  Roles: <Key size={16} />,
 };
 
 const bottomNavIcon: Record<string, React.ReactNode> = {
@@ -53,8 +47,30 @@ export function AppLayout() {
   const location = useLocation();
 
   // Form routes that shouldn't highlight parent nav items
-  const isFormPage = location.pathname.includes("/add") || 
+  const isFormPage = location.pathname.includes("/add") ||
                      location.pathname.includes("/edit/");
+
+  // AddEmployee.tsx is shared between Doctor and Staff (add + edit), keyed
+  // off /doctor/edit/:id vs /staff/edit/:id for edit, and the ?role= query
+  // param for add -- so the Doctor nav item should stay highlighted there
+  // too, unlike the Staff add/edit case which isFormPage otherwise hides.
+  const isDoctorFormContext =
+    /^\/doctor(\/|$)/i.test(location.pathname) ||
+    (/^\/staff\/add$/i.test(location.pathname) &&
+      new URLSearchParams(location.search).get("role")?.toLowerCase() === "doctor");
+
+  // patientProfile.tsx (/patients/view/:id) and EditPatientForm.tsx
+  // (/patients/edit/:id) are Patients sub-pages -- keep the nav item
+  // highlighted there instead of isFormPage hiding it on the edit route.
+  const isPatientsFormContext = /^\/patients(\/|$)/i.test(location.pathname);
+
+  // Day view.tsx (/appointments/day-view) and Week view.tsx
+  // (/appointments/week-view) are Appointment sub-views -- keep the nav item
+  // highlighted there, but not on the other /appointments/... form routes
+  // (add/edit/view/book), which stay off exactly as before.
+  const isAppointmentViewContext = /^\/appointments\/(day-view|week-view)$/i.test(
+    location.pathname,
+  );
 
 const [logoutOpen, setLogoutOpen] = useState(false);
 
@@ -73,7 +89,26 @@ const handleLogout = () => {
   logout();
 };
 
-const [userData, setUserData] = useState({
+  const navItems = [
+    { label: "Dashboard", to: "/dashboard" },
+    { label: "Staff", to: "/staff" },
+    // Doctor's own sub-pages (view profile, day view) live under /doctor/...
+    // and should keep this item highlighted, unlike the other sections.
+    { label: "Doctor", to: "/doctor", matchPrefix: true },
+    // Patients' view/edit sub-pages (patientProfile.tsx, EditPatientForm.tsx)
+    // live under /patients/... and should keep this item highlighted too.
+    { label: "Patients", to: "/patients", matchPrefix: true },
+    { label: "Appointment", to: "/appointments" },
+    { label: "Billing", to: "/billing" },
+    { label: "Protocol", to: "/protocol", hasArrow: true },
+  ];
+
+  const bottomNavItems = [
+    { label: "Settings", to: "/settings" },
+    { label: "Support", to: "/support" },
+  ];
+
+  const [userData, setUserData] = useState({
   username: "",
   user_id: "",
   role: "",
@@ -83,33 +118,6 @@ const [userData, setUserData] = useState({
   branch_area: "",
   branch: "",
 });
-
-const isHeadAdmin = userData.role === "HEAD_ADMIN" || userData.role === "SUPER_ADMIN";
-
-const { can, loading: permissionsLoading } = usePermissions();
-const hasPermission = (perm?: string) => !perm || permissionsLoading || can(perm);
-
-const navItems = [
-  { label: "Dashboard", to: "/dashboard" },
-  { label: "Staff", to: "/staff", permission: "employee.read" },
-  { label: "Doctor", to: "/doctor", permission: "doctor.read" },
-  { label: "Patients", to: "/patients", permission: "patient.read" },
-  { label: "Appointment", to: "/appointments", permission: "appointment.read" },
-  { label: "Billing", to: "/billing" },
-  { label: "Protocol", to: "/protocol", hasArrow: true },
-  ...(isHeadAdmin
-    ? [
-        { label: "Admin", to: "/admin", hasArrow: true, permission: "permission.manage" },
-        { label: "Permissions", to: "/admin/permissions", permission: "permission.manage" },
-        { label: "Roles", to: "/admin/roles", permission: "permission.manage" },
-      ]
-    : []),
-].filter((item) => hasPermission(item.permission));
-
-const bottomNavItems = [
-  { label: "Settings", to: "/settings" },
-  { label: "Support", to: "/support" },
-];
 
 useEffect(() => {
   const syncUserData = () => {
@@ -170,15 +178,23 @@ useEffect(() => {
             <NavLink
               key={item.to}
               to={item.to}
-              end
-              className={({ isActive }) =>
-                cn(
+              end={!item.matchPrefix}
+              className={({ isActive }) => {
+                const active =
+                  item.label === "Doctor"
+                    ? isDoctorFormContext
+                    : item.label === "Patients"
+                      ? isPatientsFormContext
+                      : item.label === "Appointment"
+                        ? isActive || isAppointmentViewContext
+                        : isActive && !isFormPage;
+                return cn(
                   "flex items-center gap-2 px-3 py-2 rounded-[4px] text-xs font-semibold tracking-[0.6px] capitalize",
-                  isActive && !isFormPage
+                  active
                     ? "bg-[#00488D] text-white shadow-sm"
                     : "text-[#475569] hover:bg-[#E6E8EA]"
-                )
-              }
+                );
+              }}
             >
               {navIcon[item.label]}
               {item.label}
