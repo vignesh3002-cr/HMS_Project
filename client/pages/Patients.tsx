@@ -378,7 +378,10 @@ export default function PatientsManagement() {
   const handleView = (id: string) => navigate(`/patients/view/${id}`);
   const handleEdit = (id: string) => navigate(`/patients/edit/${id}`);
   const handleDelete = (id: string) => alert(`Delete logic for patient ${id}`);
-  const handleSchedule = (id: string) => navigate(`/patients/schedule/${id}`);
+  const handleSchedule = (id: string) => {
+    const patient = (realPatients ?? []).find((p) => p.patient_id === id);
+    navigate("/appointments/book", { state: patient ? { patient } : undefined });
+  };
 
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">

@@ -205,11 +205,16 @@ const AppointmentSchedule: React.FC = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
 
+  // Date selection
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+
   const fetchAppointments = useCallback(async () => {
     setIsAppointmentsLoading(true);
     try {
       const res = await appointmentApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
+        date: format(selectedDate, "yyyy-MM-dd"),
       });
       const records = res.data?.data?.appointments || [];
       setAppointments(records.map(mapAppointmentRecord));
@@ -229,7 +234,7 @@ const AppointmentSchedule: React.FC = () => {
     } finally {
       setIsAppointmentsLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches]);
+  }, [toast, selectedBranchId, isAllBranches, selectedDate]);
 
   useEffect(() => {
     fetchAppointments();
@@ -274,10 +279,6 @@ const AppointmentSchedule: React.FC = () => {
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
-
-  // Date selection
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
   // View type dropdown (List View / Day View / Week View)
   const [viewType, setViewType] = useState<"list" | "day" | "week">("list");

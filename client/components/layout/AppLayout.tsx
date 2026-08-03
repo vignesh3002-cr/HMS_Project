@@ -47,8 +47,30 @@ export function AppLayout() {
   const location = useLocation();
 
   // Form routes that shouldn't highlight parent nav items
-  const isFormPage = location.pathname.includes("/add") || 
+  const isFormPage = location.pathname.includes("/add") ||
                      location.pathname.includes("/edit/");
+
+  // AddEmployee.tsx is shared between Doctor and Staff (add + edit), keyed
+  // off /doctor/edit/:id vs /staff/edit/:id for edit, and the ?role= query
+  // param for add -- so the Doctor nav item should stay highlighted there
+  // too, unlike the Staff add/edit case which isFormPage otherwise hides.
+  const isDoctorFormContext =
+    /^\/doctor(\/|$)/i.test(location.pathname) ||
+    (/^\/staff\/add$/i.test(location.pathname) &&
+      new URLSearchParams(location.search).get("role")?.toLowerCase() === "doctor");
+
+  // patientProfile.tsx (/patients/view/:id) and EditPatientForm.tsx
+  // (/patients/edit/:id) are Patients sub-pages -- keep the nav item
+  // highlighted there instead of isFormPage hiding it on the edit route.
+  const isPatientsFormContext = /^\/patients(\/|$)/i.test(location.pathname);
+
+  // Day view.tsx (/appointments/day-view) and Week view.tsx
+  // (/appointments/week-view) are Appointment sub-views -- keep the nav item
+  // highlighted there, but not on the other /appointments/... form routes
+  // (add/edit/view/book), which stay off exactly as before.
+  const isAppointmentViewContext = /^\/appointments\/(day-view|week-view)$/i.test(
+    location.pathname,
+  );
 
 const [logoutOpen, setLogoutOpen] = useState(false);
 
@@ -70,8 +92,12 @@ const handleLogout = () => {
   const navItems = [
     { label: "Dashboard", to: "/dashboard" },
     { label: "Staff", to: "/staff" },
-    { label: "Doctor", to: "/doctor" },
-    { label: "Patients", to: "/patients" },
+    // Doctor's own sub-pages (view profile, day view) live under /doctor/...
+    // and should keep this item highlighted, unlike the other sections.
+    { label: "Doctor", to: "/doctor", matchPrefix: true },
+    // Patients' view/edit sub-pages (patientProfile.tsx, EditPatientForm.tsx)
+    // live under /patients/... and should keep this item highlighted too.
+    { label: "Patients", to: "/patients", matchPrefix: true },
     { label: "Appointment", to: "/appointments" },
     { label: "Billing", to: "/billing" },
     { label: "Protocol", to: "/protocol", hasArrow: true },
@@ -152,15 +178,23 @@ useEffect(() => {
             <NavLink
               key={item.to}
               to={item.to}
-              end
-              className={({ isActive }) =>
-                cn(
+              end={!item.matchPrefix}
+              className={({ isActive }) => {
+                const active =
+                  item.label === "Doctor"
+                    ? isDoctorFormContext
+                    : item.label === "Patients"
+                      ? isPatientsFormContext
+                      : item.label === "Appointment"
+                        ? isActive || isAppointmentViewContext
+                        : isActive && !isFormPage;
+                return cn(
                   "flex items-center gap-2 px-3 py-2 rounded-[4px] text-xs font-semibold tracking-[0.6px] capitalize",
-                  isActive && !isFormPage
+                  active
                     ? "bg-[#00488D] text-white shadow-sm"
                     : "text-[#475569] hover:bg-[#E6E8EA]"
-                )
-              }
+                );
+              }}
             >
               {navIcon[item.label]}
               {item.label}
