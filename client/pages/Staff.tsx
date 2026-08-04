@@ -71,7 +71,7 @@ interface SupportStaffRow {
   status: "active" | "inactive";
 }
 
-const TABS = ["All staff", "Medical Staff", "Admin", "Staff"];
+const TABS = ["All staff", "Medical Staff", "Admin", "Supporting"];
 
 const supportBadgeColors: Record<SupportStaffRow["deptClass"], string> = {
   blue: "bg-blue-100 text-blue-700",
@@ -327,6 +327,7 @@ export default function Staff() {
   const isMedicalTab = activeTabName === "Medical Staff";
   const isAdminTab = activeTabName === "Admin";
   const isStaffTab = activeTabName === "Staff";
+  const isSupportingTab = activeTabName === "Supporting";
 
   const [realStaff, setRealStaff] = useState<EmployeeRecord[] | null>(null);
   const [isStaffLoading, setIsStaffLoading] = useState(true);
@@ -420,9 +421,11 @@ export default function Staff() {
         ? realStaff.filter((e) => getStaffCategory(e) === "medical")
         : isAdminTab
           ? realStaff.filter((e) => getStaffCategory(e) === "admin")
-          : isStaffTab
+          : isSupportingTab
             ? realStaff.filter((e) => getStaffCategory(e) === "staff")
-            : realStaff.filter((e) => getStaffCategory(e) !== "doctor");
+            : isStaffTab
+              ? realStaff.filter((e) => getStaffCategory(e) === "staff")
+              : realStaff.filter((e) => getStaffCategory(e) !== "doctor");
 
     const sourceData: (StaffMember | MedicalStaffRow | AdministrativeStaffRow | SupportStaffRow)[] =
       employeesForTab.map((e, i) => mapEmployeeToStaffData(e, i));
@@ -442,7 +445,7 @@ export default function Staff() {
     result = filterDataByValues(result, appliedValues);
 
     return result;
-  }, [searchQuery, appliedValues, isMedicalTab, isAdminTab, isStaffTab, realStaff]);
+  }, [searchQuery, appliedValues, isMedicalTab, isAdminTab, isStaffTab, isSupportingTab, realStaff]);
 
   // ---- SORTING ----
   const handleSort = (field: string) => {

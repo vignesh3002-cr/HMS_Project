@@ -322,12 +322,12 @@ export default function PermissionMatrix() {
 
       {/* Matrix table */}
       {hasResults ? (
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="max-h-[calc(100vh-320px)] overflow-auto">
-            <table className="w-full border-collapse text-left">
-              <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm ring-1 ring-black/5 overflow-hidden">
+          <div className="max-h-[calc(100vh-320px)] overflow-auto slim-scrollbar">
+            <table className="w-full border-separate border-spacing-0 text-left">
+              <thead className="sticky top-0 z-20 bg-[#F8FAFC]">
                 <tr>
-                  <th className="sticky left-0 z-20 min-w-[240px] w-[240px] bg-[#F8FAFC] px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                  <th className="sticky left-0 top-0 z-30 w-[280px] min-w-[280px] max-w-[280px] bg-[#F8FAFC] px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.08)]">
                     Permission
                   </th>
                   {filteredRoles.map((role) => {
@@ -356,11 +356,8 @@ export default function PermissionMatrix() {
                   if (perms.length === 0) return null;
                   return (
                     <Fragment key={category}>
-                      <tr className="bg-slate-50/80">
-                        <td
-                          colSpan={1 + filteredRoles.length}
-                          className="sticky left-0 px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200"
-                        >
+                      <tr className="bg-slate-100">
+                        <td className="sticky left-0 z-10 w-[280px] min-w-[280px] max-w-[280px] bg-slate-100 px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.06)]">
                           <span
                             className={cn(
                               "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full",
@@ -368,39 +365,37 @@ export default function PermissionMatrix() {
                             )}
                           >
                             {category}
-                            <span className="text-[10px] font-semibold opacity-70">
+                            <span className="text-[10px] font-semibold text-slate-500">
                               {perms.length}
                             </span>
                           </span>
                         </td>
+                        {filteredRoles.length > 0 && (
+                          <td colSpan={filteredRoles.length} className="bg-slate-100 border-b border-slate-200" />
+                        )}
                       </tr>
                       {perms.map((perm) => {
                         const rowPending = pendingChanges.some((c) => c.permission_key === perm.key);
                         return (
                           <tr key={perm.id} className="group hover:bg-blue-50/40 transition-colors">
-                            <td className="sticky left-0 z-10 bg-white group-hover:bg-blue-50/40 px-4 py-3 border-b border-slate-100 group-hover:border-blue-100 transition-colors">
-                              <div className="flex items-start gap-2">
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <p className="text-[13px] font-semibold text-slate-800 truncate">
-                                      {perm.name}
-                                    </p>
-                                    {rowPending && (
-                                      <span className="inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-600 bg-amber-100 rounded px-1 py-0.5">
-                                        <span className="w-1 h-1 rounded-full bg-amber-500" />
-                                        Changed
-                                      </span>
-                                    )}
-                                  </div>
-                                  {perm.description && (
-                                    <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">
-                                      {perm.description}
-                                    </p>
+                            <td className="sticky left-0 z-10 w-[280px] min-w-[280px] max-w-[280px] bg-white group-hover:bg-blue-50 px-4 py-3 border-b border-slate-100 group-hover:border-blue-100 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.06)] transition-colors">
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="text-[13px] font-semibold text-slate-800 break-words">
+                                    {perm.name}
+                                  </p>
+                                  {rowPending && (
+                                    <span className="inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-600 bg-amber-100 rounded px-1 py-0.5">
+                                      <span className="w-1 h-1 rounded-full bg-amber-500" />
+                                      Changed
+                                    </span>
                                   )}
                                 </div>
-                                <span className="text-[10px] font-mono text-slate-400 bg-slate-100 rounded px-1.5 py-0.5 mt-0.5 shrink-0">
-                                  {perm.key}
-                                </span>
+                                {perm.description && (
+                                  <p className="text-[11px] text-slate-500 leading-relaxed break-words">
+                                    {perm.description}
+                                  </p>
+                                )}
                               </div>
                             </td>
                             {filteredRoles.map((role) => {
@@ -446,6 +441,19 @@ export default function PermissionMatrix() {
           <p className="text-xs text-slate-400">Try adjusting your search or category filter</p>
         </div>
       )}
+
+      {/* Data source legend */}
+      <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-[11px] text-slate-500">
+        <span className="font-bold uppercase tracking-wider text-slate-400">Data source</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          Live from database — permissions, roles, grants &amp; audit log
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+          Static in this page — category order &amp; category colors
+        </span>
+      </div>
 
       {/* Audit log modal */}
       {auditOpen && (
@@ -533,7 +541,7 @@ function AuditLogModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <div className="max-h-[60vh] overflow-auto">
+        <div className="max-h-[60vh] overflow-auto slim-scrollbar">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-12 gap-2">
               <Loader2 className="w-6 h-6 text-[#00488D] animate-spin" />

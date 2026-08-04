@@ -8,6 +8,7 @@ import {
   Lock,
   HelpCircle,
   CheckCircle,
+  LockOpen,
   Loader2,
 } from "lucide-react";
 
@@ -51,6 +52,11 @@ const TYPE_CONFIG: Record<ConfirmationDialogType, ConfirmationDialogTypeConfig> 
     iconContainerClass: "bg-orange-100 text-orange-600",
     confirmButtonClass: "bg-orange-600 text-white hover:bg-orange-700",
   },
+  LockOpen: {
+    icon: <LockOpen className="h-5 w-5" />,
+    iconContainerClass: "bg-green-100 text-green-600",
+    confirmButtonClass: "bg-green-600 text-white hover:bg-green-700",
+  },
 };
 
 const DEFAULT_CONFIRM_TEXT: Record<ConfirmationDialogType, string> = {
@@ -60,6 +66,7 @@ const DEFAULT_CONFIRM_TEXT: Record<ConfirmationDialogType, string> = {
   success: "Confirm",
   question: "Yes",
   lock: "Reset",
+  LockOpen: "Unlock",
 };
 
 const DEFAULT_CANCEL_TEXT = "Cancel";

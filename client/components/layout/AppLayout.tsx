@@ -76,6 +76,15 @@ export function AppLayout() {
     location.pathname,
   );
 
+  // Admin nav item is a label that toggles a Permissions/Roles dropdown
+  // instead of linking to the old AdminDashboard hub page.
+  const isAdminSectionActive = /^\/admin(\/|$)/i.test(location.pathname);
+  const [adminMenuOpen, setAdminMenuOpen] = useState(isAdminSectionActive);
+
+  useEffect(() => {
+    if (isAdminSectionActive) setAdminMenuOpen(true);
+  }, [isAdminSectionActive]);
+
   const [logoutOpen, setLogoutOpen] = useState(false);
 
   const logout = () => {
@@ -119,9 +128,14 @@ export function AppLayout() {
     { label: "Protocol", to: "/protocol", hasArrow: true },
     ...(isHeadAdmin
       ? [
-          { label: "Admin", to: "/admin", hasArrow: true, permission: "permission.manage" },
-          { label: "Permissions", to: "/admin/permissions", permission: "permission.manage" },
-          { label: "Roles", to: "/admin/roles", permission: "permission.manage" },
+          {
+            label: "Admin",
+            permission: "permission.manage",
+            children: [
+              { label: "Permissions", to: "/admin/permissions" },
+              { label: "Roles", to: "/admin/roles" },
+            ],
+          },
         ]
       : []),
   ].filter((item) => hasPermission(item.permission));
@@ -183,33 +197,79 @@ export function AppLayout() {
 
           {/* NAV */}
           <nav className="flex flex-col gap-1 flex-1">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={!item.matchPrefix}
-                className={({ isActive }) => {
-                  const active =
-                    item.label === "Doctor"
-                      ? isDoctorFormContext
-                      : item.label === "Patients"
-                        ? isPatientsFormContext
-                        : item.label === "Appointment"
-                          ? isActive || isAppointmentViewContext
-                          : isActive && !isFormPage;
-                  return cn(
-                    "flex items-center gap-2 px-3 py-2 rounded-[4px] text-xs font-semibold tracking-[0.6px] capitalize",
-                    active
-                      ? "bg-[#00488D] text-white shadow-sm"
-                      : "text-[#475569] hover:bg-[#E6E8EA]",
-                  );
-                }}
-              >
-                {navIcon[item.label]}
-                {item.label}
-                {item.hasArrow && <ChevronDown size={12} className="ml-auto" />}
-              </NavLink>
-            ))}
+            {navItems.map((item) =>
+              item.children ? (
+                <div key={item.label}>
+                  <button
+                    type="button"
+                    onClick={() => setAdminMenuOpen((open) => !open)}
+                    className={cn(
+                      "w-full flex items-center gap-2 px-3 py-2 rounded-[4px] text-xs font-semibold tracking-[0.6px] capitalize",
+                      isAdminSectionActive
+                        ? "bg-[#00488D] text-white shadow-sm"
+                        : "text-[#475569] hover:bg-[#E6E8EA]",
+                    )}
+                  >
+                    {navIcon[item.label]}
+                    {item.label}
+                    <ChevronDown
+                      size={12}
+                      className={cn(
+                        "ml-auto transition-transform duration-150",
+                        adminMenuOpen && "rotate-180",
+                      )}
+                    />
+                  </button>
+                  {adminMenuOpen && (
+                    <div className="ml-6 mt-1 flex flex-col gap-1">
+                      {item.children.map((child) => (
+                        <NavLink
+                          key={child.to}
+                          to={child.to}
+                          className={({ isActive }) =>
+                            cn(
+                              "flex items-center gap-2 px-3 py-2 rounded-[4px] text-xs font-semibold tracking-[0.6px] capitalize",
+                              isActive
+                                ? "bg-[#00488D] text-white shadow-sm"
+                                : "text-[#475569] hover:bg-[#E6E8EA]",
+                            )
+                          }
+                        >
+                          {navIcon[child.label]}
+                          {child.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={!item.matchPrefix}
+                  className={({ isActive }) => {
+                    const active =
+                      item.label === "Doctor"
+                        ? isDoctorFormContext
+                        : item.label === "Patients"
+                          ? isPatientsFormContext
+                          : item.label === "Appointment"
+                            ? isActive || isAppointmentViewContext
+                            : isActive && !isFormPage;
+                    return cn(
+                      "flex items-center gap-2 px-3 py-2 rounded-[4px] text-xs font-semibold tracking-[0.6px] capitalize",
+                      active
+                        ? "bg-[#00488D] text-white shadow-sm"
+                        : "text-[#475569] hover:bg-[#E6E8EA]",
+                    );
+                  }}
+                >
+                  {navIcon[item.label]}
+                  {item.label}
+                  {item.hasArrow && <ChevronDown size={12} className="ml-auto" />}
+                </NavLink>
+              ),
+            )}
           </nav>
 
           {/* BOTTOM NAV */}

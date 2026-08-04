@@ -54,6 +54,7 @@ export interface CreateEmployeePayload {
   emp_status: boolean;
   branch_ids: string[];
   consultation_minutes?: number;
+  doctor_bio?: string;
   working_hours?: WorkingHourDto[];
 }
 
@@ -119,6 +120,7 @@ export interface EmployeeDetailResponse {
     qualification: string | null;
     license_no: string | null;
     consultation_minutes: number | null;
+    doctor_bio: string | null;
   } | null;
   doctorSchedules?: DoctorScheduleRecord[];
 }
@@ -205,6 +207,7 @@ export interface UpdateEmployeePayload {
   employee_no_experence?: number;
   branch_ids?: string[];
   consultation_minutes?: number;
+  doctor_bio?: string;
   working_hours?: WorkingHourDto[];
 }
 

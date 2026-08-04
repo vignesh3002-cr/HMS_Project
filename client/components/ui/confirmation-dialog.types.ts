@@ -6,7 +6,8 @@ export type ConfirmationDialogType =
   | "info"
   | "success"
   | "question"
-  | "lock";
+  | "lock"
+  | "LockOpen";
 
 export interface ConfirmationDialogProps {
   open: boolean;

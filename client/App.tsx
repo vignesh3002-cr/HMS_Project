@@ -16,6 +16,7 @@ import AddAppointment from "@/components/Forms/AddAppointment";
 import EditAppointment from "@/components/Forms/edit/Edit Appointment";
 import PatientProfile from "@/components/Forms/view/patientProfile";
 import ViewAppointmentScheduled from "@/components/Forms/view/View Appointment Scheduled";
+import DoctorDetailView from "@/components/Forms/view/viewemployee";
 import Profile from "@/components/Forms/view/view profile ";
 import Appointments from "./pages/Appointments";
 import Dashboard from "./pages/Dashboard";
@@ -56,6 +57,7 @@ const protectedRoutes = [
   { path: "/patients", element: <Patients /> },
   { path: "/doctor", element: <Doctor /> },
   { path: "/doctor/view/:id", element: <Scheduled /> },
+  { path: "/doctor/view/:id/details", element: <DoctorDetailView /> },
   { path: "/doctor/view", element: <Scheduled /> },
   { path: "/doctor/day-view/:id", element: <DayScheduled /> },
   { path: "/doctor/day-view", element: <DayScheduled /> },

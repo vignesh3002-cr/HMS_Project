@@ -290,6 +290,7 @@ interface EmployeeFormData {
   specialization: string;
   qualification: string;
   docLicenseNo: string;
+  doctorBio: string;
   joiningDate: string;
   branchIds: string[];
   email: string;
@@ -331,6 +332,7 @@ const emptyFormData: EmployeeFormData = {
   specialization: "",
   qualification: "",
   docLicenseNo: "",
+  doctorBio: "",
   joiningDate: "",
   branchIds: [],
   email: "",
@@ -618,6 +620,7 @@ export default function AddEmployee() {
           specialization: employee.specialization || "",
           qualification: employee.qualification || "",
           docLicenseNo: employee.license_no || "",
+          doctorBio: "",
           joiningDate: employee.joining_date ? String(employee.joining_date).slice(0, 10) : "",
           branchIds,
           email: employee.email || "",
@@ -681,6 +684,7 @@ export default function AddEmployee() {
           if (profile?.consultation_minutes) {
             setConsultationMinutes(String(profile.consultation_minutes));
           }
+          setFormData((p) => ({ ...p, doctorBio: profile?.doctor_bio || "" }));
         }
       })
       .catch(() => {
@@ -756,6 +760,7 @@ export default function AddEmployee() {
       departmentId: "",
       qualification: "",
       docLicenseNo: "",
+      doctorBio: "",
       branchIds: newRole === "DOCTOR" 
         ? p.branchIds 
         : (isBranchAdmin || isStaffAdmin) 
@@ -891,6 +896,7 @@ export default function AddEmployee() {
             : undefined,
         qualification: formData.qualification || undefined,
         license_no: formData.docLicenseNo || undefined,
+        doctor_bio: formData.doctorBio || undefined,
         joining_date: formData.joiningDate,
         consultation_minutes: Number(consultationMinutes) || 20,
         working_hours:
@@ -980,6 +986,7 @@ export default function AddEmployee() {
       { key: "mobileNo", label: "Mobile Number" },
       { key: "designation", label: "Designation" },
       { key: "joiningDate", label: "Joining Date" },
+      ...(formData.roleType === "DOCTOR" ? [{ key: "doctorBio" as const, label: "Doctor Bio" }] : []),
       ...(isSupportingStaff ? [] : [{ key: "username" as const, label: "Username" }]),
       ...(isEditMode
         ? []
@@ -1828,6 +1835,36 @@ export default function AddEmployee() {
                       onChange={handleChange}
                       disabled={submitting || !roleConfig}
                     />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <AnimatePresence>
+                {isMedical && (
+                  <motion.div
+                    key="bio"
+                    layout
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <label className={labelCls}>
+                      {displayRole} bio <Req />
+                    </label>
+                    <textarea
+                      name="doctorBio"
+                      placeholder="Brief professional biography (max 200 characters)"
+                      maxLength={200}
+                      rows={4}
+                      className={inputCls + " resize-y h-auto min-h-[96px]"}
+                      value={formData.doctorBio}
+                      onChange={handleChange}
+                      disabled={submitting || !roleConfig}
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      {formData.doctorBio.length}/200 characters
+                    </p>
                   </motion.div>
                 )}
               </AnimatePresence>

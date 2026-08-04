@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { RefreshButton } from "@/components/hms/RefreshButton";
 import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft,
@@ -13,10 +14,11 @@ import {
 } from "lucide-react";
 import api from "@/api/axios";
 import { cn } from "@/lib/utils";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 
 interface Role {
   role_type: string;
-  prefix: string;
+  prefix: string | null;
   display_name: string | null;
   description: string | null;
   is_active: boolean;
@@ -31,6 +33,7 @@ export default function RoleManagement() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Role | null>(null);
   const [saving, setSaving] = useState(false);
+  const [toggleTarget, setToggleTarget] = useState<{ role: Role; isActive: boolean } | null>(null);
 
   const fetchRoles = async () => {
     setLoading(true);
@@ -116,13 +119,11 @@ export default function RoleManagement() {
             </p>
           </div>
         </div>
-        <button
+        <RefreshButton
           onClick={fetchRoles}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Refresh
-        </button>
+          isLoading={loading}
+          title="Refresh"
+        />
       </div>
 
       {loading ? (
@@ -184,7 +185,11 @@ export default function RoleManagement() {
                         {role.role_type}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-xs font-semibold text-slate-500">{role.prefix}</td>
+                    <td className="px-4 py-3 text-xs font-semibold text-slate-500">
+                      {role.prefix ?? (
+                        <span className="text-slate-300 font-medium">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600">
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
@@ -193,7 +198,7 @@ export default function RoleManagement() {
                     </td>
                     <td className="px-4 py-3">
                       <button
-                        onClick={() => handleToggleActive(role, !role.is_active)}
+                        onClick={() => setToggleTarget({ role, isActive: !role.is_active })}
                         className={cn(
                           "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors",
                           role.is_active ? "bg-emerald-500" : "bg-slate-300"
@@ -224,6 +229,26 @@ export default function RoleManagement() {
           </div>
         </div>
       )}
+
+      <ConfirmationDialog
+        open={!!toggleTarget}
+        type={toggleTarget?.isActive ? "LockOpen" : "lock"}
+        title={toggleTarget?.isActive ? "Activate Role" : "Deactivate Role"}
+        description={
+          toggleTarget
+            ? `Are you sure you want to ${
+                toggleTarget.isActive ? "activate" : "deactivate"
+              } ${toggleTarget.role.display_name || toggleTarget.role.role_type}?`
+            : ""
+        }
+        confirmText={toggleTarget?.isActive ? "Activate" : "Deactivate"}
+        onConfirm={() => {
+          if (!toggleTarget) return;
+          handleToggleActive(toggleTarget.role, toggleTarget.isActive);
+          setToggleTarget(null);
+        }}
+        onCancel={() => setToggleTarget(null)}
+      />
 
       {/* Edit modal */}
       {editing && (
