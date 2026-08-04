@@ -102,8 +102,8 @@ export interface EmployeeRecord {
   employee_area?: string | null;
   employee_pincode?: string | number | null;
   employee_no_experence?: string | number | null;
-  emp_gender?: string | null;
-  emp_DOB?: string | null;
+  gender?: string | null;
+  dob?: string | null;
 }
 
 export interface EmployeeDetailResponse {

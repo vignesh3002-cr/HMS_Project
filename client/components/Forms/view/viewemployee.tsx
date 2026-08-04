@@ -130,11 +130,11 @@ export default function DoctorDetailView() {
   const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanent_address || "—";
   const doctorBloodGroup = doctorEmployee?.blood_group || "—";
   const doctorExperience = doctorEmployee?.employee_no_experence != null ? `${doctorEmployee.employee_no_experence}+ yrs` : "—";
-  const doctorDOB = (doctorEmployee as any)?.emp_DOB
-    ? format(new Date((doctorEmployee as any).emp_DOB), "dd MMM yyyy")
+  const doctorDOB = (doctorEmployee as any)?.dob
+    ? format(new Date((doctorEmployee as any).dob), "dd MMM yyyy")
     : "—";
-  const doctorAge = calculateAge((doctorEmployee as any)?.emp_DOB);
-  const doctorGender = (doctorEmployee as any)?.emp_gender || "—";
+  const doctorAge = calculateAge((doctorEmployee as any)?.dob);
+  const doctorGender = (doctorEmployee as any)?.gender || "—";
   const doctorBio = doctorDetail.doctorProfile?.doctor_bio?.trim() || "—";
 
   return (
