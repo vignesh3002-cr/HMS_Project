@@ -1,4 +1,5 @@
 import "./global.css";
+import "react-international-phone/style.css";
 
 import { Toaster } from "@/components/ui/toaster";
 import { createRoot } from "react-dom/client";
@@ -15,6 +16,8 @@ import AddAppointment from "@/components/Forms/AddAppointment";
 import EditAppointment from "@/components/Forms/edit/Edit Appointment";
 import PatientProfile from "@/components/Forms/view/patientProfile";
 import ViewAppointmentScheduled from "@/components/Forms/view/View Appointment Scheduled";
+import DoctorDetailView from "@/components/Forms/view/viewemployee";
+import Profile from "@/components/Forms/view/view profile ";
 import Appointments from "./pages/Appointments";
 import Dashboard from "./pages/Dashboard";
 import Departments from "./pages/Departments";
@@ -32,6 +35,9 @@ import { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { getToken } from "./utils/token";
 import WeekView from "./pages/Week view";
+import PermissionMatrix from "./pages/admin/PermissionMatrix";
+import AdminDashboard from "./pages/admin/AdminDashboard";
+import RoleManagement from "./pages/admin/RoleManagement";
 
 
 const queryClient = new QueryClient({
@@ -47,9 +53,11 @@ const queryClient = new QueryClient({
 // Define protected routes for better maintainability
 const protectedRoutes = [
   { path: "/dashboard", element: <Dashboard /> },
+  { path: "/profile", element: <Profile /> },
   { path: "/patients", element: <Patients /> },
   { path: "/doctor", element: <Doctor /> },
   { path: "/doctor/view/:id", element: <Scheduled /> },
+  { path: "/doctor/view/:id/details", element: <DoctorDetailView /> },
   { path: "/doctor/view", element: <Scheduled /> },
   { path: "/doctor/day-view/:id", element: <DayScheduled /> },
   { path: "/doctor/day-view", element: <DayScheduled /> },
@@ -57,10 +65,11 @@ const protectedRoutes = [
   { path: "/appointments/day-view", element: <DayView /> },
   { path: "/appointments/week-view", element: <WeekView /> },
   { path: "/departments", element: <Departments /> },
+  { path: "/admin", element: <AdminDashboard /> },
+  { path: "/admin/permissions", element: <PermissionMatrix /> },
+  { path: "/admin/roles", element: <RoleManagement /> },
   
-
-
-   { path: "/Staff", element: <Staff /> },
+  { path: "/Staff", element: <Staff /> },
 
   { path: "/branches/add", element: <AddBranch /> },
   { path: "/staff/add", element: <AddEmployee /> },

@@ -13,21 +13,22 @@ import {
   Loader2,
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
-
+ 
 import { FilterPopover, useFilterPanel } from "@/components/Filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
 import ExportReport from "@/components/ui/ExportReport";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
+import { appointmentApi } from "@/api/appointment.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { useBranchFilter } from "@/context/BranchFilterContext";
-
+ 
 // ============================================================
 // SHARED SUB-COMPONENTS
 // ============================================================
-
+ 
 // Photo avatar with fallback (grid only)
 const DoctorPhoto = ({ photo, name }: { photo: string; name: string }) => (
   <div className="w-16 h-16 rounded-full overflow-hidden bg-[#E5E7EB] flex items-center justify-center flex-shrink-0">
@@ -38,12 +39,43 @@ const DoctorPhoto = ({ photo, name }: { photo: string; name: string }) => (
     )}
   </div>
 );
-
+ 
+// Doctor slot-booking progress bar (list view, replaces qualification column)
+// Green while there's still availability; red once booked count reaches
+// (or would exceed) the doctor's total slot capacity for the day.
+function getSlotBand(percentage: number) {
+  if (percentage >= 100) return { color: "#EF4444", label: "Fully booked" };
+  return { color: "#16A34A", label: "Available" };
+}
+ 
+function SlotProgress({ booked, total }: { booked: number; total: number }) {
+  const percentage = total > 0 ? Math.min(100, Math.round((booked / total) * 100)) : 0;
+  const band = total === 0 ? { color: "#6B7280", label: "No slots" } : getSlotBand(percentage);
+ 
+  return (
+    <div className="min-w-[140px]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-bold">
+          <span style={{ color: band.color }}>{booked}</span>
+          <span className="text-[#9CA3AF]">/{total}</span>
+        </span>
+        <span className="text-xs font-bold" style={{ color: band.color }}>{band.label}</span>
+      </div>
+      <div className="mt-1.5 h-1.5 w-full rounded-full bg-[#E5E7EB] overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all duration-300"
+          style={{ width: `${percentage}%`, background: band.color }}
+        />
+      </div>
+    </div>
+  );
+}
+ 
 // Three-dot card menu (grid only)
 function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: () => void; onDelete: () => void }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
-
+ 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
@@ -53,7 +85,7 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
+ 
   return (
     <div className="relative" ref={wrapperRef}>
       <button onClick={() => setOpen((o) => !o)} className="p-1 rounded hover:bg-[#F2F4F6] transition-colors">
@@ -70,7 +102,7 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
     </div>
   );
 }
-
+ 
 // Map EmployeeRecord (from API) to the row shape this page renders
 const AVATAR_PALETTE = [
   { avatarColor: "#00488D", initBg: "#D6E3FF" },
@@ -78,17 +110,17 @@ const AVATAR_PALETTE = [
   { avatarColor: "#00C896", initBg: "rgba(0,200,150,0.12)" },
   { avatarColor: "#475C7F", initBg: "#E6E8EA" },
 ];
-
+ 
 function getInitials(name: string): string {
   const words = name.replace(/^Dr\.?\s*/i, "").trim().split(/\s+/);
   return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 }
-
+ 
 function formatBranch(branch: EmployeeRecord["branch"]): string {
   if (!branch?.branch_name) return "\u2014";
   return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
 }
-
+ 
 function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
@@ -99,17 +131,17 @@ function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
     avatarColor: palette.avatarColor,
     initBg: palette.initBg,
     dept: emp.department_master?.department_name || emp.specialization || "Unassigned",
-
+ 
     deptBg: "#E6E8EA",
     deptColor: "#475C7F",
     branch: formatBranch(emp.branch),
-    status: (emp.emp_status === true || emp.user_table?.user_status === 1) ? "Active" : "Leave",
+    status: (emp.emp_status === true || emp.user_table?.user_status === 0) ? "Active" : "Leave",
     qualification: emp.qualification || "—",
     mobile: emp.mobile_no || "—",
     photo: "",
   };
 }
-
+ 
 // ============================================================
 // MAIN COMPONENT (merged list + grid views)
 // ============================================================
@@ -118,38 +150,38 @@ export default function Doctor() {
   const { toast } = useToast();
   const { selectedBranchId, isAllBranches } = useBranchFilter();
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
-
+ 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
-
+ 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-
+ 
   // Date selection
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
-
+ 
   // Grid-only: infinite scroll
   const [infiniteScroll, setInfiniteScroll] = useState(false);
   const [visibleCount, setVisibleCount] = useState(rowsPerPage);
   const sentinelRef = useRef<HTMLDivElement>(null);
-
+ 
   // List-only: sorting
   const [sortField, setSortField] = useState("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
-
+ 
   const handleAddDoctor = () => {
     navigate("/STAFF/add?role=Doctor");
   };
-
+ 
   const handleViewToggle = (mode: "list" | "grid") => {
     setViewMode(mode);
     setCurrentPage(1);
     setInfiniteScroll(false);
     handleClearFilter();
   };
-
+ 
   // Filters
   const {
     values: filterValues,
@@ -160,7 +192,7 @@ export default function Doctor() {
     handleApply: handleApplyFilter,
     handleClear: handleClearFilter,
   } = useFilterPanel();
-
+ 
   const doctorFilterFields: FilterField[] = [
     { id: "name", label: "Doctor Name", type: "text", placeholder: "Search by name" },
     { id: "id", label: "Doctor ID", type: "text", placeholder: "Enter ID" },
@@ -184,11 +216,14 @@ export default function Doctor() {
       { label: "Leave", value: "Leave" },
     ]},
   ];
-
+ 
   // Real doctors fetched from the backend
   const [realDoctors, setRealDoctors] = useState<EmployeeRecord[] | null>(null);
   const [isDoctorsLoading, setIsDoctorsLoading] = useState(true);
-
+ 
+  // Per-doctor slot booking summary for the selected date (list view progress bar)
+  const [slotSummaries, setSlotSummaries] = useState<Record<string, { total: number; booked: number }>>({});
+ 
   const fetchDoctors = useCallback(async () => {
     setIsDoctorsLoading(true);
     console.log("[Doctor Page] Fetching all employees from employeeApi...");
@@ -220,11 +255,76 @@ export default function Doctor() {
       setIsDoctorsLoading(false);
     }
   }, [toast, selectedBranchId, isAllBranches]);
-
+ 
   useEffect(() => {
     fetchDoctors();
   }, [fetchDoctors]);
+ 
+  // Fetch each doctor's booked/total slot counts for the selected single day
+  // (list view only). Total slots = the doctor's real working-hours
+  // availability that day sliced into fixed 20-minute slots (backend-computed).
+  const fetchSlotSummaries = useCallback(
+    async (doctors: EmployeeRecord[], date: Date, signal: { cancelled: boolean }) => {
+      const dateStr = format(date, "yyyy-MM-dd");
 
+      // Fetch in small concurrent batches instead of firing one request per
+      // doctor all at once - hosts that are fine locally can rate-limit or
+      // choke on dozens of simultaneous connections in production.
+      const BATCH_SIZE = 5;
+      const results: (readonly [string, { total: number; booked: number }])[] = [];
+
+      for (let i = 0; i < doctors.length; i += BATCH_SIZE) {
+        if (signal.cancelled) return;
+        const batch = doctors.slice(i, i + BATCH_SIZE);
+        const batchEntries = await Promise.all(
+          batch.map(async (doc) => {
+            try {
+              const res = await appointmentApi.getDoctorSlotSummary(doc.employee_id, dateStr);
+              const data = res.data?.data;
+              return [doc.employee_id, { total: data?.total_slots ?? 0, booked: data?.booked_count ?? 0 }] as const;
+            } catch (err: any) {
+              console.error(
+                `[Doctor Page] Slot summary fetch failed for ${doc.employee_id}:`,
+                err?.response?.status,
+                err?.response?.data || err?.message,
+              );
+              return [doc.employee_id, { total: 0, booked: 0 }] as const;
+            }
+          }),
+        );
+        results.push(...batchEntries);
+      }
+
+      if (!signal.cancelled) setSlotSummaries(Object.fromEntries(results));
+    },
+    [],
+  );
+ 
+  useEffect(() => {
+    if (!realDoctors || realDoctors.length === 0 || viewMode !== "list") return;
+    const signal = { cancelled: false };
+ 
+    fetchSlotSummaries(realDoctors, selectedDate, signal);
+ 
+    // Keep the booked/total counts live: poll periodically, and refetch as
+    // soon as the tab regains focus (e.g. after booking an appointment on
+    // another page/tab), instead of only updating on next full page load.
+    const intervalId = window.setInterval(() => {
+      fetchSlotSummaries(realDoctors, selectedDate, signal);
+    }, 15000);
+ 
+    const handleFocus = () => fetchSlotSummaries(realDoctors, selectedDate, signal);
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+ 
+    return () => {
+      signal.cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
+  }, [realDoctors, selectedDate, viewMode, fetchSlotSummaries]);
+ 
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
     // Use real data from API if available, otherwise fallback to static data
@@ -232,7 +332,7 @@ export default function Doctor() {
       ? realDoctors.map((emp, index) => mapEmployeeToDoctorData(emp, index))
       : [];
     let result: Record<string, string | number>[] = [...sourceData];
-
+ 
     if (searchQuery) {
       result = result.filter((doctor) =>
         ["name", "id", "dept", "branch", "status", "mobile"]
@@ -242,12 +342,12 @@ export default function Doctor() {
           .includes(searchQuery.toLowerCase())
       );
     }
-
+ 
     result = filterDataByValues(result, appliedValues);
-
+ 
     return result;
   }, [searchQuery, appliedValues, realDoctors]);
-
+ 
   // ---- SORTING (list only) ----
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -257,7 +357,7 @@ export default function Doctor() {
       setSortDirection("asc");
     }
   };
-
+ 
   const sortedData = useMemo(() => {
     return [...filteredData].sort((a, b) => {
       const aValue = String(a[sortField] ?? "").toLowerCase();
@@ -267,9 +367,9 @@ export default function Doctor() {
       return 0;
     });
   }, [filteredData, sortField, sortDirection]);
-
+ 
   const displayData = viewMode === "list" ? sortedData : filteredData;
-
+ 
   // ---- PAGINATION ----
   const totalRecords = displayData.length;
   const totalPages = Math.max(1, Math.ceil(totalRecords / rowsPerPage));
@@ -278,11 +378,11 @@ export default function Doctor() {
   const currentRows = displayData.slice(startIndex, endIndex);
   const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
   const visibleEnd = Math.min(endIndex, totalRecords);
-
+ 
   // ---- INFINITE SCROLL (grid only) ----
   useEffect(() => {
     if (!infiniteScroll || !sentinelRef.current) return;
-
+ 
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting && visibleCount < filteredData.length) {
@@ -291,34 +391,34 @@ export default function Doctor() {
       },
       { rootMargin: "200px" },
     );
-
+ 
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
   }, [infiniteScroll, visibleCount, filteredData.length, rowsPerPage]);
-
+ 
   useEffect(() => {
     if (infiniteScroll) {
       setVisibleCount(rowsPerPage);
     }
   }, [searchQuery, appliedValues]);
-
+ 
   // Grid view has no page-navigation controls (unlike the list view's
   // HmsTable), so it must show every doctor matching the current
   // search/filters rather than just the first `rowsPerPage` of them.
   const displayCards = infiniteScroll
     ? filteredData.slice(0, visibleCount)
     : filteredData;
-
+ 
   // ---- ACTION HANDLERS ----
   const handleView = (id: number | string) => navigate(`/doctor/view/${id}`);
   const handleEdit = (id: number | string) => navigate(`/doctor/edit/${id}`);
   const handleDelete = (id: number | string) => alert(`Delete logic for doctor ${id}`);
-
+ 
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
       <div className="flex flex-col flex-1 min-w-0">
         <main className="flex flex-col gap-6">
-
+ 
           {/* ==================== HEADER ==================== */}
           <div className="flex flex-col md:flex-row md:items-center justify-between">
             <div>
@@ -336,10 +436,10 @@ export default function Doctor() {
               </button>
             </div>
           </div>
-
+ 
           {/* ==================== MAIN CARD ==================== */}
           <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col transition-all duration-300 hover:shadow-md">
-
+ 
             {/* ==================== TOOLBAR ==================== */}
             <div className="px-5 py-4 border-b border-[#E5E7EB] flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-4">
@@ -350,7 +450,7 @@ export default function Doctor() {
                   </span>
                 </div>
               </div>
-
+ 
               <div className="flex items-center gap-3 flex-wrap">
                 {/* Search Box */}
                 <div className="relative">
@@ -363,7 +463,7 @@ export default function Doctor() {
                   />
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
                 </div>
-
+ 
                 {/* View Mode Toggle */}
                 <div className="flex border border-[#E5E7EB] rounded-md overflow-hidden bg-[#F2F4F6] p-0.5">
                   <button
@@ -379,7 +479,7 @@ export default function Doctor() {
                     <LayoutGrid className="w-4 h-4" />
                   </button>
                 </div>
-
+ 
                 {/* Date nav */}
                 <div className="flex items-center">
                   <button
@@ -422,7 +522,7 @@ export default function Doctor() {
                     </svg>
                   </button>
                 </div>
-
+ 
                 {/* Filters */}
                 <FilterPopover
                   title="Filters"
@@ -437,7 +537,7 @@ export default function Doctor() {
                 <RefreshButton onClick={fetchDoctors} isLoading={isDoctorsLoading} />
               </div>
             </div>
-
+ 
             {/* ================================================================ */}
             {/* BODY: LIST VIEW (table via HmsTable)                            */}
             {/* ================================================================ */}
@@ -458,29 +558,10 @@ export default function Doctor() {
                   { key: "dept", label: "Department", render: (r: any) => (
                     <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: String(r.deptBg), color: String(r.deptColor) }}>{String(r.dept)}</span>
                   )},
-                  { key: "status", label: "Status", render: (r: any) => (
-                    <StatusBadge status={String(r.status)} />
-                  )},
-                  { key: "appointments", label: "Appointment", render: (r: any) => {
-                    const appts = Number(r.appointments);
-                    const total = Number(r.total);
-                    const pct = total > 0 ? (appts / total) * 100 : 0;
-                    const slotsLabel = appts === 0 ? "slots unavailable" : appts >= total ? "slots full" : "slots booked";
-                    return (
-                      <div className="min-w-[200px]">
-                        <div className="flex items-center justify-between gap-2 text-xs font-semibold mb-2">
-                          <span className="text-[#191C1E]">{appts}/{total}</span>
-                          <span className={appts >= total ? "text-red-500" : "text-gray-400"}>{slotsLabel}</span>
-                        </div>
-                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                          <div className="h-full rounded-full bg-gradient-to-r from-red-500 via-yellow-400 to-green-500" style={{ width: `${pct}%` }} />
-                        </div>
-                      </div>
-                    );
+                  { key: "slots", label: "Slots", sortable: true, render: (r: any) => {
+                    const summary = slotSummaries[String(r.id)];
+                    return <SlotProgress booked={summary?.booked ?? 0} total={summary?.total ?? 0} />;
                   }},
-                  { key: "qualification", label: "Qualification", render: (r: any) => (
-                    <span className="text-[#191C1E] hms-content-text leading-4">{String(r.qualification)}</span>
-                  )},
                   { key: "mobile", label: "Mobile No", render: (r: any) => (
                     <span className="text-[#191C1E] hms-content-text leading-4">{String(r.mobile)}</span>
                   )},
@@ -524,8 +605,8 @@ export default function Doctor() {
               />
             ) : (
               <>
-              
-              <div className={`flex-1 p-5 hide-scrollbar max-h-[450px] ${infiniteScroll ? " overflow-y-auto max-h-[500px]" : ""}`}>
+             
+              <div className={`flex-1 p-5 hide-scrollbar overflow-y-auto ${infiniteScroll ? "max-h-[500px]" : "max-h-[450px]"}`}>
                 {displayCards.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {displayCards.map((doctor: any) => (

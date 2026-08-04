@@ -167,7 +167,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   useEffect(() => {
     employeeApi
-      .getAll({ role_type: "DOCTOR", limit: 1000 })
+      .getAll({ roleType: "DOCTOR", limit: 1000 })
       .then((res) => {
         const employees = res.data?.data?.employees || [];
         setAllDoctors(

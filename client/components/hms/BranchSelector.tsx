@@ -1,5 +1,6 @@
 import { useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import {
   Popover,
   PopoverContent,
@@ -23,6 +24,7 @@ export function BranchSelector() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
   const { toast } = useToast();
   const {
     branches,
@@ -49,20 +51,24 @@ export function BranchSelector() {
     navigate(`/branches/edit/${branchId}`);
   };
 
-  const handleDelete = async (branch: { id: string; name: string }, e: MouseEvent) => {
+  const handleDelete = (branch: { id: string; name: string }, e: MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm(`Delete "${branch.name}"? This cannot be undone.`)) return;
+    setDeleteConfirm(branch);
+  };
 
-    setDeletingId(branch.id);
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirm) return;
+    const { id, name } = deleteConfirm;
+    setDeletingId(id);
     try {
-      const response = await branchApi.remove(branch.id);
+      const response = await branchApi.remove(id);
       if (!response.data.success) {
         throw new Error(response.data.message);
       }
-      removeBranch(branch.id);
+      removeBranch(id);
       toast({
         title: "Branch deleted",
-        description: `${branch.name} was removed.`,
+        description: `${name} was removed.`,
       });
     } catch (err: any) {
       toast({
@@ -73,6 +79,7 @@ export function BranchSelector() {
       });
     } finally {
       setDeletingId(null);
+      setDeleteConfirm(null);
     }
   };
 
@@ -122,7 +129,8 @@ export function BranchSelector() {
 
   // ── HEAD_ADMIN / other roles: full dropdown ──────────────────────────────
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <>
+      <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button className="flex items-center gap-1.5 text-[#334155] font-semibold text-sm hover:text-[#00488D] transition-colors">
           {isAllBranches ? (
@@ -258,6 +266,18 @@ export function BranchSelector() {
           </CommandList>
         </Command>
       </PopoverContent>
-    </Popover>
+      </Popover>
+      <ConfirmationDialog
+        open={!!deleteConfirm}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+        type="danger"
+        title={`Delete "${deleteConfirm?.name}"?`}
+        description="This action cannot be undone. The branch will be permanently removed."
+        confirmText="Delete"
+        cancelText="Cancel"
+        loading={deletingId === deleteConfirm?.id}
+      />
+    </>
   );
 }

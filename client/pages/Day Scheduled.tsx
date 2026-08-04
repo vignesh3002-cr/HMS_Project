@@ -1,9 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { format } from "date-fns";
 import { User, IdCard, Phone, Mail, MapPin, Cake, Droplet, VenusAndMars, Briefcase } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import CalendarPicker from "@/components/hms/Calender";
+import ScheduleSlotModal, { type ScheduleSlotModalHandle } from "@/components/hms/ScheduleSlotModal";
 import { employeeApi, type EmployeeDetailResponse, type DoctorScheduleRecord } from "@/api/employee.api";
 
 function formatDoctorFullName(e: EmployeeDetailResponse["employee"] | null): string {
@@ -101,17 +103,6 @@ const MONTH_NAMES = [
 
 const getMonthYearLabel = (year, month) => `${MONTH_NAMES[month]} ${year}`;
 
-const BRANCH_LOCATIONS = ["Tambaram", "Egmore", "Saidapet"];
-
-const formatTime12 = (time) => {
-  if (!time) return "";
-  const [hourStr, minuteStr] = time.split(":");
-  const hour = parseInt(hourStr, 10);
-  const period = hour >= 12 ? "PM" : "AM";
-  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
-  return `${String(hour12).padStart(2, "0")}:${minuteStr} ${period}`;
-};
-
 export default function DoctorProfile() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -139,7 +130,7 @@ export default function DoctorProfile() {
     : doctorEmployee?.branch?.branch_name
       ? [doctorEmployee.branch.branch_name]
       : [];
-  const doctorIsAvailable = doctorEmployee?.emp_status === true || doctorDetail?.user?.user_status === 1;
+  const doctorIsAvailable = doctorEmployee?.emp_status === true || doctorDetail?.user?.user_status === 0;
   // Only a real photo URL from the backend is used -- no stock/fallback
   // image, so the avatar block simply doesn't render when the doctor has
   // no employee_photo_URL on file.
@@ -147,26 +138,19 @@ export default function DoctorProfile() {
   const doctorLicenseNo = doctorDetail?.doctorProfile?.license_no || doctorEmployee?.license_no || "—";
   const doctorPhone = doctorEmployee?.mobile_no || "—";
   const doctorEmail = doctorEmployee?.email || "—";
-  const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanant_address || "—";
+  const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanent_address || "—";
   const doctorBloodGroup = doctorEmployee?.blood_group || "—";
   const doctorExperience = doctorEmployee?.employee_no_experence != null ? `${doctorEmployee.employee_no_experence}+ yrs` : "—";
   const doctorDOB = (doctorEmployee as any)?.dob
     ? format(new Date((doctorEmployee as any).dob), "dd MMM yyyy")
     : "—";
   const doctorGender = (doctorEmployee as any)?.gender || "—";
-  const [addSlotOpen, setAddSlotOpen] = useState(false);
-  const [addSlotDay, setAddSlotDay] = useState("");
-  const [addSlotPos, setAddSlotPos] = useState(null);
-  const [slotStart, setSlotStart] = useState("");
-  const [slotEnd, setSlotEnd] = useState("");
-  const [slotBranch, setSlotBranch] = useState("");
-  const [cancelSlotOpen, setCancelSlotOpen] = useState(false);
-  const [cancelSlotPos, setCancelSlotPos] = useState(null);
-  const [cancelSlotInfo, setCancelSlotInfo] = useState("");
+  const slotModalRef = useRef<ScheduleSlotModalHandle>(null);
   const [fromDate, setFromDate] = useState(null);
   const [toDate, setToDate] = useState(null);
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
   const [isToCalendarOpen, setIsToCalendarOpen] = useState(false);
+  const [clearScheduleConfirm, setClearScheduleConfirm] = useState(false);
 
   // Real weekly availability, grouped by day_of_week from the doctor's
   // active doctor_schedule rows (part of the same employeeApi.getOne(id)
@@ -232,67 +216,12 @@ export default function DoctorProfile() {
   };
 
   const clearSchedule = () => {
-    if (window.confirm("Are you sure you want to clear the schedule?")) {
-      alert("Schedule cleared");
-    }
+    setClearScheduleConfirm(true);
   };
 
-  const openAddSlot = (dayName, rowIndex = null, colIndex = null) => {
-    setAddSlotDay(dayName);
-    setAddSlotPos(rowIndex === null || colIndex === null ? null : { row: rowIndex, col: colIndex });
-    setSlotStart("");
-    setSlotEnd("");
-    setSlotBranch("");
-    setAddSlotOpen(true);
-  };
-
-  const closeAddSlot = () => {
-    setAddSlotOpen(false);
-  };
-
-  const confirmAddSlot = () => {
-    if (!slotStart || !slotEnd || !slotBranch) {
-      alert("Please select start time, end time and branch location.");
-      return;
-    }
-
-    const timeLabel = `${formatTime12(slotStart)} - ${formatTime12(slotEnd)}`;
-
-    if (addSlotPos) {
-      const { row, col } = addSlotPos;
-      setScheduleOverrides((prev) => ({
-        ...prev,
-        [`${row}-${col}`]: [timeLabel, "blue", slotBranch],
-      }));
-    }
-
-    setAddSlotOpen(false);
-    showAlert(
-      `Slot added${addSlotDay ? ` for ${addSlotDay}` : ""}: ${timeLabel} (${slotBranch})`
-    );
-  };
-
-  const openCancelSlot = (dayName, rowIndex, colIndex, text, branch) => {
-    setCancelSlotPos({ row: rowIndex, col: colIndex });
-    setCancelSlotInfo(`${dayName}: ${text}${branch ? ` (${branch})` : ""}`);
-    setCancelSlotOpen(true);
-  };
-
-  const closeCancelSlot = () => {
-    setCancelSlotOpen(false);
-  };
-
-  const confirmCancelSlot = () => {
-    if (cancelSlotPos) {
-      const { row, col } = cancelSlotPos;
-      setScheduleOverrides((prev) => ({
-        ...prev,
-        [`${row}-${col}`]: ["+", "empty"],
-      }));
-    }
-
-    setCancelSlotOpen(false);
-    showAlert(`Slot cancelled: ${cancelSlotInfo}`);
+  const handleConfirmClearSchedule = () => {
+    alert("Schedule cleared");
+    setClearScheduleConfirm(false);
   };
 
   return (
@@ -429,9 +358,7 @@ export default function DoctorProfile() {
           </h2>
 
           <p className="mt-3 text-[#5f6672] text-[13px] leading-[22px]">
-            Dr. John Smith has extensive experience in managing chronic
-            illnesses, preventive care, and treating a wide range of medical
-            conditions for patients of all ages.
+            {doctorDetail?.doctorProfile?.doctor_bio?.trim() || "—"}
           </p>
         </section>
 
@@ -476,7 +403,7 @@ export default function DoctorProfile() {
                 <div className="flex items-center gap-4 flex-wrap">
 
                   <button
-                    onClick={() => openAddSlot("")}
+                    onClick={() => slotModalRef.current?.openAddSlot("")}
                     className="bg-[#004a91] text-white px-[14px] py-2 rounded-md text-xs font-semibold border-0 cursor-pointer"
                   >
                     + Add slot
@@ -526,7 +453,7 @@ export default function DoctorProfile() {
 
                           {type === "empty" && (
                             <div
-                              onClick={() => openAddSlot(WEEK_DAYS[index][0], rowIndex, index)}
+                              onClick={() => slotModalRef.current?.openAddSlot(WEEK_DAYS[index][0], rowIndex, index)}
                               className="h-[54px] border border-dashed border-[#b9bfcb] rounded flex items-center justify-center text-[#7d8794] text-lg cursor-pointer hover:border-[#004a91] hover:text-[#004a91]"
                             >
                               +
@@ -536,7 +463,7 @@ export default function DoctorProfile() {
                           {["green", "blue", "orange"].includes(type) && (
                             <div
                               onClick={() =>
-                                openCancelSlot(WEEK_DAYS[index][0], rowIndex, index, text, branch)
+                                slotModalRef.current?.openCancelSlot(WEEK_DAYS[index][0], rowIndex, index, text, branch)
                               }
                               className={`cursor-pointer h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] ${
                                 type === "green"
@@ -785,113 +712,36 @@ export default function DoctorProfile() {
 
       </main>
 
-      {addSlotOpen && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-[10px] p-6 w-[300px] shadow-lg">
-            <h3 className="text-[16px] font-semibold text-[#172033] mb-2">
-              Add Slot
-            </h3>
-
-            <p className="text-[#5f6672] text-[13px] mb-4">
-              {addSlotDay ? `Add a new slot for ${addSlotDay}` : "Add a new slot"}
-            </p>
-
-            <div className="flex flex-col gap-3 mb-6">
-              <div>
-                <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                  START TIME
-                </label>
-
-                <input
-                  type="time"
-                  value={slotStart}
-                  onChange={(e) => setSlotStart(e.target.value)}
-                  className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                  END TIME
-                </label>
-
-                <input
-                  type="time"
-                  value={slotEnd}
-                  onChange={(e) => setSlotEnd(e.target.value)}
-                  className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                  BRANCH LOCATION
-                </label>
-
-                <select
-                  value={slotBranch}
-                  onChange={(e) => setSlotBranch(e.target.value)}
-                  className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
-                >
-                  <option value="">Select branch</option>
-                  {BRANCH_LOCATIONS.map((branch) => (
-                    <option key={branch} value={branch}>
-                      {branch}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={closeAddSlot}
-                className="h-9 px-4 rounded-[7px] text-[13px] font-semibold cursor-pointer bg-white text-[#555e6c] border border-[#dfe4ea]"
-              >
-                Back
-              </button>
-
-              <button
-                onClick={confirmAddSlot}
-                className="h-9 px-4 rounded-[7px] text-[13px] font-semibold cursor-pointer bg-[#004a91] text-white border-0"
-              >
-                Add Slot
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {cancelSlotOpen && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-[10px] p-6 w-[300px] shadow-lg">
-            <h3 className="text-[16px] font-semibold text-[#172033] mb-2">
-              Cancel Slot
-            </h3>
-
-            <p className="text-[#5f6672] text-[13px] mb-6">
-              Cancel this slot for {cancelSlotInfo}?
-            </p>
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={closeCancelSlot}
-                className="h-9 px-4 rounded-[7px] text-[13px] font-semibold cursor-pointer bg-white text-[#555e6c] border border-[#dfe4ea]"
-              >
-                Back
-              </button>
-
-              <button
-                onClick={confirmCancelSlot}
-                className="h-9 px-4 rounded-[7px] text-[13px] font-semibold cursor-pointer bg-[#ff453a] text-white border-0"
-              >
-                Cancel Slot
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      <ScheduleSlotModal
+        ref={slotModalRef}
+        branches={doctorBranchNames}
+        onAddSlot={({ day, row, col, timeLabel, branch }) => {
+          if (row !== null && col !== null) {
+            setScheduleOverrides((prev) => ({
+              ...prev,
+              [`${row}-${col}`]: [timeLabel, "blue", branch],
+            }));
+          }
+          showAlert(`Slot added${day ? ` for ${day}` : ""}: ${timeLabel} (${branch})`);
+        }}
+        onCancelSlot={({ row, col, info }) => {
+          setScheduleOverrides((prev) => ({
+            ...prev,
+            [`${row}-${col}`]: ["+", "empty"],
+          }));
+          showAlert(`Slot cancelled: ${info}`);
+        }}
+      />
+      <ConfirmationDialog
+        open={clearScheduleConfirm}
+        onConfirm={handleConfirmClearSchedule}
+        onCancel={() => setClearScheduleConfirm(false)}
+        type="warning"
+        title="Clear Schedule?"
+        description="Are you sure you want to clear the schedule? This action cannot be undone."
+        confirmText="Clear"
+        cancelText="Cancel"
+      />
     </div>
   );
 }

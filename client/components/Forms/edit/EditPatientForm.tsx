@@ -3,7 +3,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Loader2, UserRound, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { branchApi, Branch } from "@/api/branch.api";
 import { patientApi } from "@/api/patient.api";
 
@@ -90,6 +92,10 @@ export default function EditPatientForm() {
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [originalFormData, setOriginalFormData] = useState<FormData | null>(null);
 
   const setField = (key: keyof FormData, value: string) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
@@ -136,7 +142,7 @@ export default function EditPatientForm() {
       const response = await patientApi.getById(id);
       const patient = response.data.data;
       if (patient) {
-        setFormData({
+        const loadedFormData: FormData = {
           branch_id: patient.branch_id || "",
           patient_first_name: patient.patient_first_name || "",
           patient_middle_name: patient.patient_middle_name || "",
@@ -155,7 +161,9 @@ export default function EditPatientForm() {
           patient_emergency_name: (patient as any).patient_emergency_name || "",
           patient_emergency_relation: (patient as any).patient_emergency_relation || "",
           patient_photo_url: patient.patient_photo_url || null,
-        });
+        };
+        setFormData(loadedFormData);
+        setOriginalFormData(loadedFormData);
         if ((patient as any).patient_current_address && !(patient as any).patient_permanent_address) {
           setSameAsCurrent(true);
         }
@@ -189,6 +197,12 @@ export default function EditPatientForm() {
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
+    if (!id) return;
+
+    setShowSubmitConfirm(true);
+  };
+
+  const handleConfirmSubmit = async () => {
     if (!id) return;
 
     setSubmitting(true);
@@ -228,18 +242,36 @@ export default function EditPatientForm() {
       });
     } finally {
       setSubmitting(false);
+      setShowSubmitConfirm(false);
     }
   };
 
   const handleReset = () => {
-    setFormData(emptyFormData);
-    setSameAsCurrent(false);
+    setShowResetConfirm(true);
+  };
+
+  const handleConfirmReset = () => {
+    setShowResetConfirm(false);
+    // Reload restores the patient's original values without wiping the
+    // read-only fields the API doesn't echo back.
+    window.location.reload();
+  };
+
+  const isDirty =
+    !!originalFormData && JSON.stringify(formData) !== JSON.stringify(originalFormData);
+
+  const handleBack = () => {
+    if (isDirty) {
+      setShowLeaveConfirm(true);
+      return;
+    }
+    navigate("/dashboard");
   };
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 py-8 px-4 flex items-center justify-center">
-        <div className="w-full max-w-5xl bg-white rounded-2xl shadow-sm border border-gray-100 p-8 flex items-center justify-center">
+        <div className="w-full bg-white rounded-2xl shadow-sm border border-gray-100 p-8 flex items-center justify-center">
           <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
         </div>
       </div>
@@ -248,12 +280,12 @@ export default function EditPatientForm() {
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-5xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100">
+      <div className="w-full bg-white rounded-2xl shadow-sm border border-gray-100">
         {/* ── Header ── */}
         <div className="flex items-center gap-3 px-8 py-5 border-b border-gray-100">
           <button
             type="button"
-            onClick={() => navigate(-1)}
+            onClick={handleBack}
             className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-gray-50 transition-colors text-gray-500"
             aria-label="Go back"
           >
@@ -393,23 +425,24 @@ export default function EditPatientForm() {
             <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
               <div>
                 <label className={labelCls}>Primary mobile <Req /></label>
-                <input
-                  type="tel"
-                  placeholder="+91 98765 43210"
-                  className={inputCls}
+                <PhoneInput
                   value={formData.patient_primary_mobile}
-                  onChange={(e) => handleInputChange(e, "patient_primary_mobile")}
+                  onChange={(value) => handleInputChange({ target: { name: "patient_primary_mobile", value } } as any, "patient_primary_mobile")}
+                  placeholder="+91 98765 43210"
+                  required
                   disabled={submitting}
+                  defaultCountry="in"
                 />
               </div>
               <div>
                 <label className={labelCls}>Alternate mobile <Opt /></label>
-                <input
-                  type="tel"
-                  className={inputCls}
+                <PhoneInput
                   value={formData.patient_alternate_mobile}
-                  onChange={(e) => handleInputChange(e, "patient_alternate_mobile")}
+                  onChange={(value) => handleInputChange({ target: { name: "patient_alternate_mobile", value } } as any, "patient_alternate_mobile")}
+                  placeholder="+91 98765 43210"
+                  optional
                   disabled={submitting}
+                  defaultCountry="in"
                 />
               </div>
               <div>
@@ -426,13 +459,13 @@ export default function EditPatientForm() {
 
               <div>
                 <label className={labelCls}>Emergency mobile <Req /></label>
-                <input
-                  type="tel"
-                  placeholder="+91 98765 43210"
-                  className={inputCls}
+                <PhoneInput
                   value={formData.patient_emergency_mobile}
-                  onChange={(e) => handleInputChange(e, "patient_emergency_mobile")}
+                  onChange={(value) => handleInputChange({ target: { name: "patient_emergency_mobile", value } } as any, "patient_emergency_mobile")}
+                  placeholder="+91 98765 43210"
+                  required
                   disabled={submitting}
+                  defaultCountry="in"
                 />
               </div>
               <div>
@@ -533,6 +566,43 @@ export default function EditPatientForm() {
           </div>
         </form>
       </div>
+
+      <ConfirmationDialog
+        open={showSubmitConfirm}
+        onConfirm={handleConfirmSubmit}
+        onCancel={() => setShowSubmitConfirm(false)}
+        type="warning"
+        title="Save changes?"
+        description="Are you sure you want to save the changes to this patient?"
+        confirmText="Save changes"
+        cancelText="Cancel"
+        loading={submitting}
+      />
+
+      <ConfirmationDialog
+        open={showResetConfirm}
+        type="info"
+        title="Reset Form?"
+        description="All fields will be reset to their original values."
+        confirmText="Reset"
+        cancelText="Cancel"
+        onConfirm={handleConfirmReset}
+        onCancel={() => setShowResetConfirm(false)}
+      />
+
+      <ConfirmationDialog
+        open={showLeaveConfirm}
+        type="info"
+        title="Leave this page?"
+        description="You have unsaved changes. If you leave now, your changes will be lost."
+        confirmText="Leave"
+        cancelText="Stay"
+        onConfirm={() => {
+          setShowLeaveConfirm(false);
+          navigate("/dashboard");
+        }}
+        onCancel={() => setShowLeaveConfirm(false)}
+      />
     </div>
   );
 }

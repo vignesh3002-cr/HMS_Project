@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { User, CreditCard, Bell, Settings, LogOut } from "lucide-react";
 import {
   DropdownMenu,
@@ -18,6 +19,8 @@ export function UserProfileDropdown({
   userAvatar = "https://i.pravatar.cc/40",
   onLogout,
 }: UserProfileDropdownProps) {
+  const navigate = useNavigate();
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -60,13 +63,14 @@ export function UserProfileDropdown({
         <div className="py-2 border-b border-[#E5E7EB]">
           <h3 className="px-4 py-1 text-xs font-semibold text-[#777587] uppercase tracking-wider">Account</h3>
           <div className="px-2 mt-1 space-y-0.5">
-            <a
-              href="#"
-              className="flex items-center gap-3 px-3 py-2 rounded-lg text-[#464555] hover:bg-[#D3E4FE] hover:text-[#3525CD] transition-colors group"
+            <button
+              type="button"
+              onClick={() => navigate("/profile")}
+              className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[#464555] hover:bg-[#D3E4FE] hover:text-[#3525CD] transition-colors group"
             >
               <User size={18} className="group-hover:text-[#3525CD] transition-colors" />
               <span className="text-sm">Your Profile</span>
-            </a>
+            </button>
             <a
               href="#"
               className="flex items-center gap-3 px-3 py-2 rounded-lg text-[#464555] hover:bg-[#D3E4FE] hover:text-[#3525CD] transition-colors group"

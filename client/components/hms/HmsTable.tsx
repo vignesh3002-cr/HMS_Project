@@ -1,5 +1,5 @@
 import { type ReactNode, useState, useRef, useEffect } from "react";
-import { ChevronDown, Check } from "lucide-react";
+import { ChevronDown, Check, ArrowUpDown, ArrowDownUp, ChevronsLeft, ChevronsRight } from "lucide-react";
 
 export interface HmsColumn<T> {
   key: string;
@@ -109,6 +109,17 @@ export function PaginationBar({
   onRowsPerPageChange: (val: number) => void;
   rowsPerPageOptions?: number[];
 }) {
+  const PAGE_WINDOW = 4;
+  const pageStart =
+    totalPages <= PAGE_WINDOW
+      ? 1
+      : Math.max(1, Math.min(currentPage - 2, totalPages - (PAGE_WINDOW - 1)));
+  const pageEnd = Math.min(totalPages, pageStart + PAGE_WINDOW - 1);
+  const pages = Array.from(
+    { length: pageEnd - pageStart + 1 },
+    (_, i) => pageStart + i
+  );
+
   return (
     <div className="mt-auto shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur gap-2">
       <div className="flex items-center gap-2">
@@ -124,6 +135,14 @@ export function PaginationBar({
       <div className="flex items-center gap-1">
         <button
           disabled={currentPage <= 1}
+          onClick={() => onPageChange(1)}
+          title="First page"
+          className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
+        >
+          <ChevronsLeft className="w-3.5 h-3.5 text-[#424752]" />
+        </button>
+        <button
+          disabled={currentPage <= 1}
           onClick={() => onPageChange(currentPage - 1)}
           className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
         >
@@ -131,20 +150,21 @@ export function PaginationBar({
             <path d="M4 8L0 4L4 0L4.93333.933333L1.86667 4L4.93333 7.06667L4 8Z" fill="#424752"/>
           </svg>
         </button>
-        {Array.from({ length: Math.min(totalPages, 5) }, (_, index) => (
+        {pageStart > 1 && <span className="text-[#6B7280] text-xs">...</span>}
+        {pages.map((page) => (
           <button
-            key={index}
-            onClick={() => onPageChange(index + 1)}
+            key={page}
+            onClick={() => onPageChange(page)}
             className={`w-6 h-6 flex items-center justify-center rounded-md text-[10px] font-semibold transition-colors ${
-              currentPage === index + 1
+              currentPage === page
                 ? "bg-[#004785] text-white"
                 : "text-[#1D1A1A] hover:bg-[#F2F4F6]"
             }`}
           >
-            {index + 1}
+            {page}
           </button>
         ))}
-        {totalPages > 5 && <span className="text-[#6B7280] text-xs">...</span>}
+        {pageEnd < totalPages && <span className="text-[#6B7280] text-xs">...</span>}
         <button
           disabled={currentPage >= totalPages}
           onClick={() => onPageChange(currentPage + 1)}
@@ -153,6 +173,14 @@ export function PaginationBar({
           <svg width="5" height="8" viewBox="0 0 5 8" fill="none">
             <path d="M1 8L5 4L1 0L.0666656.933333L3.13333 4L.0666656 7.06667L1 8Z" fill="#424752"/>
           </svg>
+        </button>
+        <button
+          disabled={currentPage >= totalPages}
+          onClick={() => onPageChange(totalPages)}
+          title="Last page"
+          className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
+        >
+          <ChevronsRight className="w-3.5 h-3.5 text-[#424752]" />
         </button>
       </div>
     </div>
@@ -201,8 +229,12 @@ export default function HmsTable<T>({
                     >
                       <span>{column.label}</span>
                       {column.sortable !== false && (
-                        <span className="inline-flex h-3 w-3 items-center justify-center text-[7px] shrink-0">
-                          {isSorted ? (sortDirection === "asc" ? "\u2191" : "\u2193") : "\u2195"}
+                        <span className="inline-flex h-3 w-3 items-center justify-center shrink-0">
+                          {isSorted && sortDirection === "desc" ? (
+                            <ArrowDownUp className="w-3 h-3" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3" />
+                          )}
                         </span>
                       )}
                     </div>
@@ -257,8 +289,12 @@ export default function HmsTable<T>({
                     >
                       <span>{column.label}</span>
                       {column.sortable !== false && (
-                        <span className="inline-flex h-3 w-3 items-center justify-center text-[7px] shrink-0">
-                          {isSorted ? (sortDirection === "asc" ? "\u2191" : "\u2193") : "\u2195"}
+                        <span className="inline-flex h-3 w-3 items-center justify-center shrink-0">
+                          {isSorted && sortDirection === "desc" ? (
+                            <ArrowDownUp className="w-3 h-3" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3" />
+                          )}
                         </span>
                       )}
                     </div>

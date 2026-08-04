@@ -124,7 +124,7 @@ function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
   const fullName = `${doc.first_name} ${doc.middle_name ? doc.middle_name + " " : ""}${doc.last_name}`;
   const role = doc.user_table?.role_type || "DOCTOR";
   const branchName = formatBranch(doc.branch);
-  const isActive = doc.emp_status === true || doc.user_table?.user_status === 1;
+  const isActive = doc.emp_status === true || doc.user_table?.user_status === 0;
   return {
     avatar: getInitials(fullName),
     avatarColor: palette.avatarColor,
@@ -247,28 +247,6 @@ export default function Dashboard() {
   const [realAppointments, setRealAppointments] = useState<Record<string, unknown>[] | null>(null);
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
   const [appointmentCount, setAppointmentCount] = useState<number>(0);
-
-
-  useEffect(() => {
-    appointmentApi
-      .getAll({ limit: 100, sortBy: "appointment_date", sortOrder: "desc" })
-      .then((res) => {
-        const rows = res.data?.data?.appointments || [];
-        setRealAppointments(rows.map(mapAppointmentRecord));
-        setAppointmentCount(res.data?.data?.total ?? rows.length);
-      })
-      .catch((err) => {
-        console.error("[Dashboard] Failed to load appointments:", err);
-        toast({
-          title: "Failed to load appointments",
-          description: "Couldn't reach the appointments API.",
-          variant: "destructive",
-        });
-      })
-      .finally(() => {
-        setIsAppointmentsLoading(false);
-      });
-  }, []);
 
   const fetchEmployees = useCallback(async () => {
     setIsEmployeesLoading(true);

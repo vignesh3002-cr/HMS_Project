@@ -22,6 +22,7 @@ import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { useToast } from "@/hooks/use-toast";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 
 import DayView from "./Day view";
@@ -43,6 +44,7 @@ interface Appointment {
   doctorInitial: string;
   date: string;
   time: string;
+  sortDate: number;
   status: string;
 }
 
@@ -105,6 +107,13 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
   const patientName = formatPatientName(record.patient_bio_data);
   const doctorName = formatDoctorName(record.employees);
 
+  const dateMs = new Date(record.appointment_date).getTime();
+  const timeMs = new Date(record.appointment_time).getTime();
+  const timeOfDayMs = !isNaN(timeMs)
+    ? (timeMs % 86400000 + 86400000) % 86400000
+    : 0;
+  const sortDate = (isNaN(dateMs) ? 0 : dateMs) + timeOfDayMs;
+
   return {
     id: record.appointment_id,
     tokenId: record.token_number != null ? String(record.token_number) : "—",
@@ -118,6 +127,7 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
     doctorInitial: getInitials(doctorName),
     date: formatAppointmentDate(record.appointment_date),
     time: formatAppointmentTime(record.appointment_time),
+    sortDate,
     status: STATUS_LABELS[record.status ?? ""] ?? (record.status || "Unknown"),
   };
 }
@@ -195,11 +205,16 @@ const AppointmentSchedule: React.FC = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
 
+  // Date selection
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+
   const fetchAppointments = useCallback(async () => {
     setIsAppointmentsLoading(true);
     try {
       const res = await appointmentApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
+        date: format(selectedDate, "yyyy-MM-dd"),
       });
       const records = res.data?.data?.appointments || [];
       setAppointments(records.map(mapAppointmentRecord));
@@ -219,59 +234,51 @@ const AppointmentSchedule: React.FC = () => {
     } finally {
       setIsAppointmentsLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches]);
+  }, [toast, selectedBranchId, isAllBranches, selectedDate]);
 
   useEffect(() => {
     fetchAppointments();
   }, [fetchAppointments]);
 
-  const handleCancelAppointment = (target: Appointment) => {
-    const cancelReason = window.prompt(
-      `Cancel appointment ${target.id} for ${target.patient}?\nPlease enter a reason for cancellation:`,
-    );
+  const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
 
-    if (cancelReason === null) return;
+  const handleCancelAppointment = (target: Appointment) => {
+    setCancelReason("");
+    setCancelTarget(target);
+  };
+
+  const handleConfirmCancelAppointment = () => {
+    if (!cancelTarget) return;
 
     if (!cancelReason.trim()) {
       toast({ title: "A cancellation reason is required", variant: "destructive" });
       return;
     }
 
-    appointmentApi
-      .cancel(target.id, cancelReason.trim())
-      .then(() => {
-        setAppointments((prev) =>
-          prev.map((appt) => (appt === target ? { ...appt, status: "Cancelled" } : appt)),
-        );
-        toast({
-          title: "Appointment cancelled",
-          description: `Appointment ${target.id} has been cancelled.`,
-        });
-      })
-      .catch((err) => {
-        console.error("[Appointments Page] Cancel error:", err);
-        toast({
-          title: "Failed to cancel appointment",
-          description: "Couldn't reach the appointments API.",
-          variant: "destructive",
-        });
-      });
+    setAppointments((prev) =>
+      prev.map((appt) =>
+        appt === cancelTarget ? { ...appt, status: "Cancelled" } : appt,
+      ),
+    );
+    toast({
+      title: "Appointment cancelled",
+      description: `Appointment ${cancelTarget.id} has been cancelled.`,
+    });
+    setCancelTarget(null);
+    setCancelReason("");
   };
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
-  // Sort state
-  const [sortField, setSortField] = useState("");
+  // Sort state — defaults to Appointment Date (ascending)
+  const [sortField, setSortField] = useState("date");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
-
-  // Date selection
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
   // View type dropdown (List View / Day View / Week View)
   const [viewType, setViewType] = useState<"list" | "day" | "week">("list");
@@ -377,19 +384,22 @@ const AppointmentSchedule: React.FC = () => {
 
   const sortedData = useMemo(() => {
     if (!sortField) return filteredData;
+    const direction = sortDirection === "asc" ? 1 : -1;
     return [...filteredData].sort((a, b) => {
+      if (sortField === "date") {
+        return (a.sortDate - b.sortDate) * direction;
+      }
       const aValue = String(a[sortField as keyof Appointment] ?? "").toLowerCase();
       const bValue = String(b[sortField as keyof Appointment] ?? "").toLowerCase();
-      if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
-      if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
-      return 0;
+      return aValue < bValue ? -direction : aValue > bValue ? direction : 0;
     });
   }, [filteredData, sortField, sortDirection]);
 
   // ---- PAGINATION ----
   const totalRecords = sortedData.length;
   const totalPages = Math.max(1, Math.ceil(totalRecords / rowsPerPage));
-  const startIndex = (currentPage - 1) * rowsPerPage;
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * rowsPerPage;
   const endIndex = startIndex + rowsPerPage;
   const currentRows = sortedData.slice(startIndex, endIndex);
   const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
@@ -613,33 +623,34 @@ const AppointmentSchedule: React.FC = () => {
               </div>
             ) : (
               <HmsTable
+                scrollable={false}
                 columns={[
-                  { key: "id", label: "AppointmentNo", render: (r: Appointment) => (
+                  { key: "id", label: "AppointmentNo", className: "!whitespace-normal", render: (r: Appointment) => (
                     <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.id}</span>
                   )},
-                  { key: "tokenId", label: "TokenId", render: (r: Appointment) => (
+                  { key: "tokenId", label: "TokenId", className: "!whitespace-normal", render: (r: Appointment) => (
                     <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.tokenId}</span>
                   )},
-                  { key: "patient", label: "Patient", render: (r: Appointment) => (
+                  { key: "patient", label: "Patient", className: "!whitespace-normal", render: (r: Appointment) => (
                     <div className="flex items-center gap-2">
-                      <div className={`w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text ${r.avatarColor}`}>{r.patientInitial}</div>
+                      <div className={`w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0 ${r.avatarColor}`}>{r.patientInitial}</div>
                       <div><div className="hms-name-text capitalize">{r.patient}</div><div className="hms-id-text">{r.patientId}</div></div>
                     </div>
                   )},
-                  { key: "branch", label: "Branch", render: (r: Appointment) => <span className="hms-content-text text-[#191C1E]">{r.branch}</span> },
-                  { key: "doctor", label: "Doctor", render: (r: Appointment) => (
+                  { key: "branch", label: "Branch", className: "!whitespace-normal", render: (r: Appointment) => <span className="hms-content-text text-[#191C1E]">{r.branch}</span> },
+                  { key: "doctor", label: "Doctor", className: "!whitespace-normal", render: (r: Appointment) => (
                     <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center hms-avatar-text">{r.doctorInitial}</div>
+                      <div className="w-7 h-7 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center hms-avatar-text shrink-0">{r.doctorInitial}</div>
                       <div><div className="hms-name-text capitalize">{r.doctor}</div><div className="hms-id-text">{r.doctorId}</div></div>
                     </div>
                   )},
-                  { key: "date", label: "Appointment Date", render: (r: Appointment) => (
+                  { key: "date", label: "Appointment Date", className: "!whitespace-normal", render: (r: Appointment) => (
                     <div className="hms-content-text text-[#191C1E] leading-4"><div>{r.date}</div><div className="text-[11px] font-medium text-[#8C8D8F] mt-1">{r.time}</div></div>
                   )},
                   { key: "status", label: "Status", render: (r: Appointment) => (
                     <StatusBadge status={r.status} />
                   )},
-                  { key: "actions", label: "Action", sortable: false, render: (r: Appointment) => (
+                  { key: "actions", label: "Action", sortable: false, className: "w-px !whitespace-normal !pl-3", headerClassName: "w-px !pl-3", render: (r: Appointment) => (
                     <ActionMenu
                       onView={() => navigate(`/appointments/view/${r.id}`)}
                       onEdit={() => navigate(`/appointments/edit/${r.id}`)}
@@ -651,7 +662,7 @@ const AppointmentSchedule: React.FC = () => {
                 sortField={sortField}
                 sortDirection={sortDirection}
                 onSort={handleSort}
-                currentPage={currentPage}
+                currentPage={safeCurrentPage}
                 totalPages={totalPages}
                 totalRecords={totalRecords}
                 rowsPerPage={rowsPerPage}
@@ -667,6 +678,29 @@ const AppointmentSchedule: React.FC = () => {
           </div>
         </main>
       </div>
+
+      <ConfirmationDialog
+        open={!!cancelTarget}
+        type="danger"
+        title="Cancel Appointment?"
+        description={
+          cancelTarget
+            ? `Appointment ${cancelTarget.id} for ${cancelTarget.patient} will be cancelled. Please enter a reason for cancellation.`
+            : ""
+        }
+        confirmText="Cancel Appointment"
+        cancelText="Keep Appointment"
+        onConfirm={handleConfirmCancelAppointment}
+        onCancel={() => setCancelTarget(null)}
+      >
+        <textarea
+          value={cancelReason}
+          onChange={(e) => setCancelReason(e.target.value)}
+          placeholder="Reason for cancellation (required)"
+          rows={3}
+          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      </ConfirmationDialog>
     </div>
 
   );
