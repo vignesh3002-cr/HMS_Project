@@ -266,18 +266,36 @@ export default function Doctor() {
   const fetchSlotSummaries = useCallback(
     async (doctors: EmployeeRecord[], date: Date, signal: { cancelled: boolean }) => {
       const dateStr = format(date, "yyyy-MM-dd");
-      const entries = await Promise.all(
-        doctors.map(async (doc) => {
-          try {
-            const res = await appointmentApi.getDoctorSlotSummary(doc.employee_id, dateStr);
-            const data = res.data?.data;
-            return [doc.employee_id, { total: data?.total_slots ?? 0, booked: data?.booked_count ?? 0 }] as const;
-          } catch {
-            return [doc.employee_id, { total: 0, booked: 0 }] as const;
-          }
-        }),
-      );
-      if (!signal.cancelled) setSlotSummaries(Object.fromEntries(entries));
+
+      // Fetch in small concurrent batches instead of firing one request per
+      // doctor all at once - hosts that are fine locally can rate-limit or
+      // choke on dozens of simultaneous connections in production.
+      const BATCH_SIZE = 5;
+      const results: (readonly [string, { total: number; booked: number }])[] = [];
+
+      for (let i = 0; i < doctors.length; i += BATCH_SIZE) {
+        if (signal.cancelled) return;
+        const batch = doctors.slice(i, i + BATCH_SIZE);
+        const batchEntries = await Promise.all(
+          batch.map(async (doc) => {
+            try {
+              const res = await appointmentApi.getDoctorSlotSummary(doc.employee_id, dateStr);
+              const data = res.data?.data;
+              return [doc.employee_id, { total: data?.total_slots ?? 0, booked: data?.booked_count ?? 0 }] as const;
+            } catch (err: any) {
+              console.error(
+                `[Doctor Page] Slot summary fetch failed for ${doc.employee_id}:`,
+                err?.response?.status,
+                err?.response?.data || err?.message,
+              );
+              return [doc.employee_id, { total: 0, booked: 0 }] as const;
+            }
+          }),
+        );
+        results.push(...batchEntries);
+      }
+
+      if (!signal.cancelled) setSlotSummaries(Object.fromEntries(results));
     },
     [],
   );
@@ -540,7 +558,7 @@ export default function Doctor() {
                   { key: "dept", label: "Department", render: (r: any) => (
                     <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: String(r.deptBg), color: String(r.deptColor) }}>{String(r.dept)}</span>
                   )},
-                  { key: "slots", label: "Slots", sortable: false, render: (r: any) => {
+                  { key: "slots", label: "Slots", sortable: true, render: (r: any) => {
                     const summary = slotSummaries[String(r.id)];
                     return <SlotProgress booked={summary?.booked ?? 0} total={summary?.total ?? 0} />;
                   }},
