@@ -145,16 +145,13 @@ function ConfirmationDialog({
               </DialogPrimitive.Close>
             )}
 
-            <div className="flex w-full mt-2 flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2">
+            <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               {!hideCancelButton && (
                 <button
                   type="button"
                   onClick={onCancel}
                   disabled={loading}
-                  className={cn(
-                    buttonVariants({ variant: "outline" }),
-                    "mt-2 sm:mt-0",
-                  )}
+                  className={cn(buttonVariants({ variant: "outline" }))}
                 >
                   {cancelText ?? DEFAULT_CANCEL_TEXT}
                 </button>
@@ -166,6 +163,7 @@ function ConfirmationDialog({
                 className={cn(
                   buttonVariants({ variant: "default" }),
                   config.confirmButtonClass,
+                  "gap-2",
                 )}
               >
                 {loading ? (

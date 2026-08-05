@@ -639,7 +639,7 @@ export default function EditAppointment() {
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
                     Select a branch, doctor and date to see available time slots
                   </div>
-                ) : loadingSlots ? (
+                ) : loadingSlots || findingNearestDate ? (
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl flex items-center justify-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
                     Loading available slots...

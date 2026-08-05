@@ -74,7 +74,18 @@ async function findNearestAvailableDate(
 }
 
 function formatSlotLabel(time: string): string {
-  const [hours, minutes] = time.split(":").map(Number);
+  // Slot buttons pass plain "HH:MM"; the booking-confirmation response passes
+  // the raw ISO datetime the backend stores appointment_time as (UTC-based) --
+  // parse hours/minutes from whichever shape shows up.
+  let hours: number;
+  let minutes: number;
+  if (time.includes("T")) {
+    const date = new Date(time);
+    hours = date.getUTCHours();
+    minutes = date.getUTCMinutes();
+  } else {
+    [hours, minutes] = time.split(":").map(Number);
+  }
   const ampm = hours >= 12 ? "PM" : "AM";
   const h12 = hours % 12 || 12;
   return `${h12.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")} ${ampm}`;
@@ -643,16 +654,13 @@ export default function AddAppointment() {
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
                     Select a branch, doctor and date to see available time slots
                   </div>
-                ) : loadingSlots ? (
+                ) : loadingSlots || findingNearestDate ? (
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl flex items-center justify-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
                     Loading available slots...
                   </div>
-                ) : availableSlots.length === 0 ? (
-                  <div className="col-span-full py-8 text-center text-sm text-amber-500 bg-amber-50 rounded-xl">
-                    No available slots for this doctor on the selected date
-                  </div>
-                ) : (
+                ) 
+                 : (
                   <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
                     {availableSlots.map((slot) => (
                       <button
@@ -765,33 +773,33 @@ export default function AddAppointment() {
         description={
           bookingResult ? (
             <div className="w-full rounded-xl bg-gray-50 border border-gray-100 p-4 text-left text-sm">
-              <div className="flex items-center justify-between py-1">
-                <span className="text-gray-500">Patient</span>
-                <span className="font-semibold text-gray-900">{formData.patientName || "-"}</span>
+              <div className="flex items-center justify-between gap-4 py-1">
+                <span className="shrink-0 text-gray-500">Patient</span>
+                <span className="text-right font-semibold text-gray-900">{formData.patientName || "-"}</span>
               </div>
-              <div className="flex items-center justify-between py-1">
-                <span className="text-gray-500">Patient ID</span>
-                <span className="font-semibold text-gray-900">{bookingResult.patient_id}</span>
+              <div className="flex items-center justify-between gap-4 py-1">
+                <span className="shrink-0 text-gray-500">Patient ID</span>
+                <span className="text-right font-semibold text-gray-900">{bookingResult.patient_id}</span>
               </div>
-              <div className="flex items-center justify-between py-1">
-                <span className="text-gray-500">Appointment ID</span>
-                <span className="font-semibold text-gray-900">{bookingResult.appointment_id}</span>
+              <div className="flex items-center justify-between gap-4 py-1">
+                <span className="shrink-0 text-gray-500">Appointment ID</span>
+                <span className="text-right font-semibold text-gray-900">{bookingResult.appointment_id}</span>
               </div>
-              <div className="flex items-center justify-between py-1">
-                <span className="text-gray-500">Date</span>
-                <span className="font-semibold text-gray-900">
+              <div className="flex items-center justify-between gap-4 py-1">
+                <span className="shrink-0 text-gray-500">Date</span>
+                <span className="text-right font-semibold text-gray-900">
                   {format(parseISO(bookingResult.appointment_date), "EEE, MMM d, yyyy")}
                 </span>
               </div>
-              <div className="flex items-center justify-between py-1">
-                <span className="text-gray-500">Time</span>
-                <span className="font-semibold text-gray-900">
+              <div className="flex items-center justify-between gap-4 py-1">
+                <span className="shrink-0 text-gray-500">Time</span>
+                <span className="text-right font-semibold text-gray-900">
                   {formatSlotLabel(bookingResult.appointment_time)}
                 </span>
               </div>
-              <div className="flex items-center justify-between py-1">
-                <span className="text-gray-500">Doctor</span>
-                <span className="font-semibold text-gray-900">{selectedDoctorName || "-"}</span>
+              <div className="flex items-center justify-between gap-4 py-1">
+                <span className="shrink-0 text-gray-500">Doctor</span>
+                <span className="text-right font-semibold text-gray-900">{selectedDoctorName || "-"}</span>
               </div>
             </div>
           ) : null
