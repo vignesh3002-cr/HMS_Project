@@ -1,5 +1,5 @@
 import axios from "axios";
-import { remove } from "../utils/token";
+import { getToken, remove } from "../utils/token";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_BACKEND_URL,
@@ -20,7 +20,7 @@ export function getActiveBranchId(): string | null {
 }
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
+  const token = getToken();
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;

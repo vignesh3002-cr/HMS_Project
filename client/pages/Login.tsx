@@ -40,8 +40,8 @@ export default function Login() {
       // );
       // navigate("/authenticate");
 
-      saveToken(response.token);
-      saveUser(response.user);
+      saveToken(response.token, rememberMe);
+      saveUser(response.user, rememberMe);
       navigate("/dashboard");
     } catch (error: any) {
       const message = error.response?.data?.message || error.message || "Login failed";

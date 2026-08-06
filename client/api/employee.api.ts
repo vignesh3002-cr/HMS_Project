@@ -224,6 +224,9 @@ export const employeeApi = {
   getOne: (employeeId: string) =>
     API.get<{ success: boolean; data: EmployeeDetailResponse }>(`/employees/${employeeId}`),
 
+  getMe: () =>
+    API.get<{ success: boolean; data: EmployeeDetailResponse }>(`/employees/me`),
+
   update: (employeeId: string, data: UpdateEmployeePayload) =>
     API.put<{ success: boolean; data: any; message?: string }>(`/employees/${employeeId}`, data),
 
