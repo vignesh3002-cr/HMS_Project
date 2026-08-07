@@ -550,12 +550,6 @@ export default function Staff() {
         { key: "access", label: "Access Level", render: (r: any) => (
           <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${badgeClass(r.accessColor)}`}>{r.access}</span>
         )},
-        { key: "login", label: "Last Login", render: (r: any) => (
-          <span className="inline-flex items-center gap-1.5">
-            <span className={`w-1.5 h-1.5 rounded-full ${r.loginDot === "green" ? "bg-green-500" : "bg-orange-500"}`} />
-            <span className="text-[#191C1E] hms-content-text whitespace-nowrap">{r.login}</span>
-          </span>
-        )},
         { key: "status", label: "Status", render: (r: any) => <StatusBadge status={r.status} /> },
         { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} onDelete={handleDeleteClick} /> },
       ];

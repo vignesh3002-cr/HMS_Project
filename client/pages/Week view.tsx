@@ -112,9 +112,9 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   }, []);
 
   const viewOptions: { key: ScheduleViewType; label: string }[] = [
+    { key: "week", label: "Week View" },
     { key: "day", label: "Day View" },
     { key: "list", label: "List View" },
-    { key: "week", label: "Week View" },
   ];
 
   const handleViewSelect = (view: ScheduleViewType) => {

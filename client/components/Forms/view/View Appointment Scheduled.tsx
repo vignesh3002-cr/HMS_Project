@@ -44,8 +44,8 @@ function formatPatientName(p: AppointmentRecord["patient_bio_data"]): string {
     .join(" ");
 }
 
-function formatDoctorName(e: AppointmentRecord["employees"]): string {
-  if (!e) return "Unassigned";
+function formatDoctorName(e: AppointmentRecord["employees"], fallbackName?: string | null): string {
+  if (!e) return fallbackName || "Unassigned";
   return `Dr. ${[e.first_name, e.middle_name, e.last_name].filter(Boolean).join(" ")}`;
 }
 
@@ -131,7 +131,7 @@ const AppointmentDetails: React.FC = () => {
 
   const statusLabel = STATUS_LABELS[appointment.status ?? ""] ?? (appointment.status || "Unknown");
   const patientName = formatPatientName(appointment.patient_bio_data);
-  const doctorName = formatDoctorName(appointment.employees);
+  const doctorName = formatDoctorName(appointment.employees, appointment.doctor_name);
   const dateLabel = formatAppointmentDate(appointment.appointment_date);
   const timeLabel = formatAppointmentTime(appointment.appointment_time);
   const branchAddress = [appointment.branch?.branch_area].filter(Boolean).join(", ");
@@ -268,6 +268,11 @@ const AppointmentDetails: React.FC = () => {
                 icon={<FileText className="h-6 w-6 text-blue-600" />}
                 title="Clinical Provider"
                 link="View profile"
+                onLinkClick={() => {
+                  if (appointment.employee_id) {
+                    navigate(`/doctor/view/${appointment.employee_id}/details`);
+                  }
+                }}
               />
 
               <div className="flex items-start gap-6 border-b border-slate-100 pb-8">
@@ -490,12 +495,14 @@ interface SectionHeaderProps {
   icon: React.ReactNode;
   title: string;
   link?: string;
+  onLinkClick?: () => void;
 }
 
 const SectionHeader: React.FC<SectionHeaderProps> = ({
   icon,
   title,
   link,
+  onLinkClick,
 }) => {
   return (
     <div className="mb-8 flex items-center justify-between">
@@ -508,7 +515,11 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
       </div>
 
       {link && (
-        <button className="flex items-center gap-1 text-sm font-semibold text-blue-600 hover:underline">
+        <button
+          type="button"
+          onClick={onLinkClick}
+          className="flex items-center gap-1 text-sm font-semibold text-blue-600 hover:underline"
+        >
           {link}
           <ArrowRight className="h-4 w-4" />
         </button>

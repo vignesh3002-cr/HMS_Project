@@ -26,60 +26,44 @@ import { filterDataByValues } from "@/components/Filter/utils";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
 import HmsTable from "@/components/hms/HmsTable";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
-
-const appointments = [
-  {
-    id: "APT-2026-00125",
-    date: "25 Apr 2026",
-    time: "08:20 AM",
-    doctor: "Dr. Sarah Johnson",
-    doctorId: "DOC-2210",
-    department: "Oncologist",
-    status: "Schedule" as const,
-  },
-  {
-    id: "APT-2026-00124",
-    date: "20 May 2026",
-    time: "11:40 AM",
-    doctor: "Dr. Sarah Johnson",
-    doctorId: "DOC-2210",
-    department: "Oncologist",
-    status: "Completed" as const,
-  },
-  {
-    id: "APT-2026-00123",
-    date: "02 May 2026",
-    time: "08:20 AM",
-    doctor: "Dr. Sarah Johnson",
-    doctorId: "DOC-2210",
-    department: "Oncologist",
-    status: "Cancelled" as const,
-  },
-  {
-    id: "APT-2026-00122",
-    date: "27 Mar 2026",
-    time: "02:00 PM",
-    doctor: "Dr. David Lee",
-    doctorId: "DOC-0006",
-    department: "Oncologist",
-    status: "Completed" as const,
-  },
-  {
-    id: "APT-2026-00121",
-    date: "12 Mar 2026",
-    time: "05:40 PM",
-    doctor: "Dr. Sarah Johnson",
-    doctorId: "DOC-0002",
-    department: "Orthopedics",
-    status: "Completed" as const,
-  },
-] as const;
+import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 
 const statusVariant: Record<string, "blue" | "green" | "rose" | "amber"> = {
   Schedule: "blue",
   Completed: "green",
   Cancelled: "rose",
 };
+
+function mapAppointment(a: AppointmentRecord) {
+  const doctorName = a.employees
+    ? [a.employees.first_name, a.employees.middle_name, a.employees.last_name].filter(Boolean).join(" ")
+    : "—";
+
+  let date = "—";
+  let time = a.appointment_time || "—";
+  if (a.appointment_date) {
+    const d = new Date(a.appointment_date);
+    if (!isNaN(d.getTime())) {
+      date = format(d, "dd MMM yyyy");
+    }
+  }
+
+  const statusRaw = (a.status || "").toLowerCase();
+  const status =
+    statusRaw === "completed" ? "Completed" :
+    statusRaw === "cancelled" ? "Cancelled" :
+    "Schedule";
+
+  return {
+    id: a.appointment_id,
+    date,
+    time,
+    doctor: doctorName,
+    doctorId: a.employee_id || "—",
+    department: a.department_master?.department_name || a.department || "—",
+    status: status as "Schedule" | "Completed" | "Cancelled",
+  };
+}
 
 function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: () => void; onDelete: () => void }) {
   const [open, setOpen] = useState(false);
@@ -118,6 +102,7 @@ export default function PatientProfile() {
 
   const [patient, setPatient] = useState<PatientRecord | null>(null);
   const [loading, setLoading] = useState(true);
+  const [appointments, setAppointments] = useState<ReturnType<typeof mapAppointment>[]>([]);
 
   useEffect(() => {
     if (!id) return;
@@ -126,6 +111,14 @@ export default function PatientProfile() {
       .then((res) => setPatient(res.data.data))
       .catch(() => {})
       .finally(() => setLoading(false));
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    appointmentApi
+      .getAll({ patientId: id })
+      .then((res) => setAppointments(res.data.data.appointments.map(mapAppointment)))
+      .catch(() => {});
   }, [id]);
 
   function fullName(p: PatientRecord) {
@@ -190,7 +183,7 @@ export default function PatientProfile() {
     }
     result = filterDataByValues(result as unknown as Record<string, string | number>[], appliedValues) as typeof result;
     return result;
-  }, [searchQuery, appliedValues]);
+  }, [appointments, searchQuery, appliedValues]);
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -287,7 +280,10 @@ export default function PatientProfile() {
                   <Phone className="h-4 w-4" />
                 </Button>
                 <div className="flex flex-col items-center gap-1 sm:items-stretch">
-                  <Button className="flex w-full items-center gap-2 bg-[#004785] hover:bg-[#003a6b] sm:w-auto">
+                  <Button
+                    className="flex w-full items-center gap-2 bg-[#004785] hover:bg-[#003a6b] sm:w-auto"
+                    onClick={() => navigate("/appointments/book", { state: { patient } })}
+                  >
                     <Calendar className="h-4 w-4" />
                     Book Appointment
                   </Button>

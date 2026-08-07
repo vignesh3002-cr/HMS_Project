@@ -49,6 +49,8 @@ export default function Login() {
       } catch {
         // Non-critical — the 5-minute permission poll will pick it up.
       }
+      saveToken(response.token, rememberMe);
+      saveUser(response.user, rememberMe);
       navigate("/dashboard");
     } catch (error: any) {
       const message = error.response?.data?.message || error.message || "Login failed";

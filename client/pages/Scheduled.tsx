@@ -341,7 +341,7 @@ export default function DoctorProfile() {
               </div>
 
               <button
-                onClick={() => navigate("/appointments/book")}
+                onClick={() => navigate("/appointments/book", { state: { doctorId: id } })}
                 className="border-0 bg-[#004a91] hover:bg-[#003b75] text-white px-[17px] py-[11px] rounded-[7px] text-[13px] font-semibold cursor-pointer max-[700px]:w-full"
               >
                 Book Appointment
@@ -582,33 +582,7 @@ export default function DoctorProfile() {
 
               </div>
 
-              {/* TODAY'S REAL AVAILABLE SLOTS (from appointments API) */}
-              <div className="mt-4 border border-[#edf0f4] rounded-[7px] p-3">
-                <h3 className="text-[11px] font-bold text-[#182235] mb-2">
-                  Today's Available Slots
-                </h3>
 
-                {isSlotsLoading ? (
-                  <p className="text-[#9aa1ab] text-[11px]">Loading available slots...</p>
-                ) : todaySlots?.slots?.length ? (
-                  <div className="flex flex-wrap gap-2">
-                    {todaySlots.slots.map((slot) => (
-                      <span
-                        key={slot.schedule_id}
-                        className={`px-[9px] py-1 rounded-full text-[10px] font-semibold border ${
-                          slot.is_available
-                            ? "bg-[#f0faf6] text-[#087d53] border-[#087d53]"
-                            : "bg-[#fff1f0] text-[#9aa1ab] border-[#dfe4ea] line-through"
-                        }`}
-                      >
-                        {slot.shift_name} · {slot.time}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-[#9aa1ab] text-[11px]">No available slots for today.</p>
-                )}
-              </div>
 
               <button
                 onClick={clearSchedule}

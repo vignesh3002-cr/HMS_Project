@@ -230,8 +230,8 @@ export default function Authenticate() {
       
       if (res.data.success) { 
         const { token, user } = res.data.data;
-        saveToken(token);
-        saveUser(user);
+        saveToken(token, rememberMe);
+        saveUser(user, rememberMe);
         sessionStorage.removeItem("pendingUsername");
         navigate("/dashboard");
       } else {
