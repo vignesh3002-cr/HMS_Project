@@ -34,6 +34,7 @@ export function BranchSelector() {
     selectedBranch,
     isAllBranches,
     isBranchAdmin,
+    isStaffAdmin,
     isHeadAdmin,
     selectBranch,
     refreshBranches,
@@ -84,7 +85,7 @@ export function BranchSelector() {
   };
 
   // ── BRANCH_ADMIN: read-only display ──────────────────────────────────────
-  if (isBranchAdmin) {
+  if (isBranchAdmin || isStaffAdmin) {
     return (
       <div className="flex items-center gap-1.5 text-[#334155] font-semibold text-sm opacity-80 cursor-default select-none">
         <Lock size={14} className="text-[#64748B]" />

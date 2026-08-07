@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   ShieldCheck,
   MapPin,
@@ -8,6 +9,7 @@ import {
   Lock,
   User,
 } from "lucide-react";
+import api from "@/api/axios";
 import { branchApi, type BranchDetail } from "@/api/branch.api";
 import { getUser } from "@/utils/token";
 import { useBranchFilter } from "@/context/BranchFilterContext";
@@ -33,6 +35,29 @@ const Profile = () => {
   // blank rather than falling back to placeholder text.
   const { selectedBranchId, isAllBranches } = useBranchFilter();
   const [branch, setBranch] = useState<BranchDetail | null>(null);
+  const navigate = useNavigate();
+  const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .get("/auth/me")
+      .then((res) => {
+        if (res.data?.success) setMyEmployeeId(res.data.user?.employee_id ?? null);
+      })
+      .catch((err) => {
+        console.error("[Profile] Failed to load current user:", err);
+      });
+  }, []);
+
+  const handleEditProfile = () => {
+    if (!myEmployeeId) return;
+    const role = getUser()?.role_type || getUser()?.role || "";
+    const path = role === "DOCTOR" ? `/doctor/edit/${myEmployeeId}` : `/staff/edit/${myEmployeeId}`;
+    // ?self=1 tells Addemployee.tsx this is the account owner editing their
+    // own profile, so it can hide fields that only make sense for an admin
+    // acting on someone else (e.g. the Status/Active toggle).
+    navigate(`${path}?self=1`);
+  };
 
   useEffect(() => {
     const branchId = !isAllBranches ? selectedBranchId : getUser()?.branch_id;
@@ -118,7 +143,11 @@ const Profile = () => {
                 <button className="px-4 py-2 rounded-lg border border-[#00488D] text-[#00488D] text-xs font-semibold hover:bg-[#E6F0FF] transition-colors">
                   Export CV
                 </button>
-                <button className="px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors">
+                <button
+                  onClick={handleEditProfile}
+                  disabled={!myEmployeeId}
+                  className="px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   Edit Profile
                 </button>
               </div>
@@ -271,9 +300,17 @@ const Profile = () => {
 
               {/* ================= Security Card ================= */}
               <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm p-6">
-                <h2 className="mb-5 flex items-center gap-2 text-lg font-semibold text-slate-900">
-                  <Lock className="h-5 w-5 text-slate-400" /> Security &amp; Access
-                </h2>
+                <div className="mb-5 flex items-center justify-between">
+                  <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
+                    <Lock className="h-5 w-5 text-slate-400" /> Security &amp; Access
+                  </h2>
+                  <button
+                    onClick={() => navigate("/security")}
+                    className="px-3 py-1.5 rounded-lg border border-[#00488D] text-[#00488D] text-xs font-semibold hover:bg-[#E6F0FF] transition-colors"
+                  >
+                    Manage Username &amp; Password
+                  </button>
+                </div>
 
                 {/* 2FA */}
                 <div className="flex items-center justify-between">

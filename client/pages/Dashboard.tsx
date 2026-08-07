@@ -15,7 +15,9 @@ import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { branchApi } from "@/api/branch.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
+import { DepartmentPill, DepartmentAvatarText } from "@/components/hms/DepartmentBadge";
 import { useBranchFilter } from "@/context/BranchFilterContext";
+import { usePermission } from "@/context/PermissionContext";
 
 const navItems = [
   {
@@ -122,7 +124,7 @@ function formatBranch(branch: EmployeeRecord["branch"]): string {
 function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${doc.first_name} ${doc.middle_name ? doc.middle_name + " " : ""}${doc.last_name}`;
-  const role = doc.user_table?.role_type || "DOCTOR";
+  const role = doc.user_table?.role_type || "STAFF";
   const branchName = formatBranch(doc.branch);
   const isActive = doc.emp_status === true || doc.user_table?.user_status === 0;
   return {
@@ -136,6 +138,7 @@ function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
     deptColor: "#475C7F",
     branch: branchName,
     status: isActive ? "Active" : "Inactive",
+    role,
   };
 }
 
@@ -235,6 +238,7 @@ export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { toast } = useToast();
   const { selectedBranchId, isAllBranches } = useBranchFilter();
+  const { can, canAny, permissions, loading: permissionsLoading } = usePermission();
 
  
   const [realDoctors, setRealDoctors] = useState<Record<string, unknown>[] | null>(null);
@@ -249,6 +253,12 @@ export default function Dashboard() {
   const [appointmentCount, setAppointmentCount] = useState<number>(0);
 
   const fetchEmployees = useCallback(async () => {
+    if (!permissions.some((p) => p === "employee.read" || p === "doctor.read")) {
+      setIsEmployeesLoading(false);
+      setRealDoctors(null);
+      setRealStaff(null);
+      return;
+    }
     setIsEmployeesLoading(true);
     try {
       console.log("[Dashboard] Fetching all employees from employeeApi...");
@@ -288,7 +298,7 @@ export default function Dashboard() {
     } finally {
       setIsEmployeesLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches]);
+  }, [toast, selectedBranchId, isAllBranches, permissions]);
 
   // Branch progress bar state — branches come from the real /branch API.
   // Each branch's pct/color is driven purely by its own real total
@@ -345,6 +355,12 @@ export default function Dashboard() {
   }, []);
 
   const fetchAppointments = useCallback(async () => {
+    if (!permissions.includes("appointment.read")) {
+      setIsAppointmentsLoading(false);
+      setRealAppointments(null);
+      setAppointmentCount(0);
+      return;
+    }
     setIsAppointmentsLoading(true);
     try {
       const res = await appointmentApi.getAll({
@@ -374,6 +390,10 @@ export default function Dashboard() {
   }, [fetchAppointments]);
 
   useEffect(() => {
+    if (!permissions.includes("patient.read")) {
+      setPatientCount(0);
+      return;
+    }
     patientApi
       .getAll({ limit: 1, branchId: isAllBranches ? undefined : selectedBranchId })
       .then((res) => {
@@ -382,7 +402,7 @@ export default function Dashboard() {
       .catch(() => {
         setPatientCount(0);
       });
-  }, [selectedBranchId, isAllBranches]);
+  }, [selectedBranchId, isAllBranches, permissions]);
 
   useEffect(() => {
     fetchEmployees();
@@ -391,6 +411,7 @@ export default function Dashboard() {
   const liveStats = useMemo(() => [
     {
       label: "Doctors",
+      permission: "doctor.read",
       value: (realDoctors?.length ?? 0).toLocaleString(),
       change: "",
       changeType: "positive",
@@ -402,6 +423,7 @@ export default function Dashboard() {
     },
     {
       label: "Patients",
+      permission: "patient.read",
       value: patientCount.toLocaleString(),
       change: "",
       changeType: "positive",
@@ -413,6 +435,7 @@ export default function Dashboard() {
     },
     {
       label: "Staff",
+      permission: "employee.read",
       value: (realStaff?.length ?? 0).toLocaleString(),
       change: "",
       changeType: "neutral",
@@ -424,6 +447,7 @@ export default function Dashboard() {
     },
     {
       label: "Appointments",
+      permission: "appointment.read",
       value: appointmentCount.toLocaleString(),
       change: "",
       changeType: "positive",
@@ -435,6 +459,7 @@ export default function Dashboard() {
     },
     {
       label: "Prescription Generated",
+      permission: undefined,
       value: "8,432",
       change: "124",
       changeType: "negative",
@@ -446,6 +471,7 @@ export default function Dashboard() {
     },
     {
       label: "Bills Generated",
+      permission: undefined,
       value: "2700",
       change: "+160",
       changeType: "positive",
@@ -456,6 +482,8 @@ export default function Dashboard() {
       iconBg: "rgba(255,255,255,0.20)",
     },
   ], [realDoctors, realStaff, patientCount, appointmentCount]);
+
+  const visibleStats = liveStats.filter((stat) => !stat.permission || can(stat.permission));
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -557,6 +585,19 @@ export default function Dashboard() {
       default: return doctorFilterFields;
     }
   }, [activeTab]);
+
+  const availableTabs = useMemo(() => [
+    { key: "doctors", label: "Doctors", show: canAny(["doctor.read", "employee.read"]) },
+    { key: "staff", label: "Staff", show: can("employee.read") },
+    { key: "appointments", label: "Appointments", show: can("appointment.read") },
+  ].filter((tab) => tab.show), [permissions]);
+
+  useEffect(() => {
+    if (availableTabs.length === 0) return;
+    if (!availableTabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab(availableTabs[0].key);
+    }
+  }, [availableTabs, activeTab]);
 
   useEffect(() => {
     const container = tabsContainerRef.current;
@@ -706,6 +747,10 @@ useEffect(() => {
     navigate(`/destination-edit/${id}`);
   };
 
+  const handleEditStaff = (id: string | number, role: string) => {
+    navigate(`/staff/edit/${id}?role=${role}`);
+  };
+
   // Doctor rows always route to the real Edit Doctor page, regardless of
   // which page/tab they're clicked from — role drives the destination, not
   // the page. (Staff/Appointments keep the placeholder handler above.)
@@ -716,6 +761,10 @@ useEffect(() => {
   const handleView = (id: string | number) => {
     navigate(`/doctor/day-view/${id}`);
   };
+
+  if (permissionsLoading || isEmployeesLoading || isAppointmentsLoading) {
+    return <DashboardSkeleton />;
+  }
 
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB]">
@@ -735,7 +784,7 @@ useEffect(() => {
         <main className="flex flex-col gap-6 border-t border-[#E5E7EB] pt-6">
           {/* Stats Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-8">
-            {liveStats.map((stat) => (
+            {visibleStats.map((stat) => (
               <div
                 key={stat.label}
                 className="flex flex-col p-4 rounded-xl shadow-[2px_2px_16px_0_rgba(0,0,0,0.25)] transition-all duration-200 hover:-translate-y-1 hover:shadow-lg cursor-pointer"
@@ -775,6 +824,7 @@ useEffect(() => {
                <h2 className="hms-heading">Admin Overview</h2>
                <p className="hms-subheading">Real-time performance across all branches.</p>
              </div>
+             {can("appointment.create") && (
              <button
                onClick={() => navigate("/appointments/add")}
                className="flex items-center gap-1.5 px-5 py-2.5 bg-[#004785] rounded-[10px] text-white text-xs font-semibold whitespace-nowrap hover:opacity-90 transition-opacity"
@@ -784,6 +834,7 @@ useEffect(() => {
                </svg>
                Add Appointment
              </button>
+             )}
            </div>
 
           {/* Table Card */}
@@ -792,11 +843,7 @@ useEffect(() => {
               {/* Table Header */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-[rgba(194,198,212,0.10)]">
               <div className="relative flex items-center gap-6" ref={tabsContainerRef}>
-                {[
-                  { key: "doctors", label: "Doctors" },
-                  { key: "staff", label: "Staff" },
-                  { key: "appointments", label: "Appointments" },
-                ].map((tab) => (
+                {availableTabs.map((tab) => (
                   <button
                     key={tab.key}
                     data-tab={tab.key}
@@ -932,23 +979,25 @@ useEffect(() => {
                           <circle cx="12" cy="12" r="3" />
                         </svg>
                       </button>
+                      {can("appointment.update") && (
                       <button title="Edit" onClick={() => handleEdit(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] group-hover:stroke-[#5E87CF]">
                           <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                           <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
                         </svg>
                       </button>
+                      )}
                     </div>
                   )},
                 ] : [
                   { key: "name", label: "Name", render: (r: any) => (
                     <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.initBg, color: r.avatarColor }}>{r.avatar}</div>
+                      <DepartmentAvatarText department={r.dept}>{r.avatar}</DepartmentAvatarText>
                       <div><div className="hms-name-text">{r.name}</div><div className="hms-id-text">{r.id}</div></div>
                     </div>
                   )},
                   { key: "dept", label: "Department", render: (r: any) => (
-                    <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: r.deptBg, color: r.deptColor }}>{r.dept}</span>
+                    <DepartmentPill department={r.dept}>{r.dept}</DepartmentPill>
                   )},
                   { key: "branch", label: "Branch", render: (r: any) => <span className="text-[#191C1E] hms-content-text leading-4">{r.branch}</span> },
                   { key: "status", label: "Status", render: (r: any) => (
@@ -956,18 +1005,26 @@ useEffect(() => {
                   )},
                   { key: "actions", label: "Actions", sortable: false, render: (r: any) => (
                     <div className="flex items-center gap-1">
+                      {can("doctor.read") && (
                       <button title="View" onClick={() => handleView(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] group-hover:stroke-[#505F76]">
                           <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
                           <circle cx="12" cy="12" r="3" />
                         </svg>
                       </button>
-                      <button title="Edit" onClick={() => (activeTab === "doctors" ? handleEditDoctor : handleEdit)(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
+                      )}
+                      {can(activeTab === "doctors" ? "doctor.update" : "employee.update") && (
+                      <button title="Edit" onClick={() => {
+                        if (activeTab === "doctors") handleEditDoctor(r.id);
+                        else if (activeTab === "staff") handleEditStaff(r.id, r.role);
+                        else handleEdit(r.id);
+                      }} className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] group-hover:stroke-[#5E87CF]">
                           <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                           <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
                         </svg>
                       </button>
+                      )}
                     </div>
                   )},
                 ]}
@@ -994,6 +1051,7 @@ useEffect(() => {
           {/* Bottom Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
             {/* Branch Performance */}
+            {can("appointment.read") && (
             <div ref={branchRef} className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
               <div className="flex items-start justify-between">
                 <div>
@@ -1018,6 +1076,7 @@ useEffect(() => {
                 ))}
               </div>
             </div>
+            )}
 
             {/* System Integrity */}
             <div className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
@@ -1057,3 +1116,56 @@ useEffect(() => {
     </div>
   );
 };
+
+function DashboardSkeleton() {
+  return (
+    <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB]">
+      <div className="flex flex-col flex-1 min-w-0">
+        <main className="flex flex-col gap-6 border-t border-[#E5E7EB] pt-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-8">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div
+                key={i}
+                className="flex flex-col gap-3 p-4 rounded-xl border border-slate-200 bg-white shadow-sm"
+              >
+                <div className="w-8 h-8 bg-slate-200 rounded-[4px] animate-pulse" />
+                <div className="w-16 h-6 bg-slate-200 rounded-md animate-pulse" />
+                <div className="w-20 h-3 bg-slate-100 rounded-md animate-pulse" />
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-end justify-between">
+            <div className="flex flex-col gap-2">
+              <div className="w-44 h-6 bg-slate-200 rounded-md animate-pulse" />
+              <div className="w-72 h-3 bg-slate-100 rounded-md animate-pulse" />
+            </div>
+            <div className="w-32 h-9 bg-slate-200 rounded-[10px] animate-pulse" />
+          </div>
+
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+              <div className="flex items-center gap-6">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="w-14 h-4 bg-slate-100 rounded-md animate-pulse" />
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-[200px] h-7 bg-slate-100 rounded-md animate-pulse" />
+                <div className="w-24 h-7 bg-slate-100 rounded-md animate-pulse" />
+              </div>
+            </div>
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="flex items-center gap-4 px-5 py-4 border-b border-slate-100">
+                <div className="w-1/5 h-4 bg-slate-100 rounded-md animate-pulse" />
+                <div className="w-1/6 h-4 bg-slate-100 rounded-md animate-pulse" />
+                <div className="flex-1 h-4 bg-slate-50 rounded-md animate-pulse" />
+                <div className="w-16 h-5 bg-slate-100 rounded-full animate-pulse" />
+              </div>
+            ))}
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}

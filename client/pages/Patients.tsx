@@ -7,10 +7,10 @@ import {
   List,
   LayoutGrid,
   Plus,
-  MoreVertical,
   CalendarCheck,
   User,
   Loader2,
+  MoreVertical,
 } from "lucide-react";
 
 import HmsTable from "@/components/hms/HmsTable";
@@ -22,9 +22,11 @@ import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
+import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { useBranchFilter } from "@/context/BranchFilterContext";
+import { usePermission } from "@/context/PermissionContext";
 
 function getPatientFullName(p: PatientRecord): string {
   return [p.patient_first_name, p.patient_middle_name, p.patient_last_name]
@@ -79,10 +81,86 @@ function mapToGridPatient(p: PatientRecord) {
   };
 }
 
-// List view additionally shows diagnose + assigned doctor, but GET /patients
-// doesn't join patient_history/appointment_history today, so that data isn't
-// available yet — shown as a clear placeholder instead of guessing.
-function mapToListPatient(p: PatientRecord) {
+// A doctor only counts as "assigned" while the appointment linking them is
+// still upcoming/current — never for one that's cancelled, a no-show, or
+// already completed. Once it's over, the patient goes back to Unassigned
+// rather than continuing to show whoever last treated them.
+const NON_ASSIGNING_APPOINTMENT_STATUSES = new Set(["CANCELLED", "NO_SHOW", "COMPLETED"]);
+
+interface AssignedDoctor {
+  name: string;
+  id: string;
+}
+
+function getDoctorInitials(name: string): string {
+  const words = name.replace(/^Dr\.?\s*/i, "").trim().split(/\s+/).filter(Boolean);
+  return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
+}
+
+// Sortable timestamp for an appointment: its date plus its time-of-day
+// (appointment_time is stored as a bare time-of-day, so its own date part
+// is meaningless — same approach as Appointments.tsx's mapAppointmentRecord).
+function appointmentSortKey(record: AppointmentRecord): number {
+  const dateMs = new Date(record.appointment_date).getTime();
+  const timeMs = new Date(record.appointment_time).getTime();
+  const timeOfDayMs = !isNaN(timeMs) ? ((timeMs % 86400000) + 86400000) % 86400000 : 0;
+  return (isNaN(dateMs) ? 0 : dateMs) + timeOfDayMs;
+}
+
+// Calendar-date-only boundary for "today," UTC-anchored to match how
+// appointment_date is stored/read elsewhere (formatAppointmentDate etc.).
+function startOfTodayUtcMs(): number {
+  const now = new Date();
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+}
+
+function isTodayOrFuture(record: AppointmentRecord, todayStartMs: number): boolean {
+  const d = new Date(record.appointment_date);
+  if (isNaN(d.getTime())) return false;
+  const apptDateMs = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  return apptDateMs >= todayStartMs;
+}
+
+// Builds patient_id -> the doctor from their nearest upcoming (today or
+// later) appointment that isn't cancelled/no-show/completed, from the same
+// /appointments data Appointments.tsx already uses — GET /patients has no
+// doctor/diagnosis join today, so this is assembled entirely on the
+// frontend from the existing appointments endpoint.
+function buildAssignedDoctorMap(appointments: AppointmentRecord[]): Record<string, AssignedDoctor> {
+  const todayStartMs = startOfTodayUtcMs();
+  const nearestByPatient: Record<string, { sortKey: number; record: AppointmentRecord }> = {};
+
+  for (const record of appointments) {
+    if (!record.patient_id || !record.employees) continue;
+    if (NON_ASSIGNING_APPOINTMENT_STATUSES.has(record.status ?? "")) continue;
+    if (!isTodayOrFuture(record, todayStartMs)) continue;
+
+    const sortKey = appointmentSortKey(record);
+    const existing = nearestByPatient[record.patient_id];
+    // Nearest upcoming = smallest sort key, not largest — the very next
+    // appointment is what "currently assigned" should mean.
+    if (!existing || sortKey <= existing.sortKey) {
+      nearestByPatient[record.patient_id] = { sortKey, record };
+    }
+  }
+
+  const result: Record<string, AssignedDoctor> = {};
+  for (const [patientId, { record }] of Object.entries(nearestByPatient)) {
+    const doctor = record.employees!;
+    result[patientId] = {
+      id: doctor.employee_id,
+      name: `Dr. ${[doctor.first_name, doctor.middle_name, doctor.last_name].filter(Boolean).join(" ")}`,
+    };
+  }
+  return result;
+}
+
+// List view additionally shows diagnose + assigned doctor. Assigned doctor
+// comes from the patient's own appointment history (see
+// buildAssignedDoctorMap above); there's no diagnosis field exposed by any
+// existing endpoint yet, so that stays a clear placeholder rather than a guess.
+function mapToListPatient(p: PatientRecord, assignedDoctors: Record<string, AssignedDoctor>) {
+  const assigned = assignedDoctors[p.patient_id];
   return {
     id: p.patient_id,
     name: getPatientFullName(p),
@@ -92,11 +170,11 @@ function mapToListPatient(p: PatientRecord) {
     diagnose: "Not recorded",
     diagnoseBg: "#F3F4F6",
     diagnoseColor: "#6B7280",
-    doctor: "Unassigned",
-    doctorId: "—",
-    doctorAvatar: "?",
-    doctorColor: "#6B7280",
-    doctorBg: "#F3F4F6",
+    doctor: assigned?.name ?? "Unassigned",
+    doctorId: assigned?.id ?? "—",
+    doctorAvatar: assigned ? getDoctorInitials(assigned.name) : "?",
+    doctorColor: assigned ? "#4F46E5" : "#6B7280",
+    doctorBg: assigned ? "#E0E7FF" : "#F3F4F6",
     status: getPatientStatus(p),
   };
 }
@@ -128,9 +206,10 @@ const PatientPhoto = ({ photo, name }: { photo: string; name: string }) => (
 );
 
 // 4. Three-dot card menu
-function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: () => void; onDelete: () => void }) {
+function CardMenu({ onView, onEdit }: { onView: () => void; onEdit: () => void }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const { can } = usePermission();
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -142,6 +221,8 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  if (!can("patient.read") && !can("patient.update")) return null;
+
   return (
     <div className="relative" ref={wrapperRef}>
       <button onClick={() => setOpen((o) => !o)} className="p-1 rounded hover:bg-[#F2F4F6] transition-colors">
@@ -151,9 +232,12 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
           open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
         }`}
       >
-        <button onClick={() => { onView(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">View</button>
-        <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
-        <button onClick={() => { onDelete(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">Delete</button>
+        {can("patient.read") && (
+          <button onClick={() => { onView(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">View</button>
+        )}
+        {can("patient.update") && (
+          <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
+        )}
       </div>
     </div>
   );
@@ -165,6 +249,7 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
 export default function PatientsManagement() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { can } = usePermission();
   const { selectedBranchId, isAllBranches } = useBranchFilter();
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
 
@@ -202,6 +287,51 @@ export default function PatientsManagement() {
   useEffect(() => {
     fetchPatients();
   }, [fetchPatients]);
+
+  // Assigned Doctor (list view) — derived from the same branch's appointment
+  // history, not from GET /patients (which has no doctor join). Purely
+  // supplementary: a failed fetch here must never block the patients list
+  // itself, so it fails silently into an empty map (every row just falls
+  // back to "Unassigned") instead of throwing/toasting.
+  const [assignedDoctors, setAssignedDoctors] = useState<Record<string, AssignedDoctor>>({});
+
+  const fetchAssignedDoctors = useCallback(async () => {
+    try {
+      // GET /appointments caps limit at 100 (appointment.validation.ts) —
+      // requesting more 400s the whole call. Page through it for real
+      // instead, capped at 20 pages (2,000 appointments) as a sane ceiling.
+      const PAGE_SIZE = 100;
+      const MAX_PAGES = 20;
+      const allAppointments: AppointmentRecord[] = [];
+
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const res = await appointmentApi.getAll({
+          branchId: isAllBranches ? undefined : selectedBranchId,
+          // Only "assigned" appointments matter here — never spend the
+          // page budget on past ones just to filter them out client-side.
+          dateFrom: format(new Date(), "yyyy-MM-dd"),
+          limit: PAGE_SIZE,
+          page,
+          sortBy: "appointment_date",
+          sortOrder: "asc",
+        });
+        allAppointments.push(...(res.data?.data?.appointments || []));
+        totalPages = res.data?.data?.totalPages || 1;
+        page += 1;
+      } while (page <= totalPages && page <= MAX_PAGES);
+
+      setAssignedDoctors(buildAssignedDoctorMap(allAppointments));
+    } catch (err) {
+      console.error("[Patients Page] Failed to load assigned doctors:", err);
+      setAssignedDoctors({});
+    }
+  }, [selectedBranchId, isAllBranches]);
+
+  useEffect(() => {
+    fetchAssignedDoctors();
+  }, [fetchAssignedDoctors]);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -297,7 +427,7 @@ export default function PatientsManagement() {
       ? []
       : viewMode === "grid"
         ? (realPatients.map(mapToGridPatient) as unknown as Record<string, string | number>[])
-        : (realPatients.map(mapToListPatient) as unknown as Record<string, string | number>[]);
+        : (realPatients.map((p) => mapToListPatient(p, assignedDoctors)) as unknown as Record<string, string | number>[]);
     let result = rawData;
 
     if (searchQuery) {
@@ -313,7 +443,7 @@ export default function PatientsManagement() {
     result = filterDataByValues(result, appliedValues);
 
     return result;
-  }, [searchQuery, searchableFields, appliedValues, viewMode, realPatients]);
+  }, [searchQuery, searchableFields, appliedValues, viewMode, realPatients, assignedDoctors]);
 
   // ---- SORTING (list only) ----
   const handleSort = (field: string) => {
@@ -377,7 +507,6 @@ export default function PatientsManagement() {
   // ---- ACTION HANDLERS ----
   const handleView = (id: string) => navigate(`/patients/view/${id}`);
   const handleEdit = (id: string) => navigate(`/patients/edit/${id}`);
-  const handleDelete = (id: string) => alert(`Delete logic for patient ${id}`);
   const handleSchedule = (id: string) => {
     const patient = (realPatients ?? []).find((p) => p.patient_id === id);
     navigate("/appointments/book", { state: patient ? { patient } : undefined });
@@ -395,15 +524,17 @@ export default function PatientsManagement() {
               <p className="hms-subheading">Real-time performance across all branches.</p>
             </div>
 <div className="flex items-center gap-3">
-    <ExportReport />
-    <button
+    {can("report.export") && <ExportReport />}
+    {can("patient.create") && (
+      <button
                 onClick={handleAddDoctor}
                 className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 Add new Patient
               </button>
-            </div>
+    )}
+    </div>
           </div>
 
           {/* ==================== MAIN CARD ==================== */}
@@ -505,7 +636,13 @@ export default function PatientsManagement() {
                   open={isFilterOpen}
                   onOpenChange={setIsFilterOpen}
                 />
-                <RefreshButton onClick={fetchPatients} isLoading={isPatientsLoading} />
+                <RefreshButton
+                  onClick={() => {
+                    fetchPatients();
+                    fetchAssignedDoctors();
+                  }}
+                  isLoading={isPatientsLoading}
+                />
               </div>
             </div>
 
@@ -544,23 +681,22 @@ export default function PatientsManagement() {
                   )},
                   { key: "actions", label: "Actions", sortable: false, render: (r: any) => (
                     <div className="flex items-center gap-1">
-                      <button onClick={() => handleView(String(r.id))} title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
-                          <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-                          <circle cx="12" cy="12" r="3" />
-                        </svg>
-                      </button>
-                      <button onClick={() => handleEdit(String(r.id))} title="Edit" className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
-                          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                          <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
-                        </svg>
-                      </button>
-                      <button onClick={() => handleDelete(String(r.id))} title="Delete" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
-                          <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                        </svg>
-                      </button>
+                      {can("patient.read") && (
+                        <button onClick={() => handleView(String(r.id))} title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
+                            <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+                            <circle cx="12" cy="12" r="3" />
+                          </svg>
+                        </button>
+                      )}
+                      {can("patient.update") && (
+                        <button onClick={() => handleEdit(String(r.id))} title="Edit" className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
+                            <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
+                          </svg>
+                        </button>
+                      )}
                     </div>
                   )},
                 ]}
@@ -606,7 +742,6 @@ export default function PatientsManagement() {
                           <CardMenu
                             onView={() => handleView(patient.id)}
                             onEdit={() => handleEdit(patient.id)}
-                            onDelete={() => handleDelete(patient.id)}
                           />
                         </div>
 

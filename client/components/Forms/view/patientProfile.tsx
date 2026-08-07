@@ -261,10 +261,10 @@ export default function PatientProfile() {
                     <h1 className="text-2xl font-bold text-slate-900">{patientName}</h1>
                     <p className="hms-id-text mt-0.5">#{patient.patient_id}</p>
                     <div className="flex flex-col gap-2 text-sm text-slate-600 sm:flex-row sm:items-center mt-2">
-                      {(patient as any).patient_current_address && (
+                      {(patient as any).current_address && (
                         <div className="flex items-center gap-1.5">
                           <MapPin className="h-4 w-4 text-slate-400 shrink-0" />
-                          <span>{(patient as any).patient_current_address}</span>
+                          <span>{(patient as any).current_address}</span>
                         </div>
                       )}
                     </div>

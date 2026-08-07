@@ -47,6 +47,10 @@ const statusToneMap: Record<string, StatusTone> = {
   "in consultation": "purple",
   completed: "emerald",
   "no show": "gray",
+  "reschedule required": "amber",
+  "transfer review required": "indigo",
+  pending: "amber",
+  assigned: "blue",
 };
 
 function resolveTone(status?: string, tone?: StatusTone): StatusTone {

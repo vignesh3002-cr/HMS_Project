@@ -4,9 +4,11 @@ import { login } from "../api/auth.api";
 import { toast } from "@/hooks/use-toast";
 import ElasticPulse from "@/components/ui/Elasticpulse";
 import { saveToken, saveUser } from "../utils/token";
+import { usePermission } from "@/context/PermissionContext";
 
 export default function Login() {
   const navigate = useNavigate();
+  const { refetch: refetchPermissions } = usePermission();
   const [rememberMe, setRememberMe] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -42,6 +44,11 @@ export default function Login() {
 
       saveToken(response.token);
       saveUser(response.user);
+      try {
+        await refetchPermissions();
+      } catch {
+        // Non-critical — the 5-minute permission poll will pick it up.
+      }
       navigate("/dashboard");
     } catch (error: any) {
       const message = error.response?.data?.message || error.message || "Login failed";

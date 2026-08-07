@@ -15,6 +15,9 @@ import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { StatusBadge } from "@/components/hms/StatusBadge";
+import { DepartmentPill, DepartmentAvatarText } from "@/components/hms/DepartmentBadge";
+import { usePermission } from "@/context/PermissionContext";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 
 interface StaffMember {
   initials: string;
@@ -233,8 +236,9 @@ const badgeClass = (color: "purple" | "indigo") =>
 
 
 
-const ActionIcons = ({ id, roleType }: { id?: string; roleType?: string } = {}) => {
+const ActionIcons = ({ id, roleType, onDelete }: { id?: string; roleType?: string; onDelete?: (id: string) => void } = {}) => {
   const navigate = useNavigate();
+  const { can } = usePermission();
   // Every role now edits through the same AddEmployee.tsx form (Create/Edit
   // mode) — Doctors keep the /doctor/edit/:id path, everyone else uses
   // /staff/edit/:id; both routes render the same component.
@@ -243,28 +247,39 @@ const ActionIcons = ({ id, roleType }: { id?: string; roleType?: string } = {}) 
 
   return (
     <div className="flex items-center gap-1">
-      <button title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
-          <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-      </button>
-      <button
-        title="Edit"
-        onClick={canEdit ? () => navigate(editPath) : undefined}
-        disabled={!canEdit}
-        className={`p-1.5 rounded transition-colors duration-200 group ${canEdit ? "hover:bg-blue-50 cursor-pointer" : "opacity-40 cursor-not-allowed"}`}
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
-          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-          <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
-        </svg>
-      </button>
-      <button title="Delete" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
-        <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
-          <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-        </svg>
-      </button>
+      {can("employee.read") && (
+        <button title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
+            <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </button>
+      )}
+      {can("employee.update") && (
+        <button
+          title="Edit"
+          onClick={canEdit ? () => navigate(editPath) : undefined}
+          disabled={!canEdit}
+          className={`p-1.5 rounded transition-colors duration-200 group ${canEdit ? "hover:bg-blue-50 cursor-pointer" : "opacity-40 cursor-not-allowed"}`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
+            <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
+          </svg>
+        </button>
+      )}
+      {can("employee.delete") && (
+        <button
+          title="Deactivate"
+          onClick={id ? () => onDelete?.(id) : undefined}
+          disabled={!id}
+          className={`p-1.5 rounded transition-colors duration-200 group ${id ? "hover:bg-red-50 cursor-pointer" : "opacity-40 cursor-not-allowed"}`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
+            <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+          </svg>
+        </button>
+      )}
     </div>
   );
 };
@@ -272,6 +287,7 @@ const ActionIcons = ({ id, roleType }: { id?: string; roleType?: string } = {}) 
 export default function Staff() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { can } = usePermission();
   const { selectedBranchId, isAllBranches } = useBranchFilter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
@@ -281,6 +297,39 @@ export default function Staff() {
 
   const handleAddStaff = () => {
     navigate("/STAFF/add?role=staff");
+  };
+
+  const [deleteTarget, setDeleteTarget] = useState<EmployeeRecord | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteClick = (id: string) => {
+    const target = realStaff?.find((e) => e.employee_id === id) ?? null;
+    setDeleteTarget(target);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      const res = await employeeApi.remove(deleteTarget.employee_id);
+      if (!res.data.success) {
+        throw new Error(res.data.message);
+      }
+      toast({
+        title: "Employee deactivated",
+        description: `${deleteTarget.first_name} ${deleteTarget.last_name} has been deactivated.`,
+      });
+      setDeleteTarget(null);
+      fetchStaff();
+    } catch (err: any) {
+      toast({
+        title: "Failed to deactivate employee",
+        description: err.response?.data?.message ?? err.message ?? "Something went wrong.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   useEffect(() => {
@@ -338,6 +387,7 @@ export default function Staff() {
     try {
       const res = await employeeApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
+        limit: 1000,
       });
       console.log("[Staff Page] Response:", res.data);
       const allEmployees = res.data?.data?.employees || [];
@@ -489,12 +539,12 @@ export default function Staff() {
       return [
         { key: "name", label: "Name", render: (r: any) => (
           <div className="flex items-center gap-3">
-            <div className={`flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text ${badgeClass(r.avatar)}`}>{r.initials}</div>
+            <DepartmentAvatarText department={r.dept}>{r.initials}</DepartmentAvatarText>
             <div><div className="hms-name-text">{r.name}</div><div className="hms-id-text">{r.id}</div></div>
           </div>
         )},
         { key: "designation", label: "Department", render: (r: any) => (
-          <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${badgeClass(r.designationColor)}`}>{r.designation}</span>
+          <DepartmentPill department={r.dept}>{r.designation}</DepartmentPill>
         )},
         { key: "branch", label: "Branch", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.branch}</span> },
         { key: "access", label: "Access Level", render: (r: any) => (
@@ -507,37 +557,37 @@ export default function Staff() {
           </span>
         )},
         { key: "status", label: "Status", render: (r: any) => <StatusBadge status={r.status} /> },
-        { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} /> },
+        { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} onDelete={handleDeleteClick} /> },
       ];
     }
     if (isStaffTab) {
       return [
         { key: "name", label: "Name", render: (r: any) => (
           <div className="flex items-center gap-3">
-            <div className={`flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text ${supportBadgeColors[r.deptClass]}`}>{r.initials}</div>
+            <DepartmentAvatarText department={r.dept}>{r.initials}</DepartmentAvatarText>
             <div><div className="hms-name-text">{r.name}</div><div className="hms-id-text">{r.id}</div></div>
           </div>
         )},
         { key: "phone", label: "Phone Number", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.phone}</span> },
         { key: "designation", label: "Department", render: (r: any) => (
-          <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${supportBadgeColors[r.deptClass]}`}>{r.designation}</span>
+          <DepartmentPill department={r.dept}>{r.designation}</DepartmentPill>
         )},
         { key: "branch", label: "Branch", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.branch}</span> },
         { key: "status", label: "Status", render: (r: any) => <StatusBadge status={r.status} /> },
-        { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} /> },
+        { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} onDelete={handleDeleteClick} /> },
       ];
     }
     // Medical or All staff
     return [
       { key: "name", label: "Name", render: (r: any) => (
         <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 bg-emerald-100 text-emerald-600 hms-avatar-text">{r.initials}</div>
+          <DepartmentAvatarText department={r.dept}>{r.initials}</DepartmentAvatarText>
           <div><div className="hms-name-text">{r.name}</div><div className="hms-id-text">{r.id}</div></div>
         </div>
       )},
       { key: "phone", label: "Phone Number", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.phone}</span> },
       { key: "designation", label: "Department", render: (r: any) => (
-        <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize bg-emerald-100 text-emerald-700">{r.designation}</span>
+        <DepartmentPill department={r.dept}>{r.designation}</DepartmentPill>
       )},
       { key: "branch", label: "Branch", render: (r: any) => (
         <span className="text-[#191C1E] hms-content-text">
@@ -547,7 +597,7 @@ export default function Staff() {
         </span>
       )},
       { key: "status", label: "Status", render: (r: any) => <StatusBadge status={r.status} /> },
-      { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} /> },
+      { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} onDelete={handleDeleteClick} /> },
     ];
   };
 
@@ -563,15 +613,17 @@ export default function Staff() {
               <p className="hms-subheading">Manage and overview all staff members across branches.</p>
             </div>
             <div className="flex items-center gap-3">
-              <ExportReport />
+              {can("report.export") && <ExportReport />}
 
-              <button
-                onClick={handleAddStaff}
-                className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Add new staff
-              </button>
+              {can("employee.create") && (
+                <button
+                  onClick={handleAddStaff}
+                  className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add new staff
+                </button>
+              )}
             </div>
           </div>
 
@@ -732,6 +784,22 @@ export default function Staff() {
           </div>
         </main>
       </div>
+
+      <ConfirmationDialog
+        open={!!deleteTarget}
+        type="danger"
+        title="Deactivate Employee?"
+        description={
+          deleteTarget
+            ? `${deleteTarget.first_name} ${deleteTarget.last_name} (${deleteTarget.employee_id}) will be deactivated. They will be hidden from all lists, blocked from login, their branch assignments removed, and their future appointments flagged "Reschedule Required" for reassignment. Historical records are kept. This cannot be undone from the app.`
+            : ""
+        }
+        confirmText="Deactivate"
+        cancelText="Cancel"
+        loading={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

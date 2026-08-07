@@ -8,6 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { PermissionProvider } from "@/context/PermissionContext";
 import AddBranch from "@/components/Forms/AddBranch";
 import AddEmployee from "@/components/Forms/Addemployee";
 import PatientRegistrationForm from "@/components/Forms/PatientRegistrationForm";
@@ -18,6 +19,7 @@ import PatientProfile from "@/components/Forms/view/patientProfile";
 import ViewAppointmentScheduled from "@/components/Forms/view/View Appointment Scheduled";
 import DoctorDetailView from "@/components/Forms/view/viewemployee";
 import Profile from "@/components/Forms/view/view profile ";
+import Security from "@/components/Forms/view/Security";
 import Appointments from "./pages/Appointments";
 import Dashboard from "./pages/Dashboard";
 import Departments from "./pages/Departments";
@@ -31,6 +33,8 @@ import Staff from "./pages/Staff";
 import Scheduled from "./pages/Scheduled";
 import DayScheduled from "./pages/Day Scheduled";
 import DayView from "./pages/Day view";
+import TransferDoctor from "./pages/TransferDoctor";
+import RescheduleQueue from "./pages/RescheduleQueue";
 import { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { getToken } from "./utils/token";
@@ -38,6 +42,7 @@ import WeekView from "./pages/Week view";
 import PermissionMatrix from "./pages/admin/PermissionMatrix";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import RoleManagement from "./pages/admin/RoleManagement";
+import AccessDenied from "./pages/AccessDenied";
 
 
 const queryClient = new QueryClient({
@@ -54,36 +59,39 @@ const queryClient = new QueryClient({
 const protectedRoutes = [
   { path: "/dashboard", element: <Dashboard /> },
   { path: "/profile", element: <Profile /> },
-  { path: "/patients", element: <Patients /> },
-  { path: "/doctor", element: <Doctor /> },
-  { path: "/doctor/view/:id", element: <Scheduled /> },
-  { path: "/doctor/view/:id/details", element: <DoctorDetailView /> },
-  { path: "/doctor/view", element: <Scheduled /> },
-  { path: "/doctor/day-view/:id", element: <DayScheduled /> },
-  { path: "/doctor/day-view", element: <DayScheduled /> },
-  { path: "/appointments", element: <Appointments /> },
-  { path: "/appointments/day-view", element: <DayView /> },
-  { path: "/appointments/week-view", element: <WeekView /> },
-  { path: "/departments", element: <Departments /> },
-  { path: "/admin", element: <AdminDashboard /> },
-  { path: "/admin/permissions", element: <PermissionMatrix /> },
-  { path: "/admin/roles", element: <RoleManagement /> },
+  { path: "/security", element: <Security /> },
+  { path: "/patients", element: <Patients />, permission: "patient.read" },
+  { path: "/doctor", element: <Doctor />, permission: "doctor.read" },
+  { path: "/doctor/view/:id", element: <Scheduled />, permission: "doctor.read" },
+  { path: "/doctor/view/:id/details", element: <DoctorDetailView />, permission: "doctor.read" },
+  { path: "/doctor/view", element: <Scheduled />, permission: "doctor.read" },
+  { path: "/doctor/day-view/:id", element: <DayScheduled />, permission: "doctor.read" },
+  { path: "/doctor/day-view", element: <DayScheduled />, permission: "doctor.read" },
+  { path: "/appointments", element: <Appointments />, permission: "appointment.read" },
+  { path: "/appointments/day-view", element: <DayView />, permission: "appointment.read" },
+  { path: "/appointments/week-view", element: <WeekView />, permission: "appointment.read" },
+  { path: "/appointments/reschedule-queue", element: <RescheduleQueue />, permission: "doctor.update" },
+  { path: "/departments", element: <Departments />, permission: "department.read" },
+  { path: "/admin", element: <AdminDashboard />, permission: "permission.manage" },
+  { path: "/admin/permissions", element: <PermissionMatrix />, permission: "permission.manage" },
+  { path: "/admin/roles", element: <RoleManagement />, permission: "permission.manage" },
   
-  { path: "/Staff", element: <Staff /> },
+  { path: "/Staff", element: <Staff />, permission: "employee.read" },
 
-  { path: "/branches/add", element: <AddBranch /> },
-  { path: "/staff/add", element: <AddEmployee /> },
-  { path: "/patients/add", element: <PatientRegistrationForm /> },
-  { path: "/patients/view/:id", element: <PatientProfile /> },
-  { path: "/doctor/view/:id", element: <DoctorDetails /> },
-  { path: "/patients/edit/:id", element: <EditPatientForm /> },
-  { path: "/branches/edit/:id", element: <AddBranch /> },
-  { path: "/staff/edit/:id", element: <AddEmployee /> },
-  { path: "/doctor/edit/:id", element: <AddEmployee /> },
-  { path: "/appointments/add", element: <AddAppointment /> },
-  { path: "/appointments/edit/:id", element: <EditAppointment /> },
-  { path: "/appointments/book", element: <AddAppointment /> },
-  { path: "/appointments/view/:id", element: <ViewAppointmentScheduled /> },
+  { path: "/branches/add", element: <AddBranch />, permission: "branch.create" },
+  { path: "/staff/add", element: <AddEmployee />, permission: "employee.create" },
+  { path: "/patients/add", element: <PatientRegistrationForm />, permission: "patient.create" },
+  { path: "/patients/view/:id", element: <PatientProfile />, permission: "patient.read" },
+  { path: "/doctor/view/:id", element: <DoctorDetails />, permission: "doctor.read" },
+  { path: "/patients/edit/:id", element: <EditPatientForm />, permission: "patient.update" },
+  { path: "/branches/edit/:id", element: <AddBranch />, permission: "branch.update" },
+  { path: "/staff/edit/:id", element: <AddEmployee />, permission: "employee.update" },
+  { path: "/doctor/edit/:id", element: <AddEmployee />, permission: "employee.update" },
+  { path: "/doctor/transfer/:id", element: <TransferDoctor />, permission: "doctor.update" },
+  { path: "/appointments/add", element: <AddAppointment />, permission: "appointment.create" },
+  { path: "/appointments/edit/:id", element: <EditAppointment />, permission: "appointment.update" },
+  { path: "/appointments/book", element: <AddAppointment />, permission: "appointment.create" },
+  { path: "/appointments/view/:id", element: <ViewAppointmentScheduled />, permission: "appointment.read" },
 
 ];
 const RememberMeCheck = () => {
@@ -117,26 +125,31 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <RememberMeCheck />
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<Login />} />
-          
-          
-          {/* Protected Routes with Layout */}
-          <Route element={<AppLayout />}>
-            {protectedRoutes.map(({ path, element }) => (
-              <Route
-                key={path}
-                path={path}
-                element={<ProtectedRoute>{element}</ProtectedRoute>}
-              />
-            ))}
-          </Route>
-          
-          {/* 404 Route */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <PermissionProvider>
+          <RememberMeCheck />
+          <Routes>
+            {/* Public Routes */}
+            <Route path="/" element={<Login />} />
+            
+            
+            {/* Protected Routes with Layout */}
+            <Route element={<AppLayout />}>
+              {protectedRoutes.map(({ path, element, permission }) => (
+                <Route
+                  key={path}
+                  path={path}
+                  element={<ProtectedRoute permission={permission}>{element}</ProtectedRoute>}
+                />
+              ))}
+            </Route>
+            
+            {/* Access Denied */}
+            <Route path="/403" element={<AccessDenied />} />
+            
+            {/* 404 Route */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </PermissionProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

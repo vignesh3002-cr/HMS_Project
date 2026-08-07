@@ -8,8 +8,8 @@ import {
   ChevronRight,
   ChevronDown,
   Check,
-  MoreVertical,
   Loader2,
+  MoreVertical,
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
@@ -24,6 +24,7 @@ import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { useBranchFilter } from "@/context/BranchFilterContext";
+import { usePermission } from "@/context/PermissionContext";
 
 import DayView from "./Day view";
 import WeekView from "./Week view";
@@ -59,6 +60,8 @@ const STATUS_LABELS: Record<string, string> = {
   CANCELLED: "Cancelled",
   NO_SHOW: "No Show",
   RESCHEDULED: "Rescheduled",
+  RESCHEDULE_REQUIRED: "Reschedule Required",
+  TRANSFER_REVIEW_REQUIRED: "Transfer Review Required",
 };
 
 const APPOINTMENT_AVATAR_COLORS = [
@@ -144,6 +147,7 @@ function ActionMenu({
 }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const { can } = usePermission();
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -154,6 +158,8 @@ function ActionMenu({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  if (!can("appointment.read") && !can("appointment.update") && !can("appointment.cancel")) return null;
 
   return (
     <div className="relative inline-block text-left" ref={wrapperRef}>
@@ -170,27 +176,33 @@ function ActionMenu({
           open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
         }`}
       >
-        <button
-          type="button"
-          onClick={() => { setOpen(false); onView(); }}
-          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-green-400 hover:bg-[#F2F4F6]"
-        >
-          View Appointment
-        </button>
-        <button
-          type="button"
-          onClick={() => { setOpen(false); onEdit(); }}
-          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-indigo-600 hover:bg-[#F2F4F6]"
-        >
-          Edit Appointment
-        </button>
-        <button
-          type="button"
-          onClick={() => { setOpen(false); onCancel(); }}
-          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-red-600 hover:bg-red-50"
-        >
-          Cancel Appointment
-        </button>
+        {can("appointment.read") && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onView(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-green-400 hover:bg-[#F2F4F6]"
+          >
+            View Appointment
+          </button>
+        )}
+        {can("appointment.update") && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onEdit(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-indigo-600 hover:bg-[#F2F4F6]"
+          >
+            Edit Appointment
+          </button>
+        )}
+        {can("appointment.cancel") && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onCancel(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-red-600 hover:bg-red-50"
+          >
+            Cancel Appointment
+          </button>
+        )}
       </div>
     </div>
   );
@@ -199,6 +211,7 @@ function ActionMenu({
 const AppointmentSchedule: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { can } = usePermission();
   const { selectedBranchId, isAllBranches } = useBranchFilter();
 
   
@@ -435,21 +448,17 @@ const AppointmentSchedule: React.FC = () => {
 
 
             <div className="flex items-center gap-3">
-              <ExportReport />
+              {can("report.export") && <ExportReport />}
 
-
-
-<button
-                onClick={() => navigate("/appointments/add")}
-                className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
-              >
-
-                <Plus className="w-4 h-4" />
-                Add Appointment
-
-              </button>
-
-
+              {can("appointment.create") && (
+                <button
+                  onClick={() => navigate("/appointments/add")}
+                  className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Appointment
+                </button>
+              )}
             </div>
 
 

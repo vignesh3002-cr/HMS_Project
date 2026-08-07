@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { BranchSelector } from "@/components/hms/BranchSelector";
 import { BranchFilterProvider } from "@/context/BranchFilterContext";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
-import { usePermissions } from "@/hooks/usePermissions";
+import { usePermission } from "@/context/PermissionContext";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import {
@@ -25,6 +25,7 @@ import {
   ChevronDown,
   Shield,
   Key,
+  ClipboardList,
 } from "lucide-react";
 
 const navIcon: Record<string, React.ReactNode> = {
@@ -33,6 +34,7 @@ const navIcon: Record<string, React.ReactNode> = {
   Doctor: <Stethoscope size={16} />,
   Patients: <UserRound size={16} />,
   Appointment: <Calendar size={16} />,
+  "Reschedule Queue": <ClipboardList size={16} />,
   Billing: <Receipt size={16} />,
   Protocol: <FileText size={16} />,
   Admin: <Settings size={16} />,
@@ -109,10 +111,17 @@ export function AppLayout() {
     branch: "",
   });
 
-  const isHeadAdmin = userData.role === "HEAD_ADMIN" || userData.role === "SUPER_ADMIN";
-
-  const { can, loading: permissionsLoading } = usePermissions();
+  const { can, loading: permissionsLoading } = usePermission();
   const hasPermission = (perm?: string) => !perm || permissionsLoading || can(perm);
+
+  // Both Permissions and Roles pages are guarded by permission.manage on the
+  // backend (permission.routes.ts + role.routes.ts), so one check covers both.
+  const adminChildren = can("permission.manage")
+    ? [
+        { label: "Permissions", to: "/admin/permissions" },
+        { label: "Roles", to: "/admin/roles" },
+      ]
+    : [];
 
   const navItems = [
     { label: "Dashboard", to: "/dashboard" },
@@ -124,17 +133,19 @@ export function AppLayout() {
     // live under /patients/... and should keep this item highlighted too.
     { label: "Patients", to: "/patients", matchPrefix: true, permission: "patient.read" },
     { label: "Appointment", to: "/appointments", permission: "appointment.read" },
+    {
+      label: "Reschedule Queue",
+      to: "/appointments/reschedule-queue",
+      permission: "doctor.update",
+    },
     { label: "Billing", to: "/billing" },
     { label: "Protocol", to: "/protocol", hasArrow: true },
-    ...(isHeadAdmin
+    ...(adminChildren.length > 0
       ? [
           {
             label: "Admin",
             permission: "permission.manage",
-            children: [
-              { label: "Permissions", to: "/admin/permissions" },
-              { label: "Roles", to: "/admin/roles" },
-            ],
+            children: adminChildren,
           },
         ]
       : []),

@@ -161,6 +161,7 @@ export interface GetEmployeesParams {
   branchId?: string;
   department?: string;
   status?: boolean;
+  includeDeleted?: boolean;
   search?: string;
   page?: number;
   limit?: number;

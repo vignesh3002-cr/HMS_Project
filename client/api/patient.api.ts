@@ -24,6 +24,10 @@ export interface CreatePatientPayload {
   patient_district?: string;
   patient_area?: string;
   patient_pincode?: number;
+  current_address?: string;
+  emergency_name?: string;
+  emergency_relation?: string;
+  emergency_mobile?: string;
   photo?: string;
   branch_id: string;
   created_by: string;
@@ -70,6 +74,10 @@ export interface UpdatePatientPayload {
   marital_status?: string;
   nationality?: string;
   patient_type?: string;
+  current_address?: string;
+  emergency_name?: string;
+  emergency_relation?: string;
+  emergency_mobile?: string;
   photo?: string;
 }
 

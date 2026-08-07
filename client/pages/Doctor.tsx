@@ -8,9 +8,9 @@ import {
   List,
   LayoutGrid,
   Plus,
-  MoreVertical,
   User,
   Loader2,
+  MoreVertical,
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
  
@@ -23,7 +23,10 @@ import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { appointmentApi } from "@/api/appointment.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
+import { DepartmentPill, DepartmentAvatarText } from "@/components/hms/DepartmentBadge";
 import { useBranchFilter } from "@/context/BranchFilterContext";
+import { usePermission } from "@/context/PermissionContext";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
  
 // ============================================================
 // SHARED SUB-COMPONENTS
@@ -72,10 +75,11 @@ function SlotProgress({ booked, total }: { booked: number; total: number }) {
 }
  
 // Three-dot card menu (grid only)
-function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: () => void; onDelete: () => void }) {
+function CardMenu({ onView, onEdit, onDelete, onTransfer }: { onView: () => void; onEdit: () => void; onDelete: () => void; onTransfer: () => void }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
- 
+  const { can } = usePermission();
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
@@ -85,7 +89,9 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
- 
+
+  if (!can("doctor.read") && !can("doctor.update") && !can("employee.delete")) return null;
+
   return (
     <div className="relative" ref={wrapperRef}>
       <button onClick={() => setOpen((o) => !o)} className="p-1 rounded hover:bg-[#F2F4F6] transition-colors">
@@ -95,9 +101,18 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
           open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
         }`}
       >
-        <button onClick={() => { onView(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">View</button>
-        <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
-        <button onClick={() => { onDelete(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">Delete</button>
+        {can("doctor.read") && (
+          <button onClick={() => { onView(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">View</button>
+        )}
+        {can("doctor.update") && (
+          <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
+        )}
+        {can("doctor.update") && (
+          <button onClick={() => { onTransfer(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Transfer</button>
+        )}
+        {can("employee.delete") && (
+          <button onClick={() => { onDelete(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">Deactivate</button>
+        )}
       </div>
     </div>
   );
@@ -138,7 +153,7 @@ function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
     status: (emp.emp_status === true || emp.user_table?.user_status === 0) ? "Active" : "Leave",
     qualification: emp.qualification || "—",
     mobile: emp.mobile_no || "—",
-    photo: "",
+    photo: emp.employee_photo_URL || "",
   };
 }
  
@@ -148,6 +163,7 @@ function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
 export default function Doctor() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { can } = usePermission();
   const { selectedBranchId, isAllBranches } = useBranchFilter();
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
  
@@ -412,7 +428,37 @@ export default function Doctor() {
   // ---- ACTION HANDLERS ----
   const handleView = (id: number | string) => navigate(`/doctor/view/${id}`);
   const handleEdit = (id: number | string) => navigate(`/doctor/edit/${id}`);
-  const handleDelete = (id: number | string) => alert(`Delete logic for doctor ${id}`);
+  const handleTransfer = (id: number | string) => navigate(`/doctor/transfer/${id}`);
+
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = (id: number | string) => setDeleteTarget(String(id));
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      const res = await employeeApi.remove(deleteTarget);
+      if (!res.data.success) {
+        throw new Error(res.data.message);
+      }
+      toast({
+        title: "Doctor deactivated",
+        description: `Doctor ${deleteTarget} has been deactivated.`,
+      });
+      setDeleteTarget(null);
+      fetchDoctors();
+    } catch (err: any) {
+      toast({
+        title: "Failed to deactivate doctor",
+        description: err.response?.data?.message ?? err.message ?? "Something went wrong.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
  
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
@@ -426,14 +472,16 @@ export default function Doctor() {
               <p className="hms-subheading">Real-time performance across all branches.</p>
             </div>
             <div className="flex items-center gap-3">
-              <ExportReport />
-              <button
-                onClick={handleAddDoctor}
-                className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Add new doctor
-              </button>
+              {can("report.export") && <ExportReport />}
+              {can("doctor.create") && (
+                <button
+                  onClick={handleAddDoctor}
+                  className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add new doctor
+                </button>
+              )}
             </div>
           </div>
  
@@ -551,12 +599,12 @@ export default function Doctor() {
                 columns={[
                   { key: "name", label: "Name", render: (r: any) => (
                     <div className="flex items-center gap-2">
-                      <div className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: String(r.initBg), color: String(r.avatarColor) }}>{String(r.avatar)}</div>
+                      <DepartmentAvatarText department={r.dept}>{String(r.avatar)}</DepartmentAvatarText>
                       <div><div className="hms-name-text">{String(r.name)}</div><div className="hms-id-text">{String(r.id)}</div></div>
                     </div>
                   )},
                   { key: "dept", label: "Department", render: (r: any) => (
-                    <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: String(r.deptBg), color: String(r.deptColor) }}>{String(r.dept)}</span>
+                    <DepartmentPill department={r.dept}>{String(r.dept)}</DepartmentPill>
                   )},
                   { key: "slots", label: "Slots", sortable: true, render: (r: any) => {
                     const summary = slotSummaries[String(r.id)];
@@ -567,23 +615,36 @@ export default function Doctor() {
                   )},
                   { key: "actions", label: "Actions", sortable: false, className: "w-px", headerClassName: "w-px", render: (r: any) => (
                     <div className="flex items-center gap-1">
-                      <button onClick={() => handleView(r.id)} title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
-                          <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-                          <circle cx="12" cy="12" r="3" />
-                        </svg>
-                      </button>
-                      <button onClick={() => handleEdit(r.id)} title="Edit" className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
-                          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                          <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
-                        </svg>
-                      </button>
-                      <button onClick={() => handleDelete(r.id)} title="Delete" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
-                          <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                        </svg>
-                      </button>
+                      {can("doctor.read") && (
+                        <button onClick={() => handleView(r.id)} title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
+                            <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+                            <circle cx="12" cy="12" r="3" />
+                          </svg>
+                        </button>
+                      )}
+                      {can("doctor.update") && (
+                        <button onClick={() => handleEdit(r.id)} title="Edit" className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
+                            <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
+                          </svg>
+                        </button>
+                      )}
+                      {can("doctor.update") && (
+                        <button onClick={() => handleTransfer(r.id)} title="Transfer" className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
+                            <path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>
+                          </svg>
+                        </button>
+                      )}
+                      {can("employee.delete") && (
+                        <button onClick={() => handleDelete(r.id)} title="Deactivate" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
+                            <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                          </svg>
+                        </button>
+                      )}
                     </div>
                   )},
                 ]}
@@ -623,7 +684,7 @@ export default function Doctor() {
                             {doctor.name}
                           </p>
                           <p className="hms-id-text">{doctor.id}</p>
-                          <span className="inline-block px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize mt-1" style={{ background: doctor.deptBg, color: doctor.deptColor }}>{doctor.dept}</span>
+                          <DepartmentPill department={doctor.dept}>{doctor.dept}</DepartmentPill>
                           <p className="hms-content-text text-[#191C1E] mt-1.5">
                             <span className="font-semibold">Status</span>{" : "}
                             <span className={doctor.status === "Active" ? "font-bold text-[#16A34A]" : "font-bold text-[#F97316]"}>{doctor.status}</span>
@@ -631,7 +692,7 @@ export default function Doctor() {
                           <p className="hms-content-text text-[#191C1E] mt-1 truncate">{doctor.branch}</p>
                         </div>
                         <div className="absolute top-3 right-3">
-                          <CardMenu onView={() => handleView(doctor.id)} onEdit={() => handleEdit(doctor.id)} onDelete={() => handleDelete(doctor.id)} />
+                          <CardMenu onView={() => handleView(doctor.id)} onEdit={() => handleEdit(doctor.id)} onDelete={() => handleDelete(doctor.id)} onTransfer={() => handleTransfer(doctor.id)} />
                         </div>
                       </div>
                     ))}
@@ -655,6 +716,22 @@ export default function Doctor() {
           </div>
         </main>
       </div>
+
+      <ConfirmationDialog
+        open={!!deleteTarget}
+        type="danger"
+        title="Deactivate Doctor?"
+        description={
+          deleteTarget
+            ? `Doctor ${deleteTarget} will be deactivated. They will be hidden from all lists, blocked from login, their branch assignments removed, and their future appointments flagged "Reschedule Required" for reassignment. Historical records are kept. This cannot be undone from the app.`
+            : ""
+        }
+        confirmText="Deactivate"
+        cancelText="Cancel"
+        loading={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }
