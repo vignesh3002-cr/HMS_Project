@@ -341,7 +341,7 @@ export default function DoctorProfile() {
               </div>
 
               <button
-                onClick={() => navigate("/appointments/book")}
+                onClick={() => navigate("/appointments/book", { state: { doctorId: id } })}
                 className="border-0 bg-[#004a91] hover:bg-[#003b75] text-white px-[17px] py-[11px] rounded-[7px] text-[13px] font-semibold cursor-pointer max-[700px]:w-full"
               >
                 Book Appointment

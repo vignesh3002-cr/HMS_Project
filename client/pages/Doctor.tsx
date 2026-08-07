@@ -422,7 +422,7 @@ export default function Doctor() {
           {/* ==================== HEADER ==================== */}
           <div className="flex flex-col md:flex-row md:items-center justify-between">
             <div>
-              <h1 className="hms-heading">Doctor management</h1>
+              <h1 className="hms-heading">Doctor Management</h1>
               <p className="hms-subheading">Real-time performance across all branches.</p>
             </div>
             <div className="flex items-center gap-3">

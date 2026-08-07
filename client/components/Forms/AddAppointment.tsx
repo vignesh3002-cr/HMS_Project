@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, ChangeEvent, FormEvent } from "react";
+import { useState, useEffect, ChangeEvent, FormEvent } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { startOfWeek, endOfWeek, addWeeks, format, parseISO } from "date-fns";
-import { ArrowLeft, CalendarPlus, Plus, Search, Loader2, X } from "lucide-react";
+import { ArrowLeft, CalendarPlus, Plus, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
@@ -106,32 +106,32 @@ export default function AddAppointment() {
   // the user only needs to pick a doctor.
   const preselectedPatient = (location.state as { patient?: PatientRecord } | null)?.patient;
 
-  const [formData, setFormData] = useState<AppointmentFormData>(() =>
-    preselectedPatient
+  // Arriving from a doctor's profile (Scheduled.tsx / Day Scheduled.tsx)
+  // "Book Appointment" button carries that doctor's id so the form opens
+  // with the doctor locked in and their branch/department auto-filled.
+  const preselectedDoctorId = (location.state as { doctorId?: string } | null)?.doctorId;
+
+  const [formData, setFormData] = useState<AppointmentFormData>(() => {
+    let base = preselectedPatient
       ? {
           ...emptyFormData,
           patientId: preselectedPatient.patient_id,
           patientName: `${preselectedPatient.patient_first_name}${preselectedPatient.patient_middle_name ? ` ${preselectedPatient.patient_middle_name}` : ""}${preselectedPatient.patient_last_name ? ` ${preselectedPatient.patient_last_name}` : ""}`,
           patientNumber: preselectedPatient.patient_primary_mobile || "",
         }
-      : emptyFormData,
-  );
+      : emptyFormData;
+    if (preselectedDoctorId) base = { ...base, doctorId: preselectedDoctorId };
+    return base;
+  });
   const [submitting, setSubmitting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [bookingResult, setBookingResult] = useState<AppointmentResponse | null>(null);
 
-  // Patient search
-  const [patientSearch, setPatientSearch] = useState(
-    preselectedPatient
-      ? `${preselectedPatient.patient_id} - ${preselectedPatient.patient_first_name}${preselectedPatient.patient_last_name ? ` ${preselectedPatient.patient_last_name}` : ""}`
-      : "",
+  // Patient dropdown options
+  const [patients, setPatients] = useState<PatientRecord[]>(
+    preselectedPatient ? [preselectedPatient] : [],
   );
-  const [patientResults, setPatientResults] = useState<PatientRecord[]>([]);
-  const [searchingPatient, setSearchingPatient] = useState(false);
-  const [showPatientDropdown, setShowPatientDropdown] = useState(false);
-  const patientSearchRef = useRef<HTMLDivElement>(null);
-  const searchTimeout = useRef<ReturnType<typeof setTimeout>>();
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -145,6 +145,11 @@ export default function AddAppointment() {
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [findingNearestDate, setFindingNearestDate] = useState(false);
+
+  // Doctors actually assigned (via employees.branch_id) to the currently
+  // selected branch -- used to narrow the Department and Doctor dropdowns
+  // down to what's actually available at that branch, once a branch is picked.
+  const [branchDoctors, setBranchDoctors] = useState<EmployeeRecord[]>([]);
 
   useEffect(() => {
     branchApi
@@ -176,6 +181,22 @@ export default function AddAppointment() {
       .catch(() => {});
   }, []);
 
+  // Fetch the doctors assigned to the selected branch, so the Department and
+  // Doctor dropdowns can be narrowed down to what's actually at that branch.
+  useEffect(() => {
+    if (!formData.branchId) {
+      setBranchDoctors([]);
+      return;
+    }
+    employeeApi
+      .getAll({ branchId: formData.branchId, limit: 1000 })
+      .then((res) => {
+        const allEmployees = res.data?.data?.employees || [];
+        setBranchDoctors(allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR"));
+      })
+      .catch(() => setBranchDoctors([]));
+  }, [formData.branchId]);
+
   // Fetch available slots when branch + doctor + date changes
   useEffect(() => {
     if (!formData.doctorId || !formData.branchId || !formData.selectDate) {
@@ -198,33 +219,27 @@ export default function AddAppointment() {
       .finally(() => setLoadingSlots(false));
   }, [formData.doctorId, formData.branchId, formData.selectDate]);
 
-  // Patient search with debounce
-  const handlePatientSearch = (value: string) => {
-    setPatientSearch(value);
-    setShowPatientDropdown(true);
+  // Load the full patient list once for the Patient dropdown.
+  useEffect(() => {
+    patientApi
+      .getAll({ limit: 1000 })
+      .then((res) => {
+        const fetched = res.data.data?.patients || [];
+        // Guarantee the preselected patient (arriving via nav state) is in
+        // the options list even if it isn't among the first 1000 returned.
+        if (preselectedPatient && !fetched.some((p) => p.patient_id === preselectedPatient.patient_id)) {
+          setPatients([preselectedPatient, ...fetched]);
+        } else {
+          setPatients(fetched);
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    if (searchTimeout.current) clearTimeout(searchTimeout.current);
-
-    if (value.trim().length < 2) {
-      setPatientResults([]);
-      return;
-    }
-
-    searchTimeout.current = setTimeout(() => {
-      setSearchingPatient(true);
-      patientApi
-        .getAll({ search: value, limit: 10 })
-        .then((res) => {
-          setPatientResults(res.data.data?.patients || []);
-        })
-        .catch(() => {
-          setPatientResults([]);
-        })
-        .finally(() => setSearchingPatient(false));
-    }, 300);
-  };
-
-  const selectPatient = (patient: PatientRecord) => {
+  const selectPatient = (patientId: string) => {
+    const patient = patients.find((p) => p.patient_id === patientId);
+    if (!patient) return;
     setFormData((prev) => ({
       ...prev,
       patientId: patient.patient_id,
@@ -232,33 +247,7 @@ export default function AddAppointment() {
         `${patient.patient_first_name}${patient.patient_middle_name ? ` ${patient.patient_middle_name}` : ""}${patient.patient_last_name ? ` ${patient.patient_last_name}` : ""}`,
       patientNumber: patient.patient_primary_mobile || "",
     }));
-    setPatientSearch(
-      `${patient.patient_id} - ${patient.patient_first_name}${patient.patient_last_name ? ` ${patient.patient_last_name}` : ""}`
-    );
-    setShowPatientDropdown(false);
   };
-
-  const clearPatient = () => {
-    setFormData((prev) => ({
-      ...prev,
-      patientId: "",
-      patientName: "",
-      patientNumber: "",
-    }));
-    setPatientSearch("");
-    setPatientResults([]);
-  };
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (patientSearchRef.current && !patientSearchRef.current.contains(e.target as Node)) {
-        setShowPatientDropdown(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -334,6 +323,20 @@ export default function AddAppointment() {
       formData.patientComment
   );
 
+  // Once a branch is selected, only show departments that branch's doctors
+  // actually belong to; otherwise fall back to the full department list.
+  const departmentsForDropdown = formData.branchId
+    ? departments.filter((d) =>
+        branchDoctors.some((doc) => doc.department_id === d.department_id),
+      )
+    : departments;
+
+  // Once a branch is selected, only show that branch's doctors; either way,
+  // further narrow down to the selected department, if one is chosen.
+  const doctorsForDropdown = (formData.branchId ? branchDoctors : doctors).filter((doc) =>
+    formData.departmentId ? doc.department_id === formData.departmentId : true,
+  );
+
   const selectedDoctor = doctors.find((doc) => doc.employee_id === formData.doctorId);
   const selectedDoctorName = selectedDoctor
     ? `Dr. ${selectedDoctor.first_name}${selectedDoctor.middle_name ? ` ${selectedDoctor.middle_name}` : ""} ${selectedDoctor.last_name}`
@@ -346,6 +349,72 @@ export default function AddAppointment() {
     endOfWeek(addWeeks(new Date(), 1), { weekStartsOn: 1 }),
     "yyyy-MM-dd",
   );
+
+  // Shared by the Doctor dropdown's onValueChange and the doctor-preselect
+  // effect below -- looks up the doctor's real specialization/department and
+  // their actual mapped branches (via employeeApi.getOne), then finds the
+  // nearest date they have an open slot.
+  const applyDoctorSelection = (val: string) => {
+    const selectedDoctor = doctors.find((doc) => doc.employee_id === val);
+
+    const specialization = selectedDoctor?.specialization?.trim().toLowerCase();
+    const matchedDepartment = specialization
+      ? departments.find((d) => d.department_name.trim().toLowerCase() === specialization)
+      : undefined;
+
+    setFormData((prev) => ({
+      ...prev,
+      doctorId: val,
+      departmentId: matchedDepartment?.department_id || selectedDoctor?.department_id || prev.departmentId,
+      timeSlot: "",
+    }));
+
+    if (!val) {
+      setDoctorBranches([]);
+      return;
+    }
+
+    setFindingNearestDate(true);
+
+    employeeApi
+      .getOne(val)
+      .then((res) => {
+        const mappedBranches = res.data?.data?.branches || [];
+        setDoctorBranches(mappedBranches);
+        const nextBranchId =
+          mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
+          mappedBranches[0]?.branch_id ||
+          selectedDoctor?.branch_id ||
+          formData.branchId;
+
+        if (!nextBranchId) return null;
+
+        setFormData((prev) => ({ ...prev, branchId: nextBranchId }));
+
+        return findNearestAvailableDate(val, nextBranchId, formData.selectDate, maxSelectableDate);
+      })
+      .then((date) => {
+        if (date) {
+          setFormData((prev) => ({ ...prev, selectDate: date, timeSlot: "" }));
+        } else if (date === null) {
+          toast({
+            title: "No available date found",
+            description: "This doctor has no open slots this week or next week at their branch.",
+            variant: "destructive",
+          });
+        }
+      })
+      .finally(() => setFindingNearestDate(false));
+  };
+
+  // Arrived from a doctor's profile page with a doctor already chosen --
+  // run the same selection logic as picking them from the dropdown, once
+  // the doctor list has loaded (needed to resolve their specialization).
+  useEffect(() => {
+    if (!preselectedDoctorId || doctors.length === 0) return;
+    applyDoctorSelection(preselectedDoctorId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preselectedDoctorId, doctors]);
 
   return (
     <div className="min-h-screen bg-[#F7F9FB] p-6">
@@ -372,54 +441,19 @@ export default function AddAppointment() {
           {/* Form Body */}
           <form onSubmit={handleSubmit} className="p-8">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-6 gap-y-6">
-              {/* Patient Search */}
-              <div className="lg:col-span-3 relative" ref={patientSearchRef}>
-                <label className={labelClass}>Search Patient {requiredStar}</label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search by patient ID, name, or mobile..."
-                    className={inputClass + " pl-10 pr-10"}
-                    value={patientSearch}
-                    onChange={(e) => handlePatientSearch(e.target.value)}
-                    onFocus={() => {
-                      if (patientResults.length > 0) setShowPatientDropdown(true);
-                    }}
-                  />
-                  {patientSearch && (
-                    <button
-                      type="button"
-                      onClick={clearPatient}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
-                  {searchingPatient && (
-                    <Loader2 className="absolute right-10 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-500 animate-spin" />
-                  )}
-                </div>
-
-                {showPatientDropdown && patientResults.length > 0 && (
-                  <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
-                    {patientResults.map((p) => (
-                      <button
-                        key={p.patient_id}
-                        type="button"
-                        onClick={() => selectPatient(p)}
-                        className="w-full px-4 py-3 text-left hover:bg-blue-50 transition-colors border-b border-gray-50 last:border-0"
-                      >
-                        <div className="text-sm font-semibold text-gray-900">
-                          {p.patient_first_name}{p.patient_middle_name ? ` ${p.patient_middle_name}` : ""}{p.patient_last_name ? ` ${p.patient_last_name}` : ""}
-                        </div>
-                        <div className="text-xs text-gray-500 mt-0.5">
-                          {p.patient_id}{p.patient_primary_mobile ? ` | ${p.patient_primary_mobile}` : ""}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
+              {/* Patient Select */}
+              <div className="lg:col-span-3">
+                <label className={labelClass}>Select Patient {requiredStar}</label>
+                <FormDropdown
+                  className={inputClass}
+                  options={patients.map((p) => ({
+                    label: `${p.patient_id} - ${p.patient_first_name}${p.patient_middle_name ? ` ${p.patient_middle_name}` : ""}${p.patient_last_name ? ` ${p.patient_last_name}` : ""}${p.patient_primary_mobile ? ` (${p.patient_primary_mobile})` : ""}`,
+                    value: p.patient_id,
+                  }))}
+                  value={formData.patientId}
+                  onValueChange={selectPatient}
+                  placeholder={patients.length ? "Search and select a patient" : "Loading patients..."}
+                />
               </div>
 
               {/* Patient ID (read-only after selection) */}
@@ -471,7 +505,13 @@ export default function AddAppointment() {
                   )}
                   value={formData.branchId}
                   onValueChange={(val) => {
-                    setFormData((prev) => ({ ...prev, branchId: val, timeSlot: "" }));
+                    setFormData((prev) => ({
+                      ...prev,
+                      branchId: val,
+                      departmentId: "",
+                      doctorId: "",
+                      timeSlot: "",
+                    }));
 
                     if (!val || !formData.doctorId) return;
 
@@ -503,20 +543,28 @@ export default function AddAppointment() {
                 <label className={labelClass}>Department {requiredStar}</label>
                 <FormDropdown
                   className={inputClass}
-                  options={departments.map((d) => ({
+                  options={departmentsForDropdown.map((d) => ({
                     label: d.department_name,
                     value: d.department_id,
                   }))}
                   value={formData.departmentId}
-                  onValueChange={(val) => setFormData((prev) => ({ ...prev, departmentId: val }))}
-                  placeholder={departments.length ? "Select Department" : "Loading departments..."}
+                  onValueChange={(val) =>
+                    setFormData((prev) => ({ ...prev, departmentId: val, doctorId: "", timeSlot: "" }))
+                  }
+                  placeholder={
+                    formData.branchId && departmentsForDropdown.length === 0
+                      ? "No departments at this branch"
+                      : departments.length
+                        ? "Select Department"
+                        : "Loading departments..."
+                  }
                 />
               </div>
               <div>
                 <label className={labelClass}>Doctor Name {requiredStar}</label>
                 <FormDropdown
                   className={inputClass}
-                  options={doctors.map((doc) => {
+                  options={doctorsForDropdown.map((doc) => {
                     const fullName = `Dr. ${doc.first_name}${doc.middle_name ? ` ${doc.middle_name}` : ""} ${doc.last_name}`;
                     const specialty = doc.specialization || doc.department_master?.department_name;
                     return {
@@ -525,71 +573,14 @@ export default function AddAppointment() {
                     };
                   })}
                   value={formData.doctorId}
-                  onValueChange={(val) => {
-                    const selectedDoctor = doctors.find((doc) => doc.employee_id === val);
-
-                    // department_id and specialization are entered as two
-                    // independent fields on the doctor's record (see
-                    // Addemployee.tsx), so they can end up out of sync for
-                    // some doctors -- prefer whichever department's name
-                    // actually matches the doctor's specialization, and only
-                    // fall back to the (possibly mismatched) department_id
-                    // when no department name matches.
-                    const specialization = selectedDoctor?.specialization?.trim().toLowerCase();
-                    const matchedDepartment = specialization
-                      ? departments.find((d) => d.department_name.trim().toLowerCase() === specialization)
-                      : undefined;
-
-                    setFormData((prev) => ({
-                      ...prev,
-                      doctorId: val,
-                      departmentId: matchedDepartment?.department_id || selectedDoctor?.department_id || prev.departmentId,
-                      timeSlot: "",
-                    }));
-
-                    if (!val) {
-                      setDoctorBranches([]);
-                      return;
-                    }
-
-                    setFindingNearestDate(true);
-
-                    // employee.branch_id is just the doctor's "home" branch and
-                    // isn't guaranteed to be one they're actually scheduled at --
-                    // getAvailableSlots requires a real active user_branch_mapping,
-                    // so look up their actual mapped branches first (same data
-                    // employeeApi.getOne exposes via /employees/:id).
-                    employeeApi
-                      .getOne(val)
-                      .then((res) => {
-                        const mappedBranches = res.data?.data?.branches || [];
-                        setDoctorBranches(mappedBranches);
-                        const nextBranchId =
-                          mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
-                          mappedBranches[0]?.branch_id ||
-                          selectedDoctor?.branch_id ||
-                          formData.branchId;
-
-                        if (!nextBranchId) return null;
-
-                        setFormData((prev) => ({ ...prev, branchId: nextBranchId }));
-
-                        return findNearestAvailableDate(val, nextBranchId, formData.selectDate, maxSelectableDate);
-                      })
-                      .then((date) => {
-                        if (date) {
-                          setFormData((prev) => ({ ...prev, selectDate: date, timeSlot: "" }));
-                        } else if (date === null) {
-                          toast({
-                            title: "No available date found",
-                            description: "This doctor has no open slots this week or next week at their branch.",
-                            variant: "destructive",
-                          });
-                        }
-                      })
-                      .finally(() => setFindingNearestDate(false));
-                  }}
-                  placeholder={doctors.length ? "Select Doctor" : "Loading doctors..."}
+                  onValueChange={applyDoctorSelection}
+                  placeholder={
+                    formData.branchId && doctorsForDropdown.length === 0
+                      ? "No doctors match this branch/department"
+                      : doctors.length
+                        ? "Select Doctor"
+                        : "Loading doctors..."
+                  }
                 />
               </div>
 

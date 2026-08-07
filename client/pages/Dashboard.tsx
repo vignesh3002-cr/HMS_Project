@@ -248,6 +248,11 @@ export default function Dashboard() {
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
   const [appointmentCount, setAppointmentCount] = useState<number>(0);
 
+  // Date selection state -- declared early since fetchAppointments below
+  // depends on it to scope the Appointments tab to the selected day.
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+
   const fetchEmployees = useCallback(async () => {
     setIsEmployeesLoading(true);
     try {
@@ -352,6 +357,7 @@ export default function Dashboard() {
         sortBy: "appointment_date",
         sortOrder: "desc",
         branchId: isAllBranches ? undefined : selectedBranchId,
+        date: format(selectedDate, "yyyy-MM-dd"),
       });
       const rows = res.data?.data?.appointments || [];
       setRealAppointments(rows.map(mapAppointmentRecord));
@@ -367,7 +373,7 @@ export default function Dashboard() {
     } finally {
       setIsAppointmentsLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches, fetchBranchPerformance]);
+  }, [toast, selectedBranchId, isAllBranches, fetchBranchPerformance, selectedDate]);
 
   useEffect(() => {
     fetchAppointments();
@@ -472,9 +478,6 @@ export default function Dashboard() {
   const tabsContainerRef = useRef<HTMLDivElement>(null);
   const [underline, setUnderline] = useState({ left: 0, width: 0 });
 
-  // Date selection state
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const {
     values: filterValues,
     appliedValues,
@@ -926,7 +929,7 @@ useEffect(() => {
                   )},
                   { key: "actions", label: "Action", sortable: false, render: (r: any) => (
                     <div className="flex items-center gap-1">
-                      <button title="View" onClick={() => handleView(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
+                      <button title="View" onClick={() => navigate(`/appointments/view/${r.id}`)} className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] group-hover:stroke-[#505F76]">
                           <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
                           <circle cx="12" cy="12" r="3" />
