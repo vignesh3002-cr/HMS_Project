@@ -231,6 +231,12 @@ export const employeeApi = {
   update: (employeeId: string, data: UpdateEmployeePayload) =>
     API.put<{ success: boolean; data: any; message?: string }>(`/employees/${employeeId}`, data),
 
+  updatePhoto: (employeeId: string, employee_photo_URL: string) =>
+    API.patch<{ success: boolean; data: any; message?: string }>(
+      `/employees/${employeeId}/photo`,
+      { employee_photo_URL }
+    ),
+
   remove: (employeeId: string) =>
     API.delete<{ success: boolean; message: string }>(`/employees/${employeeId}`),
 };

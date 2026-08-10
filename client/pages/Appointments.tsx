@@ -15,8 +15,7 @@ import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
-import { FilterPopover, useFilterPanel } from "@/components/Filter";
-import type { FilterField } from "@/components/Filter/types";
+import { FilterPopover, useFilterPanel, useAppointmentFilters } from "@/components/Filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { useToast } from "@/hooks/use-toast";
@@ -29,6 +28,7 @@ import { usePermission } from "@/context/PermissionContext";
 import DayView from "./Day view";
 import WeekView from "./Week view";
 import ExportReport from "@/components/ui/ExportReport";
+import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
 
 
 interface Appointment {
@@ -51,9 +51,13 @@ interface Appointment {
 
 
 
+// Mirrors APPOINTMENT_STATUS in appointment.constants.ts exactly -- keep
+// these keys in sync with the backend enum (previously had "BOOKED" where
+// the backend actually uses "SCHEDULED", and a "CONFIRMED" status that
+// doesn't exist there, so every newly-booked appointment fell through to
+// the raw-value fallback below instead of getting a real label).
 const STATUS_LABELS: Record<string, string> = {
-  BOOKED: "Scheduled",
-  CONFIRMED: "Conformed",
+  SCHEDULED: "Scheduled",
   CHECKED_IN: "Checked In",
   IN_CONSULTATION: "In Consultation",
   COMPLETED: "Completed",
@@ -325,32 +329,7 @@ const AppointmentSchedule: React.FC = () => {
     handleClear: handleClearFilter,
   } = useFilterPanel();
 
-  const branchOptions = useMemo(
-    () =>
-      Array.from(new Set(appointments.map((item) => item.branch))).map((value) => ({
-        label: value,
-        value,
-      })),
-    [appointments],
-  );
-
-  const statusOptions = useMemo(
-    () =>
-      Array.from(new Set(appointments.map((item) => item.status))).map((value) => ({
-        label: value,
-        value,
-      })),
-    [appointments],
-  );
-
-  const appointmentFilterFields: FilterField[] = [
-    { id: "patient", label: "Patient Name", type: "text", placeholder: "Search by name" },
-    { id: "patientId", label: "Patient ID", type: "text", placeholder: "Enter ID" },
-    { id: "date", label: "Appointment Date", type: "text", placeholder: "Enter date" },
-    { id: "branch", label: "Branch", type: "multiselect", options: branchOptions },
-    { id: "doctor", label: "Doctor Name", type: "text", placeholder: "Search by doctor" },
-    { id: "status", label: "Status", type: "multiselect", options: statusOptions },
-  ];
+  const { appointmentFilterFields } = useAppointmentFilters({ appointmentRows: appointments });
 
   // Search & filter
   const searchableFields: (keyof Appointment)[] = [
@@ -426,6 +405,23 @@ const AppointmentSchedule: React.FC = () => {
     return <WeekView />;
   }
 
+  // ---- EXPORT ----
+  const handleExport = async (exportFormat: string) => {
+    if (exportFormat !== "csv") return;
+    try {
+      await downloadExportCsv("appointments", {
+        branchId: isAllBranches ? undefined : selectedBranchId,
+      });
+      toast({ title: "Export complete", description: "The CSV file has been downloaded." });
+    } catch (err: any) {
+      toast({
+        title: "Export failed",
+        description: exportErrorMessage(err),
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
       <div className="flex flex-col flex-1 min-w-0">
@@ -448,7 +444,7 @@ const AppointmentSchedule: React.FC = () => {
 
 
             <div className="flex items-center gap-3">
-              {can("report.export") && <ExportReport />}
+              {can("report.export") && <ExportReport onExport={handleExport} />}
 
               {can("appointment.create") && (
                 <button

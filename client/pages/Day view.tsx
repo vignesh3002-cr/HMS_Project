@@ -5,11 +5,12 @@ import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
+import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
 import { useToast } from "@/hooks/use-toast";
 import { appointmentApi, type AppointmentRecord, type AvailableSlot } from "@/api/appointment.api";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
-import { FilterPopover, useFilterPanel } from "@/components/Filter";
-import type { FilterField } from "@/components/Filter/types";
+import { FilterPopover, useFilterPanel, useScheduleFilters } from "@/components/Filter";
+import { usePermission } from "@/context/PermissionContext";
 
 /* ============================= Types ============================= */
 
@@ -213,6 +214,7 @@ function mapEmployeeToDayColumn(emp: EmployeeRecord): DayDoctorColumn {
 
 const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) => {
   const navigate = useNavigate();
+  const { can } = usePermission();
   const [searchTerm, setSearchTerm] = useState("");
   const [toolbarSearchTerm, setToolbarSearchTerm] = useState("");
   const [selectedDoctorName, setSelectedDoctorName] = useState<string | null>(null);
@@ -310,14 +312,11 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   // Doctor filter options, built from the real doctor list -- lets the
   // toolbar Filter popover pick any number of specific doctors.
-  const doctorFilterFields: FilterField[] = useMemo(() => [
-    {
-      id: "doctorIds",
-      label: "Doctor",
-      type: "multiselect",
-      options: doctorColumns.map((doc) => ({ label: doc.name, value: doc.employeeId })),
-    },
-  ], [doctorColumns]);
+  const { doctorFilterFields } = useScheduleFilters({
+    doctors: doctorColumns,
+    idKey: "doctorIds",
+    valueField: "employeeId",
+  });
 
   // Only doctors matching the toolbar search, the picked doctor (if any),
   // and the multi-select Filter popover get a column at all -- narrowing
@@ -409,6 +408,22 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   const totalAppointments = dayAppointments.length;
 
+  // ---- EXPORT ----
+  const handleExport = async (exportFormat: string) => {
+    if (exportFormat !== "csv") return;
+    try {
+      const day = format(selectedDate, "yyyy-MM-dd");
+      await downloadExportCsv("appointments", { from: day, to: day });
+      toast({ title: "Export complete", description: "The CSV file has been downloaded." });
+    } catch (err: any) {
+      toast({
+        title: "Export failed",
+        description: exportErrorMessage(err),
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
       <div className="flex flex-col flex-1 min-w-0">
@@ -430,11 +445,13 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
 
             <div className="flex items-center gap-3">
-              <ExportReport />
+              {can("report.export") && <ExportReport onExport={handleExport} />}
 
 
 
+              {can("appointment.create") && (
               <button
+                onClick={() => navigate("/appointments/add")}
                 className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
               >
 
@@ -442,6 +459,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                 Add Appointment
 
               </button>
+              )}
 
 
             </div>

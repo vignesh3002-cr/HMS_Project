@@ -5,9 +5,8 @@ import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
-import { FilterPopover, useFilterPanel } from "@/components/Filter";
-import type { FilterField } from "@/components/Filter/types";
-import { filterDataByValues } from "@/components/Filter/utils";
+import { FilterPopover, useFilterPanel, useDashboardFilters } from "@/components/Filter";
+import { applySearchAndFilter } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { patientApi } from "@/api/patient.api";
@@ -237,7 +236,11 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("doctors");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { toast } = useToast();
-  const { selectedBranchId, isAllBranches } = useBranchFilter();
+  // Aliased -- this page already has its own local `branches` state below
+  // for the branch-performance widget, so the real branch directory from
+  // the shared hook (same one Staff.tsx uses for its Branch filter) needs a
+  // different name.
+  const { selectedBranchId, isAllBranches, branches: branchDirectory } = useBranchFilter();
   const { can, canAny, permissions, loading: permissionsLoading } = usePermission();
 
  
@@ -418,6 +421,7 @@ export default function Dashboard() {
     {
       label: "Doctors",
       permission: "doctor.read",
+      loading: isEmployeesLoading,
       value: (realDoctors?.length ?? 0).toLocaleString(),
       change: "",
       changeType: "positive",
@@ -442,6 +446,7 @@ export default function Dashboard() {
     {
       label: "Staff",
       permission: "employee.read",
+      loading: isEmployeesLoading,
       value: (realStaff?.length ?? 0).toLocaleString(),
       change: "",
       changeType: "neutral",
@@ -454,6 +459,7 @@ export default function Dashboard() {
     {
       label: "Appointments",
       permission: "appointment.read",
+      loading: isAppointmentsLoading,
       value: appointmentCount.toLocaleString(),
       change: "",
       changeType: "positive",
@@ -487,7 +493,7 @@ export default function Dashboard() {
       icon: <Receipt className="h-4 w-4" color="#00488D" />,
       iconBg: "rgba(255,255,255,0.20)",
     },
-  ], [realDoctors, realStaff, patientCount, appointmentCount]);
+  ], [realDoctors, realStaff, patientCount, appointmentCount, isEmployeesLoading, isAppointmentsLoading]);
 
   const visibleStats = liveStats.filter((stat) => !stat.permission || can(stat.permission));
 
@@ -520,74 +526,21 @@ export default function Dashboard() {
     handleClearFilter();
   }, [activeTab]);
 
-  const doctorFilterFields: FilterField[] = [
-    { id: "name", label: "Doctor Name", type: "text", placeholder: "Search by name" },
-    { id: "dept", label: "Department", type: "multiselect", options: [
-      { label: "Cardiology", value: "Cardiology" },
-      { label: "Neurology", value: "Neurology" },
-      { label: "Orthopedics", value: "Orthopedics" },
-      { label: "Dermatology", value: "Dermatology" },
-      { label: "ENT", value: "ENT" },
-      { label: "Gynecology", value: "Gynecology" },
-      { label: "Urology", value: "Urology" },
-      { label: "Orthology", value: "Orthology" },
-    ]},
-    { id: "branch", label: "Branch", type: "multiselect", options: [
-      { label: "Central Hospital (Tambaram)", value: "Central Hospital (Tambaram)" },
-      { label: "Central Hospital (Saidapet)", value: "Central Hospital (Saidapet)" },
-      { label: "Central Hospital (Egmore)", value: "Central Hospital (Egmore)" },
-    ]},
-    { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "Active", value: "Active" },
-      { label: "Leave", value: "Leave" },
-    ]},
-  ];
-
-  const staffFilterFields: FilterField[] = [
-    { id: "name", label: "Staff Name", type: "text", placeholder: "Search by name" },
-    { id: "dept", label: "Department", type: "multiselect", options: [
-      { label: "Emergency", value: "Emergency" },
-      { label: "Radiology", value: "Radiology" },
-      { label: "Surgery", value: "Surgery" },
-      { label: "Pathology", value: "Pathology" },
-      { label: "Maternity", value: "Maternity" },
-      { label: "Pharmacy", value: "Pharmacy" },
-      { label: "Pulmonology", value: "Pulmonology" },
-      { label: "Neurology", value: "Neurology" },
-    ]},
-    { id: "branch", label: "Branch", type: "multiselect", options: [
-      { label: "Central Hospital (Tambaram)", value: "Central Hospital (Tambaram)" },
-      { label: "Central Hospital (Saidapet)", value: "Central Hospital (Saidapet)" },
-      { label: "Central Hospital (Egmore)", value: "Central Hospital (Egmore)" },
-    ]},
-    { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "Active", value: "Active" },
-      { label: "Leave", value: "Leave" },
-    ]},
-  ];
-
-  const appointmentFilterFields: FilterField[] = [
-    { id: "patientName", label: "Patient Name", type: "text", placeholder: "Search by name" },
-    { id: "doctorName", label: "Doctor Name", type: "text", placeholder: "Search by doctor" },
-    { id: "reason", label: "Reason", type: "text", placeholder: "Search reason" },
-    { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "Booked", value: "Booked" },
-      { label: "Confirmed", value: "Confirmed" },
-      { label: "Checked In", value: "Checked In" },
-      { label: "In Consultation", value: "In Consultation" },
-      { label: "Completed", value: "Completed" },
-      { label: "Cancelled", value: "Cancelled" },
-      { label: "No Show", value: "No Show" },
-    ]},
-  ];
-
-  const activeFilterFields = useMemo(() => {
-    switch (activeTab) {
-      case "staff": return staffFilterFields;
-      case "appointments": return appointmentFilterFields;
-      default: return doctorFilterFields;
-    }
-  }, [activeTab]);
+  // Filter UI, state, and field/option logic all live in Filter/ now --
+  // useFilterPanel() (state, above) and useDashboardFilters() (field
+  // definitions + real-data-derived options) are the single source of
+  // truth; Dashboard just receives activeFilterFields and renders it via
+  // FilterPopover below. Branch/Department/Status/Name options are built
+  // from the same real, already-fetched realDoctors/realStaff/
+  // realAppointments/branchDirectory Dashboard already has -- no new or
+  // duplicate API calls.
+  const { activeFilterFields } = useDashboardFilters({
+    activeTab,
+    realDoctors,
+    realStaff,
+    realAppointments,
+    branches: branchDirectory,
+  });
 
   const availableTabs = useMemo(() => [
     { key: "doctors", label: "Doctors", show: canAny(["doctor.read", "employee.read"]) },
@@ -635,23 +588,14 @@ export default function Dashboard() {
       ? ["appointmentNo", "patientName", "doctorName", "reason", "status"]
       : ["name", "id", "dept", "branch", "status"];
 
-  const filteredData = useMemo(() => {
-    let result = [...activeData];
-
-    if (searchQuery) {
-      result = result.filter((item) =>
-        searchableFields.some((field) =>
-          String(item[field] ?? "")
-            .toLowerCase()
-            .includes(searchQuery.toLowerCase())
-        )
-      );
-    }
-
-    result = filterDataByValues(result, appliedValues);
-
-    return result;
-  }, [searchQuery, activeTab, appliedValues, realDoctors, realStaff, realAppointments]);
+  // Dashboard receives its filtered rows straight from Filter/'s
+  // applySearchAndFilter() -- same search-then-filter sequence as before,
+  // now a single reusable call instead of Dashboard orchestrating both
+  // steps itself.
+  const filteredData = useMemo(
+    () => applySearchAndFilter(activeData, searchQuery, searchableFields, appliedValues, activeFilterFields),
+    [searchQuery, activeTab, appliedValues, activeFilterFields, realDoctors, realStaff, realAppointments],
+  );
 
   const currentSortField = sortField[activeTab];
   const currentSortDirection = sortDirection[activeTab];
@@ -765,7 +709,12 @@ useEffect(() => {
     navigate(`/doctor/day-view/${id}`);
   };
 
-  if (permissionsLoading || isEmployeesLoading || isAppointmentsLoading) {
+  // Only the very first load (waiting on permissions) shows the full-page
+  // skeleton. Branch/date changes and manual refreshes just flip
+  // isEmployeesLoading/isAppointmentsLoading — those are handled inline
+  // (stat cards + table spinner below) so the shell never unmounts, same
+  // as the Staff page.
+  if (permissionsLoading) {
     return <DashboardSkeleton />;
   }
 
@@ -811,7 +760,11 @@ useEffect(() => {
                 </div>
                 <div className="pt-2">
                   <div className="font-extrabold text-xl leading-7 tracking-[-1px]" style={{ color: stat.valueColor }}>
-                    <CountUp target={parseStatValue(stat.value)} />
+                    {stat.loading ? (
+                      <div className="w-12 h-5 rounded-md bg-black/10 animate-pulse" />
+                    ) : (
+                      <CountUp target={parseStatValue(stat.value)} />
+                    )}
                   </div>
                   <div className="text-[rgba(0,0,0,0.70)] text-[9px] font-semibold tracking-[0.9px] capitalize leading-[13.5px]">
                     {stat.label}

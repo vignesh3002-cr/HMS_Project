@@ -2006,7 +2006,7 @@ export default function AddEmployee() {
                         {/* Day */}
                         <div className="flex flex-col">
                           <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5">
-                            Day
+                            Day <Req />
                           </label>
                           <FormDropdown
                             name={`day-${entry.id}`}
@@ -2022,7 +2022,7 @@ export default function AddEmployee() {
                         {/* Start time */}
                         <div className="flex flex-col">
                           <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5">
-                            Start time
+                            Start time <Req />
                           </label>
                           <TimepickerWheel
                             value={entry.start_time}
@@ -2035,7 +2035,7 @@ export default function AddEmployee() {
                         {/* End time */}
                         <div className="flex flex-col">
                           <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5">
-                            End time
+                            End time <Req />
                           </label>
                           <TimepickerWheel
                             value={entry.end_time}
@@ -2048,7 +2048,7 @@ export default function AddEmployee() {
                         {/* Branch */}
                         <div className="flex flex-col">
                           <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5">
-                            Branch
+                            Branch <Req />
                           </label>
                           <FormDropdown
                             name={`branch-${entry.id}`}

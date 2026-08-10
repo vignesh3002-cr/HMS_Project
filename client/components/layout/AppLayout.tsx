@@ -136,7 +136,7 @@ export function AppLayout() {
     {
       label: "Reschedule Queue",
       to: "/appointments/reschedule-queue",
-      permission: "doctor.update",
+      permission: "doctor.transfer",
     },
     { label: "Billing", to: "/billing" },
     { label: "Protocol", to: "/protocol", hasArrow: true },

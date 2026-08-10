@@ -1,13 +1,14 @@
-import { useState, useEffect, ChangeEvent, FormEvent } from "react";
+import { useState, useEffect, useMemo, useRef, ChangeEvent, FormEvent } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { startOfWeek, endOfWeek, addWeeks, format, parseISO } from "date-fns";
-import { ArrowLeft, CalendarPlus, Plus, Loader2 } from "lucide-react";
+import { addDays, format, parseISO } from "date-fns";
+import { ArrowLeft, CalendarPlus, Calendar as CalendarIcon, Plus, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import CalendarPicker from "@/components/hms/Calender";
 import { branchApi, Branch } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
-import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
+import { employeeApi, type EmployeeRecord, type DoctorScheduleRecord } from "@/api/employee.api";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
 import { appointmentApi, type AvailableSlot, type AppointmentResponse } from "@/api/appointment.api";
 
@@ -106,9 +107,10 @@ export default function AddAppointment() {
   // the user only needs to pick a doctor.
   const preselectedPatient = (location.state as { patient?: PatientRecord } | null)?.patient;
 
-  // Arriving from a doctor's profile (Scheduled.tsx / Day Scheduled.tsx)
-  // "Book Appointment" button carries that doctor's id so the form opens
-  // with the doctor locked in and their branch/department auto-filled.
+  // Arriving from a doctor's profile (Scheduled.tsx, shared by both the
+  // /doctor/view and /doctor/day-view routes) "Book Appointment" button
+  // carries that doctor's id so the form opens with the doctor locked in
+  // and their branch/department auto-filled.
   const preselectedDoctorId = (location.state as { doctorId?: string } | null)?.doctorId;
 
   const [formData, setFormData] = useState<AppointmentFormData>(() => {
@@ -128,6 +130,22 @@ export default function AddAppointment() {
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [bookingResult, setBookingResult] = useState<AppointmentResponse | null>(null);
 
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const calendarWrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        calendarWrapperRef.current &&
+        !calendarWrapperRef.current.contains(event.target as Node)
+      ) {
+        setIsCalendarOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   // Patient dropdown options
   const [patients, setPatients] = useState<PatientRecord[]>(
     preselectedPatient ? [preselectedPatient] : [],
@@ -145,6 +163,16 @@ export default function AddAppointment() {
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [findingNearestDate, setFindingNearestDate] = useState(false);
+
+  // True when the selected doctor has no schedule on the selected date at the
+  // selected branch (backend returns an empty slots array in that case) or the
+  // slots request itself failed - shown as "Doctor is not assigned for this day".
+  const [doctorUnavailable, setDoctorUnavailable] = useState(false);
+
+  // The selected doctor's active weekly schedules (from employeeApi.getOne) -
+  // used to derive which weekdays they actually work at the selected branch,
+  // so the calendar only enables those dates.
+  const [doctorSchedules, setDoctorSchedules] = useState<DoctorScheduleRecord[]>([]);
 
   // Doctors actually assigned (via employees.branch_id) to the currently
   // selected branch -- used to narrow the Department and Doctor dropdowns
@@ -201,10 +229,12 @@ export default function AddAppointment() {
   useEffect(() => {
     if (!formData.doctorId || !formData.branchId || !formData.selectDate) {
       setAvailableSlots([]);
+      setDoctorUnavailable(false);
       return;
     }
 
     setLoadingSlots(true);
+    setDoctorUnavailable(false);
     setFormData((prev) => ({ ...prev, timeSlot: "" }));
 
     appointmentApi
@@ -212,9 +242,13 @@ export default function AddAppointment() {
       .then((res) => {
         const slots = res.data.data?.slots || [];
         setAvailableSlots(slots.filter((s) => s.is_available));
+        // Empty slots array = the backend found no active schedule for this
+        // doctor/branch/date (a fully-booked day still returns slot entries).
+        setDoctorUnavailable(slots.length === 0);
       })
       .catch(() => {
         setAvailableSlots([]);
+        setDoctorUnavailable(true);
       })
       .finally(() => setLoadingSlots(false));
   }, [formData.doctorId, formData.branchId, formData.selectDate]);
@@ -342,13 +376,34 @@ export default function AddAppointment() {
     ? `Dr. ${selectedDoctor.first_name}${selectedDoctor.middle_name ? ` ${selectedDoctor.middle_name}` : ""} ${selectedDoctor.last_name}`
     : "";
 
-  // Appointment Date is bookable only within the current week through the
-  // end of next week -- no previous-week slots.
-  const minSelectableDate = format(startOfWeek(new Date(), { weekStartsOn: 1 }), "yyyy-MM-dd");
-  const maxSelectableDate = format(
-    endOfWeek(addWeeks(new Date(), 1), { weekStartsOn: 1 }),
-    "yyyy-MM-dd",
-  );
+  // Appointment Date is bookable only within exactly 14 days from today --
+  // no past dates, nothing beyond the two-week window.
+  const minSelectableDate = format(new Date(), "yyyy-MM-dd");
+  const maxSelectableDate = format(addDays(new Date(), 14), "yyyy-MM-dd");
+
+  // Weekdays (MONDAY..SUNDAY) the selected doctor actually works at the
+  // selected branch, derived from their active schedules. null = we don't
+  // have schedule data yet, in which case the calendar stays fully enabled
+  // so the flow can't dead-end (the slots API still guards the backend).
+  const workingWeekdays = useMemo(() => {
+    if (!formData.doctorId || !formData.branchId) return null;
+    const days = new Set(
+      doctorSchedules
+        .filter(
+          (s) =>
+            s.branch_id === formData.branchId &&
+            s.is_active !== false &&
+            Boolean(s.day_of_week),
+        )
+        .map((s) => s.day_of_week as string),
+    );
+    return days.size > 0 ? days : null;
+  }, [doctorSchedules, formData.doctorId, formData.branchId]);
+
+  const isDateDisabled = (date: Date) => {
+    if (!workingWeekdays) return false;
+    return !workingWeekdays.has(format(date, "EEEE").toUpperCase());
+  };
 
   // Shared by the Doctor dropdown's onValueChange and the doctor-preselect
   // effect below -- looks up the doctor's real specialization/department and
@@ -381,6 +436,7 @@ export default function AddAppointment() {
       .then((res) => {
         const mappedBranches = res.data?.data?.branches || [];
         setDoctorBranches(mappedBranches);
+        setDoctorSchedules(res.data?.data?.doctorSchedules || []);
         const nextBranchId =
           mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
           mappedBranches[0]?.branch_id ||
@@ -615,19 +671,48 @@ export default function AddAppointment() {
                     </span>
                   )}
                 </label>
-                <input
-                  type="date"
-                  name="selectDate"
-                  min={minSelectableDate}
-                  max={maxSelectableDate}
-                  className={inputClass + " text-gray-500"}
-                  value={formData.selectDate}
-                  onChange={(e) => {
-                    handleInputChange(e);
-                    setFormData((prev) => ({ ...prev, timeSlot: "" }));
-                  }}
-                  required
-                />
+
+                <div className="relative" ref={calendarWrapperRef}>
+                  {/* Fake input that just displays the date */}
+                  <button
+                    type="button"
+                    onClick={() => setIsCalendarOpen(false)}
+                    className="w-full flex items-center justify-between rounded-xl border border-gray-200 px-4 py-2.5 text-left cursor-default bg-white text-sm text-gray-900"
+                  >
+                    <span>{format(parseISO(formData.selectDate), "dd-MM-yyyy")}</span>
+                  </button>
+
+                  {/* Calendar icon - the ONLY trigger */}
+                  <button
+                    type="button"
+                    onClick={() => setIsCalendarOpen((prev) => !prev)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2"
+                    aria-label="Open calendar"
+                  >
+                    <CalendarIcon className="w-4 h-4 text-gray-500" />
+                  </button>
+
+                  {isCalendarOpen && (
+                    <div className="absolute z-50 mt-2">
+                      <CalendarPicker
+                        theme="light"
+                        hideThemePicker
+                        selected={parseISO(formData.selectDate)}
+                        minDate={new Date()}
+                        maxDate={addDays(new Date(), 14)}
+                        isDateDisabled={isDateDisabled}
+                        onSelect={(date) => {
+                          setFormData((prev) => ({
+                            ...prev,
+                            selectDate: format(date, "yyyy-MM-dd"),
+                            timeSlot: "",
+                          }));
+                          setIsCalendarOpen(false);
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Available Time Slots */}
@@ -650,8 +735,11 @@ export default function AddAppointment() {
                     <Loader2 className="w-4 h-4 animate-spin" />
                     Loading available slots...
                   </div>
-                ) 
-                 : (
+                ) : doctorUnavailable ? (
+                  <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
+                    Doctor is not assigned for this day
+                  </div>
+                ) : (
                   <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
                     {availableSlots.map((slot) => (
                       <button
@@ -763,32 +851,32 @@ export default function AddAppointment() {
         title="Appointment Booked"
         description={
           bookingResult ? (
-            <div className="w-full rounded-xl bg-gray-50 border border-gray-100 p-4 text-left text-sm">
-              <div className="flex items-center justify-between gap-4 py-1">
+            <div className="w-full min-w-[300px] sm:min-w-[340px] rounded-xl bg-gray-50 border border-gray-100 p-4 text-left text-sm">
+              <div className="flex items-center justify-between gap-6 py-1">
                 <span className="shrink-0 text-gray-500">Patient</span>
                 <span className="text-right font-semibold text-gray-900">{formData.patientName || "-"}</span>
               </div>
-              <div className="flex items-center justify-between gap-4 py-1">
+              <div className="flex items-center justify-between gap-6 py-1">
                 <span className="shrink-0 text-gray-500">Patient ID</span>
                 <span className="text-right font-semibold text-gray-900">{bookingResult.patient_id}</span>
               </div>
-              <div className="flex items-center justify-between gap-4 py-1">
+              <div className="flex items-center justify-between gap-6 py-1">
                 <span className="shrink-0 text-gray-500">Appointment ID</span>
                 <span className="text-right font-semibold text-gray-900">{bookingResult.appointment_id}</span>
               </div>
-              <div className="flex items-center justify-between gap-4 py-1">
+              <div className="flex items-center justify-between gap-6 py-1">
                 <span className="shrink-0 text-gray-500">Date</span>
                 <span className="text-right font-semibold text-gray-900">
                   {format(parseISO(bookingResult.appointment_date), "EEE, MMM d, yyyy")}
                 </span>
               </div>
-              <div className="flex items-center justify-between gap-4 py-1">
+              <div className="flex items-center justify-between gap-6 py-1">
                 <span className="shrink-0 text-gray-500">Time</span>
                 <span className="text-right font-semibold text-gray-900">
                   {formatSlotLabel(bookingResult.appointment_time)}
                 </span>
               </div>
-              <div className="flex items-center justify-between gap-4 py-1">
+              <div className="flex items-center justify-between gap-6 py-1">
                 <span className="shrink-0 text-gray-500">Doctor</span>
                 <span className="text-right font-semibold text-gray-900">{selectedDoctorName || "-"}</span>
               </div>

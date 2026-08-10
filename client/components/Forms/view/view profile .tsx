@@ -16,9 +16,9 @@ import {
   Link,
   FileText,
 } from "lucide-react";
-import api from "@/api/axios";
 import { branchApi, type BranchDetail } from "@/api/branch.api";
 import { employeeApi, EmployeeDetailResponse } from "@/api/employee.api";
+import { AvatarUpload } from "@/components/ui/avatar-upload";
 import { getUser } from "@/utils/token";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 
@@ -132,28 +132,10 @@ const Profile = () => {
   const { selectedBranchId, isAllBranches } = useBranchFilter();
   const [branch, setBranch] = useState<BranchDetail | null>(null);
   const navigate = useNavigate();
-  const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
 
-  useEffect(() => {
-    api
-      .get("/auth/me")
-      .then((res) => {
-        if (res.data?.success) setMyEmployeeId(res.data.user?.employee_id ?? null);
-      })
-      .catch((err) => {
-        console.error("[Profile] Failed to load current user:", err);
-      });
-  }, []);
-
-  const handleEditProfile = () => {
-    if (!myEmployeeId) return;
-    const role = getUser()?.role_type || getUser()?.role || "";
-    const path = role === "DOCTOR" ? `/doctor/edit/${myEmployeeId}` : `/staff/edit/${myEmployeeId}`;
-    // ?self=1 tells Addemployee.tsx this is the account owner editing their
-    // own profile, so it can hide fields that only make sense for an admin
-    // acting on someone else (e.g. the Status/Active toggle).
-    navigate(`${path}?self=1`);
-  };
+  const isAdmin = ["SUPER_ADMIN", "HEAD_ADMIN", "BRANCH_ADMIN"].includes(
+    String(getUser()?.role_type ?? "").toUpperCase()
+  );
 
   useEffect(() => {
     const branchId = !isAllBranches ? selectedBranchId : getUser()?.branch_id;
@@ -191,6 +173,7 @@ const Profile = () => {
 
   const [profile, setProfile] = useState<EmployeeDetailResponse | null>(null);
   const [form, setForm] = useState<ProfileFormState>(emptyForm);
+  const [photoUrl, setPhotoUrl] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -207,6 +190,9 @@ const Profile = () => {
         if (!isMounted) return;
 
         setProfile(data);
+        setPhotoUrl(
+          data.employee.employee_photo_URL || data.employee.photo || ""
+        );
         setForm({
           first_name: data.employee.first_name || "",
           last_name: data.employee.last_name || "",
@@ -241,27 +227,15 @@ const Profile = () => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!profile) return;
-
+  const handlePhotoChange = async (dataUrl: string | null) => {
+    if (!dataUrl || !profile) return;
     try {
       setSaving(true);
       setError(null);
-      await employeeApi.update(profile.employee.employee_id, {
-        first_name: form.first_name,
-        last_name: form.last_name,
-        email: form.email,
-        mobile_no: form.mobile_no,
-        current_address: form.current_address,
-        employee_state: form.employee_state,
-        employee_district: form.employee_district,
-        employee_pincode: form.employee_pincode
-          ? Number(form.employee_pincode)
-          : undefined,
-      });
+      await employeeApi.updatePhoto(profile.employee.employee_id, dataUrl);
+      setPhotoUrl(dataUrl);
     } catch (err: any) {
-      setError(err?.response?.data?.message || "Failed to save changes.");
+      setError(err?.response?.data?.message || "Failed to update photo.");
     } finally {
       setSaving(false);
     }
@@ -270,10 +244,6 @@ const Profile = () => {
   const roleType = profile?.user?.role_type || "";
   const roleLabel = ROLE_LABELS[roleType] || roleType || "";
   const branchName = profile?.employee?.branch?.branch_name || "";
-  const photoUrl =
-    profile?.employee?.employee_photo_URL ||
-    profile?.employee?.photo ||
-    "https://i.pravatar.cc/150?img=12";
   const fullName = [form.first_name, form.last_name].filter(Boolean).join(" ");
 
   return (
@@ -303,10 +273,7 @@ const Profile = () => {
                         <User className="w-10 h-10 text-[#00488D]" strokeWidth={1.5} />
                       )}
                     </div>
-                    <button className="absolute bottom-0 right-0 w-7 h-7 flex items-center justify-center rounded-full bg-[#004785] text-white text-xs shadow-sm hover:bg-[#003a6b] transition-colors">
-                      📷
-                    </button>
-                  </div>
+                    </div>
 
                   <div>
                     <h1 className="hms-heading">{displayName}</h1>
@@ -335,13 +302,6 @@ const Profile = () => {
                 <div className="z-10 flex w-full flex-col items-stretch gap-2 md:w-auto md:flex-row">
                   <button className="px-4 py-2 rounded-lg border border-[#00488D] text-[#00488D] text-xs font-semibold hover:bg-[#E6F0FF] transition-colors">
                     Export CV
-                  </button>
-                  <button
-                    onClick={handleEditProfile}
-                    disabled={!myEmployeeId}
-                    className="px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Edit Profile
                   </button>
                 </div>
               </div>
@@ -668,7 +628,7 @@ const Profile = () => {
               {loading ? (
                 <p className="text-sm text-gray-500">Loading profile...</p>
               ) : (
-                <form className="space-y-10" onSubmit={handleSubmit}>
+                <form className="space-y-10">
                   {error && (
                     <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
                       {error}
@@ -682,18 +642,29 @@ const Profile = () => {
                           Profile Information
                         </h3>
                         <p className="hms-subheading">
-                          Update your account information.
+                          Your profile details are read-only.
+                          {isAdmin ? " Only the profile photo can be changed." : ""}
                         </p>
                       </div>
                     </div>
 
                     {/* Profile Image */}
                     <div className="mb-8 flex items-center gap-6">
-                      <img
-                        src={photoUrl}
-                        alt="Profile"
-                        className="h-24 w-24 rounded-full border object-cover"
-                      />
+                      {isAdmin ? (
+                        <AvatarUpload
+                          value={photoUrl}
+                          onChange={handlePhotoChange}
+                          label="Profile photo"
+                          hint="Only admins can change their own photo"
+                          size={96}
+                        />
+                      ) : (
+                        <img
+                          src={photoUrl || "https://i.pravatar.cc/150?img=12"}
+                          alt="Profile"
+                          className="h-24 w-24 rounded-full border object-cover"
+                        />
+                      )}
 
                       <div>
                         <h4 className="hms-name-text">{fullName}</h4>
@@ -716,7 +687,7 @@ const Profile = () => {
                           onChange={(e) =>
                             handleChange("first_name", e.target.value)
                           }
-                          className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none focus:border-blue-500"
+                          className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 outline-none disabled:cursor-not-allowed"
                         />
                       </div>
 
@@ -730,7 +701,7 @@ const Profile = () => {
                           onChange={(e) =>
                             handleChange("last_name", e.target.value)
                           }
-                          className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none focus:border-blue-500"
+                          className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 outline-none disabled:cursor-not-allowed"
                         />
                       </div>
 
@@ -741,8 +712,9 @@ const Profile = () => {
                         <input
                           type="email"
                           value={form.email}
+                          disabled
                           onChange={(e) => handleChange("email", e.target.value)}
-                          className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none focus:border-blue-500"
+                          className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 outline-none disabled:cursor-not-allowed"
                         />
                       </div>
 
@@ -756,7 +728,7 @@ const Profile = () => {
                           onChange={(e) =>
                             handleChange("mobile_no", e.target.value)
                           }
-                          className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none focus:border-blue-500"
+                          className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 outline-none disabled:cursor-not-allowed"
                         />
                       </div>
 
@@ -804,7 +776,7 @@ const Profile = () => {
                           onChange={(e) =>
                             handleChange("employee_state", e.target.value)
                           }
-                          className="w-full rounded-lg border border-gray-300 px-4 py-3"
+                          className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 disabled:cursor-not-allowed"
                         />
                       </div>
 
@@ -817,7 +789,7 @@ const Profile = () => {
                           onChange={(e) =>
                             handleChange("employee_district", e.target.value)
                           }
-                          className="w-full rounded-lg border border-gray-300 px-4 py-3"
+                          className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 disabled:cursor-not-allowed"
                         />
                       </div>
 
@@ -830,7 +802,7 @@ const Profile = () => {
                           onChange={(e) =>
                             handleChange("employee_pincode", e.target.value)
                           }
-                          className="w-full rounded-lg border border-gray-300 px-4 py-3"
+                          className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 disabled:cursor-not-allowed"
                         />
                       </div>
 
@@ -843,22 +815,12 @@ const Profile = () => {
                           onChange={(e) =>
                             handleChange("current_address", e.target.value)
                           }
-                          className="w-full rounded-lg border border-gray-300 px-4 py-3"
+                          className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 disabled:cursor-not-allowed"
                         />
                       </div>
                     </div>
                   </section>
 
-                  {/* ================= Form Actions ================= */}
-                  <div className="flex justify-end gap-4 pt-8 border-t">
-                    <button
-                      type="submit"
-                      disabled={saving}
-                      className="rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-60"
-                    >
-                      {saving ? "Saving..." : "Save Changes"}
-                    </button>
-                  </div>
                 </form>
               )}
             </div>

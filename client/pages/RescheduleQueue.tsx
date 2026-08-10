@@ -18,13 +18,15 @@ import {
   RescheduleQueueEntry,
 } from "@/api/doctorTransfer.api";
 import { branchApi, Branch } from "@/api/branch.api";
-import { employeeApi, EmployeeRecord } from "@/api/employee.api";
+import { employeeApi, EmployeeRecord, DoctorScheduleRecord } from "@/api/employee.api";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { getUser } from "@/utils/token";
 
 const TRANSFER_ADMIN_ROLES = ["HEAD_ADMIN", "SUPER_ADMIN", "BRANCH_ADMIN"];
 
 const STATUS_FILTERS = [
-  { label: "All statuses", value: "" },
+  { label: "All status", value: "" },
   { label: "Pending", value: "PENDING" },
   { label: "Assigned", value: "ASSIGNED" },
   { label: "Confirmed", value: "CONFIRMED" },
@@ -80,6 +82,25 @@ function todayISODate(): string {
   ).padStart(2, "0")}`;
 }
 
+const DAY_OF_WEEK_NAMES = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"] as const;
+
+function dayOfWeekOf(dateStr: string): string {
+  if (!dateStr) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
+  if (m) return DAY_OF_WEEK_NAMES[new Date(+m[1], +m[2] - 1, +m[3]).getDay()];
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? "" : DAY_OF_WEEK_NAMES[d.getDay()];
+}
+
+function dayLabelOf(day: string): string {
+  return day ? day.charAt(0) + day.slice(1).toLowerCase() : day;
+}
+
+function patientNameOf(entry: RescheduleQueueEntry): string {
+  const p = entry.patient_bio_data;
+  return [p?.patient_first_name, p?.patient_last_name].filter(Boolean).join(" ") || entry.patient_id;
+}
+
 export default function RescheduleQueue() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -101,9 +122,15 @@ export default function RescheduleQueue() {
   // Action dialogs
   const [assignTarget, setAssignTarget] = useState<RescheduleQueueEntry | null>(null);
   const [assignDoctorId, setAssignDoctorId] = useState("");
+  const [assignBranchId, setAssignBranchId] = useState("");
   const [assignDate, setAssignDate] = useState("");
   const [assignTime, setAssignTime] = useState("");
   const [assignReason, setAssignReason] = useState("");
+  const [assignDone, setAssignDone] = useState(false);
+  const [assignDoneMessage, setAssignDoneMessage] = useState("");
+  const [doctorSchedulesById, setDoctorSchedulesById] = useState<Record<string, DoctorScheduleRecord[]>>({});
+  const [schedulesLoading, setSchedulesLoading] = useState(false);
+  const [schedulesLoaded, setSchedulesLoaded] = useState(false);
 
   const [confirmTarget, setConfirmTarget] = useState<RescheduleQueueEntry | null>(null);
   const [confirmReason, setConfirmReason] = useState("");
@@ -173,6 +200,56 @@ export default function RescheduleQueue() {
     [doctors],
   );
 
+  const branchLabelOf = useCallback(
+    (branchId: string) => {
+      const b = branches.find((x) => x.branch_id === branchId);
+      return b?.branch_name ? `${b.branch_name} (${branchId})` : branchId;
+    },
+    [branches],
+  );
+
+  const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
+
+  const assignDoctorFiltering = useMemo(
+    () => schedulesLoaded && !!assignTarget?.department_id && !!assignDay,
+    [schedulesLoaded, assignTarget, assignDay],
+  );
+
+  const isAssignDoctorEligible = useCallback(
+    (doctorId: string, branchId: string, day: string) =>
+      (doctorSchedulesById[doctorId] || []).some(
+        (s) => s.is_active !== false && s.branch_id === branchId && s.day_of_week === day,
+      ),
+    [doctorSchedulesById],
+  );
+
+  const assignBranchOptions = useMemo(
+    () =>
+      branches.map((b) => ({
+        label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+        value: b.branch_id,
+        highlight: b.branch_id === assignTarget?.branch_id,
+        badge: b.branch_id === assignTarget?.branch_id ? "Appointment's branch" : undefined,
+      })),
+    [branches, assignTarget],
+  );
+
+  const assignDoctorOptions = useMemo(() => {
+    const active = doctors.filter((d) => d.emp_status !== false);
+    const labelOf = (d: EmployeeRecord) =>
+      `Dr. ${[d.first_name, d.middle_name, d.last_name].filter(Boolean).join(" ")}`;
+    if (!assignDoctorFiltering) {
+      return active.map((d) => ({ label: labelOf(d), value: d.employee_id }));
+    }
+    return active
+      .filter((d) => isAssignDoctorEligible(d.employee_id, assignBranchId, assignDay))
+      .map((d) => ({
+        label: labelOf(d),
+        value: d.employee_id,
+        badge: `available ${dayLabelOf(assignDay)}`,
+      }));
+  }, [doctors, assignDoctorFiltering, isAssignDoctorEligible, assignBranchId, assignDay]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return entries;
@@ -189,14 +266,57 @@ export default function RescheduleQueue() {
 
   const openAssign = (entry: RescheduleQueueEntry) => {
     setAssignDoctorId("");
+    setAssignBranchId(entry.branch_id);
     setAssignDate(entry.old_appointment_date ? toDateInputValue(entry.old_appointment_date) : todayISODate());
     setAssignTime(entry.old_appointment_time ? formatTime(entry.old_appointment_time) : "");
     setAssignReason("");
+    setAssignDone(false);
+    setAssignDoneMessage("");
     setAssignTarget(entry);
+    if (entry.department_id) {
+      const needIds = doctors
+        .filter((d) => d.emp_status !== false && d.department_id === entry.department_id)
+        .map((d) => d.employee_id)
+        .filter((id) => !doctorSchedulesById[id]);
+      if (needIds.length === 0) {
+        setSchedulesLoaded(true);
+        return;
+      }
+      setSchedulesLoading(true);
+      setSchedulesLoaded(false);
+      Promise.all(needIds.map((id) => employeeApi.getOne(id)))
+        .then((resps) => {
+          setDoctorSchedulesById((prev) => {
+            const next = { ...prev };
+            resps.forEach((r, i) => {
+              const id = needIds[i];
+              next[id] = (r.data?.data?.doctorSchedules || []).filter(
+                (s) => s.is_active !== false && s.branch_id,
+              );
+            });
+            return next;
+          });
+        })
+        .catch((err) => {
+          console.error("[RescheduleQueue] Failed to load doctor schedules", err);
+          setSchedulesLoaded(false);
+        })
+        .finally(() => setSchedulesLoading(false));
+    } else {
+      setSchedulesLoaded(false);
+    }
   };
 
   const doAssign = async () => {
     if (!assignTarget) return;
+    if (assignDoctorFiltering && assignDoctorOptions.length === 0) {
+      toast({
+        title: "No doctor available",
+        description: `No doctor from the same department works at ${branchLabelOf(assignBranchId)} on ${dayLabelOf(assignDay)}.`,
+        variant: "destructive",
+      });
+      return;
+    }
     if (!assignDoctorId) {
       toast({ title: "Choose a doctor", variant: "destructive" });
       return;
@@ -214,13 +334,13 @@ export default function RescheduleQueue() {
       const res = await doctorTransferApi.processRescheduleAction(assignTarget.appointment_id, {
         action: "ASSIGN",
         employee_id: assignDoctorId,
-        branch_id: assignTarget.branch_id,
+        branch_id: assignBranchId,
         appointment_date: assignDate,
         appointment_time: assignTime,
         reason: assignReason.trim() || undefined,
       });
-      toast({ title: "Slot assigned", description: res.data.message });
-      setAssignTarget(null);
+      setAssignDoneMessage(res.data.message);
+      setAssignDone(true);
       fetchQueue();
     } catch (err: any) {
       toast({
@@ -277,6 +397,28 @@ export default function RescheduleQueue() {
     }
   };
 
+  const assignDoneFooter = (
+    <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <button
+        type="button"
+        onClick={() => navigate("/dashboard")}
+        className={cn(buttonVariants({ variant: "outline" }), "gap-2")}
+      >
+        Home
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setAssignDone(false);
+          setAssignTarget(null);
+        }}
+        className={cn(buttonVariants({ variant: "default" }), "gap-2")}
+      >
+        OK
+      </button>
+    </div>
+  );
+
   if (!roleOk) {
     return (
       <div className="p-8 max-w-lg mx-auto text-center">
@@ -325,7 +467,7 @@ export default function RescheduleQueue() {
               setStatusFilter(v);
               setPage(1);
             }}
-            placeholder="All statuses"
+            placeholder="All status"
           />
         </div>
         <div className="w-56">
@@ -482,30 +624,120 @@ export default function RescheduleQueue() {
       {/* Assign slot dialog */}
       <ConfirmationDialog
         open={!!assignTarget}
-        type="info"
-        title="Assign a new slot"
-        description="Pick a doctor and a slot. The doctor must be assigned to the appointment's branch and have working hours covering the chosen time."
+        type={assignDone ? "success" : "info"}
+        title={assignDone ? "Slot assigned" : "Assign a new slot"}
+        description={
+          assignDone
+            ? "The appointment has been reassigned and the queue updated."
+            : "Pick a branch, a doctor and a slot. Only doctors who work at the selected branch on the selected day are listed."
+        }
         confirmText="Assign slot"
         loading={processing}
+        hideCancelButton={assignDone}
+        showCloseButton={!assignDone}
+        footer={assignDone ? assignDoneFooter : undefined}
         onConfirm={doAssign}
-        onCancel={() => setAssignTarget(null)}
+        onCancel={() => {
+          setAssignDone(false);
+          setAssignTarget(null);
+        }}
       >
+        {assignDone ? (
+          <div className="w-full space-y-3 text-left">
+            <div className="rounded-lg bg-green-50 border border-green-200 px-3 py-2.5 text-sm text-green-700">
+              {assignDoneMessage || "The appointment has been reassigned."}
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+              <div>
+                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wide">Patient</div>
+                <div className="text-[#191C1E] font-medium">
+                  {assignTarget ? patientNameOf(assignTarget) : "—"}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wide">Branch</div>
+                <div className="text-[#191C1E] font-medium">{branchLabelOf(assignBranchId)}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wide">Doctor</div>
+                <div className="text-[#191C1E] font-medium">{doctorNameById(assignDoctorId) || "—"}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wide">Date · Time</div>
+                <div className="text-[#191C1E] font-medium">
+                  {assignDate} · {assignTime}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
         <div className="w-full space-y-3 text-left">
+          <div>
+            <label className={labelCls}>Assign at branch</label>
+            <FormDropdown
+              name="assign_branch"
+              className={
+                assignTarget && assignBranchId === assignTarget.branch_id
+                  ? "w-full bg-blue-50 border border-blue-500 rounded-xl px-3 py-2 text-sm text-[#00488D] focus:outline-none focus:ring-2 focus:ring-[#00488D]/30"
+                  : inputCls
+              }
+              options={assignBranchOptions}
+              value={assignBranchId}
+              onValueChange={(v) => {
+                setAssignBranchId(v);
+                if (
+                  schedulesLoaded &&
+                  assignTarget?.department_id &&
+                  assignDoctorId &&
+                  !isAssignDoctorEligible(assignDoctorId, v, assignDay)
+                ) {
+                  setAssignDoctorId("");
+                }
+              }}
+              placeholder="Select branch"
+            />
+            {assignTarget && assignBranchId === assignTarget.branch_id && (
+              <p className="text-[11px] text-blue-600 mt-1">
+                Defaults to the appointment's branch — changeable.
+              </p>
+            )}
+          </div>
           <div>
             <label className={labelCls}>Doctor</label>
             <FormDropdown
               name="assign_doctor"
               className={inputCls}
-              options={doctors
-                .filter((d) => d.emp_status !== false)
-                .map((d) => ({
-                  label: `Dr. ${[d.first_name, d.middle_name, d.last_name].filter(Boolean).join(" ")}`,
-                  value: d.employee_id,
-                }))}
+              options={assignDoctorOptions}
               value={assignDoctorId}
               onValueChange={setAssignDoctorId}
-              placeholder="Select doctor"
+              disabled={schedulesLoading}
+              placeholder={
+                assignDoctorFiltering && assignDoctorOptions.length === 0
+                  ? "No doctors available"
+                  : "Select doctor"
+              }
+              emptyMessage="No doctors available"
             />
+            {schedulesLoading ? (
+              <p className="text-[11px] text-[#94A3B8] mt-1">
+                <Loader2 className="inline h-3 w-3 animate-spin mr-1" />
+                Checking doctor availability…
+              </p>
+            ) : assignDoctorFiltering && assignDoctorOptions.length === 0 ? (
+              <p className="text-[11px] text-[#94A3B8] mt-1">
+                No doctor from the same department works at {branchLabelOf(assignBranchId)} on{" "}
+                {dayLabelOf(assignDay)}.
+              </p>
+            ) : assignDoctorFiltering ? (
+              <p className="text-[11px] text-[#94A3B8] mt-1">
+                Showing {assignDoctorOptions.length} doctor(s) working at {branchLabelOf(assignBranchId)} on{" "}
+                {dayLabelOf(assignDay)} — only these are listed.
+              </p>
+            ) : assignTarget?.department_id ? (
+              <p className="text-[11px] text-[#94A3B8] mt-1">
+                Showing all active doctor(s) — pick a date first to filter by working hours.
+              </p>
+            ) : null}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -515,7 +747,20 @@ export default function RescheduleQueue() {
                 min={todayISODate()}
                 className={inputCls}
                 value={assignDate}
-                onChange={(e) => setAssignDate(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setAssignDate(v);
+                  const day = dayOfWeekOf(v);
+                  if (
+                    schedulesLoaded &&
+                    assignTarget?.department_id &&
+                    day &&
+                    assignDoctorId &&
+                    !isAssignDoctorEligible(assignDoctorId, assignBranchId, day)
+                  ) {
+                    setAssignDoctorId("");
+                  }
+                }}
               />
             </div>
             <div>
@@ -533,6 +778,7 @@ export default function RescheduleQueue() {
             />
           </div>
         </div>
+        )}
       </ConfirmationDialog>
 
       {/* Confirm reschedule dialog */}

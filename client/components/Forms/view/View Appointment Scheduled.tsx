@@ -19,9 +19,13 @@ import {
 } from "lucide-react";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 
+// Mirrors APPOINTMENT_STATUS in appointment.constants.ts exactly -- keep
+// these keys in sync with the backend enum (previously had "BOOKED" where
+// the backend actually uses "SCHEDULED", and a "CONFIRMED" status that
+// doesn't exist there, so every newly-booked appointment fell through to
+// the raw-value fallback below instead of getting a real label).
 const STATUS_LABELS: Record<string, string> = {
-  BOOKED: "Scheduled",
-  CONFIRMED: "Conformed",
+  SCHEDULED: "Scheduled",
   CHECKED_IN: "Checked In",
   IN_CONSULTATION: "In Consultation",
   COMPLETED: "Completed",

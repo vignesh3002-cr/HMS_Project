@@ -35,11 +35,6 @@ export function PhoneInput({
     onChange(phone);
   };
 
-  const baseInputClasses =
-    "w-full h-10 px-4 bg-white border border-gray-200 rounded-xl text-[13.5px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-[3px] focus:ring-blue-500/15 focus:border-blue-500 transition-all duration-200 disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed";
-
-  const errorClasses = "border-red-500 focus:border-red-500 focus:ring-red-500/15";
-
   return (
     <div className="w-full">
       {(label || required || optional) && (
@@ -51,57 +46,71 @@ export function PhoneInput({
           )}
         </label>
       )}
-      <RPhoneInput
-        value={value}
-        onChange={handleChange}
-        defaultCountry={defaultCountry}
-        disabled={disabled}
-        placeholder={placeholder}
-        name={name}
-        required={required}
-        preferredCountries={["in", "us", "gb", "ae", "sa"]}
-        inputProps={{
-          id: id || name,
-          ...props,
-        }}
+      
+      {/* Outer wrapper controls the border and focus ring (removed overflow-hidden) */}
+      <div
         className={cn(
-          "w-full flex items-center",
-          error && "focus-within:ring-2 focus-within:ring-red-500/20",
-          className,
+          "flex w-full items-center h-10 rounded-xl border bg-white transition-all duration-200",
+          error
+            ? "border-red-500 focus-within:ring-2 focus-within:ring-red-500/20"
+            : "border-gray-200 focus-within:border-blue-500 focus-within:ring-[3px] focus-within:ring-blue-500/15",
+          disabled && "bg-gray-50 cursor-not-allowed",
+          className
         )}
-        inputClassName={cn(
-          "flex-1 h-10 bg-transparent border-none outline-none text-[13.5px] text-gray-900 placeholder:text-gray-400",
-          disabled && "bg-gray-50 text-gray-400 cursor-not-allowed",
-        )}
-        countrySelectorStyleProps={{
-          className: cn(
-            "flex items-center h-10 px-3 bg-white border-r border-gray-200 rounded-l-xl text-gray-900",
-            disabled && "bg-gray-50 text-gray-400 cursor-not-allowed",
-            error && "border-r-red-500",
-          ),
-          buttonClassName: "flex items-center gap-1.5",
-          buttonContentWrapperClassName: "flex items-center gap-1.5",
-          flagClassName: "w-5 h-3.5 rounded",
-          dropdownArrowClassName: "text-gray-400",
-          dropdownStyleProps: {
-            className: "border border-gray-200 rounded-xl shadow-lg mt-1",
-          },
-        }}
-        inputStyle={{
-          border: "none",
-          boxShadow: "none",
-          backgroundColor: "transparent",
-        }}
-        style={{
-          border: `1px solid ${error ? "#ef4444" : "#e5e7eb"}`,
-          borderRadius: "0.75rem",
-          backgroundColor: disabled ? "#f9fafb" : "#ffffff",
-          transition: "all 200ms ease",
-          boxShadow: error
-            ? "0 0 0 3px rgb(239 68 68 / 0.1)"
-            : "none",
-        }}
-      />
+      >
+        <RPhoneInput
+          value={value}
+          onChange={handleChange}
+          defaultCountry={defaultCountry}
+          disabled={disabled}
+          placeholder={placeholder}
+          name={name}
+          required={required}
+          preferredCountries={["in", "us", "gb", "ae", "sa"]}
+          inputProps={{
+            id: id || name,
+            ...props,
+          }}
+          className="w-full flex items-center border-none bg-transparent"
+          style={{
+            border: "none",
+            boxShadow: "none",
+            background: "transparent",
+            height: "100%",
+          }}
+          inputClassName="flex-1 h-full bg-transparent border-none outline-none text-[13.5px] text-gray-900 placeholder:text-gray-400"
+          inputStyle={{
+            border: "none",
+            boxShadow: "none",
+            background: "transparent",
+            height: "100%",
+            paddingLeft: "4px",
+          }}
+          countrySelectorStyleProps={{
+            className: "flex items-center h-full bg-transparent border-none",
+            style: {
+              border: "none",
+              boxShadow: "none",
+              background: "transparent",
+              height: "100%",
+            },
+            buttonStyle: {
+              border: "none",
+              boxShadow: "none",
+              background: "transparent",
+              height: "100%",
+            },
+            // Added 'rounded-md' so the hover state looks clean inside the rounded box
+            buttonClassName: "flex items-center gap-1.5 hover:bg-gray-100 rounded-md transition-colors h-full ml-1 px-2",
+            buttonContentWrapperClassName: "flex items-center gap-1.5",
+            flagClassName: "w-5 h-3.5 rounded",
+            dropdownArrowClassName: "text-gray-400",
+            dropdownStyleProps: {
+              className: "border border-gray-200 rounded-xl shadow-lg mt-1 bg-white z-50",
+            },
+          }}
+        />
+      </div>
     </div>
   );
 }

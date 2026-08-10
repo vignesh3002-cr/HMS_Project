@@ -31,7 +31,6 @@ import Doctor from "./pages/Doctor";
 import DoctorDetails from "./pages/Viewmoredoctor";
 import Staff from "./pages/Staff";
 import Scheduled from "./pages/Scheduled";
-import DayScheduled from "./pages/Day Scheduled";
 import DayView from "./pages/Day view";
 import TransferDoctor from "./pages/TransferDoctor";
 import RescheduleQueue from "./pages/RescheduleQueue";
@@ -65,12 +64,12 @@ const protectedRoutes = [
   { path: "/doctor/view/:id", element: <Scheduled />, permission: "doctor.read" },
   { path: "/doctor/view/:id/details", element: <DoctorDetailView />, permission: "doctor.read" },
   { path: "/doctor/view", element: <Scheduled />, permission: "doctor.read" },
-  { path: "/doctor/day-view/:id", element: <DayScheduled />, permission: "doctor.read" },
-  { path: "/doctor/day-view", element: <DayScheduled />, permission: "doctor.read" },
+  { path: "/doctor/day-view/:id", element: <Scheduled />, permission: "doctor.read" },
+  { path: "/doctor/day-view", element: <Scheduled />, permission: "doctor.read" },
   { path: "/appointments", element: <Appointments />, permission: "appointment.read" },
   { path: "/appointments/day-view", element: <DayView />, permission: "appointment.read" },
   { path: "/appointments/week-view", element: <WeekView />, permission: "appointment.read" },
-  { path: "/appointments/reschedule-queue", element: <RescheduleQueue />, permission: "doctor.update" },
+  { path: "/appointments/reschedule-queue", element: <RescheduleQueue />, permission: "doctor.transfer" },
   { path: "/departments", element: <Departments />, permission: "department.read" },
   { path: "/admin", element: <AdminDashboard />, permission: "permission.manage" },
   { path: "/admin/permissions", element: <PermissionMatrix />, permission: "permission.manage" },
@@ -83,11 +82,17 @@ const protectedRoutes = [
   { path: "/patients/add", element: <PatientRegistrationForm />, permission: "patient.create" },
   { path: "/patients/view/:id", element: <PatientProfile />, permission: "patient.read" },
   { path: "/doctor/view/:id", element: <DoctorDetails />, permission: "doctor.read" },
+  // Staff.tsx's "View" action -- same role-adaptive detail component as
+  // above (shows different fields depending on the employee's actual
+  // role_type: Branch Admin/Staff Admin/Nurse/etc.), just under a route
+  // name that isn't doctor-specific and gated by employee.read to match
+  // what the View button itself already checks.
+  { path: "/staff/view/:id", element: <DoctorDetails />, permission: "employee.read" },
   { path: "/patients/edit/:id", element: <EditPatientForm />, permission: "patient.update" },
   { path: "/branches/edit/:id", element: <AddBranch />, permission: "branch.update" },
   { path: "/staff/edit/:id", element: <AddEmployee />, permission: "employee.update" },
   { path: "/doctor/edit/:id", element: <AddEmployee />, permission: "employee.update" },
-  { path: "/doctor/transfer/:id", element: <TransferDoctor />, permission: "doctor.update" },
+  { path: "/doctor/transfer/:id", element: <TransferDoctor />, permission: "doctor.transfer" },
   { path: "/appointments/add", element: <AddAppointment />, permission: "appointment.create" },
   { path: "/appointments/edit/:id", element: <EditAppointment />, permission: "appointment.update" },
   { path: "/appointments/book", element: <AddAppointment />, permission: "appointment.create" },

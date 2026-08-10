@@ -15,10 +15,10 @@ import {
 
 import HmsTable from "@/components/hms/HmsTable";
 import ExportReport from "@/components/ui/ExportReport";
+import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
 
 // Filter system
-import { FilterPopover, useFilterPanel } from "@/components/Filter";
-import type { FilterField } from "@/components/Filter/types";
+import { FilterPopover, useFilterPanel, usePatientFilters } from "@/components/Filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
@@ -377,42 +377,15 @@ export default function PatientsManagement() {
   } = useFilterPanel();
 
   // ---- FILTER FIELDS ----
-  // (a) List view filters
-  const listFilterFields: FilterField[] = [
-    { id: "name", label: "Patient Name", type: "text", placeholder: "Search by name" },
-    {
-      id: "id",
-      label: "Patient ID",
-      type: "combobox",
-      placeholder: "Search ID",
-      options: (realPatients ?? []).map((p) => ({ label: p.patient_id, value: p.patient_id })),
-    },
-    { id: "diagnose", label: "Diagnosis", type: "text", placeholder: "Search diagnosis" },
-    { id: "doctor", label: "Assigned Doctor", type: "text", placeholder: "Search doctor" },
-    { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "Active", value: "Active" },
-      { label: "Inactive", value: "Inactive" },
-    ]},
-  ];
-
-  // (b) Grid view filters
-  const gridFilterFields: FilterField[] = [
-    { id: "name", label: "Patient Name", type: "text", placeholder: "Search by name" },
-    {
-      id: "id",
-      label: "Patient ID",
-      type: "combobox",
-      placeholder: "Search ID",
-      options: (realPatients ?? []).map((p) => ({ label: p.patient_id, value: p.patient_id })),
-    },
-    { id: "bloodGroup", label: "Blood Group", type: "text", placeholder: "Search blood group" },
-    { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "Active", value: "Active" },
-      { label: "Inactive", value: "Inactive" },
-    ]},
-  ];
-
-  const patientFilterFields = viewMode === "grid" ? gridFilterFields : listFilterFields;
+  const patientRows = useMemo(
+    () => (realPatients ?? []).map((p) => ({
+      id: p.patient_id,
+      name: getPatientFullName(p),
+      status: getPatientStatus(p),
+    })),
+    [realPatients],
+  );
+  const { patientFilterFields } = usePatientFilters({ viewMode, patientRows });
 
   // ---- SEARCH & FILTER ----
   const searchableFields = useMemo(
@@ -440,10 +413,10 @@ export default function PatientsManagement() {
       );
     }
 
-    result = filterDataByValues(result, appliedValues);
+    result = filterDataByValues(result, appliedValues, patientFilterFields);
 
     return result;
-  }, [searchQuery, searchableFields, appliedValues, viewMode, realPatients, assignedDoctors]);
+  }, [searchQuery, searchableFields, appliedValues, viewMode, realPatients, assignedDoctors, patientFilterFields]);
 
   // ---- SORTING (list only) ----
   const handleSort = (field: string) => {
@@ -512,6 +485,23 @@ export default function PatientsManagement() {
     navigate("/appointments/book", { state: patient ? { patient } : undefined });
   };
 
+  // ---- EXPORT ----
+  const handleExport = async (exportFormat: string) => {
+    if (exportFormat !== "csv") return;
+    try {
+      await downloadExportCsv("patients", {
+        branchId: isAllBranches ? undefined : selectedBranchId,
+      });
+      toast({ title: "Export complete", description: "The CSV file has been downloaded." });
+    } catch (err: any) {
+      toast({
+        title: "Export failed",
+        description: exportErrorMessage(err),
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
       <div className="flex flex-col flex-1 min-w-0">
@@ -524,7 +514,7 @@ export default function PatientsManagement() {
               <p className="hms-subheading">Real-time performance across all branches.</p>
             </div>
 <div className="flex items-center gap-3">
-    {can("report.export") && <ExportReport />}
+    {can("report.export") && <ExportReport onExport={handleExport} />}
     {can("patient.create") && (
       <button
                 onClick={handleAddDoctor}

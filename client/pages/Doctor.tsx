@@ -14,10 +14,10 @@ import {
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
  
-import { FilterPopover, useFilterPanel } from "@/components/Filter";
-import type { FilterField } from "@/components/Filter/types";
+import { FilterPopover, useFilterPanel, useDoctorFilters } from "@/components/Filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import ExportReport from "@/components/ui/ExportReport";
+import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { appointmentApi } from "@/api/appointment.api";
@@ -27,6 +27,7 @@ import { DepartmentPill, DepartmentAvatarText } from "@/components/hms/Departmen
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { getUser } from "@/utils/token";
  
 // ============================================================
 // SHARED SUB-COMPONENTS
@@ -90,7 +91,7 @@ function CardMenu({ onView, onEdit, onDelete, onTransfer }: { onView: () => void
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  if (!can("doctor.read") && !can("doctor.update") && !can("employee.delete")) return null;
+  if (!can("doctor.read") && !can("doctor.update") && !can("doctor.transfer") && !can("employee.delete")) return null;
 
   return (
     <div className="relative" ref={wrapperRef}>
@@ -107,7 +108,7 @@ function CardMenu({ onView, onEdit, onDelete, onTransfer }: { onView: () => void
         {can("doctor.update") && (
           <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
         )}
-        {can("doctor.update") && (
+        {can("doctor.transfer") && (
           <button onClick={() => { onTransfer(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Transfer</button>
         )}
         {can("employee.delete") && (
@@ -164,7 +165,7 @@ export default function Doctor() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { can } = usePermission();
-  const { selectedBranchId, isAllBranches } = useBranchFilter();
+  const { selectedBranchId, isAllBranches, branches } = useBranchFilter();
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
  
   // Search state
@@ -209,30 +210,6 @@ export default function Doctor() {
     handleClear: handleClearFilter,
   } = useFilterPanel();
  
-  const doctorFilterFields: FilterField[] = [
-    { id: "name", label: "Doctor Name", type: "text", placeholder: "Search by name" },
-    { id: "id", label: "Doctor ID", type: "text", placeholder: "Enter ID" },
-    { id: "dept", label: "Department", type: "multiselect", options: [
-      { label: "Cardiology", value: "Cardiology" },
-      { label: "Orthopedics", value: "Orthopedics" },
-      { label: "Neurology", value: "Neurology" },
-      { label: "Pediatrics", value: "Pediatrics" },
-      { label: "Oncology", value: "Oncology" },
-      { label: "Pediatrician", value: "Pediatrician" },
-    ]},
-    { id: "branch", label: "Branch", type: "multiselect", options: [
-      { label: "Apollo Hospital (Tambaram)", value: "Apollo Hospital (Tambaram)" },
-      { label: "Government Hospital (Saidapet)", value: "Government Hospital (Saidapet)" },
-      { label: "Central Hospital (Guindy)", value: "Central Hospital (Guindy)" },
-      { label: "Global Hospital (Triplicane)", value: "Global Hospital (Triplicane)" },
-      { label: "Central Hospital (Tambaram)", value: "Central Hospital (Tambaram)" },
-    ]},
-    { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "Active", value: "Active" },
-      { label: "Leave", value: "Leave" },
-    ]},
-  ];
- 
   // Real doctors fetched from the backend
   const [realDoctors, setRealDoctors] = useState<EmployeeRecord[] | null>(null);
   const [isDoctorsLoading, setIsDoctorsLoading] = useState(true);
@@ -250,7 +227,15 @@ export default function Doctor() {
       });
       console.log("[Doctor Page] Response:", res.data);
       const allEmployees = res.data?.data?.employees || [];
-      const doctors = allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR");
+      const me = getUser();
+      const isAdmin = ["SUPER_ADMIN", "HEAD_ADMIN", "BRANCH_ADMIN"].includes(
+        String(me?.role_type ?? "").toUpperCase()
+      );
+      const doctors = allEmployees.filter(
+        (e) =>
+          e.user_table?.role_type === "DOCTOR" &&
+          !(isAdmin && me?.employee_id && e.employee_id === me.employee_id)
+      );
       setRealDoctors(doctors);
       if (doctors.length === 0) {
         toast({
@@ -341,14 +326,19 @@ export default function Doctor() {
     };
   }, [realDoctors, selectedDate, viewMode, fetchSlotSummaries]);
  
+  // Mapped doctor rows -- shared by the filter field options below and the
+  // search/filter step, so both work off the exact same real data.
+  const doctorRows = useMemo(
+    () => (realDoctors ? realDoctors.map((emp, index) => mapEmployeeToDoctorData(emp, index)) : []),
+    [realDoctors],
+  );
+
+  const { doctorFilterFields } = useDoctorFilters({ doctorRows, branches });
+
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
-    // Use real data from API if available, otherwise fallback to static data
-    const sourceData = realDoctors
-      ? realDoctors.map((emp, index) => mapEmployeeToDoctorData(emp, index))
-      : [];
-    let result: Record<string, string | number>[] = [...sourceData];
- 
+    let result: Record<string, string | number>[] = [...doctorRows];
+
     if (searchQuery) {
       result = result.filter((doctor) =>
         ["name", "id", "dept", "branch", "status", "mobile"]
@@ -359,11 +349,11 @@ export default function Doctor() {
       );
     }
  
-    result = filterDataByValues(result, appliedValues);
- 
+    result = filterDataByValues(result, appliedValues, doctorFilterFields);
+
     return result;
-  }, [searchQuery, appliedValues, realDoctors]);
- 
+  }, [searchQuery, appliedValues, doctorRows, doctorFilterFields]);
+
   // ---- SORTING (list only) ----
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -460,6 +450,24 @@ export default function Doctor() {
     }
   };
  
+  // ---- EXPORT ----
+  const handleExport = async (exportFormat: string) => {
+    if (exportFormat !== "csv") return;
+    try {
+      await downloadExportCsv("employees", {
+        branchId: isAllBranches ? undefined : selectedBranchId,
+        roleType: "DOCTOR",
+      });
+      toast({ title: "Export complete", description: "The CSV file has been downloaded." });
+    } catch (err: any) {
+      toast({
+        title: "Export failed",
+        description: exportErrorMessage(err),
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
       <div className="flex flex-col flex-1 min-w-0">
@@ -472,7 +480,7 @@ export default function Doctor() {
               <p className="hms-subheading">Real-time performance across all branches.</p>
             </div>
             <div className="flex items-center gap-3">
-              {can("report.export") && <ExportReport />}
+              {can("report.export") && <ExportReport onExport={handleExport} />}
               {can("doctor.create") && (
                 <button
                   onClick={handleAddDoctor}
@@ -631,7 +639,7 @@ export default function Doctor() {
                           </svg>
                         </button>
                       )}
-                      {can("doctor.update") && (
+                      {can("doctor.transfer") && (
                         <button onClick={() => handleTransfer(r.id)} title="Transfer" className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
                           <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
                             <path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>

@@ -13,10 +13,12 @@ import { format, addDays, subDays, startOfWeek, isSameWeek } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
+import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { employeeApi } from "@/api/employee.api";
-import { FilterPopover, useFilterPanel } from "@/components/Filter";
-import type { FilterField } from "@/components/Filter/types";
+import { FilterPopover, useFilterPanel, useScheduleFilters } from "@/components/Filter";
+import { usePermission } from "@/context/PermissionContext";
+import { useToast } from "@/hooks/use-toast";
 
 interface Schedule {
   patients: number;
@@ -78,6 +80,8 @@ const colorStyles = {
 
 const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) => {
   const navigate = useNavigate();
+  const { can } = usePermission();
+  const { toast } = useToast();
   const [doctors, setDoctors] = useState<Doctor[]>([]);
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -242,14 +246,11 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   // Doctor filter options, built from the real (deduped) doctor rows -- lets
   // the toolbar Filter popover pick any number of specific doctors.
-  const doctorFilterFields: FilterField[] = useMemo(() => [
-    {
-      id: "doctorNames",
-      label: "Doctor",
-      type: "multiselect",
-      options: doctors.map((doctor) => ({ label: doctor.name, value: doctor.name })),
-    },
-  ], [doctors]);
+  const { doctorFilterFields } = useScheduleFilters({
+    doctors,
+    idKey: "doctorNames",
+    valueField: "name",
+  });
 
   // Only doctors matching the search and the multi-select Filter popover get
   // a row at all -- narrowing down to specific doctors hides every other
@@ -263,6 +264,24 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   });
 
   const totalAppointments = weekAppointments.length;
+
+  // ---- EXPORT ----
+  const handleExport = async (exportFormat: string) => {
+    if (exportFormat !== "csv") return;
+    try {
+      await downloadExportCsv("appointments", {
+        from: format(weekStart, "yyyy-MM-dd"),
+        to: format(addDays(weekStart, 6), "yyyy-MM-dd"),
+      });
+      toast({ title: "Export complete", description: "The CSV file has been downloaded." });
+    } catch (err: any) {
+      toast({
+        title: "Export failed",
+        description: exportErrorMessage(err),
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
@@ -286,11 +305,13 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
 
         <div className="flex items-center gap-3">
-          <ExportReport />
+          {can("report.export") && <ExportReport onExport={handleExport} />}
 
 
 
+          {can("appointment.create") && (
           <button
+            onClick={() => navigate("/appointments/add")}
             className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
           >
 
@@ -298,6 +319,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
             Add Appointment
 
           </button>
+          )}
 
 
         </div>

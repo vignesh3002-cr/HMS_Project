@@ -7,8 +7,9 @@ import {
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { Camera, Check, X } from "lucide-react";
+import { Camera, Check, Eye, Pencil, RefreshCw, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog"; // Make sure this path is correct
 
 export interface AvatarUploadProps {
   value?: string | null;
@@ -21,16 +22,12 @@ export interface AvatarUploadProps {
   readOnly?: boolean;
 }
 
-// Final photo is rendered onto a square canvas at OUTPUT_SIZE and compressed
-// to JPEG before being turned into a data URL — an unresized phone photo can
-// be several MB, which balloons past the server's request size limit once
-// base64-encoded.
 const OUTPUT_SIZE = 320;
 const JPEG_QUALITY = 0.85;
 const DEFAULT_MAX_SIZE_MB = 1;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 3;
-const VIEWPORT = 220; // crop stage diameter, px
+const VIEWPORT = 220;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -60,8 +57,6 @@ interface PhotoEditorProps {
   onSave: (dataUrl: string) => void;
 }
 
-// Full-screen align/zoom stage: drag to reposition, slider to zoom,
-// renders the visible circle onto a canvas on save.
 function PhotoEditor({ src, onCancel, onSave }: PhotoEditorProps) {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -124,8 +119,14 @@ function PhotoEditor({ src, onCancel, onSave }: PhotoEditorProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-xs rounded-2xl bg-white p-5 shadow-xl">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-xs rounded-2xl bg-white p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-bold text-gray-800">Adjust photo</h2>
           <button
@@ -159,7 +160,6 @@ function PhotoEditor({ src, onCancel, onSave }: PhotoEditorProps) {
               transform: `translate(calc(-50% + ${boundedPan.x}px), calc(-50% + ${boundedPan.y}px))`,
             }}
           />
-          {/* subtle ring to signal the crop boundary */}
           <div className="pointer-events-none absolute inset-0 rounded-full ring-1 ring-inset ring-black/10" />
         </div>
 
@@ -207,11 +207,42 @@ export function AvatarUpload({
   readOnly,
 }: AvatarUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingSrc, setPendingSrc] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
+  const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
 
   const openPicker = () => inputRef.current?.click();
+
+  // Handle clicking outside to close the menu
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        wrapperRef.current &&
+        !wrapperRef.current.contains(event.target as Node)
+      ) {
+        setMenuOpen(false);
+      }
+    };
+    // Use mousedown so it fires before the click event
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [menuOpen]);
+
+  const handleAvatarClick = () => {
+    if (readOnly) return;
+    if (value) {
+      setMenuOpen((prev) => !prev);
+    } else {
+      openPicker();
+    }
+  };
 
   const stageFile = (file: File) => {
     if (!file.type.startsWith("image/")) return;
@@ -230,7 +261,7 @@ export function AvatarUpload({
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) stageFile(file);
-    e.target.value = ""; // allow re-selecting the same file later
+    e.target.value = "";
   };
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -252,14 +283,16 @@ export function AvatarUpload({
         />
       )}
 
+      {/* Added ref={wrapperRef} here to track clicks */}
       <div
+        ref={wrapperRef}
         {...(!readOnly
           ? {
-              onClick: openPicker,
+              onClick: handleAvatarClick,
               onKeyDown: (e: KeyboardEvent) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  openPicker();
+                  handleAvatarClick();
                 }
               },
               onDragOver: (e: DragEvent<HTMLDivElement>) => {
@@ -298,6 +331,53 @@ export function AvatarUpload({
             <Camera style={{ width: size * 0.18, height: size * 0.18 }} />
           </div>
         )}
+
+        {/* Context Menu Popup */}
+        {!readOnly && menuOpen && (
+          // Removed the invisible backdrop div, no longer needed!
+          <div className="absolute right-0 top-full z-50 mt-2 w-36 rounded-md bg-white py-1 shadow-lg ring-1 ring-black/5">
+            <button
+              type="button"
+              onClick={() => {
+                setViewOpen(true);
+                setMenuOpen(false);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+            >
+              <Eye className="h-3.5 w-3.5" /> View
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPendingSrc(value ?? null);
+                setMenuOpen(false);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+            >
+              <Pencil className="h-3.5 w-3.5" /> Edit Crop
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                openPicker();
+                setMenuOpen(false);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+            >
+              <RefreshCw className="h-3.5 w-3.5" /> Replace
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmRemoveOpen(true);
+                setMenuOpen(false);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-500 hover:bg-red-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Remove
+            </button>
+          </div>
+        )}
       </div>
 
       {label && <p className="mt-2 text-xs font-semibold text-gray-700">{label}</p>}
@@ -305,6 +385,45 @@ export function AvatarUpload({
       {!readOnly && <p className="text-[11px] text-gray-400">Max {maxSizeMB}MB</p>}
       {!readOnly && error && <p className="text-[11px] text-red-500">{error}</p>}
 
+      {/* Image Viewer Modal */}
+      {viewOpen && value && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setViewOpen(false)}
+        >
+          <div className="relative" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={value}
+              alt="Photo full view"
+              className="max-h-[80vh] max-w-[80vw] rounded-lg object-contain"
+            />
+            <button
+              type="button"
+              className="absolute -top-3 -right-3 rounded-full bg-white p-1.5 text-gray-700 shadow-md hover:bg-gray-100"
+              onClick={() => setViewOpen(false)}
+              aria-label="Close view"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Remove Confirmation Dialog */}
+      <ConfirmationDialog
+        open={confirmRemoveOpen}
+        type="danger"
+        title="Remove Photo"
+        description="Are you sure you want to remove this photo? This action cannot be undone."
+        confirmText="Remove"
+        onConfirm={() => {
+          onChange(null);
+          setConfirmRemoveOpen(false);
+        }}
+        onCancel={() => setConfirmRemoveOpen(false)}
+      />
+
+      {/* Photo Editor */}
       {pendingSrc && (
         <PhotoEditor
           src={pendingSrc}
