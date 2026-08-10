@@ -90,6 +90,7 @@ export interface EmployeeRecord {
   user_table: {
     role_type: string;
     user_status: number;
+    created_at?: string | null;
   };
   branch: {
     branch_name: string;
@@ -154,6 +155,20 @@ export interface CreateEmployeeResponse {
       middle_name: string | null;
     };
   };
+}
+
+export interface AddScheduleSlotPayload {
+  branch_id: string;
+  day_of_week: DayOfWeek;
+  shift_name?: string;
+  start_time: string;
+  end_time: string;
+}
+
+export interface AddScheduleSlotResponse {
+  success: boolean;
+  message: string;
+  data: DoctorScheduleRecord;
 }
 
 export interface GetEmployeesParams {
@@ -233,4 +248,12 @@ export const employeeApi = {
 
   remove: (employeeId: string) =>
     API.delete<{ success: boolean; message: string }>(`/employees/${employeeId}`),
+
+  addScheduleSlot: (employeeId: string, data: AddScheduleSlotPayload) =>
+    API.post<AddScheduleSlotResponse>(`/employees/${employeeId}/schedules`, data),
+
+  removeScheduleSlot: (employeeId: string, scheduleId: string | number) =>
+    API.delete<{ success: boolean; message: string; data: { schedule_id: string; soft_closed: boolean } }>(
+      `/employees/${employeeId}/schedules/${scheduleId}`,
+    ),
 };

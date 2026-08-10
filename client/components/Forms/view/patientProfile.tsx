@@ -27,6 +27,9 @@ import { QuickAddFab } from "@/components/hms/QuickAddFab";
 import HmsTable from "@/components/hms/HmsTable";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { useToast } from "@/hooks/use-toast";
+import { usePermission } from "@/context/PermissionContext";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 
 const statusVariant: Record<string, "blue" | "green" | "rose" | "amber"> = {
   Schedule: "blue",
@@ -65,9 +68,18 @@ function mapAppointment(a: AppointmentRecord) {
   };
 }
 
-function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: () => void; onDelete: () => void }) {
+function CardMenu({
+  onView,
+  onEdit,
+  onCancel,
+}: {
+  onView: () => void;
+  onEdit: () => void;
+  onCancel: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const { can } = usePermission();
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -79,18 +91,50 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  if (!can("appointment.read") && !can("appointment.update") && !can("appointment.cancel")) return null;
+
   return (
-    <div className="relative" ref={wrapperRef}>
-      <button onClick={() => setOpen((o) => !o)} className="p-1 rounded hover:bg-[#F2F4F6] transition-colors">
+    <div className="relative inline-block text-left" ref={wrapperRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center justify-center p-1.5 border border-[#E5E7EB] rounded-md hover:border-[#00488D] transition-colors"
+      >
         <MoreVertical className="w-4 h-4 text-[#6B7280]" />
       </button>
-      <div className={`absolute right-0 top-full mt-1 w-28 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
+
+      <div
+        className={`absolute right-0 top-full mt-1 w-44 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-40 transition-all duration-150 ${
           open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
         }`}
       >
-        <button onClick={() => { onView(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">View</button>
-        <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
-        <button onClick={() => { onDelete(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">Delete</button>
+        {can("appointment.read") && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onView(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-green-400 hover:bg-[#F2F4F6]"
+          >
+            View Appointment
+          </button>
+        )}
+        {can("appointment.update") && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onEdit(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-indigo-600 hover:bg-[#F2F4F6]"
+          >
+            Edit Appointment
+          </button>
+        )}
+        {can("appointment.cancel") && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onCancel(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-red-600 hover:bg-red-50"
+          >
+            Cancel Appointment
+          </button>
+        )}
       </div>
     </div>
   );
@@ -99,6 +143,7 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
 export default function PatientProfile() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const { toast } = useToast();
 
   const [patient, setPatient] = useState<PatientRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -212,9 +257,37 @@ export default function PatientProfile() {
   const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
   const visibleEnd = Math.min(endIndex, totalRecords);
 
-  const handleView = (id: string) => alert(`View appointment ${id}`);
-  const handleEdit = (id: string) => alert(`Edit appointment ${id}`);
-  const handleDelete = (id: string) => alert(`Delete appointment ${id}`);
+  const handleView = (id: string) => navigate(`/appointments/view/${id}`);
+  const handleEdit = (id: string) => navigate(`/appointments/edit/${id}`);
+
+  const [cancelTarget, setCancelTarget] = useState<ReturnType<typeof mapAppointment> | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+
+  const handleCancelAppointment = (target: ReturnType<typeof mapAppointment>) => {
+    setCancelReason("");
+    setCancelTarget(target);
+  };
+
+  const handleConfirmCancelAppointment = () => {
+    if (!cancelTarget) return;
+
+    if (!cancelReason.trim()) {
+      toast({ title: "A cancellation reason is required", variant: "destructive" });
+      return;
+    }
+
+    setAppointments((prev) =>
+      prev.map((apt) =>
+        apt === cancelTarget ? { ...apt, status: "Cancelled" } : apt,
+      ),
+    );
+    toast({
+      title: "Appointment cancelled",
+      description: `Appointment ${cancelTarget.id} has been cancelled.`,
+    });
+    setCancelTarget(null);
+    setCancelReason("");
+  };
 
   if (loading) {
     return (
@@ -510,8 +583,14 @@ export default function PatientProfile() {
                   return <StatusBadge tone={statusVariant[a.status]}>{a.status}</StatusBadge>;
                 }},
                 { key: "actions", label: "Actions", sortable: false, render: (apt) => {
-                  const a = apt as any;
-                  return <CardMenu onView={() => handleView(a.id)} onEdit={() => handleEdit(a.id)} onDelete={() => handleDelete(a.id)} />;
+                  const a = apt as ReturnType<typeof mapAppointment>;
+                  return (
+                    <CardMenu
+                      onView={() => handleView(a.id)}
+                      onEdit={() => handleEdit(a.id)}
+                      onCancel={() => handleCancelAppointment(a)}
+                    />
+                  );
                 }},
               ]}
               data={currentRows}
@@ -534,6 +613,29 @@ export default function PatientProfile() {
         </main>
       </div>
       <QuickAddFab />
+
+      <ConfirmationDialog
+        open={!!cancelTarget}
+        type="danger"
+        title="Cancel Appointment?"
+        description={
+          cancelTarget
+            ? `Appointment ${cancelTarget.id} for ${patientName} will be cancelled. Please enter a reason for cancellation.`
+            : ""
+        }
+        confirmText="Cancel Appointment"
+        cancelText="Keep Appointment"
+        onConfirm={handleConfirmCancelAppointment}
+        onCancel={() => setCancelTarget(null)}
+      >
+        <textarea
+          value={cancelReason}
+          onChange={(e) => setCancelReason(e.target.value)}
+          placeholder="Reason for cancellation (required)"
+          rows={3}
+          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      </ConfirmationDialog>
     </div>
   );
 }
