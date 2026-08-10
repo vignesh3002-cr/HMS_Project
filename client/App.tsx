@@ -62,7 +62,7 @@ const protectedRoutes = [
   { path: "/patients", element: <Patients />, permission: "patient.read" },
   { path: "/doctor", element: <Doctor />, permission: "doctor.read" },
   { path: "/doctor/view/:id", element: <Scheduled />, permission: "doctor.read" },
-  { path: "/doctor/view/:id/details", element: <DoctorDetailView />, permission: "doctor.read" },
+  { path: "/doctor/view/:id/details", element: <DoctorDetails />, permission: "doctor.read" },
   { path: "/doctor/view", element: <Scheduled />, permission: "doctor.read" },
   { path: "/doctor/day-view/:id", element: <Scheduled />, permission: "doctor.read" },
   { path: "/doctor/day-view", element: <Scheduled />, permission: "doctor.read" },

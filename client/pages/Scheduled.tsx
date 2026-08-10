@@ -205,7 +205,7 @@ export default function DoctorProfile() {
   const doctorSchedules: DoctorScheduleRecord[] = doctorDetail?.doctorSchedules ?? [];
 
   const scheduleByDay = useMemo(() => {
-    const map: Record<string, { time: string; branch: string }[]> = {};
+    const map: Record<string, { time: string; branch: string; scheduleId: string | number }[]> = {};
     WEEK_DAYS.forEach(([day]) => {
       map[day.toUpperCase()] = [];
     });
@@ -215,6 +215,7 @@ export default function DoctorProfile() {
       map[key].push({
         time: `${formatScheduleTime(s.start_time)} - ${formatScheduleTime(s.end_time)}`,
         branch: s.branch?.branch_name || "",
+        scheduleId: s.schedule_id,
       });
     });
     return map;
@@ -225,21 +226,75 @@ export default function DoctorProfile() {
     ...WEEK_DAYS.map(([day]) => scheduleByDay[day.toUpperCase()]?.length || 0),
   );
 
-  // Local-only overlay so "+ Add slot"/"Cancel slot" still feel interactive
-  // in this view -- there's no schedule-mutation API wired up here, so these
-  // edits aren't persisted, only real backend rows are shown by default.
-  const [scheduleOverrides, setScheduleOverrides] = useState<
-    Record<string, [string, string, string?]>
-  >({});
-
   const schedule = Array.from({ length: maxScheduleRows }, (_, rowIndex) =>
-    WEEK_DAYS.map(([day], colIndex) => {
-      const overrideKey = `${rowIndex}-${colIndex}`;
-      if (scheduleOverrides[overrideKey]) return scheduleOverrides[overrideKey];
+    WEEK_DAYS.map(([day]) => {
       const entry = scheduleByDay[day.toUpperCase()]?.[rowIndex];
-      return entry ? ([entry.time, "blue", entry.branch] as [string, string, string]) : ["+", "empty"];
+      return entry
+        ? ([entry.time, "blue", entry.branch, entry.scheduleId] as [string, string, string, string | number])
+        : (["+", "empty"] as [string, string]);
     }),
   );
+
+  const refetchDoctor = () => {
+    if (!id) return;
+    employeeApi
+      .getOne(id)
+      .then((res) => setDoctorDetail(res.data?.data ?? null))
+      .catch((err) => console.error("[Doctor Profile] Failed to refresh schedule:", err));
+  };
+
+  const handleAddSlot = async ({
+    day,
+    branchId,
+    branchName,
+    startTime,
+    endTime,
+    timeLabel,
+  }: {
+    day: string;
+    branchId: string;
+    branchName: string;
+    startTime: string;
+    endTime: string;
+    timeLabel: string;
+  }) => {
+    if (!id || !day || !branchId) {
+      showAlert("Please select a day and branch for the new slot.");
+      return;
+    }
+    try {
+      await employeeApi.addScheduleSlot(id, {
+        branch_id: branchId,
+        day_of_week: day.toUpperCase() as any,
+        start_time: startTime,
+        end_time: endTime,
+      });
+      refetchDoctor();
+      showAlert(`Slot added for ${day}: ${timeLabel} (${branchName})`);
+    } catch (err: any) {
+      showAlert(err?.response?.data?.message || "Failed to add slot.");
+    }
+  };
+
+  const handleCancelSlot = async ({
+    scheduleId,
+    info,
+  }: {
+    scheduleId: string | number | null;
+    info: string;
+  }) => {
+    if (!id || scheduleId === null) {
+      showAlert("Unable to cancel this slot.");
+      return;
+    }
+    try {
+      await employeeApi.removeScheduleSlot(id, scheduleId);
+      refetchDoctor();
+      showAlert(`Slot cancelled: ${info}`);
+    } catch (err: any) {
+      showAlert(err?.response?.data?.message || "Failed to cancel slot.");
+    }
+  };
 
   const showAlert = (message) => {
     alert(message);
@@ -544,7 +599,7 @@ export default function DoctorProfile() {
                       key={rowIndex}
                       className="grid grid-cols-7 min-h-[64px] border-b border-[#b9bfcb] last:border-b-0"
                     >
-                      {row.map(([text, type, branch], index) => (
+                      {row.map(([text, type, branch, scheduleId], index) => (
 
                         <div
                           key={index}
@@ -569,7 +624,14 @@ export default function DoctorProfile() {
                           {["green", "blue", "orange"].includes(type) && (
                             <div
                               onClick={() =>
-                                slotModalRef.current?.openCancelSlot(WEEK_DAYS[index][0], rowIndex, index, text, branch)
+                                slotModalRef.current?.openCancelSlot(
+                                  WEEK_DAYS[index][0],
+                                  rowIndex,
+                                  index,
+                                  text,
+                                  branch,
+                                  scheduleId ?? null,
+                                )
                               }
                               className={`cursor-pointer h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] ${
                                 type === "green"
@@ -899,23 +961,9 @@ export default function DoctorProfile() {
 
       <ScheduleSlotModal
         ref={slotModalRef}
-        branches={doctorBranchNames}
-        onAddSlot={({ day, row, col, timeLabel, branch }) => {
-          if (row !== null && col !== null) {
-            setScheduleOverrides((prev) => ({
-              ...prev,
-              [`${row}-${col}`]: [timeLabel, "blue", branch],
-            }));
-          }
-          showAlert(`Slot added${day ? ` for ${day}` : ""}: ${timeLabel} (${branch})`);
-        }}
-        onCancelSlot={({ row, col, info }) => {
-          setScheduleOverrides((prev) => ({
-            ...prev,
-            [`${row}-${col}`]: ["+", "empty"],
-          }));
-          showAlert(`Slot cancelled: ${info}`);
-        }}
+        branches={doctorDetail?.branches ?? []}
+        onAddSlot={handleAddSlot}
+        onCancelSlot={handleCancelSlot}
       />
       <ConfirmationDialog
         open={clearScheduleConfirm}

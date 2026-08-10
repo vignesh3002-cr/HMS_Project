@@ -52,10 +52,24 @@ function getSlotBand(percentage: number) {
   return { color: "#16A34A", label: "Available" };
 }
  
-function SlotProgress({ booked, total }: { booked: number; total: number }) {
+function SlotProgress({ booked, total, loading }: { booked: number; total: number; loading?: boolean }) {
+  if (loading) {
+    return (
+      <div className="min-w-[140px]">
+        <div className="flex items-center gap-1.5">
+          <Loader2 className="w-3 h-3 animate-spin text-[#9CA3AF]" />
+          <span className="text-xs font-bold text-[#9CA3AF]">Loading...</span>
+        </div>
+        <div className="mt-1.5 h-1.5 w-full rounded-full bg-[#E5E7EB] overflow-hidden">
+          <div className="h-full w-1/3 rounded-full bg-[#D1D5DB] animate-pulse" />
+        </div>
+      </div>
+    );
+  }
+
   const percentage = total > 0 ? Math.min(100, Math.round((booked / total) * 100)) : 0;
   const band = total === 0 ? { color: "#6B7280", label: "No slots" } : getSlotBand(percentage);
- 
+
   return (
     <div className="min-w-[140px]">
       <div className="flex items-center justify-between gap-2">
@@ -270,9 +284,11 @@ export default function Doctor() {
 
       // Fetch in small concurrent batches instead of firing one request per
       // doctor all at once - hosts that are fine locally can rate-limit or
-      // choke on dozens of simultaneous connections in production.
+      // choke on dozens of simultaneous connections in production. Each
+      // batch's results are merged in as soon as they land (rather than
+      // waiting for every doctor to finish) so rows show their real slot
+      // count progressively instead of all flipping at once at the end.
       const BATCH_SIZE = 5;
-      const results: (readonly [string, { total: number; booked: number }])[] = [];
 
       for (let i = 0; i < doctors.length; i += BATCH_SIZE) {
         if (signal.cancelled) return;
@@ -293,10 +309,10 @@ export default function Doctor() {
             }
           }),
         );
-        results.push(...batchEntries);
-      }
 
-      if (!signal.cancelled) setSlotSummaries(Object.fromEntries(results));
+        if (signal.cancelled) return;
+        setSlotSummaries((prev) => ({ ...prev, ...Object.fromEntries(batchEntries) }));
+      }
     },
     [],
   );
@@ -304,9 +320,13 @@ export default function Doctor() {
   useEffect(() => {
     if (!realDoctors || realDoctors.length === 0 || viewMode !== "list") return;
     const signal = { cancelled: false };
- 
+
+    // Reset so every row shows its loading state again for the newly
+    // selected date/doctor set, instead of briefly showing the previous
+    // date's stale counts while the fresh fetch is in flight.
+    setSlotSummaries({});
     fetchSlotSummaries(realDoctors, selectedDate, signal);
- 
+
     // Keep the booked/total counts live: poll periodically, and refetch as
     // soon as the tab regains focus (e.g. after booking an appointment on
     // another page/tab), instead of only updating on next full page load.
@@ -616,7 +636,7 @@ export default function Doctor() {
                   )},
                   { key: "slots", label: "Slots", sortable: true, render: (r: any) => {
                     const summary = slotSummaries[String(r.id)];
-                    return <SlotProgress booked={summary?.booked ?? 0} total={summary?.total ?? 0} />;
+                    return <SlotProgress booked={summary?.booked ?? 0} total={summary?.total ?? 0} loading={!summary} />;
                   }},
                   { key: "mobile", label: "Mobile No", render: (r: any) => (
                     <span className="text-[#191C1E] hms-content-text leading-4">{String(r.mobile)}</span>

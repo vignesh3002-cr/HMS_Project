@@ -110,7 +110,7 @@ export interface PatientRecord {
   patient_area: string | null;
   patient_pincode: number | null;
   branch: { branch_name: string | null } | null;
-  user_table: { role_type: string | null; user_status: number | null } | null;
+  user_table: { role_type: string | null; user_status: number | null; created_at?: string | null } | null;
 }
 
 export interface GetPatientsParams {

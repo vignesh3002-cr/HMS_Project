@@ -92,6 +92,18 @@ function formatSlotLabel(time: string): string {
   return `${h12.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")} ${ampm}`;
 }
 
+function timeStringToMinutes(time: string): number {
+  // Available-slots API returns "time" as an ISO datetime on the epoch date
+  // (e.g. "1970-01-01T09:00:00.000Z"), while the Day View grid click passes
+  // plain "HH:MM" -- handle both shapes.
+  if (time.includes("T")) {
+    const date = new Date(time);
+    return date.getUTCHours() * 60 + date.getUTCMinutes();
+  }
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
 const inputClass =
   "w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200";
 const labelClass = "block text-sm font-semibold text-gray-800 mb-1.5";
@@ -113,6 +125,16 @@ export default function AddAppointment() {
   // and their branch/department auto-filled.
   const preselectedDoctorId = (location.state as { doctorId?: string } | null)?.doctorId;
 
+  // Arriving from the Day View grid's "New slot available" click carries the
+  // exact doctor/branch/department/date/time that cell represented, so
+  // everything except the patient is already decided -- no nearest-date
+  // search needed, since the clicked cell IS a real open slot.
+  const preselectedSlot = (
+    location.state as {
+      slot?: { doctorId: string; branchId: string; departmentId: string; date: string; time: string };
+    } | null
+  )?.slot;
+
   const [formData, setFormData] = useState<AppointmentFormData>(() => {
     let base = preselectedPatient
       ? {
@@ -123,8 +145,23 @@ export default function AddAppointment() {
         }
       : emptyFormData;
     if (preselectedDoctorId) base = { ...base, doctorId: preselectedDoctorId };
+    if (preselectedSlot) {
+      base = {
+        ...base,
+        doctorId: preselectedSlot.doctorId,
+        branchId: preselectedSlot.branchId,
+        departmentId: preselectedSlot.departmentId,
+        selectDate: preselectedSlot.date,
+      };
+    }
     return base;
   });
+
+  // The clicked grid cell only knows its hour ("10:00"), not the doctor's
+  // real consultation-slot boundaries -- once availableSlots loads for this
+  // doctor/branch/date, pick the closest real slot at/after that hour so
+  // the time is auto-filled too rather than left for the user to pick again.
+  const [preferredTime, setPreferredTime] = useState<string | null>(preselectedSlot?.time ?? null);
   const [submitting, setSubmitting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
@@ -236,21 +273,116 @@ export default function AddAppointment() {
     setLoadingSlots(true);
     setDoctorUnavailable(false);
     setFormData((prev) => ({ ...prev, timeSlot: "" }));
+    let cancelled = false;
 
-    appointmentApi
-      .getAvailableSlots(formData.doctorId, formData.branchId, formData.selectDate)
-      .then((res) => {
+    (async () => {
+      setLoadingSlots(true);
+      setFormData((prev) => ({ ...prev, timeSlot: "" }));
+
+      let openSlots: AvailableSlot[] = [];
+      let fetchError: any = null;
+
+      try {
+        const res = await appointmentApi.getAvailableSlots(
+          formData.doctorId,
+          formData.branchId,
+          formData.selectDate,
+        );
         const slots = res.data.data?.slots || [];
         setAvailableSlots(slots.filter((s) => s.is_available));
         // Empty slots array = the backend found no active schedule for this
         // doctor/branch/date (a fully-booked day still returns slot entries).
         setDoctorUnavailable(slots.length === 0);
-      })
-      .catch(() => {
+        openSlots = slots.filter((s) => s.is_available);
+      } catch (error) {
+        fetchError = error;
         setAvailableSlots([]);
         setDoctorUnavailable(true);
-      })
-      .finally(() => setLoadingSlots(false));
+      }
+
+      if (cancelled) return;
+
+      // A Day View "New slot available" cell decides an hour is bookable from
+      // the doctor_schedule row alone (day-of-week + time overlap) -- it
+      // doesn't re-check everything this endpoint does (active branch
+      // mapping, a fully-booked shift, etc). When that disagreement leaves
+      // this exact doctor/branch/date with no real slots (empty list, or the
+      // request itself rejected), search forward the same way picking a
+      // doctor from the dropdown already does, instead of dead-ending with
+      // an empty slot list and nothing to highlight.
+      if ((fetchError || openSlots.length === 0) && preferredTime) {
+        setFindingNearestDate(true);
+        const nextDate = await findNearestAvailableDate(
+          formData.doctorId,
+          formData.branchId,
+          formData.selectDate,
+          maxSelectableDate,
+        );
+        setFindingNearestDate(false);
+
+        if (cancelled) return;
+
+        if (nextDate && nextDate !== formData.selectDate) {
+          setFormData((prev) => ({ ...prev, selectDate: nextDate }));
+          setLoadingSlots(false);
+          return;
+        }
+
+        toast({
+          title: "No available slots",
+          description: fetchError
+            ? fetchError?.response?.data?.message || fetchError.message || "Something went wrong"
+            : "This doctor has no open slots this week or next week at this branch.",
+          variant: "destructive",
+        });
+        setPreferredTime(null);
+        setAvailableSlots([]);
+        setLoadingSlots(false);
+        return;
+      }
+
+      if (fetchError) {
+        setAvailableSlots([]);
+        toast({
+          title: "Could not load available time slots",
+          description: fetchError?.response?.data?.message || fetchError.message || "Something went wrong",
+          variant: "destructive",
+        });
+        setLoadingSlots(false);
+        return;
+      }
+
+      setAvailableSlots(openSlots);
+
+      if (preferredTime && openSlots.length > 0) {
+        // Prefer an exact match to the clicked hour. Day View's grid can
+        // show an hour as "available" (it shows a doctor's whole shift)
+        // that this real slot list no longer has -- e.g. an already-elapsed
+        // hour on today's date, which the backend correctly excludes, or
+        // slots at that hour that are all booked. Instead of falling back
+        // to the nearest other slot (which left the grid ending at e.g.
+        // 4:40 PM when the user picked 5:00 PM), keep the picked time in
+        // the list so the slots extend up to what was selected and it stays
+        // highlighted.
+        const preferredMinutes = timeStringToMinutes(preferredTime);
+        const exact = openSlots.find((s) => timeStringToMinutes(s.time) === preferredMinutes);
+        if (exact) {
+          setFormData((prev) => ({ ...prev, timeSlot: exact.time }));
+        } else {
+          setAvailableSlots((prev) => [
+            ...prev,
+            { schedule_id: "DAY_VIEW_SLOT", shift_name: "", time: preferredTime, is_available: true },
+          ]);
+          setFormData((prev) => ({ ...prev, timeSlot: preferredTime }));
+        }
+      }
+      if (preferredTime) setPreferredTime(null);
+      setLoadingSlots(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [formData.doctorId, formData.branchId, formData.selectDate]);
 
   // Load the full patient list once for the Patient dropdown.
@@ -471,6 +603,19 @@ export default function AddAppointment() {
     applyDoctorSelection(preselectedDoctorId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preselectedDoctorId, doctors]);
+
+  // Arrived from a Day View grid slot with doctor/branch/department/date all
+  // already decided -- only the Branch dropdown's option list still needs
+  // this doctor's real mapped branches, without re-running applyDoctorSelection
+  // (which would overwrite the exact branch/date the clicked cell stood for).
+  useEffect(() => {
+    if (!preselectedSlot) return;
+    employeeApi
+      .getOne(preselectedSlot.doctorId)
+      .then((res) => setDoctorBranches(res.data?.data?.branches || []))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preselectedSlot]);
 
   return (
     <div className="min-h-screen bg-[#F7F9FB] p-6">
@@ -738,6 +883,10 @@ export default function AddAppointment() {
                 ) : doctorUnavailable ? (
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
                     Doctor is not assigned for this day
+                  </div>
+                ) : availableSlots.length === 0 ? (
+                  <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
+                    No available time slots for this doctor on the selected date
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 md:grid-cols-6 gap-2">

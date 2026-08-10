@@ -10,6 +10,8 @@ import { QuickAddFab } from "@/components/hms/QuickAddFab";
 import { usePermission } from "@/context/PermissionContext";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import Notifications from "@/components/Forms/view/Notification";
 import {
   LayoutDashboard,
   Users,
@@ -340,10 +342,17 @@ export function AppLayout() {
             {/* RIGHT */}
             <div className="flex items-center gap-4">
               {/* NOTIFICATION */}
-              <button className="relative p-2 rounded-full hover:bg-slate-100 transition-colors">
-                <Bell size={18} className="text-[#334155]" />
-                <span className="absolute top-1 right-1 w-2 h-2 bg-red-600 rounded-full"></span>
-              </button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button className="relative p-2 rounded-full hover:bg-slate-100 transition-colors">
+                    <Bell size={18} className="text-[#334155]" />
+                    <span className="absolute top-1 right-1 w-2 h-2 bg-red-600 rounded-full"></span>
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[380px] overflow-hidden rounded-[16px] border border-[#E5E7EB] bg-white p-0 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.16)]" align="end">
+                  <Notifications />
+                </PopoverContent>
+              </Popover>
 
               <div className="w-px h-6 bg-[rgba(194,198,212,0.30)]" />
 

@@ -622,76 +622,39 @@ export default function Dashboard() {
   const visibleEnd = Math.min(endIndex, totalRecords);
 
   const [animatedValues, setAnimatedValues] = useState<Record<string, number>>({});
-  const branchRef = useRef<HTMLDivElement>(null);
-  const hasAnimated = useRef(false);
 
-  // Initial trigger on scroll
+  // Animate each branch's bar from its current displayed value to its real
+  // pct whenever `branches` loads/changes -- no scroll-visibility gating,
+  // since that depended on this card being the first thing to intersect the
+  // viewport and silently never animated otherwise. Cleans up its own
+  // intervals so repeated branch/date changes can't leak overlapping timers.
   useEffect(() => {
-    const el = branchRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && !hasAnimated.current) {
-          hasAnimated.current = true;
-          observer.disconnect();
-
-          branches.forEach((branch, index) => {
-            setTimeout(() => {
-              let current = 0;
-              const interval = setInterval(() => {
-                current += 1;
-                setAnimatedValues((prev) => ({
-                  ...prev,
-                  [branch.id]: current,
-                }));
-                if (current >= branch.pct) {
-                  clearInterval(interval);
-                }
-              }, 30);
-            }, index * 200);
-          });
-        }
-      },
-      { threshold: 0.1 },
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  // Animate only the branch whose pct changed
-useEffect(() => {
-  if (!hasAnimated.current) return;
-
-  branches.forEach((branch) => {
-    const current = animatedValues[branch.id] ?? 0;
-
-    if (current !== branch.pct) {
-      const interval = setInterval(() => {
+    const intervals = branches.map((branch) => {
+      const interval = window.setInterval(() => {
         setAnimatedValues((prev) => {
           const value = prev[branch.id] ?? 0;
 
           if (value === branch.pct) {
-            clearInterval(interval);
+            window.clearInterval(interval);
             return prev;
           }
 
           return {
             ...prev,
-            [branch.id]:
-              value < branch.pct ? value + 1 : value - 1,
+            [branch.id]: value < branch.pct ? value + 1 : value - 1,
           };
         });
       }, 30);
-    }
-  });
-}, [branches]);
+      return interval;
+    });
+
+    return () => intervals.forEach((interval) => window.clearInterval(interval));
+  }, [branches]);
 
   const navigate = useNavigate();
 
   const handleEdit = (id: string | number) => {
-    navigate(`/destination-edit/${id}`);
+    navigate(`/appointments/edit/${id}`);
   };
 
   const handleEditStaff = (id: string | number, role: string) => {
@@ -1008,7 +971,7 @@ useEffect(() => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
             {/* Branch Performance */}
             {can("appointment.read") && (
-            <div ref={branchRef} className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+            <div className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="text-[#191C1E] font-extrabold text-base leading-6 tracking-[-0.4px]">Branch Performance</h3>

@@ -8,15 +8,17 @@ import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
 import { useToast } from "@/hooks/use-toast";
 import { appointmentApi, type AppointmentRecord, type AvailableSlot } from "@/api/appointment.api";
-import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
+import { employeeApi, type EmployeeRecord, type DoctorScheduleRecord } from "@/api/employee.api";
 import { FilterPopover, useFilterPanel, useScheduleFilters } from "@/components/Filter";
 import { usePermission } from "@/context/PermissionContext";
+import { branchApi } from "@/api/branch.api";
 
 /* ============================= Types ============================= */
 
 interface DayDoctorColumn {
   employeeId: string;
   branchId: string;
+  departmentId: string;
   name: string;
   spec: string;
 }
@@ -26,6 +28,15 @@ interface AppointmentSlot {
   label: string;
   fill: number;
   dark: boolean;
+  // Present only on an open ("New slot available") cell -- carries what
+  // AddAppointment needs to open pre-filled with just the patient left to pick.
+  booking?: {
+    doctorId: string;
+    branchId: string;
+    departmentId: string;
+    date: string;
+    time: string;
+  };
 }
 
 interface ScheduleRow {
@@ -108,26 +119,35 @@ function CheckIcon({ className }: { className?: string }) {
 
 /* ============================= Data ============================= */
 
-// Hourly rows shown in the grid (09:00 AM - 04:00 PM). Real appointment
-// counts per doctor/hour are computed from the appointments API response
-// in the scheduleRows useMemo below.
-const TIME_ROW_HOURS = [9, 10, 11, 12, 13, 14, 15, 16];
-const TIME_ROW_LABELS = [
-  "09:00 AM",
-  "10:00 AM",
-  "11:00 AM",
-  "12:00 PM",
-  "01:00 PM",
-  "02:00 PM",
-  "03:00 PM",
-  "04:00 PM",
-];
+// Hourly rows shown in the grid, covering the full 24-hour day (12:00 AM -
+// 11:00 PM). Real appointment counts per doctor/hour are computed from the
+// appointments API response in the scheduleRows useMemo below.
+const TIME_ROW_HOURS = Array.from({ length: 24 }, (_, hour) => hour);
+const TIME_ROW_LABELS = TIME_ROW_HOURS.map((hour) => {
+  const period = hour >= 12 ? "PM" : "AM";
+  const h12 = hour % 12 || 12;
+  return `${String(h12).padStart(2, "0")}:00 ${period}`;
+});
 
-function slot(count: number, label: string, fill: number, dark = false): AppointmentSlot {
-  return { count, label, fill, dark };
+function slot(
+  count: number,
+  label: string,
+  fill: number,
+  dark = false,
+  booking?: AppointmentSlot["booking"],
+): AppointmentSlot {
+  return { count, label, fill, dark, booking };
 }
 
 const EMPTY = null;
+
+// doctor_schedule start_time/end_time come back as ISO timestamps on the
+// epoch date (e.g. "1970-01-01T10:30:00.000Z") -- only the UTC hour/minute
+// digits carry the actual shift boundary.
+function timeStringToMinutes(time: string): number {
+  const d = new Date(time);
+  return isNaN(d.getTime()) ? NaN : d.getUTCHours() * 60 + d.getUTCMinutes();
+}
 
 /* ============================= Sub-components ============================= */
 
@@ -143,13 +163,16 @@ function EmptySlot({ onClick }: { onClick?: () => void }) {
   );
 }
 
-function AppointmentCard({ cell, onCancel }: { cell: AppointmentSlot; onCancel?: () => void }) {
+
+function AppointmentCard({ cell }: { cell: AppointmentSlot }) {
+  const navigate = useNavigate();
+
   if (cell.count === 0) {
     return (
       <button
         type="button"
-        onClick={onCancel}
-        className="flex h-[52px] w-full items-center justify-center rounded-[2px] border-l-2 border-l-[#004ac6] bg-[rgba(0,74,198,0.05)] p-1 text-center transition-colors hover:bg-[rgba(0,74,198,0.1)]"
+        onClick={() => cell.booking && navigate("/appointments/add", { state: { slot: cell.booking } })}
+        className="flex h-[52px] w-full items-center justify-center rounded-[2px] border-l-2 border-l-[#004ac6] bg-[rgba(0,74,198,0.05)] p-1 text-center opacity-50 transition-opacity hover:opacity-80"
       >
         <span className="font-['Manrope',sans-serif] text-[9px] font-bold leading-[13px] text-[#004ac6]">
           New slot available
@@ -205,6 +228,7 @@ function mapEmployeeToDayColumn(emp: EmployeeRecord): DayDoctorColumn {
   return {
     employeeId: emp.employee_id,
     branchId: emp.branch_id,
+    departmentId: emp.department_id,
     name: `Dr. ${[emp.first_name, emp.middle_name, emp.last_name].filter(Boolean).join(" ")}`,
     spec: emp.department_master?.department_name || emp.specialization || "General",
   };
@@ -270,12 +294,35 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   const [doctorColumns, setDoctorColumns] = useState<DayDoctorColumn[]>([]);
   const [isLoadingDoctors, setIsLoadingDoctors] = useState(true);
 
+  // Active branch ids -- GET /branches only ever returns branch_status:
+  // "Active" rows, so this doubles as an allowlist. A doctor_schedule row can
+  // outlive its branch being deactivated; getAvailableSlots rejects any
+  // inactive branch outright, so a schedule pointing at one must not be
+  // offered as "New slot available".
+  const [activeBranchIds, setActiveBranchIds] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    branchApi
+      .getAll()
+      .then((res) => {
+        const branches = res.data?.data || (Array.isArray(res.data) ? res.data : []);
+        setActiveBranchIds(new Set(branches.map((b: { branch_id: string }) => b.branch_id)));
+      })
+      .catch(() => setActiveBranchIds(new Set()));
+  }, []);
+
   useEffect(() => {
     employeeApi
       .getAll({ limit: 1000 })
       .then((res) => {
         const employees = res.data?.data?.employees || [];
-        const doctors = employees.filter((e) => e.user_table?.role_type === "DOCTOR");
+        // Inactive doctors can still have leftover active doctor_schedule rows
+        // (deactivation doesn't retire their schedule) -- getAvailableSlots
+        // rejects any inactive doctor outright, so a column for one would
+        // only ever offer slots that can never actually be booked.
+        const doctors = employees.filter(
+          (e) => e.user_table?.role_type === "DOCTOR" && e.emp_status !== false,
+        );
         setDoctorColumns(doctors.map(mapEmployeeToDayColumn));
       })
       .catch((err) => {
@@ -285,30 +332,60 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       .finally(() => setIsLoadingDoctors(false));
   }, []);
 
-  // Real per-doctor available slots for the selected date, from
-  // GET /appointments/available-slots -- used to tell a truly open hour
-  // apart from an hour the doctor isn't even scheduled for.
-  const [availableSlotsByDoctor, setAvailableSlotsByDoctor] = useState<Record<string, AvailableSlot[]>>({});
+  // GET /employees/:id returns each doctor's real doctor_schedule rows --
+  // day_of_week decides which doctors get a column on the selected date,
+  // and the start_time/end_time on each active shift is what drives which
+  // hourly cells show "New slot available" below (varies per doctor, per
+  // shift, not a fixed hour range). Deliberately NOT using
+  // GET /appointments/available-slots here -- that endpoint hides any time
+  // already past on today's date, which under-reports a doctor's full
+  // shift; every scheduled, unbooked hour should show as available.
+  const [doctorScheduleDays, setDoctorScheduleDays] = useState<Record<string, string[]>>({});
+  const [doctorSchedulesByEmployee, setDoctorSchedulesByEmployee] = useState<Record<string, DoctorScheduleRecord[]>>({});
+  // Which branches each doctor actually has an active user_branch_mapping to --
+  // GET /appointments/available-slots 400s with "Doctor is not assigned to the
+  // selected branch" for any branch outside this list, so a schedule row whose
+  // branch isn't in here can never produce a real booking and must not be
+  // offered as "New slot available".
+  const [doctorMappedBranches, setDoctorMappedBranches] = useState<Record<string, Set<string>>>({});
+  const [isLoadingScheduleDays, setIsLoadingScheduleDays] = useState(true);
 
   useEffect(() => {
     if (doctorColumns.length === 0) {
-      setAvailableSlotsByDoctor({});
+      setDoctorScheduleDays({});
+      setDoctorSchedulesByEmployee({});
+      setDoctorMappedBranches({});
+      setIsLoadingScheduleDays(false);
       return;
     }
 
-    const dateStr = format(selectedDate, "yyyy-MM-dd");
+    setIsLoadingScheduleDays(true);
 
     Promise.all(
       doctorColumns.map((doc) =>
-        appointmentApi
-          .getAvailableSlots(doc.employeeId, doc.branchId, dateStr)
-          .then((res) => [doc.employeeId, res.data?.data?.slots ?? []] as const)
-          .catch(() => [doc.employeeId, []] as const),
+        employeeApi
+          .getOne(doc.employeeId)
+          .then((res) => {
+            const activeSchedules = (res.data?.data?.doctorSchedules ?? []).filter((s) => s.is_active && s.day_of_week);
+            const days = activeSchedules.map((s) => s.day_of_week as string);
+            const mappedBranches = new Set((res.data?.data?.branches ?? []).map((b) => b.branch_id));
+            return { employeeId: doc.employeeId, days, schedules: activeSchedules, mappedBranches };
+          })
+          .catch(() => ({
+            employeeId: doc.employeeId,
+            days: [] as string[],
+            schedules: [] as DoctorScheduleRecord[],
+            mappedBranches: new Set<string>(),
+          })),
       ),
-    ).then((entries) => {
-      setAvailableSlotsByDoctor(Object.fromEntries(entries));
-    });
-  }, [doctorColumns, selectedDate]);
+    )
+      .then((entries) => {
+        setDoctorScheduleDays(Object.fromEntries(entries.map((e) => [e.employeeId, e.days])));
+        setDoctorSchedulesByEmployee(Object.fromEntries(entries.map((e) => [e.employeeId, e.schedules])));
+        setDoctorMappedBranches(Object.fromEntries(entries.map((e) => [e.employeeId, e.mappedBranches])));
+      })
+      .finally(() => setIsLoadingScheduleDays(false));
+  }, [doctorColumns]);
 
   // Doctor filter options, built from the real doctor list -- lets the
   // toolbar Filter popover pick any number of specific doctors.
@@ -319,9 +396,13 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   });
 
   // Only doctors matching the toolbar search, the picked doctor (if any),
-  // and the multi-select Filter popover get a column at all -- narrowing
-  // down to specific doctors hides every other doctor's column entirely
-  // instead of just dimming it.
+  // the multi-select Filter popover, and -- once schedule data has loaded --
+  // an active doctor_schedule row for the selected date's day of week get a
+  // column at all. e.g. selecting a Monday only shows doctors who actually
+  // work Mondays, instead of every doctor with an all-empty column.
+  const selectedDayOfWeek = format(selectedDate, "EEEE").toUpperCase();
+  const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
+
   const visibleDoctorColumns = useMemo(() => {
     const term = toolbarSearchTerm.trim().toLowerCase();
     const selectedIds: string[] = Array.isArray(appliedValues.doctorIds) ? appliedValues.doctorIds : [];
@@ -339,9 +420,22 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
       if (selectedIds.length > 0 && !selectedIds.includes(doc.employeeId)) return false;
 
+      if (!isLoadingScheduleDays) {
+        const days = doctorScheduleDays[doc.employeeId] ?? [];
+        if (!days.includes(selectedDayOfWeek)) return false;
+      }
+
       return true;
     });
-  }, [doctorColumns, toolbarSearchTerm, selectedDoctorName, appliedValues]);
+  }, [
+    doctorColumns,
+    toolbarSearchTerm,
+    selectedDoctorName,
+    appliedValues,
+    doctorScheduleDays,
+    isLoadingScheduleDays,
+    selectedDayOfWeek,
+  ]);
 
   const scheduleRows: ScheduleRow[] = useMemo(() => {
     return TIME_ROW_HOURS.map((hour, idx) => ({
@@ -358,14 +452,52 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           return slot(count, `${count} Patient${count > 1 ? "s" : ""}`, fill, false);
         }
 
-        const hasOpenSlot = (availableSlotsByDoctor[doc.employeeId] ?? []).some(
-          (s) => s.is_available && Number(s.time.split(":")[0]) === hour,
-        );
+        // Overlap check in minutes, not whole hours -- a shift ending at
+        // 19:30 still has a bookable slot inside the 19:00-20:00 grid row,
+        // so comparing only rounded-down hours was dropping that last
+        // partial-hour row (and any partial-hour start) from every shift.
+        // Both ends use a strict `<`/`>` -- a shift ending exactly on the
+        // hour (e.g. 17:00) has zero overlap with that hour's row (17:00-
+        // 18:00), so that row must NOT show as available; using `<=` here
+        // previously marked it available anyway, offering a "5:00 PM" slot
+        // the doctor's actual shift (and consultation-length generateTimeSlots
+        // on the backend) never produced -- the real last bookable start was
+        // 16:40 (last 20-min slot fitting before 17:00), so clicking the
+        // 5:00 PM cell always landed on a nonexistent slot.
+        const hourStart = hour * 60;
+        const hourEnd = hourStart + 60;
+        const mappedBranches = doctorMappedBranches[doc.employeeId];
+        const matchedSchedule = (doctorSchedulesByEmployee[doc.employeeId] ?? []).find((s) => {
+          // Trim/uppercase before comparing -- some doctor_schedule rows have
+          // stray whitespace in day_of_week (e.g. " WEDNESDAY"), which still
+          // reads as the right day to a human but fails the backend's exact
+          // string match, silently zeroing out getAvailableSlots for that row.
+          if ((s.day_of_week ?? "").trim().toUpperCase() !== selectedDayOfWeek || !s.start_time || !s.end_time) {
+            return false;
+          }
+          // A schedule whose branch this doctor isn't actively mapped to, or
+          // whose branch has been deactivated, can never actually be booked
+          // -- getAvailableSlots rejects both -- so don't offer it as
+          // "New slot available" in the first place.
+          if (mappedBranches && s.branch_id && !mappedBranches.has(s.branch_id)) return false;
+          if (activeBranchIds && s.branch_id && !activeBranchIds.has(s.branch_id)) return false;
+          const startMinutes = timeStringToMinutes(s.start_time);
+          const endMinutes = timeStringToMinutes(s.end_time);
+          return !isNaN(startMinutes) && !isNaN(endMinutes) && hourStart < endMinutes && hourEnd > startMinutes;
+        });
 
-        return hasOpenSlot ? slot(0, "New slot available", 0, false) : EMPTY;
+        if (!matchedSchedule) return EMPTY;
+
+        return slot(0, "New slot available", 0, false, {
+          doctorId: doc.employeeId,
+          branchId: matchedSchedule.branch_id || doc.branchId,
+          departmentId: doc.departmentId,
+          date: selectedDateStr,
+          time: `${String(hour).padStart(2, "0")}:00`,
+        });
       }),
     }));
-  }, [visibleDoctorColumns, dayAppointments, availableSlotsByDoctor]);
+  }, [visibleDoctorColumns, dayAppointments, doctorSchedulesByEmployee, doctorMappedBranches, selectedDayOfWeek, selectedDateStr]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -589,7 +721,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           aria-label="Doctor appointment schedule grid"
           className="max-w-full overflow-x-auto rounded-xl border border-[#E5E7EB] bg-white shadow-sm"
         >
-          {isLoadingDay || isLoadingDoctors ? (
+          {isLoadingDay || isLoadingDoctors || isLoadingScheduleDays ? (
             <div className="flex min-w-[400px] flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
               <Loader2 size={24} className="animate-spin text-[#00488D]" />
               Loading schedule...

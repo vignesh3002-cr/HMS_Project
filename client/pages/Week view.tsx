@@ -166,7 +166,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   // All doctors (not just ones with an appointment this week), so every
   // doctor gets a row -- same approach as Day view.tsx.
   const [allDoctors, setAllDoctors] = useState<
-    { employeeId: string; name: string; department: string }[]
+    { employeeId: string; branchId: string; name: string; department: string }[]
   >([]);
 
   useEffect(() => {
@@ -177,6 +177,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         setAllDoctors(
           employees.map((emp) => ({
             employeeId: emp.employee_id,
+            branchId: emp.branch_id,
             name: `Dr. ${[emp.first_name, emp.middle_name, emp.last_name].filter(Boolean).join(" ")}`,
             department: (emp.department_master?.department_name || emp.specialization || "General").toUpperCase(),
           })),
@@ -187,6 +188,71 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         setAllDoctors([]);
       });
   }, []);
+
+  // A doctor's real mapped branches (via user_branch_mapping) -- their
+  // doctor_schedule rows can be tied to any of these, not just the single
+  // `employees.branch_id`/appointment `branch_id` fallback, so availability
+  // has to be checked across all of them or a multi-branch doctor's open
+  // slots get missed entirely (same fix as Day view.tsx).
+  const [doctorBranchIds, setDoctorBranchIds] = useState<Record<string, string[]>>({});
+
+  // Real per-doctor available slots for each day of the selected week, from
+  // GET /appointments/available-slots -- lets an unbooked-but-scheduled day
+  // show "New slot available" instead of "OFF" (same distinction Day
+  // view.tsx makes). Keyed by `${employeeId}|${yyyy-MM-dd}`.
+  const [availableByDoctorDay, setAvailableByDoctorDay] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const byIdForSlots = new Map<string, { employeeId: string; branchId: string }>();
+    allDoctors.forEach((doc) => byIdForSlots.set(doc.employeeId, doc));
+    weekAppointments.forEach((appt) => {
+      const emp = appt.employees;
+      if (!emp || !appt.branch_id || byIdForSlots.has(emp.employee_id)) return;
+      byIdForSlots.set(emp.employee_id, { employeeId: emp.employee_id, branchId: appt.branch_id });
+    });
+
+    const pairs = Array.from(byIdForSlots.values());
+    if (pairs.length === 0) {
+      setDoctorBranchIds({});
+      setAvailableByDoctorDay({});
+      return;
+    }
+
+    Promise.all(
+      pairs.map((doc) =>
+        employeeApi
+          .getOne(doc.employeeId)
+          .then((res) => {
+            const mapped = (res.data?.data?.branches ?? []).map((b) => b.branch_id);
+            return [doc.employeeId, mapped.length ? mapped : [doc.branchId]] as const;
+          })
+          .catch(() => [doc.employeeId, [doc.branchId]] as const),
+      ),
+    ).then((branchEntries) => {
+      const branchMap = Object.fromEntries(branchEntries);
+      setDoctorBranchIds(branchMap);
+
+      const dayKeys = weekDays.map((d) => format(d, "yyyy-MM-dd"));
+
+      return Promise.all(
+        pairs.flatMap((doc) => {
+          const branchIds = branchMap[doc.employeeId] ?? [doc.branchId];
+          return dayKeys.map((dateStr) =>
+            Promise.all(
+              branchIds.map((branchId) =>
+                appointmentApi
+                  .getAvailableSlots(doc.employeeId, branchId, dateStr)
+                  .then((res) => (res.data?.data?.slots ?? []).some((s) => s.is_available))
+                  .catch(() => false),
+              ),
+            ).then((results) => [`${doc.employeeId}|${dateStr}`, results.some(Boolean)] as const),
+          );
+        }),
+      );
+    }).then((entries) => {
+      if (entries) setAvailableByDoctorDay(Object.fromEntries(entries));
+    });
+  }, [allDoctors, weekAppointments, selectedDate]);
 
   useEffect(() => {
     const dayKeys = weekDays.map((d) => format(d, "yyyy-MM-dd"));
@@ -228,7 +294,10 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         ).length;
 
         if (count === 0) {
-          return { patients: 0, progress: 0, color: "gray", off: true };
+          const hasOpenSlot = doc.employeeIds.some((id) => availableByDoctorDay[`${id}|${key}`]);
+          return hasOpenSlot
+            ? { patients: 0, progress: 0, color: "blue", off: false }
+            : { patients: 0, progress: 0, color: "gray", off: true };
         }
 
         const progress = Math.min(100, count * 10);
@@ -238,7 +307,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     }));
 
     setDoctors(derivedDoctors);
-  }, [weekAppointments, allDoctors, selectedDate]);
+  }, [weekAppointments, allDoctors, selectedDate, availableByDoctorDay]);
 
   const dateLabel = isSameWeek(selectedDate, new Date(), { weekStartsOn: 1 })
     ? "This Week"
