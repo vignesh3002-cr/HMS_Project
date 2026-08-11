@@ -26,54 +26,10 @@ import { filterDataByValues } from "@/components/Filter/utils";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
 import HmsTable from "@/components/hms/HmsTable";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
-
-const appointments = [
-  {
-    id: "APT-2026-00125",
-    date: "25 Apr 2026",
-    time: "08:20 AM",
-    doctor: "Dr. Sarah Johnson",
-    doctorId: "DOC-2210",
-    department: "Oncologist",
-    status: "Schedule" as const,
-  },
-  {
-    id: "APT-2026-00124",
-    date: "20 May 2026",
-    time: "11:40 AM",
-    doctor: "Dr. Sarah Johnson",
-    doctorId: "DOC-2210",
-    department: "Oncologist",
-    status: "Completed" as const,
-  },
-  {
-    id: "APT-2026-00123",
-    date: "02 May 2026",
-    time: "08:20 AM",
-    doctor: "Dr. Sarah Johnson",
-    doctorId: "DOC-2210",
-    department: "Oncologist",
-    status: "Cancelled" as const,
-  },
-  {
-    id: "APT-2026-00122",
-    date: "27 Mar 2026",
-    time: "02:00 PM",
-    doctor: "Dr. David Lee",
-    doctorId: "DOC-0006",
-    department: "Oncologist",
-    status: "Completed" as const,
-  },
-  {
-    id: "APT-2026-00121",
-    date: "12 Mar 2026",
-    time: "05:40 PM",
-    doctor: "Dr. Sarah Johnson",
-    doctorId: "DOC-0002",
-    department: "Orthopedics",
-    status: "Completed" as const,
-  },
-] as const;
+import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { useToast } from "@/hooks/use-toast";
+import { usePermission } from "@/context/PermissionContext";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 
 const statusVariant: Record<string, "blue" | "green" | "rose" | "amber"> = {
   Schedule: "blue",
@@ -81,9 +37,49 @@ const statusVariant: Record<string, "blue" | "green" | "rose" | "amber"> = {
   Cancelled: "rose",
 };
 
-function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: () => void; onDelete: () => void }) {
+function mapAppointment(a: AppointmentRecord) {
+  const doctorName = a.employees
+    ? [a.employees.first_name, a.employees.middle_name, a.employees.last_name].filter(Boolean).join(" ")
+    : "—";
+
+  let date = "—";
+  let time = a.appointment_time || "—";
+  if (a.appointment_date) {
+    const d = new Date(a.appointment_date);
+    if (!isNaN(d.getTime())) {
+      date = format(d, "dd MMM yyyy");
+    }
+  }
+
+  const statusRaw = (a.status || "").toLowerCase();
+  const status =
+    statusRaw === "completed" ? "Completed" :
+    statusRaw === "cancelled" ? "Cancelled" :
+    "Schedule";
+
+  return {
+    id: a.appointment_id,
+    date,
+    time,
+    doctor: doctorName,
+    doctorId: a.employee_id || "—",
+    department: a.department_master?.department_name || a.department || "—",
+    status: status as "Schedule" | "Completed" | "Cancelled",
+  };
+}
+
+function CardMenu({
+  onView,
+  onEdit,
+  onCancel,
+}: {
+  onView: () => void;
+  onEdit: () => void;
+  onCancel: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const { can } = usePermission();
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -95,18 +91,50 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  if (!can("appointment.read") && !can("appointment.update") && !can("appointment.cancel")) return null;
+
   return (
-    <div className="relative" ref={wrapperRef}>
-      <button onClick={() => setOpen((o) => !o)} className="p-1 rounded hover:bg-[#F2F4F6] transition-colors">
+    <div className="relative inline-block text-left" ref={wrapperRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center justify-center p-1.5 border border-[#E5E7EB] rounded-md hover:border-[#00488D] transition-colors"
+      >
         <MoreVertical className="w-4 h-4 text-[#6B7280]" />
       </button>
-      <div className={`absolute right-0 top-full mt-1 w-28 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
+
+      <div
+        className={`absolute right-0 top-full mt-1 w-44 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-40 transition-all duration-150 ${
           open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
         }`}
       >
-        <button onClick={() => { onView(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">View</button>
-        <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
-        <button onClick={() => { onDelete(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">Delete</button>
+        {can("appointment.read") && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onView(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-green-400 hover:bg-[#F2F4F6]"
+          >
+            View Appointment
+          </button>
+        )}
+        {can("appointment.update") && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onEdit(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-indigo-600 hover:bg-[#F2F4F6]"
+          >
+            Edit Appointment
+          </button>
+        )}
+        {can("appointment.cancel") && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onCancel(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-red-600 hover:bg-red-50"
+          >
+            Cancel Appointment
+          </button>
+        )}
       </div>
     </div>
   );
@@ -115,9 +143,11 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
 export default function PatientProfile() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const { toast } = useToast();
 
   const [patient, setPatient] = useState<PatientRecord | null>(null);
   const [loading, setLoading] = useState(true);
+  const [appointments, setAppointments] = useState<ReturnType<typeof mapAppointment>[]>([]);
 
   useEffect(() => {
     if (!id) return;
@@ -126,6 +156,14 @@ export default function PatientProfile() {
       .then((res) => setPatient(res.data.data))
       .catch(() => {})
       .finally(() => setLoading(false));
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    appointmentApi
+      .getAll({ patientId: id })
+      .then((res) => setAppointments(res.data.data.appointments.map(mapAppointment)))
+      .catch(() => {});
   }, [id]);
 
   function fullName(p: PatientRecord) {
@@ -190,7 +228,7 @@ export default function PatientProfile() {
     }
     result = filterDataByValues(result as unknown as Record<string, string | number>[], appliedValues) as typeof result;
     return result;
-  }, [searchQuery, appliedValues]);
+  }, [appointments, searchQuery, appliedValues]);
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -219,9 +257,37 @@ export default function PatientProfile() {
   const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
   const visibleEnd = Math.min(endIndex, totalRecords);
 
-  const handleView = (id: string) => alert(`View appointment ${id}`);
-  const handleEdit = (id: string) => alert(`Edit appointment ${id}`);
-  const handleDelete = (id: string) => alert(`Delete appointment ${id}`);
+  const handleView = (id: string) => navigate(`/appointments/view/${id}`);
+  const handleEdit = (id: string) => navigate(`/appointments/edit/${id}`);
+
+  const [cancelTarget, setCancelTarget] = useState<ReturnType<typeof mapAppointment> | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+
+  const handleCancelAppointment = (target: ReturnType<typeof mapAppointment>) => {
+    setCancelReason("");
+    setCancelTarget(target);
+  };
+
+  const handleConfirmCancelAppointment = () => {
+    if (!cancelTarget) return;
+
+    if (!cancelReason.trim()) {
+      toast({ title: "A cancellation reason is required", variant: "destructive" });
+      return;
+    }
+
+    setAppointments((prev) =>
+      prev.map((apt) =>
+        apt === cancelTarget ? { ...apt, status: "Cancelled" } : apt,
+      ),
+    );
+    toast({
+      title: "Appointment cancelled",
+      description: `Appointment ${cancelTarget.id} has been cancelled.`,
+    });
+    setCancelTarget(null);
+    setCancelReason("");
+  };
 
   if (loading) {
     return (
@@ -261,10 +327,10 @@ export default function PatientProfile() {
                     <h1 className="text-2xl font-bold text-slate-900">{patientName}</h1>
                     <p className="hms-id-text mt-0.5">#{patient.patient_id}</p>
                     <div className="flex flex-col gap-2 text-sm text-slate-600 sm:flex-row sm:items-center mt-2">
-                      {(patient as any).patient_current_address && (
+                      {(patient as any).current_address && (
                         <div className="flex items-center gap-1.5">
                           <MapPin className="h-4 w-4 text-slate-400 shrink-0" />
-                          <span>{(patient as any).patient_current_address}</span>
+                          <span>{(patient as any).current_address}</span>
                         </div>
                       )}
                     </div>
@@ -287,7 +353,10 @@ export default function PatientProfile() {
                   <Phone className="h-4 w-4" />
                 </Button>
                 <div className="flex flex-col items-center gap-1 sm:items-stretch">
-                  <Button className="flex w-full items-center gap-2 bg-[#004785] hover:bg-[#003a6b] sm:w-auto">
+                  <Button
+                    className="flex w-full items-center gap-2 bg-[#004785] hover:bg-[#003a6b] sm:w-auto"
+                    onClick={() => navigate("/appointments/book", { state: { patient } })}
+                  >
                     <Calendar className="h-4 w-4" />
                     Book Appointment
                   </Button>
@@ -514,8 +583,14 @@ export default function PatientProfile() {
                   return <StatusBadge tone={statusVariant[a.status]}>{a.status}</StatusBadge>;
                 }},
                 { key: "actions", label: "Actions", sortable: false, render: (apt) => {
-                  const a = apt as any;
-                  return <CardMenu onView={() => handleView(a.id)} onEdit={() => handleEdit(a.id)} onDelete={() => handleDelete(a.id)} />;
+                  const a = apt as ReturnType<typeof mapAppointment>;
+                  return (
+                    <CardMenu
+                      onView={() => handleView(a.id)}
+                      onEdit={() => handleEdit(a.id)}
+                      onCancel={() => handleCancelAppointment(a)}
+                    />
+                  );
                 }},
               ]}
               data={currentRows}
@@ -538,6 +613,29 @@ export default function PatientProfile() {
         </main>
       </div>
       <QuickAddFab />
+
+      <ConfirmationDialog
+        open={!!cancelTarget}
+        type="danger"
+        title="Cancel Appointment?"
+        description={
+          cancelTarget
+            ? `Appointment ${cancelTarget.id} for ${patientName} will be cancelled. Please enter a reason for cancellation.`
+            : ""
+        }
+        confirmText="Cancel Appointment"
+        cancelText="Keep Appointment"
+        onConfirm={handleConfirmCancelAppointment}
+        onCancel={() => setCancelTarget(null)}
+      >
+        <textarea
+          value={cancelReason}
+          onChange={(e) => setCancelReason(e.target.value)}
+          placeholder="Reason for cancellation (required)"
+          rows={3}
+          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      </ConfirmationDialog>
     </div>
   );
 }

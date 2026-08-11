@@ -68,7 +68,12 @@ export function QuickAddFab() {
       return;
     }
     if (key === "staff") {
-      navigate("/staff/add");
+      // Without ?role=, Addemployee.tsx's emptyFormData defaults the role
+      // dropdown to Doctor. Must be the real backend enum "STAFF" (not
+      // lowercase "staff", which Staff.tsx's own Add button incorrectly
+      // uses) - Addemployee.tsx's role-param matching only recognizes
+      // exact-cased enum values, so anything else silently fails to apply.
+      navigate("/staff/add?role=STAFF");
       return;
     }
     if (key === "patient") {

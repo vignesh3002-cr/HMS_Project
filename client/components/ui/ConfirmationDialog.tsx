@@ -83,6 +83,7 @@ function ConfirmationDialog({
   showCloseButton = true,
   closeOnBackdrop = true,
   closeOnEscape = true,
+  footer,
   children,
   onConfirm,
   onCancel,
@@ -145,37 +146,41 @@ function ConfirmationDialog({
               </DialogPrimitive.Close>
             )}
 
-            <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              {!hideCancelButton && (
+            {footer ? (
+              footer
+            ) : (
+              <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                {!hideCancelButton && (
+                  <button
+                    type="button"
+                    onClick={onCancel}
+                    disabled={loading}
+                    className={cn(buttonVariants({ variant: "outline" }))}
+                  >
+                    {cancelText ?? DEFAULT_CANCEL_TEXT}
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={onCancel}
+                  onClick={handleConfirm}
                   disabled={loading}
-                  className={cn(buttonVariants({ variant: "outline" }))}
+                  className={cn(
+                    buttonVariants({ variant: "default" }),
+                    config.confirmButtonClass,
+                    "gap-2",
+                  )}
                 >
-                  {cancelText ?? DEFAULT_CANCEL_TEXT}
+                  {loading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Confirming...
+                    </>
+                  ) : (
+                    confirmText ?? DEFAULT_CONFIRM_TEXT[type]
+                  )}
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={handleConfirm}
-                disabled={loading}
-                className={cn(
-                  buttonVariants({ variant: "default" }),
-                  config.confirmButtonClass,
-                  "gap-2",
-                )}
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Confirming...
-                  </>
-                ) : (
-                  confirmText ?? DEFAULT_CONFIRM_TEXT[type]
-                )}
-              </button>
-            </div>
+              </div>
+            )}
           </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

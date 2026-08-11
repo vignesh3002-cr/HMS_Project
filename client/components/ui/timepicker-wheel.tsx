@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Clock } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface TimepickerWheelProps {
   value: string;
@@ -9,11 +10,18 @@ interface TimepickerWheelProps {
   className?: string;
 }
 
-function to12h(
-  value: string,
-): { hour: string; minute: string; period: string } {
-  if (!value || !value.includes(":"))
-    return { hour: "12", minute: "00", period: "AM" };
+const ITEM_HEIGHT = 34;
+const WHEEL_HEIGHT = 132;
+const WHEEL_PAD = (WHEEL_HEIGHT - ITEM_HEIGHT) / 2;
+
+const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
+const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, "0"));
+const PERIODS = ["AM", "PM"];
+
+type WheelKey = "hour" | "minute" | "period";
+
+function to12h(value: string): { hour: string; minute: string; period: string } {
+  if (!value || !value.includes(":")) return { hour: "12", minute: "00", period: "AM" };
   const [h, m] = value.split(":").map(Number);
   const period = h >= 12 ? "PM" : "AM";
   const hour12 = h % 12 === 0 ? 12 : h % 12;
@@ -31,15 +39,65 @@ function to24h(hour: string, minute: string, period: string): string {
   return `${String(h).padStart(2, "0")}:${minute}`;
 }
 
-const HOURS = Array.from({ length: 12 }, (_, i) =>
-  String(i + 1).padStart(2, "0"),
-);
+interface WheelColumnProps {
+  items: string[];
+  activeIndex: number;
+  period?: boolean;
+  trackRef: React.RefObject<HTMLDivElement | null>;
+  onScroll: () => void;
+  onJump: (index: number) => void;
+}
 
-const MINUTES = Array.from({ length: 60 }, (_, i) =>
-  String(i).padStart(2, "0"),
-);
+function WheelColumn({ items, activeIndex, period, trackRef, onScroll, onJump }: WheelColumnProps) {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const el = trackRef.current;
+    if (!el) return;
+    const current = Math.round(el.scrollTop / ITEM_HEIGHT);
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      el.scrollTo({ top: Math.min(current + 1, items.length - 1) * ITEM_HEIGHT, behavior: "smooth" });
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      el.scrollTo({ top: Math.max(current - 1, 0) * ITEM_HEIGHT, behavior: "smooth" });
+    }
+  };
 
-const PERIODS = ["AM", "PM"];
+  return (
+    <div
+      ref={trackRef}
+      onScroll={onScroll}
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+      role="listbox"
+      aria-label={period ? "Period" : "Select"}
+      className={cn(
+        "h-[132px] shrink-0 snap-y snap-mandatory overflow-y-auto outline-none scroll-smooth",
+        "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        period ? "w-[54px]" : "w-[60px]"
+      )}
+      style={{ paddingTop: WHEEL_PAD, paddingBottom: WHEEL_PAD }}
+    >
+      {items.map((value, i) => (
+        <div
+          key={`${value}-${i}`}
+          role="option"
+          aria-selected={i === activeIndex}
+          onClick={() => onJump(i)}
+          tabIndex={-1}
+          className={cn(
+            "flex h-[34px] snap-center select-none items-center justify-center font-mono font-bold transition-all duration-150",
+            period ? "text-[11px] tracking-[0.18em]" : "text-[17px]",
+            i === activeIndex
+              ? "scale-105 text-clinical-blue opacity-100 [text-shadow:0_0_12px_rgba(0,72,141,0.35)]"
+              : "text-slate-400 opacity-40 hover:opacity-70"
+          )}
+        >
+          {value}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function TimepickerWheel({
   value,
@@ -48,18 +106,27 @@ export default function TimepickerWheel({
   placeholder = "Select time",
   className = "",
 }: TimepickerWheelProps) {
+  const initial = to12h(value);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hourRef = useRef<HTMLDivElement>(null);
+  const minuteRef = useRef<HTMLDivElement>(null);
+  const periodRef = useRef<HTMLDivElement>(null);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const init = to12h(value);
-  const [tempHour, setTempHour] = useState(init.hour);
-  const [tempMinute, setTempMinute] = useState(init.minute);
-  const [tempPeriod, setTempPeriod] = useState(init.period);
+  const [tempHour, setTempHour] = useState(initial.hour);
+  const [tempMinute, setTempMinute] = useState(initial.minute);
+  const [tempPeriod, setTempPeriod] = useState(initial.period);
+  const [active, setActive] = useState<Record<WheelKey, number>>({
+    hour: Math.max(HOURS.indexOf(initial.hour), 0),
+    minute: Math.max(MINUTES.indexOf(initial.minute), 0),
+    period: Math.max(PERIODS.indexOf(initial.period), 0),
+  });
 
   const displayText = value
     ? (() => {
         const d = to12h(value);
-        return `${d.hour} : ${d.minute} ${d.period}`;
+        return `${d.hour}:${d.minute} ${d.period}`;
       })()
     : "";
 
@@ -74,10 +141,7 @@ export default function TimepickerWheel({
   useEffect(() => {
     if (!open) return;
     function handleClickOutside(event: MouseEvent) {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(event.target as Node)
-      ) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setOpen(false);
       }
     }
@@ -85,112 +149,111 @@ export default function TimepickerWheel({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [open]);
 
-  const handleOptionClick = useCallback(
-    (key: "hour" | "minute" | "period", val: string) => {
-      const newHour = key === "hour" ? val : tempHour;
-      const newMinute = key === "minute" ? val : tempMinute;
-      const newPeriod = key === "period" ? val : tempPeriod;
-      if (key === "hour") setTempHour(val);
-      if (key === "minute") setTempMinute(val);
-      if (key === "period") setTempPeriod(val);
-      onChange(to24h(newHour, newMinute, newPeriod));
-    },
-    [tempHour, tempMinute, tempPeriod, onChange],
-  );
+  useEffect(() => {
+    if (!open) return;
+    const h = Math.max(HOURS.indexOf(tempHour), 0);
+    const m = Math.max(MINUTES.indexOf(tempMinute), 0);
+    const p = Math.max(PERIODS.indexOf(tempPeriod), 0);
+    if (hourRef.current) hourRef.current.scrollTop = h * ITEM_HEIGHT;
+    if (minuteRef.current) minuteRef.current.scrollTop = m * ITEM_HEIGHT;
+    if (periodRef.current) periodRef.current.scrollTop = p * ITEM_HEIGHT;
+    setActive({ hour: h, minute: m, period: p });
+  }, [open]);
 
-  const selectedHour = to12h(value).hour;
+  const itemsFor = (key: WheelKey): string[] =>
+    key === "hour" ? HOURS : key === "minute" ? MINUTES : PERIODS;
+
+  const indexOf = (key: WheelKey): number => {
+    const el = key === "hour" ? hourRef.current : key === "minute" ? minuteRef.current : periodRef.current;
+    if (!el) return 0;
+    return Math.min(Math.max(Math.round(el.scrollTop / ITEM_HEIGHT), 0), itemsFor(key).length - 1);
+  };
+
+  const commit = () => {
+    onChange(to24h(HOURS[indexOf("hour")], MINUTES[indexOf("minute")], PERIODS[indexOf("period")]));
+  };
+
+  const handleScroll = (key: WheelKey) => () => {
+    setActive((prev) => ({ ...prev, [key]: indexOf(key) }));
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    settleTimer.current = setTimeout(commit, 120);
+  };
+
+  const handleJump = (key: WheelKey) => (index: number) => {
+    const el = key === "hour" ? hourRef.current : key === "minute" ? minuteRef.current : periodRef.current;
+    if (!el) return;
+    el.scrollTo({ top: index * ITEM_HEIGHT, behavior: "smooth" });
+    setActive((prev) => ({ ...prev, [key]: index }));
+  };
 
   return (
-    <div ref={containerRef} className="relative w-full" style={{ zIndex: open ? 50 : "auto" }}>
+    <div ref={containerRef} className="relative w-full">
       <button
         type="button"
         disabled={disabled}
-        onClick={() => setOpen((prev) => !prev)}
-        className={`flex items-center w-full h-10 px-4 bg-white border rounded-xl cursor-pointer transition-all duration-200 box-border disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed ${
+        onClick={() => !disabled && setOpen((prev) => !prev)}
+        className={cn(
+          "flex h-9 w-full items-center justify-between rounded-lg border bg-white px-3 transition-all duration-200",
+          "disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400",
           open
-            ? "border-blue-500 ring-[3px] ring-blue-500/15"
-            : "border-gray-200 hover:border-gray-300"
-        } ${className}`}
+            ? "border-clinical-blue ring-2 ring-clinical-blue/15"
+            : "border-[#E2E8F0] hover:border-clinical-blue-mid",
+          className
+        )}
       >
-        <Clock className="h-4 w-4 mr-3 flex-shrink-0 text-gray-400" />
-        <span className="flex-1 text-left text-[13.5px] font-medium text-gray-900">
-          {displayText || (
-            <span className="text-gray-400 font-normal">{placeholder}</span>
-          )}
-        </span>
-        <svg
-          className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform duration-200 ${
-            open ? "rotate-180" : ""
-          }`}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
+        <div className="flex flex-1 items-center gap-2 overflow-hidden">
+          <Clock className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+          <span className="truncate text-xs font-medium text-clinical-body">
+            {displayText || <span className="font-normal text-slate-400">{placeholder}</span>}
+          </span>
+        </div>
       </button>
 
-      <div
-        className={`absolute top-full left-0 right-0 mt-2 bg-white border border-[#e5e7eb] rounded-xl shadow-[0_10px_25px_-5px_rgba(0,0,0,0.1),0_8px_10px_-6px_rgba(0,0,0,0.05)] flex p-2 gap-1 z-50 transition-all duration-200 origin-top ${
-          open
-            ? "opacity-100 scale-100 translate-y-0 pointer-events-auto"
-            : "opacity-0 scale-95 -translate-y-2 pointer-events-none"
-        }`}
-      >
-        {/* Hours column */}
-        <div className="flex-1 h-[220px] overflow-y-auto hide-scrollbar text-center border-r border-[#f3f4f6] px-1">
-          {HOURS.map((h) => (
-            <div
-              key={h}
-              onClick={() => handleOptionClick("hour", h)}
-              className={`px-0 py-2 text-sm font-medium rounded-lg cursor-pointer transition-colors duration-150 my-0.5 ${
-                h === selectedHour
-                  ? "bg-[#004ac6] text-white"
-                  : "text-[#4b5563] hover:bg-[#f3f4f6] hover:text-[#111827]"
-              }`}
-            >
-              {h}
-            </div>
-          ))}
-        </div>
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-50 mt-1.5 min-w-[220px] rounded-lg border border-[#E2E8F0] bg-white p-2.5 shadow-[0_8px_30px_-8px_rgba(15,23,42,0.22)]">
+          <div className="relative flex items-stretch justify-center gap-1.5">
+            <div className="pointer-events-none absolute inset-x-2.5 top-1/2 h-[34px] -translate-y-1/2 rounded-md border-y border-clinical-blue/30 bg-gradient-to-b from-clinical-blue/[0.08] to-clinical-blue/[0.02]" />
 
-        {/* Minutes column */}
-        <div className="flex-1 h-[220px] overflow-y-auto hide-scrollbar text-center border-r border-[#f3f4f6] px-1">
-          {MINUTES.map((m) => (
-            <div
-              key={m}
-              onClick={() => handleOptionClick("minute", m)}
-              className={`px-0 py-2 text-sm font-medium rounded-lg cursor-pointer transition-colors duration-150 my-0.5 ${
-                m === tempMinute
-                  ? "bg-[#004ac6] text-white"
-                  : "text-[#4b5563] hover:bg-[#f3f4f6] hover:text-[#111827]"
-              }`}
-            >
-              {m}
-            </div>
-          ))}
-        </div>
+            <WheelColumn
+              items={HOURS}
+              activeIndex={active.hour}
+              onScroll={handleScroll("hour")}
+              onJump={handleJump("hour")}
+              trackRef={hourRef}
+            />
 
-        {/* Period column — only 2 options, so it sizes to content instead of stretching to the other columns' 220px */}
-        <div className="flex-1 self-start text-center px-1">
-          {PERIODS.map((p) => (
-            <div
-              key={p}
-              onClick={() => handleOptionClick("period", p)}
-              className={`px-0 py-2 text-sm font-medium rounded-lg cursor-pointer transition-colors duration-150 my-0.5 ${
-                p === tempPeriod
-                  ? "bg-[#004ac6] text-white"
-                  : "text-[#4b5563] hover:bg-[#f3f4f6] hover:text-[#111827]"
-              }`}
-            >
-              {p}
-            </div>
-          ))}
+            <span className="self-center font-mono text-base font-bold text-clinical-blue-mid/60 select-none">:</span>
+
+            <WheelColumn
+              items={MINUTES}
+              activeIndex={active.minute}
+              onScroll={handleScroll("minute")}
+              onJump={handleJump("minute")}
+              trackRef={minuteRef}
+            />
+
+            <div className="my-1 w-px bg-[#E2E8F0]" />
+
+            <WheelColumn
+              items={PERIODS}
+              period
+              activeIndex={active.period}
+              onScroll={handleScroll("period")}
+              onJump={handleJump("period")}
+              trackRef={periodRef}
+            />
+          </div>
+
+          <div className="mt-2 flex items-center justify-between border-t border-[#F1F5F9] pt-2">
+            <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+              Selected
+            </span>
+            <span className="font-mono text-xs font-bold text-clinical-blue">
+              {tempHour}:{tempMinute} {tempPeriod}
+            </span>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

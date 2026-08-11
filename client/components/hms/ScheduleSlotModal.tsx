@@ -1,31 +1,63 @@
 import { forwardRef, useImperativeHandle, useState } from "react";
 
+export interface ScheduleSlotBranchOption {
+  branch_id: string;
+  branch_name: string;
+}
+
 export interface ScheduleSlotAddPayload {
   day: string;
+  date: string;
   row: number | null;
   col: number | null;
+  branchId: string;
+  branchName: string;
+  startTime: string;
+  endTime: string;
   timeLabel: string;
-  branch: string;
 }
+
+const WEEK_DAY_OPTIONS = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+
+const toDateInputValue = (d: Date) => {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
 
 export interface ScheduleSlotCancelPayload {
   row: number;
   col: number;
+  scheduleId: string | number | null;
   info: string;
 }
 
 export interface ScheduleSlotModalHandle {
   openAddSlot: (dayName?: string, rowIndex?: number | null, colIndex?: number | null) => void;
-  openCancelSlot: (dayName: string, rowIndex: number, colIndex: number, text: string, branch?: string) => void;
+  openCancelSlot: (
+    dayName: string,
+    rowIndex: number,
+    colIndex: number,
+    text: string,
+    branch?: string,
+    scheduleId?: string | number | null,
+  ) => void;
 }
 
 interface ScheduleSlotModalProps {
-  branches?: string[];
+  branches?: ScheduleSlotBranchOption[];
   onAddSlot: (payload: ScheduleSlotAddPayload) => void;
   onCancelSlot: (payload: ScheduleSlotCancelPayload) => void;
 }
-
-const DEFAULT_BRANCHES = ["Tambaram", "Egmore", "Saidapet"];
 
 const formatTime12 = (time: string) => {
   if (!time) return "";
@@ -41,27 +73,31 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
     const [addSlotOpen, setAddSlotOpen] = useState(false);
     const [addSlotDay, setAddSlotDay] = useState("");
     const [addSlotPos, setAddSlotPos] = useState<{ row: number; col: number } | null>(null);
+    const [slotDate, setSlotDate] = useState(() => toDateInputValue(new Date()));
     const [slotStart, setSlotStart] = useState("");
     const [slotEnd, setSlotEnd] = useState("");
     const [slotBranch, setSlotBranch] = useState("");
     const [cancelSlotOpen, setCancelSlotOpen] = useState(false);
     const [cancelSlotPos, setCancelSlotPos] = useState<{ row: number; col: number } | null>(null);
     const [cancelSlotInfo, setCancelSlotInfo] = useState("");
+    const [cancelScheduleId, setCancelScheduleId] = useState<string | number | null>(null);
 
-    const branchOptions = branches?.length ? branches : DEFAULT_BRANCHES;
+    const branchOptions = branches ?? [];
 
     useImperativeHandle(ref, () => ({
       openAddSlot: (dayName = "", rowIndex = null, colIndex = null) => {
         setAddSlotDay(dayName);
         setAddSlotPos(rowIndex === null || colIndex === null ? null : { row: rowIndex, col: colIndex });
+        setSlotDate(toDateInputValue(new Date()));
         setSlotStart("");
         setSlotEnd("");
         setSlotBranch("");
         setAddSlotOpen(true);
       },
-      openCancelSlot: (dayName, rowIndex, colIndex, text, branch) => {
+      openCancelSlot: (dayName, rowIndex, colIndex, text, branch, scheduleId = null) => {
         setCancelSlotPos({ row: rowIndex, col: colIndex });
         setCancelSlotInfo(`${dayName}: ${text}${branch ? ` (${branch})` : ""}`);
+        setCancelScheduleId(scheduleId);
         setCancelSlotOpen(true);
       },
     }));
@@ -71,19 +107,24 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
     };
 
     const confirmAddSlot = () => {
-      if (!slotStart || !slotEnd || !slotBranch) {
-        alert("Please select start time, end time and branch location.");
+      if (!addSlotDay || !slotDate || !slotStart || !slotEnd || !slotBranch) {
+        alert("Please select day, date, start time, end time and branch location.");
         return;
       }
 
+      const selectedBranch = branchOptions.find((b) => b.branch_id === slotBranch);
       const timeLabel = `${formatTime12(slotStart)} - ${formatTime12(slotEnd)}`;
 
       onAddSlot({
         day: addSlotDay,
+        date: slotDate,
         row: addSlotPos?.row ?? null,
         col: addSlotPos?.col ?? null,
+        branchId: slotBranch,
+        branchName: selectedBranch?.branch_name ?? "",
+        startTime: slotStart,
+        endTime: slotEnd,
         timeLabel,
-        branch: slotBranch,
       });
 
       setAddSlotOpen(false);
@@ -98,6 +139,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
         onCancelSlot({
           row: cancelSlotPos.row,
           col: cancelSlotPos.col,
+          scheduleId: cancelScheduleId,
           info: cancelSlotInfo,
         });
       }
@@ -119,6 +161,38 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
               </p>
 
               <div className="flex flex-col gap-3 mb-6">
+                <div>
+                  <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
+                    DAY
+                  </label>
+
+                  <select
+                    value={addSlotDay}
+                    onChange={(e) => setAddSlotDay(e.target.value)}
+                    className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
+                  >
+                    <option value="">Select day</option>
+                    {WEEK_DAY_OPTIONS.map((day) => (
+                      <option key={day} value={day}>
+                        {day}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
+                    DATE
+                  </label>
+
+                  <input
+                    type="date"
+                    value={slotDate}
+                    onChange={(e) => setSlotDate(e.target.value)}
+                    className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
+                  />
+                </div>
+
                 <div>
                   <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
                     START TIME
@@ -157,8 +231,8 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
                   >
                     <option value="">Select branch</option>
                     {branchOptions.map((branch) => (
-                      <option key={branch} value={branch}>
-                        {branch}
+                      <option key={branch.branch_id} value={branch.branch_id}>
+                        {branch.branch_name}
                       </option>
                     ))}
                   </select>

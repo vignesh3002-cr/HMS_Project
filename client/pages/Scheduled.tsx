@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { format } from "date-fns";
 import { User, IdCard, Phone, Mail, MapPin, Cake, Droplet, VenusAndMars, Briefcase } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -10,6 +10,8 @@ import { employeeApi, type EmployeeDetailResponse, type DoctorScheduleRecord } f
 import { appointmentApi, type AvailableSlotsResult } from "@/api/appointment.api";
 import { doctorLeaveApi } from "@/api/doctorLeave.api";
 import { getUser } from "@/utils/token";
+import { DepartmentPill } from "@/components/hms/DepartmentBadge";
+import { StatusBadge } from "@/components/hms/StatusBadge";
 
 function formatDoctorFullName(e: EmployeeDetailResponse["employee"] | null): string {
   if (!e) return "Doctor";
@@ -110,7 +112,14 @@ const getMonthYearLabel = (year, month) => `${MONTH_NAMES[month]} ${year}`;
 export default function DoctorProfile() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const [activeTab, setActiveTab] = useState("week");
+  const location = useLocation();
+  // Entering via /doctor/day-view/:id opens on the Day tab, /doctor/view/:id
+  // opens on Week -- both routes render this same merged page now, so the
+  // entry URL just decides the initial tab instead of navigating to a
+  // separate page.
+  const [activeTab, setActiveTab] = useState(() =>
+    location.pathname.includes("/doctor/day-view") ? "day" : "week",
+  );
   const [toggledDates, setToggledDates] = useState<Set<string>>(new Set());
   const slotModalRef = useRef<ScheduleSlotModalHandle>(null);
   const [fromDate, setFromDate] = useState(null);
@@ -198,7 +207,7 @@ export default function DoctorProfile() {
   const doctorSchedules: DoctorScheduleRecord[] = doctorDetail?.doctorSchedules ?? [];
 
   const scheduleByDay = useMemo(() => {
-    const map: Record<string, { time: string; branch: string }[]> = {};
+    const map: Record<string, { time: string; branch: string; scheduleId: string | number }[]> = {};
     WEEK_DAYS.forEach(([day]) => {
       map[day.toUpperCase()] = [];
     });
@@ -208,6 +217,7 @@ export default function DoctorProfile() {
       map[key].push({
         time: `${formatScheduleTime(s.start_time)} - ${formatScheduleTime(s.end_time)}`,
         branch: s.branch?.branch_name || "",
+        scheduleId: s.schedule_id,
       });
     });
     return map;
@@ -218,21 +228,75 @@ export default function DoctorProfile() {
     ...WEEK_DAYS.map(([day]) => scheduleByDay[day.toUpperCase()]?.length || 0),
   );
 
-  // Local-only overlay so "+ Add slot"/"Cancel slot" still feel interactive
-  // in this view -- there's no schedule-mutation API wired up here, so these
-  // edits aren't persisted, only real backend rows are shown by default.
-  const [scheduleOverrides, setScheduleOverrides] = useState<
-    Record<string, [string, string, string?]>
-  >({});
-
   const schedule = Array.from({ length: maxScheduleRows }, (_, rowIndex) =>
-    WEEK_DAYS.map(([day], colIndex) => {
-      const overrideKey = `${rowIndex}-${colIndex}`;
-      if (scheduleOverrides[overrideKey]) return scheduleOverrides[overrideKey];
+    WEEK_DAYS.map(([day]) => {
       const entry = scheduleByDay[day.toUpperCase()]?.[rowIndex];
-      return entry ? ([entry.time, "blue", entry.branch] as [string, string, string]) : ["+", "empty"];
+      return entry
+        ? ([entry.time, "blue", entry.branch, entry.scheduleId] as [string, string, string, string | number])
+        : (["+", "empty"] as [string, string]);
     }),
   );
+
+  const refetchDoctor = () => {
+    if (!id) return;
+    employeeApi
+      .getOne(id)
+      .then((res) => setDoctorDetail(res.data?.data ?? null))
+      .catch((err) => console.error("[Doctor Profile] Failed to refresh schedule:", err));
+  };
+
+  const handleAddSlot = async ({
+    day,
+    branchId,
+    branchName,
+    startTime,
+    endTime,
+    timeLabel,
+  }: {
+    day: string;
+    branchId: string;
+    branchName: string;
+    startTime: string;
+    endTime: string;
+    timeLabel: string;
+  }) => {
+    if (!id || !day || !branchId) {
+      showAlert("Please select a day and branch for the new slot.");
+      return;
+    }
+    try {
+      await employeeApi.addScheduleSlot(id, {
+        branch_id: branchId,
+        day_of_week: day.toUpperCase() as any,
+        start_time: startTime,
+        end_time: endTime,
+      });
+      refetchDoctor();
+      showAlert(`Slot added for ${day}: ${timeLabel} (${branchName})`);
+    } catch (err: any) {
+      showAlert(err?.response?.data?.message || "Failed to add slot.");
+    }
+  };
+
+  const handleCancelSlot = async ({
+    scheduleId,
+    info,
+  }: {
+    scheduleId: string | number | null;
+    info: string;
+  }) => {
+    if (!id || scheduleId === null) {
+      showAlert("Unable to cancel this slot.");
+      return;
+    }
+    try {
+      await employeeApi.removeScheduleSlot(id, scheduleId);
+      refetchDoctor();
+      showAlert(`Slot cancelled: ${info}`);
+    } catch (err: any) {
+      showAlert(err?.response?.data?.message || "Failed to cancel slot.");
+    }
+  };
 
   const showAlert = (message) => {
     alert(message);
@@ -347,16 +411,18 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
       <main className="w-full p-4">
 
         {/* DOCTOR PROFILE */}
-         <button
-          onClick={() => window.history.back()}
-          className="flex items-center gap-2 border-0 bg-transparent text-[#343943] text-sm cursor-pointer"
-        >
-          <span className="text-[25px] leading-none">‹</span>
-          
-        </button>
-        <section className="bg-white border border-[#edf0f4] rounded-[10px] p-4 flex gap-[18px] mb-4 max-[700px]:flex-col">
 
-          <div className="w-32 h-32 rounded-lg overflow-hidden shrink-0 bg-gray-200 flex items-center justify-center max-[700px]:w-[105px] max-[700px]:h-[105px]">
+        <button
+          onClick={() => window.history.back()}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[#E5E7EB] bg-white text-[#424752] text-sm font-medium shadow-sm hover:bg-[#F2F4F6] hover:border-[#00488D]/30 hover:text-[#00488D] transition-all duration-200 cursor-pointer"
+        >
+          <span className="text-lg leading-none">←</span>
+          <span>Go back</span>
+        </button>
+
+        <section className="bg-white border border-[#E5E7EB] rounded-xl p-4 flex gap-[18px] mb-4 max-[700px]:flex-col">
+
+          <div className="w-32 h-32 rounded-full overflow-hidden shrink-0 bg-[#E6E8EA] flex items-center justify-center max-[700px]:w-[105px] max-[700px]:h-[105px]">
             {doctorPhoto ? (
               <img
                 src={doctorPhoto}
@@ -364,56 +430,58 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                 className="w-full h-full object-cover"
               />
             ) : (
-              <User className="w-1/2 h-1/2 text-gray-400" strokeWidth={1.5} />
+              <User className="w-1/2 h-1/2 text-[#8C8D8F]" strokeWidth={1.5} />
             )}
           </div>
 
           <div className="flex-1">
 
-            <div className="flex justify-between items-start max-[700px]:flex-col max-[700px]:gap-[15px]">
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl font-bold text-[#191C1E] max-[500px]:text-lg">
+                  {doctorName}
+                </h1>
 
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-xl font-bold text-[#182235] max-[500px]:text-lg">
-                    {doctorName}
-                  </h1>
-
-                  <span className="inline-flex items-center gap-[5px] bg-[#edf5ff] text-[#2266c8] border border-[#d5e6ff] px-[9px] py-1 rounded-full text-[11px]">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#2675df]" />
-                    {doctorSpecialization}
-                  </span>
-                </div>
-
-                <p className="mt-[5px] text-[#707784] text-[13px]">
-                  {doctorQualification}
-                </p>
+                <DepartmentPill department={doctorSpecialization} className="text-[11px] px-[9px] py-1 rounded-full">
+                  {doctorSpecialization}
+                </DepartmentPill>
               </div>
 
-              <button
-                onClick={() => navigate("/appointments/book")}
-                className="border-0 bg-[#004a91] hover:bg-[#003b75] text-white px-[17px] py-[11px] rounded-[7px] text-[13px] font-semibold cursor-pointer max-[700px]:w-full"
-              >
-                Book Appointment
-              </button>
-
+              <p className="mt-[5px] text-[#424752] text-[13px]">
+                {doctorQualification}
+              </p>
             </div>
 
             <div className="mt-[21px] flex flex-col gap-3 text-[13px]">
 
-              <div className="text-[#555e6d]">
+              <div className="text-[#424752]">
                 <span className="mr-1.5">▣</span>
                 Hospital : {doctorBranchNames.length ? doctorBranchNames.join(", ") : "—"}
               </div>
 
-              <div className={`flex items-center gap-[7px] ${doctorIsAvailable ? "text-[#0b955e]" : "text-[#9aa1ab]"}`}>
-                <span className={`w-2 h-2 rounded-full ${doctorIsAvailable ? "bg-[#16a866]" : "bg-[#9aa1ab]"}`} />
-                {doctorIsAvailable ? "Available" : "Unavailable"}
+              {/* Availability + Book Appointment */}
+              <div className="flex items-center justify-between mt-1 max-[500px]:flex-col max-[500px]:items-stretch max-[500px]:gap-3">
+
+                <StatusBadge tone={doctorIsAvailable ? "green" : "slate"}>
+                  {doctorIsAvailable ? "Available" : "Unavailable"}
+                </StatusBadge>
+
+                <button
+                  onClick={() =>
+                    navigate("/appointments/book", { state: { doctorId: id } })
+                  }
+                  className="border-0 bg-[#004785] hover:bg-[#003a6b] text-white px-[17px] py-[11px] rounded-[7px] text-[13px] font-semibold cursor-pointer max-[500px]:w-full transition-colors duration-150"
+                >
+                  Book Appointment
+                </button>
+
               </div>
 
             </div>
 
           </div>
         </section>
+
 
         {/* ABOUT */}
         <section className="bg-white border border-[#edf0f4] rounded-[10px] p-[21px] mb-4">
@@ -489,11 +557,7 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
           {["day", "week"].map((tab) => (
             <button
               key={tab}
-              onClick={() =>
-                tab === "day"
-                  ? navigate(id ? `/doctor/day-view/${id}` : "/doctor/day-view")
-                  : setActiveTab(tab)
-              }
+              onClick={() => setActiveTab(tab)}
               className={`h-[39px] px-[17px] border-0 bg-transparent text-xs cursor-pointer ${
                 activeTab === tab
                   ? "text-[#004a91] border-b-2 border-[#004a91]"
@@ -523,19 +587,23 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
 
                 <div className="flex items-center gap-4 flex-wrap">
 
-                  <button
-                    onClick={previousWeek}
-                    className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
-                  >
-                    ‹ Previous week
-                  </button>
+                  {activeTab === "week" && (
+                    <>
+                      <button
+                        onClick={previousWeek}
+                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
+                      >
+                        ‹ Previous week
+                      </button>
 
-                  <button
-                    onClick={nextWeek}
-                    className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
-                  >
-                    Next week ›
-                  </button>
+                      <button
+                        onClick={nextWeek}
+                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
+                      >
+                        Next week ›
+                      </button>
+                    </>
+                  )}
 
                   <button
                     onClick={() => slotModalRef.current?.openAddSlot("")}
@@ -559,12 +627,16 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                     {WEEK_DAYS.map(([day], dayIdx) => (
                       <div
                         key={day}
-                        className="min-h-[43px] p-[7px_3px] border-r border-[#b9bfcb] text-center text-[#003b80] text-[8px] font-bold"
+                        className={`min-h-[43px] p-[7px_3px] border-r border-[#b9bfcb] text-center text-[#003b80] text-[8px] font-bold ${
+                          activeTab === "day" ? "flex items-center justify-center" : ""
+                        }`}
                       >
                         {day}
-                        <small className="block mt-[3px] text-[7px]">
-                          {weekDates[dayIdx]}
-                        </small>
+                        {activeTab === "week" && (
+                          <small className="block mt-[3px] text-[7px]">
+                            {weekDates[dayIdx]}
+                          </small>
+                        )}
                       </div>
                     ))}
 
@@ -576,7 +648,7 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                       key={rowIndex}
                       className="grid grid-cols-7 min-h-[64px] border-b border-[#b9bfcb] last:border-b-0"
                     >
-                      {row.map(([text, type, branch], index) => (
+                      {row.map(([text, type, branch, scheduleId], index) => (
 
                         <div
                           key={index}
@@ -601,7 +673,14 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                           {["green", "blue", "orange"].includes(type) && (
                             <div
                               onClick={() =>
-                                slotModalRef.current?.openCancelSlot(WEEK_DAYS[index][0], rowIndex, index, text, branch)
+                                slotModalRef.current?.openCancelSlot(
+                                  WEEK_DAYS[index][0],
+                                  rowIndex,
+                                  index,
+                                  text,
+                                  branch,
+                                  scheduleId ?? null,
+                                )
                               }
                               className={`cursor-pointer h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] ${
                                 type === "green"
@@ -762,7 +841,8 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
           {/* RIGHT COLUMN */}
           <aside className="min-w-0 max-[900px]:grid max-[900px]:grid-cols-2 max-[900px]:gap-5 max-[700px]:block">
 
-            {/* CALENDAR */}
+            {/* CALENDAR (Week tab only -- the Day tab's simpler layout never had a month calendar) */}
+            {activeTab === "week" && (
             <section className="bg-white border border-[#edf0f4] rounded-[10px] p-[25px] mb-6 max-[900px]:mb-0 max-[700px]:mb-5">
 
               <div className="flex items-center justify-between mb-[22px]">
@@ -836,6 +916,7 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
               </div>
 
             </section>
+            )}
 
             {/* REVIEWS */}
             <section className="bg-white border border-[#edf0f4] rounded-lg overflow-hidden">
@@ -929,23 +1010,9 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
 
       <ScheduleSlotModal
         ref={slotModalRef}
-        branches={doctorBranchNames}
-        onAddSlot={({ day, row, col, timeLabel, branch }) => {
-          if (row !== null && col !== null) {
-            setScheduleOverrides((prev) => ({
-              ...prev,
-              [`${row}-${col}`]: [timeLabel, "blue", branch],
-            }));
-          }
-          showAlert(`Slot added${day ? ` for ${day}` : ""}: ${timeLabel} (${branch})`);
-        }}
-        onCancelSlot={({ row, col, info }) => {
-          setScheduleOverrides((prev) => ({
-            ...prev,
-            [`${row}-${col}`]: ["+", "empty"],
-          }));
-          showAlert(`Slot cancelled: ${info}`);
-        }}
+        branches={doctorDetail?.branches ?? []}
+        onAddSlot={handleAddSlot}
+        onCancelSlot={handleCancelSlot}
       />
       <ConfirmationDialog
         open={clearScheduleConfirm}

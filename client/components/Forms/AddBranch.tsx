@@ -71,12 +71,19 @@ interface AdminFormData {
   adminAadhaarNo: string;
   adminPanNo: string;
   adminPassportNo: string;
+  adminGender: string;
+  adminDateOfBirth: string;
+  adminExperience: string;
   adminState: string;
   adminDistrict: string;
   adminArea: string;
   adminPincode: string;
   adminCurrentAddress: string;
   adminPermanentAddress: string;
+  adminPermanentState: string;
+  adminPermanentDistrict: string;
+  adminPermanentArea: string;
+  adminPermanentPincode: string;
   adminEmergencyContactName: string;
   adminEmergencyContactRelation: string;
   adminEmergencyContactNumber: string;
@@ -126,12 +133,19 @@ const emptyAdminData: AdminFormData = {
   adminAadhaarNo: "",
   adminPanNo: "",
   adminPassportNo: "",
+  adminGender: "",
+  adminDateOfBirth: "",
+  adminExperience: "",
   adminState: "",
   adminDistrict: "",
   adminArea: "",
   adminPincode: "",
   adminCurrentAddress: "",
   adminPermanentAddress: "",
+  adminPermanentState: "",
+  adminPermanentDistrict: "",
+  adminPermanentArea: "",
+  adminPermanentPincode: "",
   adminEmergencyContactName: "",
   adminEmergencyContactRelation: "",
   adminEmergencyContactNumber: "",
@@ -170,8 +184,10 @@ const adminRequired: Record<BranchAdminMode, { key: keyof AdminFormData; label: 
   EXISTING: [{ key: "adminUserId", label: "Branch Admin" }],
   NEW: [
     { key: "adminFirstName", label: "Admin First Name" },
-    { key: "adminMiddleName", label: "Admin Middle Name" },
     { key: "adminLastName", label: "Admin Last Name" },
+    { key: "adminGender", label: "Admin Gender" },
+    { key: "adminDateOfBirth", label: "Admin Date of Birth" },
+    { key: "adminExperience", label: "Admin Experience" },
     { key: "adminBloodGroup", label: "Admin Blood Group" },
     { key: "adminNationality", label: "Admin Nationality" },
     { key: "adminMaritalStatus", label: "Admin Marital Status" },
@@ -187,6 +203,10 @@ const adminRequired: Record<BranchAdminMode, { key: keyof AdminFormData; label: 
     { key: "adminPincode", label: "Admin Pincode" },
     { key: "adminCurrentAddress", label: "Admin Current Address" },
     { key: "adminPermanentAddress", label: "Admin Permanent Address" },
+    { key: "adminPermanentState", label: "Admin Permanent State" },
+    { key: "adminPermanentDistrict", label: "Admin Permanent District" },
+    { key: "adminPermanentArea", label: "Admin Permanent Area" },
+    { key: "adminPermanentPincode", label: "Admin Permanent Pincode" },
     { key: "adminEmergencyContactName", label: "Admin Emergency Contact Name" },
     { key: "adminEmergencyContactRelation", label: "Admin Emergency Contact Relation" },
     { key: "adminEmergencyContactNumber", label: "Admin Emergency Contact Number" },
@@ -256,6 +276,7 @@ export default function AddBranch() {
   const [customDepartment, setCustomDepartment] = useState("");
   const [indianStates, setIndianStates] = useState<IState[]>([]);
   const [districtOptions, setDistrictOptions] = useState<string[]>([]);
+  const [permanentDistrictOptions, setPermanentDistrictOptions] = useState<string[]>([]);
   const [sameAsCurrent, setSameAsCurrent] = useState(false);
   const [branchDistrictOptions, setBranchDistrictOptions] = useState<string[]>([]);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
@@ -297,7 +318,14 @@ export default function AddBranch() {
     const checked = e.target.checked;
     setSameAsCurrent(checked);
     if (checked) {
-      setAdminData((p) => ({ ...p, adminPermanentAddress: p.adminCurrentAddress }));
+      setAdminData((p) => ({
+        ...p,
+        adminPermanentAddress: p.adminCurrentAddress,
+        adminPermanentState: p.adminState,
+        adminPermanentDistrict: p.adminDistrict,
+        adminPermanentArea: p.adminArea,
+        adminPermanentPincode: p.adminPincode,
+      }));
     }
   };
 
@@ -365,6 +393,20 @@ export default function AddBranch() {
       setDistrictOptions([]);
     }
   }, [adminData.adminState, indianStates]);
+
+  useEffect(() => {
+    if (adminData.adminPermanentState) {
+      const s = indianStates.find((s) => s.name === adminData.adminPermanentState);
+      if (s)
+        setPermanentDistrictOptions(
+          City.getCitiesOfState("IN", s.isoCode)
+            .map((c) => c.name)
+            .sort(),
+        );
+    } else {
+      setPermanentDistrictOptions([]);
+    }
+  }, [adminData.adminPermanentState, indianStates]);
 
   useEffect(() => {
     if (branchData.state) {
@@ -596,6 +638,8 @@ export default function AddBranch() {
             last_name: adminData.adminLastName || "",
             email: adminData.adminEmail,
             mobile_no: adminData.adminMobile,
+            dob: adminData.adminDateOfBirth || undefined,
+            gender: adminData.adminGender || undefined,
             blood_group: adminData.adminBloodGroup || undefined,
             nationality: adminData.adminNationality || undefined,
             marital_status: adminData.adminMaritalStatus || undefined,
@@ -609,6 +653,15 @@ export default function AddBranch() {
             employee_district: adminData.adminDistrict || undefined,
             employee_area: adminData.adminArea || undefined,
             employee_pincode: adminData.adminPincode ? Number(adminData.adminPincode) : undefined,
+            permanent_employee_state: adminData.adminPermanentState || undefined,
+            permanent_employee_district: adminData.adminPermanentDistrict || undefined,
+            permanent_employee_area: adminData.adminPermanentArea || undefined,
+            permanent_employee_pincode: adminData.adminPermanentPincode
+              ? Number(adminData.adminPermanentPincode)
+              : undefined,
+            employee_no_experence: adminData.adminExperience
+              ? Number(adminData.adminExperience)
+              : undefined,
             emergency_contact_name: adminData.adminEmergencyContactName || undefined,
             emergency_contact_relationship: adminData.adminEmergencyContactRelation || undefined,
             emergency_contact_number: adminData.adminEmergencyContactNumber || undefined,
@@ -688,6 +741,17 @@ export default function AddBranch() {
             employee_district: adminData.adminDistrict || undefined,
             employee_area: adminData.adminArea || undefined,
             employee_pincode: adminData.adminPincode ? Number(adminData.adminPincode) : undefined,
+            permanent_employee_state: adminData.adminPermanentState || undefined,
+            permanent_employee_district: adminData.adminPermanentDistrict || undefined,
+            permanent_employee_area: adminData.adminPermanentArea || undefined,
+            permanent_employee_pincode: adminData.adminPermanentPincode
+              ? Number(adminData.adminPermanentPincode)
+              : undefined,
+            employee_no_experence: adminData.adminExperience
+              ? Number(adminData.adminExperience)
+              : undefined,
+            dob: adminData.adminDateOfBirth || undefined,
+            gender: adminData.adminGender || undefined,
             emergency_contact_name: adminData.adminEmergencyContactName || undefined,
             emergency_contact_relationship: adminData.adminEmergencyContactRelation || undefined,
             emergency_contact_number: adminData.adminEmergencyContactNumber || undefined,
@@ -870,7 +934,6 @@ export default function AddBranch() {
                   value={branchData.emergencyNumber}
                   onChange={(value) => handleChange({ target: { name: "emergencyNumber", value } } as any)}
                   placeholder="Enter Emergency Number"
-                  required
                   disabled={submitting}
                   defaultCountry="in"
                 />
@@ -1239,7 +1302,7 @@ export default function AddBranch() {
                   </div>
                   <div>
                     <label className={labelCls}>
-                      Middle Name <Req />
+                      Middle Name <Opt />
                     </label>
                     <input
                       type="text"
@@ -1266,6 +1329,51 @@ export default function AddBranch() {
 
                   <div>
                     <label className={labelCls}>
+                      Gender <Req />
+                    </label>
+                    <FormDropdown
+                      className={inputCls}
+                      options={["Male", "Female", "Other"]}
+                      value={adminData.adminGender}
+                      onValueChange={(v) => setAdminData((p) => ({ ...p, adminGender: v }))}
+                      placeholder="Select gender"
+                      disabled={submitting}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelCls}>
+                      Date of Birth <Req />
+                    </label>
+                    <input
+                      type="date"
+                      name="adminDateOfBirth"
+                      max={new Date().toISOString().split("T")[0]}
+                      className={inputCls + " text-gray-500"}
+                      value={adminData.adminDateOfBirth}
+                      onChange={handleChange}
+                      disabled={submitting}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Age</label>
+                    <input
+                      type="text"
+                      placeholder="Auto-calculated"
+                      className={inputCls + " bg-gray-50 text-gray-500"}
+                      value={
+                        adminData.adminDateOfBirth
+                          ? Math.floor(
+                              (Date.now() - new Date(adminData.adminDateOfBirth).getTime()) /
+                                31557600000,
+                            ).toString()
+                          : ""
+                      }
+                      disabled
+                    />
+                  </div>
+
+                  <div>
+                    <label className={labelCls}>
                       Blood Group <Req />
                     </label>
                     <FormDropdown
@@ -1274,6 +1382,23 @@ export default function AddBranch() {
                       value={adminData.adminBloodGroup}
                       onValueChange={(v) => setAdminData((p) => ({ ...p, adminBloodGroup: v }))}
                       placeholder="Select blood group"
+                      disabled={submitting}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelCls}>
+                      Experience (years) <Req />
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      name="adminExperience"
+                      placeholder="Enter experience"
+                      maxLength={10}
+                      className={inputCls}
+                      value={adminData.adminExperience}
+                      onChange={handleChange}
                       disabled={submitting}
                     />
                   </div>
@@ -1370,7 +1495,6 @@ export default function AddBranch() {
                       value={adminData.adminMobile}
                       onChange={(value) => handleChange({ target: { name: "adminMobile", value } } as any)}
                       placeholder="Enter Mobile Number"
-                      required
                       disabled={submitting}
                       defaultCountry="in"
                     />
@@ -1388,7 +1512,7 @@ export default function AddBranch() {
                     />
                   </div>
 
-                  <div className="md:col-span-3">
+                  <div className="md:col-span-1">
                     <label className={labelCls}>
                       Department <Req />
                     </label>
@@ -1425,7 +1549,43 @@ export default function AddBranch() {
                   <h6 className="text-[11.5px] font-bold text-gray-500 uppercase tracking-wide my-3">
                     Address and location
                   </h6>
+
+                  {/* Current address */}
+                  <Section
+                    title="Current Address"
+                    sub="Employee's current residential location."
+                  >
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-x-5 gap-y-[18px]">
+                    <div className="md:col-span-1">
+                      <label className={labelCls}>
+                        Address <Req />
+                      </label>
+                      <input
+                        type="text"
+                        name="adminCurrentAddress"
+                        placeholder="Enter current address"
+                        maxLength={255}
+                        className={inputCls}
+                        value={adminData.adminCurrentAddress}
+                        onChange={handleChange}
+                        disabled={submitting}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>
+                        Area <Req />
+                      </label>
+                      <input
+                        type="text"
+                        name="adminArea"
+                        placeholder="Enter area"
+                        maxLength={50}
+                        className={inputCls}
+                        value={adminData.adminArea}
+                        onChange={handleChange}
+                        disabled={submitting}
+                      />
+                    </div>
                     <div>
                       <label className={labelCls}>
                         State <Req />
@@ -1456,22 +1616,6 @@ export default function AddBranch() {
                     </div>
                     <div>
                       <label className={labelCls}>
-                        Area <Req />
-                      </label>
-                      <input
-                        type="text"
-                        name="adminArea"
-                        placeholder="Enter area"
-                        maxLength={50}
-                        className={inputCls}
-                        value={adminData.adminArea}
-                        onChange={handleChange}
-                        disabled={submitting}
-                      />
-                    </div>
-
-                    <div>
-                      <label className={labelCls}>
                         Pincode <Req />
                       </label>
                       <input
@@ -1487,24 +1631,15 @@ export default function AddBranch() {
                         disabled={submitting}
                       />
                     </div>
-
-                    <div className="md:col-span-3">
-                      <label className={labelCls}>
-                        Current Address <Req />
-                      </label>
-                      <input
-                        type="text"
-                        name="adminCurrentAddress"
-                        placeholder="Enter current address"
-                        maxLength={255}
-                        className={inputCls}
-                        value={adminData.adminCurrentAddress}
-                        onChange={handleChange}
-                        disabled={submitting}
-                      />
-                    </div>
-
-                    <div className="md:col-span-3 flex items-center gap-2">
+                  </div>
+                  </Section>
+                  {/* Permanent address */}
+                  <Section
+                    title="Permanent Address"
+                    sub="Permanent residential address of the employee."
+                  >
+                  <div className="mt-4 border-t border-gray-200 pt-4">
+                    <div className="flex items-center gap-2 mb-3">
                       <input
                         type="checkbox"
                         id="adminSameAsCurrent"
@@ -1520,23 +1655,96 @@ export default function AddBranch() {
                         Same as current address
                       </label>
                     </div>
-
-                    <div className="md:col-span-3">
-                      <label className={labelCls}>
-                        Permanent Address <Req />
-                      </label>
-                      <input
-                        type="text"
-                        name="adminPermanentAddress"
-                        placeholder="Enter permanent address"
-                        maxLength={255}
-                        className={inputCls}
-                        value={adminData.adminPermanentAddress}
-                        onChange={handleChange}
-                        disabled={submitting || sameAsCurrent}
-                      />
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-x-5 gap-y-[18px]">
+                      <div className="md:col-span-1">
+                        <label className={labelCls}>
+                          Address <Req />
+                        </label>
+                        <input
+                          type="text"
+                          name="adminPermanentAddress"
+                          placeholder="Enter Building no and street name"
+                          maxLength={255}
+                          className={inputCls}
+                          value={adminData.adminPermanentAddress}
+                          onChange={handleChange}
+                          disabled={submitting || sameAsCurrent}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelCls}>
+                          Area <Req />
+                        </label>
+                        <input
+                          type="text"
+                          name="adminPermanentArea"
+                          placeholder="Enter area"
+                          maxLength={50}
+                          className={inputCls}
+                          value={adminData.adminPermanentArea}
+                          onChange={handleChange}
+                          disabled={submitting || sameAsCurrent}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelCls}>
+                          State <Req />
+                        </label>
+                        <FormDropdown
+                          className={inputCls}
+                          options={indianStates.map((s) => s.name)}
+                          value={adminData.adminPermanentState}
+                          onValueChange={(v) =>
+                            setAdminData((p) => ({
+                              ...p,
+                              adminPermanentState: v,
+                              adminPermanentDistrict: "",
+                            }))
+                          }
+                          placeholder="Select state"
+                          disabled={submitting || sameAsCurrent}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelCls}>
+                          District <Req />
+                        </label>
+                        <FormDropdown
+                          className={inputCls}
+                          options={permanentDistrictOptions}
+                          value={adminData.adminPermanentDistrict}
+                          onValueChange={(v) =>
+                            setAdminData((p) => ({ ...p, adminPermanentDistrict: v }))
+                          }
+                          placeholder={
+                            adminData.adminPermanentState ? "Select district" : "Select state first"
+                          }
+                          disabled={
+                            submitting || sameAsCurrent || !adminData.adminPermanentState
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className={labelCls}>
+                          Pincode <Req />
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          name="adminPermanentPincode"
+                          placeholder="Enter pincode"
+                          maxLength={10}
+                          className={inputCls}
+                          value={adminData.adminPermanentPincode}
+                          onChange={handleChange}
+                          disabled={submitting || sameAsCurrent}
+                        />
+                      </div>
                     </div>
                   </div>
+                  </Section>
                 </div>
 
                 {/* Emergency contact */}
@@ -1678,6 +1886,7 @@ export default function AddBranch() {
           </div>
         </form>
       </div>
+      
 
       <ConfirmationDialog
         open={showSubmitConfirm}
@@ -1723,6 +1932,6 @@ export default function AddBranch() {
         }}
         onCancel={() => setShowLeaveConfirm(false)}
       />
-    </div>
+       </div>
   );
 }

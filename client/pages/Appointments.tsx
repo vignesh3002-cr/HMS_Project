@@ -8,15 +8,14 @@ import {
   ChevronRight,
   ChevronDown,
   Check,
-  MoreVertical,
   Loader2,
+  MoreVertical,
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
-import { FilterPopover, useFilterPanel } from "@/components/Filter";
-import type { FilterField } from "@/components/Filter/types";
+import { FilterPopover, useFilterPanel, useAppointmentFilters } from "@/components/Filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { useToast } from "@/hooks/use-toast";
@@ -24,10 +23,12 @@ import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { useBranchFilter } from "@/context/BranchFilterContext";
+import { usePermission } from "@/context/PermissionContext";
 
 import DayView from "./Day view";
 import WeekView from "./Week view";
 import ExportReport from "@/components/ui/ExportReport";
+import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
 
 
 interface Appointment {
@@ -50,15 +51,21 @@ interface Appointment {
 
 
 
+// Mirrors APPOINTMENT_STATUS in appointment.constants.ts exactly -- keep
+// these keys in sync with the backend enum (previously had "BOOKED" where
+// the backend actually uses "SCHEDULED", and a "CONFIRMED" status that
+// doesn't exist there, so every newly-booked appointment fell through to
+// the raw-value fallback below instead of getting a real label).
 const STATUS_LABELS: Record<string, string> = {
-  BOOKED: "Scheduled",
-  CONFIRMED: "Conformed",
+  SCHEDULED: "Scheduled",
   CHECKED_IN: "Checked In",
   IN_CONSULTATION: "In Consultation",
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
   NO_SHOW: "No Show",
   RESCHEDULED: "Rescheduled",
+  RESCHEDULE_REQUIRED: "Reschedule Required",
+  TRANSFER_REVIEW_REQUIRED: "Transfer Review Required",
 };
 
 const APPOINTMENT_AVATAR_COLORS = [
@@ -144,6 +151,7 @@ function ActionMenu({
 }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const { can } = usePermission();
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -154,6 +162,8 @@ function ActionMenu({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  if (!can("appointment.read") && !can("appointment.update") && !can("appointment.cancel")) return null;
 
   return (
     <div className="relative inline-block text-left" ref={wrapperRef}>
@@ -170,27 +180,33 @@ function ActionMenu({
           open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
         }`}
       >
-        <button
-          type="button"
-          onClick={() => { setOpen(false); onView(); }}
-          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-green-400 hover:bg-[#F2F4F6]"
-        >
-          View Appointment
-        </button>
-        <button
-          type="button"
-          onClick={() => { setOpen(false); onEdit(); }}
-          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-indigo-600 hover:bg-[#F2F4F6]"
-        >
-          Edit Appointment
-        </button>
-        <button
-          type="button"
-          onClick={() => { setOpen(false); onCancel(); }}
-          className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-red-600 hover:bg-red-50"
-        >
-          Cancel Appointment
-        </button>
+        {can("appointment.read") && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onView(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-green-400 hover:bg-[#F2F4F6]"
+          >
+            View Appointment
+          </button>
+        )}
+        {can("appointment.update") && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onEdit(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-indigo-600 hover:bg-[#F2F4F6]"
+          >
+            Edit Appointment
+          </button>
+        )}
+        {can("appointment.cancel") && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onCancel(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-red-600 hover:bg-red-50"
+          >
+            Cancel Appointment
+          </button>
+        )}
       </div>
     </div>
   );
@@ -199,6 +215,7 @@ function ActionMenu({
 const AppointmentSchedule: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { can } = usePermission();
   const { selectedBranchId, isAllBranches } = useBranchFilter();
 
   
@@ -312,32 +329,7 @@ const AppointmentSchedule: React.FC = () => {
     handleClear: handleClearFilter,
   } = useFilterPanel();
 
-  const branchOptions = useMemo(
-    () =>
-      Array.from(new Set(appointments.map((item) => item.branch))).map((value) => ({
-        label: value,
-        value,
-      })),
-    [appointments],
-  );
-
-  const statusOptions = useMemo(
-    () =>
-      Array.from(new Set(appointments.map((item) => item.status))).map((value) => ({
-        label: value,
-        value,
-      })),
-    [appointments],
-  );
-
-  const appointmentFilterFields: FilterField[] = [
-    { id: "patient", label: "Patient Name", type: "text", placeholder: "Search by name" },
-    { id: "patientId", label: "Patient ID", type: "text", placeholder: "Enter ID" },
-    { id: "date", label: "Appointment Date", type: "text", placeholder: "Enter date" },
-    { id: "branch", label: "Branch", type: "multiselect", options: branchOptions },
-    { id: "doctor", label: "Doctor Name", type: "text", placeholder: "Search by doctor" },
-    { id: "status", label: "Status", type: "multiselect", options: statusOptions },
-  ];
+  const { appointmentFilterFields } = useAppointmentFilters({ appointmentRows: appointments });
 
   // Search & filter
   const searchableFields: (keyof Appointment)[] = [
@@ -413,6 +405,23 @@ const AppointmentSchedule: React.FC = () => {
     return <WeekView />;
   }
 
+  // ---- EXPORT ----
+  const handleExport = async (exportFormat: string) => {
+    if (exportFormat !== "csv") return;
+    try {
+      await downloadExportCsv("appointments", {
+        branchId: isAllBranches ? undefined : selectedBranchId,
+      });
+      toast({ title: "Export complete", description: "The CSV file has been downloaded." });
+    } catch (err: any) {
+      toast({
+        title: "Export failed",
+        description: exportErrorMessage(err),
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
       <div className="flex flex-col flex-1 min-w-0">
@@ -435,21 +444,17 @@ const AppointmentSchedule: React.FC = () => {
 
 
             <div className="flex items-center gap-3">
-              <ExportReport />
+              {can("report.export") && <ExportReport onExport={handleExport} />}
 
-
-
-<button
-                onClick={() => navigate("/appointments/add")}
-                className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
-              >
-
-                <Plus className="w-4 h-4" />
-                Add Appointment
-
-              </button>
-
-
+              {can("appointment.create") && (
+                <button
+                  onClick={() => navigate("/appointments/add")}
+                  className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Appointment
+                </button>
+              )}
             </div>
 
 
