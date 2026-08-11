@@ -8,6 +8,8 @@ import CalendarPicker from "@/components/hms/Calender";
 import ScheduleSlotModal, { type ScheduleSlotModalHandle } from "@/components/hms/ScheduleSlotModal";
 import { employeeApi, type EmployeeDetailResponse, type DoctorScheduleRecord } from "@/api/employee.api";
 import { appointmentApi, type AvailableSlotsResult } from "@/api/appointment.api";
+import { doctorLeaveApi } from "@/api/doctorLeave.api";
+import { getUser } from "@/utils/token";
 
 function formatDoctorFullName(e: EmployeeDetailResponse["employee"] | null): string {
   if (!e) return "Doctor";
@@ -236,23 +238,70 @@ export default function DoctorProfile() {
     alert(message);
   };
 
-  const submitLeave = (e) => {
-    e.preventDefault();
+const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
 
-    const form = new FormData(e.target);
-    const reason = form.get("reason");
+  if (!id) {
+    alert("Doctor ID is missing.");
+    return;
+  }
 
-    if (!fromDate || !toDate || !(reason as string).trim()) {
-      alert("Please fill in all leave details.");
+  const form = new FormData(e.currentTarget);
+  const reason = String(form.get("reason") || "").trim();
+
+  if (!fromDate || !toDate || !reason) {
+    alert("Please fill in all leave details.");
+    return;
+  }
+
+  if (toDate < fromDate) {
+    alert("The To date cannot be before the From date.");
+    return;
+  }
+
+  try {
+    const loggedInUser = getUser();
+
+    if (!loggedInUser?.user_id) {
+      alert("Logged-in user information is missing. Please log in again.");
       return;
     }
 
-    alert("Leave submitted successfully!");
-    e.target.reset();
+    const response = await doctorLeaveApi.apply(id, {
+      leave_start_date: format(fromDate, "yyyy-MM-dd"),
+      leave_end_date: format(toDate, "yyyy-MM-dd"),
+      leave_reason: reason,
+      requested_by: loggedInUser.user_id,
+    });
+
+    console.log("Leave application response:", response.data);
+
+    if (response.data?.success === false) {
+      throw new Error(response.data.message || "Failed to apply leave.");
+    }
+
+    const leaveId = response.data?.leave?.leave_id;
+
+    alert(
+      leaveId
+        ? `Leave applied successfully!\nLeave ID: ${leaveId}`
+        : "Leave applied successfully!"
+    );
+
+    e.currentTarget.reset();
     setFromDate(null);
     setToDate(null);
-  };
+  } catch (error: any) {
+    console.error("Leave application failed:", error);
+    console.error("Backend response:", error?.response?.data);
 
+    alert(
+      error?.response?.data?.message ||
+        error?.message ||
+        "Failed to apply for leave."
+    );
+  }
+};
   const clearSchedule = () => {
     setClearScheduleConfirm(true);
   };
