@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2 } from "lucide-react";
+import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2, MoreVertical } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
@@ -8,6 +8,7 @@ import CalendarPicker from "@/components/hms/Calender";
 import { FilterPopover, useFilterPanel, useDashboardFilters } from "@/components/Filter";
 import { applySearchAndFilter } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { patientApi } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
@@ -230,6 +231,82 @@ function CountUp({ target, duration = 1800 }: { target: number; duration?: numbe
   }, [target, duration]);
 
   return <>{formatStatValue(count)}</>;
+}
+
+function AppointmentActionMenu({
+  status,
+  onView,
+  onEdit,
+  onCancel,
+}: {
+  status: string;
+  onView: () => void;
+  onEdit: () => void;
+  onCancel: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const { can } = usePermission();
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  if (!can("appointment.read") && !can("appointment.update") && !can("appointment.cancel")) return null;
+
+  const isCancelled = status.toLowerCase() === "cancelled";
+
+  return (
+    <div className="relative inline-block text-left" ref={wrapperRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center justify-center p-1.5 border border-[#E5E7EB] rounded-md hover:border-[#00488D] transition-colors"
+      >
+        <MoreVertical className="w-4 h-4 text-[#6B7280]" />
+      </button>
+
+      <div
+        className={`absolute right-0 top-full mt-1 w-44 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-40 transition-all duration-150 ${
+          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
+        }`}
+      >
+        {can("appointment.read") && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onView(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
+          >
+            View Appointment
+          </button>
+        )}
+        {can("appointment.update") && !isCancelled && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onEdit(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
+          >
+            Edit Appointment
+          </button>
+        )}
+        {can("appointment.cancel") && !isCancelled && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onCancel(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-red-600 hover:bg-red-50"
+          >
+            Cancel Appointment
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function Dashboard() {
@@ -672,6 +749,36 @@ export default function Dashboard() {
     navigate(`/doctor/day-view/${id}`);
   };
 
+  const [cancelTarget, setCancelTarget] = useState<Record<string, unknown> | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+
+  const handleCancelAppointment = (target: Record<string, unknown>) => {
+    setCancelReason("");
+    setCancelTarget(target);
+  };
+
+  const handleConfirmCancelAppointment = () => {
+    if (!cancelTarget) return;
+
+    if (!cancelReason.trim()) {
+      toast({ title: "A cancellation reason is required", variant: "destructive" });
+      return;
+    }
+
+    const targetId = cancelTarget.id;
+    setRealAppointments((prev) =>
+      (prev ?? []).map((appt) =>
+        appt.id === targetId ? { ...appt, status: "Cancelled" } : appt,
+      ),
+    );
+    toast({
+      title: "Appointment cancelled",
+      description: `Appointment ${targetId} has been cancelled.`,
+    });
+    setCancelTarget(null);
+    setCancelReason("");
+  };
+
   // Only the very first load (waiting on permissions) shows the full-page
   // skeleton. Branch/date changes and manual refreshes just flip
   // isEmployeesLoading/isAppointmentsLoading — those are handled inline
@@ -891,22 +998,12 @@ export default function Dashboard() {
                     <StatusBadge status={String(r.status)} />
                   )},
                   { key: "actions", label: "Action", sortable: false, render: (r: any) => (
-                    <div className="flex items-center gap-1">
-                      <button title="View" onClick={() => navigate(`/appointments/view/${r.id}`)} className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] group-hover:stroke-[#505F76]">
-                          <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-                          <circle cx="12" cy="12" r="3" />
-                        </svg>
-                      </button>
-                      {can("appointment.update") && (
-                      <button title="Edit" onClick={() => handleEdit(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] group-hover:stroke-[#5E87CF]">
-                          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                          <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
-                        </svg>
-                      </button>
-                      )}
-                    </div>
+                    <AppointmentActionMenu
+                      status={r.status}
+                      onView={() => navigate(`/appointments/view/${r.id}`)}
+                      onEdit={() => handleEdit(r.id)}
+                      onCancel={() => handleCancelAppointment(r)}
+                    />
                   )},
                 ] : [
                   { key: "name", label: "Name", render: (r: any) => (
@@ -1032,6 +1129,29 @@ export default function Dashboard() {
           </div>
         </main>
       </div>
+
+      <ConfirmationDialog
+        open={!!cancelTarget}
+        type="danger"
+        title="Cancel Appointment?"
+        description={
+          cancelTarget
+            ? `Appointment ${cancelTarget.id} will be cancelled. Please enter a reason for cancellation.`
+            : ""
+        }
+        confirmText="Cancel Appointment"
+        cancelText="Keep Appointment"
+        onConfirm={handleConfirmCancelAppointment}
+        onCancel={() => setCancelTarget(null)}
+      >
+        <textarea
+          value={cancelReason}
+          onChange={(e) => setCancelReason(e.target.value)}
+          placeholder="Reason for cancellation (required)"
+          rows={3}
+          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      </ConfirmationDialog>
     </div>
   );
 };
