@@ -541,7 +541,7 @@ export default function PatientRegistrationForm({
       setShowLeaveConfirm(true);
       return;
     }
-    navigate("/dashboard");
+    navigate(-1);
   };
 
   if (loading && editMode) {
@@ -1333,7 +1333,7 @@ export default function PatientRegistrationForm({
         cancelText="Stay"
         onConfirm={() => {
           setShowLeaveConfirm(false);
-          navigate("/dashboard");
+          navigate(-1);
         }}
         onCancel={() => setShowLeaveConfirm(false)}
       />
