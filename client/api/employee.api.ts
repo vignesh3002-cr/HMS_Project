@@ -115,7 +115,7 @@ export interface EmployeeDetailResponse {
     parmanent_address?: string | null;
   };
   user: { role_type: string; user_status: number } | null;
-  branches: { branch_id: string; branch_name: string }[];
+  branches: { branch_id: string; branch_name: string; status?: number }[];
   doctorProfile?: {
     specialization: string | null;
     qualification: string | null;
