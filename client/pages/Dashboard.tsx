@@ -635,11 +635,28 @@ export default function Dashboard() {
   useEffect(() => {
     const container = tabsContainerRef.current;
     if (!container) return;
-    const activeButton = container.querySelector<HTMLButtonElement>(`[data-tab="${activeTab}"]`);
-    if (activeButton) {
-      setUnderline({ left: activeButton.offsetLeft, width: activeButton.offsetWidth });
+
+    const measure = () => {
+      const activeButton = container.querySelector<HTMLButtonElement>(`[data-tab="${activeTab}"]`);
+      if (activeButton) {
+        setUnderline({ left: activeButton.offsetLeft, width: activeButton.offsetWidth });
+      }
+    };
+
+    measure();
+
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(measure);
     }
-  }, [activeTab]);
+
+    const ro = new ResizeObserver(measure);
+    ro.observe(container);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [activeTab, availableTabs]);
 
   const handleSort = (field: string) => {
     if (sortField[activeTab] === field) {
@@ -877,15 +894,15 @@ export default function Dashboard() {
                       setActiveTab(tab.key);
                       setCurrentPage(1);
                     }}
-                    className="relative pb-1 text-xs font-semibold tracking-[1.2px] capitalize transition-colors duration-200"
+                    className="relative pb-2 text-xs font-semibold tracking-[1.2px] capitalize transition-colors duration-200"
                     style={{ color: activeTab === tab.key ? "#00488D" : "#424752" }}
                   >
                     {tab.label}
                   </button>
                 ))}
                 <div
-                  className="absolute bottom-0 h-0.5 bg-[#00488D] transition-all duration-300 ease-out"
-                  style={{ left: underline.left, width: underline.width }}
+                    className="absolute bottom-0 h-[2px] bg-[#00488D] transition-all duration-300 ease-out max-[1024px]:hidden"
+                    style={{ left: underline.left, width: underline.width }}
                 />
               </div>
               <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -974,6 +991,7 @@ export default function Dashboard() {
               </div>
             ) : (
               <HmsTable
+                scrollable={false}
                 columns={activeTab === "appointments" ? [
                   { key: "patientName", label: "Patient Name", render: (r: any) => (
                     <div className="flex items-center gap-2">
