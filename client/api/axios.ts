@@ -13,7 +13,7 @@ export function setActiveBranchId(id: string | null) {
 }
 
 export function getActiveBranchId(): string | null {
-  if (activeBranchId) return activeBranchId;
+  if (activeBranchId) return activeBranchId; 
   const stored = localStorage.getItem("hms_selected_branch_id");
   if (stored && stored !== "__ALL_BRANCHES__") return stored;
   return null;
