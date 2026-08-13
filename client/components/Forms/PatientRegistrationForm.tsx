@@ -177,12 +177,6 @@ export default function PatientRegistrationForm({
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [originalFormData, setOriginalFormData] = useState<FormData | null>(null);
 
-  const toDateInputValue = (val: string | null | undefined): string => {
-    if (!val) return "";
-    const d = new Date(val);
-    if (isNaN(d.getTime())) return val;
-    return d.toISOString().split("T")[0];
-  };
 
   const addInsuranceFiles = (files: FileList | File[]) => {
     const arr = Array.from(files).filter(
@@ -232,7 +226,7 @@ export default function PatientRegistrationForm({
             patient_middle_name: patient.patient_middle_name || "",
             patient_last_name: patient.patient_last_name || "",
             patient_gender: patient.patient_gender || "",
-            patient_dob: toDateInputValue(patient.patient_dob),
+            patient_dob: (patient as any).patient_dob || "",
             patient_blood_group: patient.patient_blood_group || "",
             patient_type: isKnownType || !patient.patient_type ? (patient.patient_type || "") : OTHER_PATIENT_TYPE_VALUE,
             patient_type_other: isKnownType || !patient.patient_type ? "" : (patient.patient_type || ""),
@@ -547,7 +541,7 @@ export default function PatientRegistrationForm({
       setShowLeaveConfirm(true);
       return;
     }
-    navigate("/dashboard");
+    navigate(-1);
   };
 
   if (loading && editMode) {
@@ -1121,7 +1115,7 @@ export default function PatientRegistrationForm({
                       <label className={labelCls}>Validity date <Req /></label>
                       <input
                         type="date"
-                        max={new Date().toISOString().split("T")[0]}
+                        min={new Date().toISOString().split("T")[0]}
                         className={inputCls + " text-gray-500"}
                         value={formData.validity_date}
                         onChange={(e) => setField("validity_date", e.target.value)}
@@ -1339,7 +1333,7 @@ export default function PatientRegistrationForm({
         cancelText="Stay"
         onConfirm={() => {
           setShowLeaveConfirm(false);
-          navigate("/dashboard");
+          navigate(-1);
         }}
         onCancel={() => setShowLeaveConfirm(false)}
       />
