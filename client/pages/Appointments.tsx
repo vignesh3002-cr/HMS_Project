@@ -18,6 +18,7 @@ import CalendarPicker from "@/components/hms/Calender";
 import { FilterPopover, useFilterPanel, useAppointmentFilters } from "@/components/Filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { getEffectiveAppointmentStatus } from "@/lib/appointmentStatus";
 import { useToast } from "@/hooks/use-toast";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
@@ -135,7 +136,7 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
     date: formatAppointmentDate(record.appointment_date),
     time: formatAppointmentTime(record.appointment_time),
     sortDate,
-    status: STATUS_LABELS[record.status ?? ""] ?? (record.status || "Unknown"),
+    status: STATUS_LABELS[getEffectiveAppointmentStatus(record)] ?? (record.status || "Unknown"),
   };
 }
 

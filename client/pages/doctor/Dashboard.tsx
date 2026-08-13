@@ -1,4 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
+import { getActiveBranchId } from "../../api/axios";
+import {
+  doctorDashboardApi,
+  type DashboardAppointment,
+  type DashboardDoctorResponse,
+  type DashboardSchedule,
+} from "../../api/doctorDashboard.api";
 
 type AppointmentStatus = "Check Out" | "Check In" | "Cancelled";
 
@@ -9,65 +16,6 @@ interface Appointment {
   phone: string;
   status: AppointmentStatus;
 }
-
-interface AvailabilityItem {
-  day: string;
-  time?: string;
-  leave?: boolean;
-}
-
-const appointments: Appointment[] = [
-  {
-    patient: "Alberto Ripley",
-    image:
-      "https://www.figma.com/api/mcp/asset/0174143d-d6a1-4d40-96d6-22a8b499a788.png",
-    dateTime: "27 May 2026 - 09:30 AM",
-    phone: "+1 56556 54565",
-    status: "Check Out",
-  },
-  {
-    patient: "Robert",
-    image:
-      "https://www.figma.com/api/mcp/asset/0174143d-d6a1-4d40-96d6-22a8b499a788.png",
-    dateTime: "27 May 2026 - 09:35 AM",
-    phone: "+1 565056 54565",
-    status: "Check Out",
-  },
-  {
-    patient: "Susan Babin",
-    image:
-      "https://www.figma.com/api/mcp/asset/ab38b57a-fa2d-4bec-9c05-76cd7828f028.png",
-    dateTime: "27 May 2026 - 10:15 AM",
-    phone: "+1 65658 95654",
-    status: "Check In",
-  },
-  {
-    patient: "Carol Lam",
-    image:
-      "https://www.figma.com/api/mcp/asset/045b41b8-d0ce-4adb-be51-0501943e83f5.png",
-    dateTime: "27 May 2026 - 12:40 PM",
-    phone: "+1 65658 56578",
-    status: "Cancelled",
-  },
-  {
-    patient: "Sharon",
-    image:
-      "https://www.figma.com/api/mcp/asset/045b41b8-d0ce-4adb-be51-0501943e83f5.png",
-    dateTime: "27 May 2026 - 02:40 PM",
-    phone: "+1 65758 56578",
-    status: "Cancelled",
-  },
-];
-
-const availability: AvailabilityItem[] = [
-  { day: "Mon", time: "3:30 PM - 4:30 PM" },
-  { day: "Tue", time: "11:00 AM - 12:30 PM" },
-  { day: "Wed", time: "08:00 PM - 10:30 PM" },
-  { day: "Thu", time: "01:00 PM - 02:30 PM" },
-  { day: "Fri", time: "01:00 PM - 03:30 PM" },
-  { day: "Sat", time: "09:00 PM - 10:30 PM" },
-  { day: "Sun", leave: true },
-];
 
 const chartData = [
   { day: "Mon", completed: 153.59, rescheduled: 51.19 },
@@ -80,12 +28,7 @@ const chartData = [
 
 const periods = ["Last 7 Days", "Last 30 Days", "This Month", "This Year"];
 
-const hospitals = [
-  "Central Hospital (Egmore)",
-  "City Hospital",
-  "Apollo Hospital",
-  "Government Hospital",
-];
+const fallbackHospital = "Central Hospital (Egmore)";
 
 function Icon({
   name,
@@ -201,16 +144,191 @@ function statusClasses(status: AppointmentStatus) {
   return "border border-red-200 bg-red-100 text-red-700";
 }
 
+function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleDateString("en-US", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatTime(value: string) {
+  if (!value) return "";
+
+  // Backend schedule/appointment times can arrive as:
+  // 11:00, 11:00:00, or 1970-01-01T11:00:00.000Z.
+  // For schedule values we must not let the browser convert the
+  // UTC placeholder date into the user's local timezone.
+  const timeMatch = value.match(/(?:T|\s)?(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?/);
+
+  if (timeMatch) {
+    let hour = Number(timeMatch[1]);
+    const minute = timeMatch[2];
+    const suffix = hour >= 12 ? "PM" : "AM";
+
+    hour = hour % 12 || 12;
+    return `${String(hour).padStart(2, "0")}:${minute} ${suffix}`;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatScheduleRange(start?: string | null, end?: string | null) {
+  if (!start || !end) return "";
+
+  return `${formatTime(start)} - ${formatTime(end)}`;
+}
+
+function mapAppointmentStatus(status: string): AppointmentStatus {
+  switch (status) {
+    case "CANCELLED":
+      return "Cancelled";
+    case "COMPLETED":
+      return "Check Out";
+    case "CHECKED_IN":
+    case "IN_CONSULTATION":
+      return "Check In";
+    default:
+      return "Check In";
+  }
+}
+
 export default function DoctorDashboard() {
   const [periodOpen, setPeriodOpen] = useState(false);
   const [hospitalOpen, setHospitalOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [period, setPeriod] = useState("Last 7 Days");
-  const [hospital, setHospital] = useState("Central Hospital (Egmore)");
+  const [hospital, setHospital] = useState(fallbackHospital);
+  const [doctor, setDoctor] = useState<DashboardDoctorResponse["data"] | null>(null);
+  const [dashboardAppointments, setDashboardAppointments] = useState<Appointment[]>([]);
+  const [dashboardSchedules, setDashboardSchedules] = useState<DashboardSchedule[]>([]);
+  const [totalAppointments, setTotalAppointments] = useState(0);
+  const [cancelledAppointments, setCancelledAppointments] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [dashboardError, setDashboardError] = useState("");
 
   const periodRef = useRef<HTMLDivElement>(null);
   const hospitalRef = useRef<HTMLDivElement>(null);
   const notificationRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadDashboard = async (showLoader = false) => {
+      try {
+        if (showLoader) setLoading(true);
+        setDashboardError("");
+
+        const authResponse = await doctorDashboardApi.getCurrentUser();
+        const employeeId = authResponse.data.user?.employee_id;
+
+        if (!employeeId) {
+          throw new Error("No employee ID is linked to the logged-in user.");
+        }
+
+        const today = new Date().toISOString().slice(0, 10);
+        const employeeResponse = await doctorDashboardApi.getDoctor(employeeId);
+        const employeeData = employeeResponse.data.data;
+
+        if (cancelled) return;
+
+        setDoctor(employeeData);
+        setDashboardSchedules(employeeData.doctorSchedules ?? []);
+
+        const firstActiveBranch = employeeData.branches?.find(
+          (branch) => branch.status === undefined || branch.status === 1
+        );
+
+        // Prefer the branch selected by the existing HMS branch selector.
+        // If none is selected, fall back to the doctor's active branch.
+        const selectedBranchId = getActiveBranchId();
+        const branchId = selectedBranchId || firstActiveBranch?.branch_id;
+
+        if (firstActiveBranch?.branch_name) {
+          setHospital(firstActiveBranch.branch_name);
+        }
+
+        const [appointmentsResponse, cancelledResponse] = await Promise.all([
+          doctorDashboardApi.getAppointments({
+            employeeId,
+            branchId,
+            date: today,
+            page: 1,
+            limit: 100,
+          }),
+          doctorDashboardApi.getAppointments({
+            employeeId,
+            branchId,
+            date: today,
+            status: "CANCELLED",
+            page: 1,
+            limit: 1,
+          }),
+        ]);
+
+        if (cancelled) return;
+
+        setTotalAppointments(appointmentsResponse.data.data.total);
+        setCancelledAppointments(cancelledResponse.data.data.total);
+
+        const mappedAppointments = appointmentsResponse.data.data.appointments.map(
+          (item: DashboardAppointment): Appointment => ({
+            patient: [
+              item.patient_bio_data?.patient_first_name,
+              item.patient_bio_data?.patient_middle_name,
+              item.patient_bio_data?.patient_last_name,
+            ]
+              .filter(Boolean)
+              .join(" ") || "Unknown Patient",
+            image:
+              "https://www.figma.com/api/mcp/asset/0174143d-d6a1-4d40-96d6-22a8b499a788.png",
+            dateTime: `${formatDate(item.appointment_date)} - ${formatTime(
+              item.appointment_time
+            )}`,
+            phone: item.patient_bio_data?.patient_primary_mobile || "-",
+            status: mapAppointmentStatus(item.status),
+          })
+        );
+
+        setDashboardAppointments(mappedAppointments);
+      } catch (error: any) {
+        console.error("Failed to load doctor dashboard:", error);
+        if (!cancelled) {
+          setDashboardError(
+            error?.response?.data?.message ||
+              error?.message ||
+              "Failed to load dashboard data."
+          );
+        }
+      } finally {
+        if (!cancelled && showLoader) setLoading(false);
+      }
+    };
+
+    // Initial load.
+    void loadDashboard(true);
+
+    // Keep today's appointments/counts synchronized with the backend.
+    // The existing appointment API is REST-based, so polling is used instead
+    // of pretending the endpoint is WebSocket real-time.
+    const intervalId = window.setInterval(() => {
+      void loadDashboard(false);
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   useEffect(() => {
     const handleClick = (event: MouseEvent) => {
@@ -240,16 +358,42 @@ export default function DoctorDashboard() {
     };
   }, []);
 
-  const displayHospital =
-    hospital === "Central Hospital (Egmore)" ? (
-      <>
-        Central Hospital
-        <br />
-        (Egmore)
-      </>
-    ) : (
-      hospital
+  const displayHospital = hospital || fallbackHospital;
+
+  const todayDate = new Date().toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  const doctorName = doctor?.employee
+    ? `Dr. ${doctor.employee.first_name} ${doctor.employee.last_name}`
+    : "Dr. Jenkins";
+
+  const doctorId = doctor?.employee?.employee_id || "-";
+
+
+  const availability = [
+    "MONDAY",
+    "TUESDAY",
+    "WEDNESDAY",
+    "THURSDAY",
+    "FRIDAY",
+    "SATURDAY",
+    "SUNDAY",
+  ].map((day) => {
+    const schedule = dashboardSchedules.find(
+      (item) => item.day_of_week?.toUpperCase() === day && item.is_active !== false
     );
+
+    return {
+      day: day.slice(0, 3).charAt(0) + day.slice(1, 3).toLowerCase(),
+      time: schedule
+        ? formatScheduleRange(schedule.start_time, schedule.end_time)
+        : undefined,
+      leave: !schedule,
+    };
+  });
 
   return (
     <main className="min-h-screen w-full bg-white font-['Inter',sans-serif] text-[#181c1e]">
@@ -258,21 +402,24 @@ export default function DoctorDashboard() {
         <header className="mb-8 flex items-center justify-between max-[700px]:items-start">
           <div className="flex flex-col gap-2">
             <h1 className="font-['Manrope',sans-serif] text-[28px] font-bold leading-[34px] tracking-[-0.56px] text-[#191c1e] max-[700px]:text-2xl max-[700px]:leading-8">
-              Welcome back, Dr. Jenkins
+              Welcome back, {doctorName}
             </h1>
 
             <div className="flex items-center gap-6 max-[700px]:flex-wrap max-[700px]:gap-2.5">
               <div className="flex items-center gap-1">
                 <span className="font-['Manrope',sans-serif] text-xs font-bold uppercase leading-4 tracking-[0.6px] text-[#434654]">
-                  May 30, 2026
+                  {todayDate}
                 </span>
                 <span className="rounded bg-[#dae2ff] px-2 py-0.5 font-['Manrope',sans-serif] text-sm font-bold leading-5 tracking-[-0.14px] text-[#003d9b]">
-                  DOC-99283
+                  {doctorId}
                 </span>
               </div>
 
               <div className="flex items-center gap-1">
                 <span className="text-[17px] leading-none text-yellow-500">★</span>
+                <span className="text-[17px] leading-none text-yellow-500">
+                  ★
+                </span>
                 <span className="text-xs font-bold text-[#191c1e]">4.9</span>
                 <span className="text-[11px] font-medium text-[#434654]">
                   (128 reviews)
@@ -334,8 +481,9 @@ export default function DoctorDashboard() {
                       <br />
                       Appointments
                     </div>
+
                     <div className="text-2xl font-semibold leading-8 tracking-[-0.24px]">
-                      42
+                      {loading ? "—" : totalAppointments}
                     </div>
                   </div>
 
@@ -353,6 +501,7 @@ export default function DoctorDashboard() {
                       <span className="h-[7px] flex-1 rounded-[1px] bg-[#003d9b]" />
                       <span className="h-[6px] flex-1 rounded-[1px] bg-[#003d9b]" />
                     </div>
+
                     <span className="whitespace-nowrap text-xs font-bold text-[#003d9b]">
                       +12%
                     </span>
@@ -366,6 +515,7 @@ export default function DoctorDashboard() {
                     <div className="text-xs font-medium uppercase leading-4 tracking-[0.6px] text-[#434654]">
                       Total Patients
                     </div>
+
                     <div className="text-2xl font-semibold leading-8 tracking-[-0.24px]">
                       1,284
                     </div>
@@ -388,8 +538,9 @@ export default function DoctorDashboard() {
                     <div className="text-xs font-medium uppercase leading-4 tracking-[0.6px] text-[#434654]">
                       Cancelled
                     </div>
+
                     <div className="text-2xl font-semibold leading-8 tracking-[-0.24px]">
-                      35
+                      {loading ? "—" : cancelledAppointments}
                     </div>
                   </div>
 
@@ -410,6 +561,7 @@ export default function DoctorDashboard() {
                 <h2 className="font-['Manrope',sans-serif] text-lg font-bold leading-6 text-[#191c1e]">
                   Today's Appointments
                 </h2>
+
                 <button
                   type="button"
                   onClick={() => alert("Opening all appointments...")}
@@ -419,18 +571,27 @@ export default function DoctorDashboard() {
                 </button>
               </div>
 
+              {dashboardError && (
+                <div className="px-4 py-2 text-xs text-red-600">
+                  {dashboardError}
+                </div>
+              )}
+
               <table className="w-full table-fixed border-collapse max-[700px]:min-w-[650px]">
                 <thead className="bg-slate-50">
                   <tr>
                     <th className="w-[31%] border-b border-slate-200 px-5 py-3 text-left font-['Manrope',sans-serif] text-xs font-bold leading-4 text-slate-500">
                       Patient
                     </th>
+
                     <th className="w-[30%] border-b border-slate-200 px-5 py-3 text-center font-['Manrope',sans-serif] text-xs font-bold leading-4 text-slate-500">
                       Date &amp; Time
                     </th>
+
                     <th className="w-[22%] border-b border-slate-200 px-5 py-3 text-center font-['Manrope',sans-serif] text-xs font-bold leading-4 text-slate-500">
                       Phone
                     </th>
+
                     <th className="w-[17%] border-b border-slate-200 px-5 py-3 text-center font-['Manrope',sans-serif] text-xs font-bold leading-4 text-slate-500">
                       Status
                     </th>
@@ -438,8 +599,10 @@ export default function DoctorDashboard() {
                 </thead>
 
                 <tbody>
-                  {appointments.map((appointment) => (
-                    <tr key={`${appointment.patient}-${appointment.dateTime}`}>
+                  {dashboardAppointments.map((appointment) => (
+                    <tr
+                      key={`${appointment.patient}-${appointment.dateTime}`}
+                    >
                       <td className="h-[50px] overflow-hidden border-b border-slate-100 px-5 py-2 text-xs text-slate-600">
                         <div className="flex items-center gap-3">
                           <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-slate-100">
@@ -449,6 +612,7 @@ export default function DoctorDashboard() {
                               className="h-full w-full object-cover"
                             />
                           </div>
+
                           <span className="overflow-hidden text-ellipsis whitespace-nowrap font-['Manrope',sans-serif] text-xs font-bold text-slate-800">
                             {appointment.patient}
                           </span>
@@ -456,7 +620,12 @@ export default function DoctorDashboard() {
                       </td>
 
                       <td className="h-[50px] overflow-hidden text-ellipsis whitespace-nowrap border-b border-slate-100 px-5 py-2 text-center font-['Manrope',sans-serif] text-xs text-slate-600">
-                        {appointment.dateTime}
+                        {appointment.dateTime.split(" - ").map((part, index) => (
+                          <React.Fragment key={`${appointment.patient}-${index}`}>
+                            {index > 0 && <br />}
+                            {part}
+                          </React.Fragment>
+                        ))}
                       </td>
 
                       <td className="h-[50px] overflow-hidden text-ellipsis whitespace-nowrap border-b border-slate-100 px-5 py-2 text-center font-['Manrope',sans-serif] text-xs text-slate-600">
@@ -485,6 +654,7 @@ export default function DoctorDashboard() {
                   <h2 className="text-lg font-semibold leading-6 text-[#181c1e]">
                     Appointment Trends
                   </h2>
+
                   <p className="text-xs font-medium leading-4 text-[#434654]">
                     Weekly performance analysis
                   </p>
@@ -493,6 +663,7 @@ export default function DoctorDashboard() {
                 <div className="flex items-center gap-4 max-[700px]:w-full max-[700px]:justify-between">
                   <div className="flex items-center gap-2">
                     <span className="h-3 w-3 rounded-full bg-[#003d9b]" />
+
                     <span className="text-xs font-medium leading-4 text-[#181c1e]">
                       Completed
                     </span>
@@ -500,6 +671,7 @@ export default function DoctorDashboard() {
 
                   <div className="flex items-center gap-2">
                     <span className="h-3 w-3 rounded-full bg-[#c3c6d6]" />
+
                     <span className="text-xs font-medium leading-4 text-[#181c1e]">
                       Rescheduled
                     </span>
@@ -515,6 +687,7 @@ export default function DoctorDashboard() {
                       className="flex h-7 min-w-[116px] items-center justify-between gap-[15px] rounded-md bg-[#ebeef1] px-3 text-xs font-medium text-[#181c1e]"
                     >
                       <span>{period}</span>
+
                       <Icon
                         name="chevron"
                         className="h-4 w-4 text-slate-500"
@@ -553,6 +726,7 @@ export default function DoctorDashboard() {
                         className="w-4 rounded-t-[2px] bg-[#003d9b]"
                         style={{ height: `${item.completed}px` }}
                       />
+
                       <div
                         className="w-4 rounded-t-[2px] bg-[#c3c6d6]"
                         style={{ height: `${item.rescheduled}px` }}
@@ -587,6 +761,7 @@ export default function DoctorDashboard() {
                     className="relative min-h-[50px] min-w-[153px] rounded border border-slate-200 bg-white px-[13px] py-[5px] pr-[33px] text-left text-sm leading-5 text-slate-800"
                   >
                     {displayHospital}
+
                     <Icon
                       name="chevron"
                       className="absolute right-2 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-500"
@@ -595,7 +770,7 @@ export default function DoctorDashboard() {
 
                   {hospitalOpen && (
                     <div className="absolute right-0 top-[55px] z-30 w-[180px] overflow-hidden rounded border border-slate-200 bg-white shadow-[0_5px_15px_rgba(0,0,0,0.12)]">
-                      {hospitals.map((item) => (
+                      {(doctor?.branches?.length ? doctor.branches.map((branch) => branch.branch_name) : [fallbackHospital]).map((item) => (
                         <button
                           type="button"
                           key={item}
@@ -617,20 +792,20 @@ export default function DoctorDashboard() {
                 {availability.map((item) => (
                   <div
                     key={item.day}
-                    className="flex h-12 items-center justify-between border-b border-slate-50 last:border-0"
+                    className="flex min-h-12 items-center justify-between gap-3 border-b border-slate-50 last:border-0"
                   >
-                    <span className="text-base font-semibold leading-6 text-slate-700">
+                    <span className="w-12 shrink-0 text-base font-semibold leading-6 text-slate-700">
                       {item.day}
                     </span>
 
                     {item.leave ? (
-                      <span className="w-[148px] text-sm font-medium leading-5 text-red-500">
+                      <span className="flex-1 text-right text-sm font-medium leading-5 text-red-500">
                         Leave
                       </span>
                     ) : (
-                      <span className="flex items-center gap-2 text-sm leading-5 text-slate-500">
-                        <Icon name="clock" className="h-4 w-4" />
+                      <span className="flex flex-1 items-center justify-end gap-2 whitespace-nowrap text-sm leading-5 text-slate-500">
                         {item.time}
+                        <Icon name="clock" className="h-4 w-4 shrink-0" />
                       </span>
                     )}
                   </div>
@@ -660,6 +835,7 @@ export default function DoctorDashboard() {
                     <span className="text-[13px] font-semibold leading-[18px] tracking-[0.13px] text-[#181c1e]">
                       Sarah J.
                     </span>
+
                     <div className="flex gap-px text-xs text-yellow-500">
                       ★★★★★
                     </div>
@@ -676,6 +852,7 @@ export default function DoctorDashboard() {
                     <span className="text-[13px] font-semibold leading-[18px] tracking-[0.13px] text-[#181c1e]">
                       Michael R.
                     </span>
+
                     <div className="flex gap-px text-xs text-yellow-500">
                       ★★★★☆
                     </div>
