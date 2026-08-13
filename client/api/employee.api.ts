@@ -105,6 +105,7 @@ export interface EmployeeRecord {
   employee_no_experence?: string | number | null;
   gender?: string | null;
   dob?: string | null;
+  deleted_at?: string | null;
 }
 
 export interface EmployeeDetailResponse {
@@ -136,6 +137,8 @@ export interface DoctorScheduleRecord {
   end_time: string | null;
   consultation_minutes: number | null;
   is_active: boolean | null;
+  effective_from?: string | null;
+  effective_to?: string | null;
   branch?: { branch_name: string } | null;
 }
 
@@ -163,6 +166,20 @@ export interface AddScheduleSlotPayload {
   shift_name?: string;
   start_time: string;
   end_time: string;
+  // Day-specific schedules: set effective_from === effective_to to the target
+  // date. Omit (or null) for a repeating weekly template row.
+  effective_from?: string | null;
+  effective_to?: string | null;
+}
+
+export interface UpdateScheduleSlotPayload {
+  branch_id: string;
+  day_of_week: DayOfWeek;
+  shift_name?: string;
+  start_time: string;
+  end_time: string;
+  effective_from?: string | null;
+  effective_to?: string | null;
 }
 
 export interface AddScheduleSlotResponse {
@@ -255,8 +272,14 @@ export const employeeApi = {
   remove: (employeeId: string) =>
     API.delete<{ success: boolean; message: string }>(`/employees/${employeeId}`),
 
+  restore: (employeeId: string) =>
+    API.post<{ success: boolean; message: string }>(`/employees/${employeeId}/restore`),
+
   addScheduleSlot: (employeeId: string, data: AddScheduleSlotPayload) =>
     API.post<AddScheduleSlotResponse>(`/employees/${employeeId}/schedules`, data),
+
+  updateScheduleSlot: (employeeId: string, scheduleId: string | number, data: UpdateScheduleSlotPayload) =>
+    API.put<AddScheduleSlotResponse>(`/employees/${employeeId}/schedules/${scheduleId}`, data),
 
   removeScheduleSlot: (employeeId: string, scheduleId: string | number) =>
     API.delete<{ success: boolean; message: string; data: { schedule_id: string; soft_closed: boolean } }>(

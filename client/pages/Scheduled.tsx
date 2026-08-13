@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { format } from "date-fns";
+import { format, addDays, subDays } from "date-fns";
 import { User, IdCard, Phone, Mail, MapPin, Cake, Droplet, VenusAndMars, Briefcase } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import CalendarPicker from "@/components/hms/Calender";
-import ScheduleSlotModal, { type ScheduleSlotModalHandle } from "@/components/hms/ScheduleSlotModal";
+import ScheduleSlotModal, {
+  type ScheduleSlotModalHandle,
+  type ScheduleSlotAddPayload,
+  type ScheduleSlotEditPayload,
+} from "@/components/hms/ScheduleSlotModal";
 import { employeeApi, type EmployeeDetailResponse, type DoctorScheduleRecord } from "@/api/employee.api";
 import { appointmentApi, type AvailableSlotsResult } from "@/api/appointment.api";
 import { DepartmentPill } from "@/components/hms/DepartmentBadge";
@@ -29,6 +33,29 @@ function formatScheduleTime(time: string | null): string {
   const period = hours >= 12 ? "PM" : "AM";
   const h12 = hours % 12 || 12;
   return `${String(h12).padStart(2, "0")}:${minutes} ${period}`;
+}
+
+// Inverse of formatScheduleTime -- converts a stored schedule time back to
+// the "HH:MM" value the modal's <input type="time"> expects.
+function scheduleTimeToInput(time: string | null): string {
+  if (!time) return "";
+  const d = new Date(time);
+  if (isNaN(d.getTime())) return "";
+  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+// effective_from/effective_to come back as UTC-anchored datetimes -- return
+// just the "YYYY-MM-DD" day part using UTC getters so no timezone shift.
+function scheduleDateToInput(time: string | null | undefined): string {
+  if (!time) return "";
+  const d = new Date(time);
+  if (isNaN(d.getTime())) return "";
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+// Is this a repeating weekly template row (no effective window)?
+function isWeeklySchedule(s: DoctorScheduleRecord): boolean {
+  return !s.effective_from && !s.effective_to;
 }
 
 const WEEK_DAYS = [
@@ -105,6 +132,11 @@ const MONTH_NAMES = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+const dmyToIso = (dateStr: string) => {
+  const [dd, mm, yy] = dateStr.split("/").map(Number);
+  return `${2000 + yy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+};
+
 const getMonthYearLabel = (year, month) => `${MONTH_NAMES[month]} ${year}`;
 
 export default function DoctorProfile() {
@@ -120,6 +152,10 @@ export default function DoctorProfile() {
   );
   const [toggledDates, setToggledDates] = useState<Set<string>>(new Set());
   const slotModalRef = useRef<ScheduleSlotModalHandle>(null);
+  // The date shown on the Day tab -- weekly template rows are merged with
+  // any date-specific rows whose effective window covers this date.
+  const [dayViewDate, setDayViewDate] = useState(() => new Date());
+  const [isDayCalendarOpen, setIsDayCalendarOpen] = useState(false);
   const [fromDate, setFromDate] = useState(null);
   const [toDate, setToDate] = useState(null);
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
@@ -128,19 +164,32 @@ export default function DoctorProfile() {
   const [weekDates, setWeekDates] = useState(() => getWeekDates(new Date()));
   const [calendarViewYear, setCalendarViewYear] = useState(() => new Date().getFullYear());
   const [calendarViewMonth, setCalendarViewMonth] = useState(() => new Date().getMonth());
+  const gridWeekDates = weekDates;
 
   const [doctorDetail, setDoctorDetail] = useState<EmployeeDetailResponse | null>(null);
+  const [isLoadingDoctor, setIsLoadingDoctor] = useState(true);
+  const [doctorError, setDoctorError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
+    setIsLoadingDoctor(true);
+    setDoctorError(null);
     employeeApi
       .getOne(id)
       .then((res) => {
-        setDoctorDetail(res.data?.data ?? null);
+        const data = res.data?.data ?? null;
+        console.log("[Doctor Profile] API response:", data);
+        console.log("[Doctor Profile] doctorSchedules:", data?.doctorSchedules);
+        console.log("[Doctor Profile] role_type:", data?.user?.role_type);
+        setDoctorDetail(data);
       })
       .catch((err) => {
         console.error("[Doctor Profile] Error:", err);
+        setDoctorError(err?.response?.data?.message || err?.message || "Failed to load doctor");
         setDoctorDetail(null);
+      })
+      .finally(() => {
+        setIsLoadingDoctor(false);
       });
   }, [id]);
 
@@ -204,12 +253,17 @@ export default function DoctorProfile() {
   // navigating weeks.
   const doctorSchedules: DoctorScheduleRecord[] = doctorDetail?.doctorSchedules ?? [];
 
+  // Week grid shows the repeating weekly template only -- date-specific rows
+  // (effective_from/effective_to set) are handled by the Day tab so they
+  // don't repeat on every single week.
+  const weeklySchedules = doctorSchedules.filter(isWeeklySchedule);
+
   const scheduleByDay = useMemo(() => {
     const map: Record<string, { time: string; branch: string; scheduleId: string | number }[]> = {};
     WEEK_DAYS.forEach(([day]) => {
       map[day.toUpperCase()] = [];
     });
-    doctorSchedules.forEach((s) => {
+    weeklySchedules.forEach((s) => {
       const key = (s.day_of_week || "").toUpperCase();
       if (!(key in map)) return;
       map[key].push({
@@ -219,7 +273,51 @@ export default function DoctorProfile() {
       });
     });
     return map;
-  }, [doctorSchedules]);
+  }, [weeklySchedules]);
+
+  // Day tab: every slot that applies on dayViewDate -- weekly template rows
+  // for that day-of-week, merged with any date-specific rows whose effective
+  // window covers the date.
+  const dayScheduleRows = useMemo(() => {
+    const dayOfWeek = format(dayViewDate, "EEEE").toUpperCase();
+    const dayKey = format(dayViewDate, "yyyy-MM-dd");
+    return doctorSchedules
+      .filter((s) => {
+        if ((s.day_of_week || "").trim().toUpperCase() !== dayOfWeek) return false;
+        if (isWeeklySchedule(s)) return true;
+        const from = scheduleDateToInput(s.effective_from);
+        const to = scheduleDateToInput(s.effective_to);
+        if (from && dayKey < from) return false;
+        if (to && dayKey > to) return false;
+        return true;
+      })
+      .sort((a, b) =>
+        scheduleTimeToInput(a.start_time).localeCompare(scheduleTimeToInput(b.start_time)),
+      );
+  }, [doctorSchedules, dayViewDate]);
+
+  const dayNameOf = (dayOfWeekKey: string | null | undefined): string => {
+    const key = (dayOfWeekKey || "").trim().toUpperCase();
+    const found = WEEK_DAYS.find(([day]) => day.toUpperCase() === key);
+    return found ? found[0] : "";
+  };
+
+  const openEditSlot = (s: DoctorScheduleRecord) => {
+    const dateSpecific = !isWeeklySchedule(s);
+    slotModalRef.current?.openEditSlot({
+      scheduleId: s.schedule_id,
+      day: dayNameOf(s.day_of_week),
+      date: dateSpecific
+        ? scheduleDateToInput(s.effective_from) || format(dayViewDate, "yyyy-MM-dd")
+        : format(dayViewDate, "yyyy-MM-dd"),
+      branchId: s.branch_id,
+      branchName: s.branch?.branch_name || "",
+      startTime: scheduleTimeToInput(s.start_time),
+      endTime: scheduleTimeToInput(s.end_time),
+      timeLabel: `${formatScheduleTime(s.start_time)} - ${formatScheduleTime(s.end_time)}`,
+      mode: dateSpecific ? "date" : "weekly",
+    });
+  };
 
   const maxScheduleRows = Math.max(
     1,
@@ -235,6 +333,32 @@ export default function DoctorProfile() {
     }),
   );
 
+  // Build gridSchedule with full objects for JSX compatibility
+  const gridSchedule = Array.from({ length: maxScheduleRows }, (_, rowIndex) =>
+    WEEK_DAYS.map(([day], colIndex) => {
+      const entry = scheduleByDay[day.toUpperCase()]?.[rowIndex];
+      if (!entry) return null;
+      // Find original record by time and scheduleId
+      const original = doctorSchedules.find(
+        (s) =>
+          s.schedule_id === entry.scheduleId &&
+          (s.day_of_week || "").toUpperCase() === day.toUpperCase()
+      );
+      if (original) return original;
+      // Synthetic fallback to keep JSX happy if lookup misses
+      return {
+        schedule_id: entry.scheduleId,
+        start_time: "",
+        end_time: "",
+        day_of_week: day,
+        branch_id: null,
+        branch: { branch_name: entry.branch || "" },
+        effective_from: null,
+        effective_to: null,
+      } as DoctorScheduleRecord;
+    })
+  );
+
   const refetchDoctor = () => {
     if (!id) return;
     employeeApi
@@ -245,34 +369,89 @@ export default function DoctorProfile() {
 
   const handleAddSlot = async ({
     day,
+    date,
     branchId,
     branchName,
     startTime,
     endTime,
     timeLabel,
-  }: {
-    day: string;
-    branchId: string;
-    branchName: string;
-    startTime: string;
-    endTime: string;
-    timeLabel: string;
-  }) => {
+    mode,
+  }: ScheduleSlotAddPayload) => {
     if (!id || !day || !branchId) {
       showAlert("Please select a day and branch for the new slot.");
       return;
     }
+    // Prevent same exact time schedule for same day
+    const existing = doctorSchedules.find((s) => {
+      const sameDay = (s.day_of_week || "").trim().toUpperCase() === day.toUpperCase();
+      const sameTime = scheduleTimeToInput(s.start_time) === startTime && scheduleTimeToInput(s.end_time) === endTime;
+      const sameBranch = s.branch_id === branchId;
+      return sameDay && sameTime && sameBranch && (mode === "date" ? s.effective_from === date || s.effective_to === date : isWeeklySchedule(s));
+    });
+    if (existing) {
+      showAlert("A schedule with the same time already exists for this day/branch. Please choose a different time.");
+      return;
+    }
     try {
+      // "date" mode creates a day-specific row (effective_from = effective_to
+      // = the chosen date); "weekly" mode creates a repeating template row.
+      const effective =
+        mode === "date" && date
+          ? { effective_from: date, effective_to: date }
+          : { effective_from: null, effective_to: null };
       await employeeApi.addScheduleSlot(id, {
         branch_id: branchId,
         day_of_week: day.toUpperCase() as any,
         start_time: startTime,
         end_time: endTime,
+        ...effective,
       });
       refetchDoctor();
-      showAlert(`Slot added for ${day}: ${timeLabel} (${branchName})`);
+      showAlert(
+        mode === "date"
+          ? `Slot added for ${day} ${date}: ${timeLabel} (${branchName})`
+          : `Slot added for ${day}: ${timeLabel} (${branchName})`,
+      );
     } catch (err: any) {
       showAlert(err?.response?.data?.message || "Failed to add slot.");
+    }
+  };
+
+  const handleUpdateSlot = async ({
+    scheduleId,
+    day,
+    date,
+    branchId,
+    branchName,
+    startTime,
+    endTime,
+    timeLabel,
+    mode,
+  }: ScheduleSlotEditPayload) => {
+    if (!id || scheduleId === null || scheduleId === undefined) {
+      showAlert("Unable to update this slot.");
+      return;
+    }
+    try {
+      const effective =
+        mode === "date" && date
+          ? { effective_from: date, effective_to: date }
+          : { effective_from: null, effective_to: null };
+      await employeeApi.updateScheduleSlot(id, scheduleId, {
+        branch_id: branchId,
+        day_of_week: day.toUpperCase() as any,
+        start_time: startTime,
+        end_time: endTime,
+        ...effective,
+      });
+      refetchDoctor();
+      showAlert(
+        mode === "date"
+          ? `Slot updated for ${day} ${date}: ${timeLabel} (${branchName})`
+          : `Slot updated for ${day}: ${timeLabel} (${branchName})`,
+      );
+    } catch (err: any) {
+      showAlert(err?.response?.data?.message || "Failed to update slot.");
     }
   };
 
@@ -434,6 +613,18 @@ export default function DoctorProfile() {
         </section>
 
 
+        {doctorError && (
+          <section className="bg-white border border-[#ff453a] rounded-[10px] p-4 mb-4 text-[#ff453a] text-sm">
+            Error loading doctor: {doctorError}
+          </section>
+        )}
+
+        {isLoadingDoctor && (
+          <section className="bg-white border border-[#edf0f4] rounded-[10px] p-4 mb-4 text-[#555] text-sm">
+            Loading doctor profile...
+          </section>
+        )}
+
         {/* ABOUT */}
         <section className="bg-white border border-[#edf0f4] rounded-[10px] p-[21px] mb-4">
 
@@ -542,22 +733,55 @@ export default function DoctorProfile() {
                     <>
                       <button
                         onClick={previousWeek}
-                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
+                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer hover:text-[#004a91] transition-colors"
                       >
                         ‹ Previous week
                       </button>
 
                       <button
                         onClick={nextWeek}
-                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
+                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer hover:text-[#004a91] transition-colors"
                       >
                         Next week ›
                       </button>
                     </>
                   )}
 
+                  {activeTab === "day" && (
+                    <>
+                      <button
+                        onClick={() => setDayViewDate((d) => subDays(d, 1))}
+                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
+                      >
+                        ‹ Previous day
+                      </button>
+
+                      <button
+                        onClick={() => setDayViewDate((d) => addDays(d, 1))}
+                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
+                      >
+                        Next day ›
+                      </button>
+
+                      <button
+                        onClick={() => setDayViewDate(new Date())}
+                        className="border-0 bg-transparent text-[#004a91] text-xs cursor-pointer"
+                      >
+                        Today
+                      </button>
+                    </>
+                  )}
+
                   <button
-                    onClick={() => slotModalRef.current?.openAddSlot("")}
+                    onClick={() =>
+                      slotModalRef.current?.openAddSlot(
+                        activeTab === "day" ? format(dayViewDate, "EEEE") : "",
+                        null,
+                        null,
+                        activeTab === "day" ? "date" : "weekly",
+                        activeTab === "day" ? format(dayViewDate, "yyyy-MM-dd") : undefined,
+                      )
+                    }
                     className="bg-[#004a91] text-white px-[14px] py-2 rounded-md text-xs font-semibold border-0 cursor-pointer"
                   >
                     + Add slot
@@ -572,82 +796,137 @@ export default function DoctorProfile() {
 
                 <div className="min-w-[610px]">
 
+                  {/* ── UNIFIED GRID for both Day & Week tabs ── */}
                   {/* HEADER */}
                   <div className="grid grid-cols-7 bg-[#f1f3f5] border-b border-[#b9bfcb]">
 
                     {WEEK_DAYS.map(([day], dayIdx) => (
                       <div
                         key={day}
-                        className={`min-h-[43px] p-[7px_3px] border-r border-[#b9bfcb] text-center text-[#003b80] text-[8px] font-bold ${
-                          activeTab === "day" ? "flex items-center justify-center" : ""
-                        }`}
+                        className={`min-h-[43px] p-[7px_3px] border-r border-[#b9bfcb] text-center text-[#003b80] text-[8px] font-bold ${activeTab === "day" ? "cursor-pointer" : ""}`}
+                        onClick={activeTab === "day" ? () => setIsDayCalendarOpen(true) : undefined}
                       >
-                        {day}
-                        {activeTab === "week" && (
-                          <small className="block mt-[3px] text-[7px]">
-                            {weekDates[dayIdx]}
-                          </small>
-                        )}
+                        <div className="flex items-center justify-center gap-1">
+                          {day}
+                          {activeTab === "day" && (
+                            <span className="block mt-[3px] text-[7px]">
+                              {gridWeekDates[dayIdx]}
+                            </span>
+                          )}
+                          {activeTab === "week" && (
+                            <small className="block mt-[3px] text-[7px]">
+                              {weekDates[dayIdx]}
+                            </small>
+                          )}
+                        </div>
+                        {/* Highlight selected day on Day tab */}
+                            {activeTab === "day" && gridWeekDates[dayIdx] === format(dayViewDate, "dd/MM/yy") && (
+                            <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#004a91]" />
+                          )}
                       </div>
                     ))}
 
                   </div>
 
                   {/* ROWS */}
-                  {schedule.map((row, rowIndex) => (
+                  {gridSchedule.map((row, rowIndex) => (
                     <div
                       key={rowIndex}
                       className="grid grid-cols-7 min-h-[64px] border-b border-[#b9bfcb] last:border-b-0"
                     >
-                      {row.map(([text, type, branch, scheduleId], index) => (
+                      {row.map((cell, index) => (
 
                         <div
                           key={index}
                           className="p-1 border-r border-[#b9bfcb] min-w-0"
                         >
 
-                          {type === "off" && (
-                            <div className="h-[54px] border border-dashed border-[#b9bfcb] rounded flex items-center justify-center text-[#657080] text-[8px]">
-                              Week Off
-                            </div>
-                          )}
+                          {cell ? (
+                            activeTab === "day" ? (
+                              /* Day tab: slot with Edit + Cancel buttons */
+                              <div
+                                className={`cursor-pointer h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] ${
+                                  isWeeklySchedule(cell)
+                                    ? "bg-[#f1f6ff] text-[#1e5fc7] border-[#1e5fc7]"
+                                    : "bg-[#fff7ef] text-[#ed741b] border-[#ed741b]"
+                                }`}
+                              >
+                                <strong className="text-[6px] whitespace-nowrap pl-1">
+                                  {formatScheduleTime(cell.start_time)} - {formatScheduleTime(cell.end_time)}
+                                </strong>
 
-                          {type === "empty" && (
-                            <div
-                              onClick={() => slotModalRef.current?.openAddSlot(WEEK_DAYS[index][0], rowIndex, index)}
-                              className="h-[54px] border border-dashed border-[#b9bfcb] rounded flex items-center justify-center text-[#7d8794] text-lg cursor-pointer hover:border-[#004a91] hover:text-[#004a91]"
-                            >
-                              +
-                            </div>
-                          )}
+                                <small className="text-[6px] leading-[8px]">
+                                  {cell.branch?.branch_name || "Central Hospital"}
+                                  {isWeeklySchedule(cell) ? " · Weekly" : ""}
+                                </small>
 
-                          {["green", "blue", "orange"].includes(type) && (
+                                <div className="flex items-center justify-between gap-1 mt-[3px] pt-[2px] border-t border-current/20">
+                                  <button
+                                    onClick={() => openEditSlot(cell)}
+                                    className="flex-1 px-1.5 py-1 rounded-md border border-[#004a91] text-[#004a91] text-[8px] font-semibold bg-white cursor-pointer hover:bg-[#eef4ff]"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      slotModalRef.current?.openCancelSlot(
+                                        dayNameOf(cell.day_of_week) || "",
+                                        rowIndex,
+                                        index,
+                                        `${formatScheduleTime(cell.start_time)} - ${formatScheduleTime(cell.end_time)}`,
+                                        cell.branch?.branch_name || "",
+                                        cell.schedule_id,
+                                      )
+                                    }
+                                    className="flex-1 px-1.5 py-1 rounded-md border border-[#ff453a] text-[#ff453a] text-[8px] font-semibold bg-white cursor-pointer hover:bg-[#fff1f0]"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              /* Week tab: click slot to cancel */
+                              <div
+                                onClick={() =>
+                                  slotModalRef.current?.openCancelSlot(
+                                    WEEK_DAYS[index][0],
+                                    rowIndex,
+                                    index,
+                                    `${formatScheduleTime(cell.start_time)} - ${formatScheduleTime(cell.end_time)}`,
+                                    cell.branch?.branch_name || "",
+                                    cell.schedule_id,
+                                  )
+                                }
+                                className={`cursor-pointer h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] ${
+                                  isWeeklySchedule(cell)
+                                    ? "bg-[#f1f6ff] text-[#1e5fc7] border-[#1e5fc7]"
+                                    : "bg-[#fff7ef] text-[#ed741b] border-[#ed741b]"
+                                }`}
+                              >
+                                <strong className="text-[6px] whitespace-nowrap pl-1">
+                                  {formatScheduleTime(cell.start_time)} - {formatScheduleTime(cell.end_time)}
+                                </strong>
+
+                                <small className="text-[6px] leading-[8px]">
+                                  {cell.branch?.branch_name || "Central Hospital"}
+                                </small>
+                              </div>
+                            )
+                          ) : (
+                            /* Empty cell: + to add */
                             <div
                               onClick={() =>
-                                slotModalRef.current?.openCancelSlot(
+                                slotModalRef.current?.openAddSlot(
                                   WEEK_DAYS[index][0],
                                   rowIndex,
                                   index,
-                                  text,
-                                  branch,
-                                  scheduleId ?? null,
+                                  activeTab === "day" ? "date" : "weekly",
+                                  activeTab === "day" ? dmyToIso(gridWeekDates[index]) : undefined,
                                 )
                               }
-                              className={`cursor-pointer h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] ${
-                                type === "green"
-                                  ? "bg-[#f0faf6] text-[#087d53] border-[#087d53]"
-                                  : type === "blue"
-                                  ? "bg-[#f1f6ff] text-[#1e5fc7] border-[#1e5fc7]"
-                                  : "bg-[#fff7ef] text-[#ed741b] border-[#ed741b]"
-                              }`}
+                              className="h-[54px] border border-dashed border-[#b9bfcb] rounded flex items-center justify-center text-[#7d8794] text-lg cursor-pointer hover:border-[#004a91] hover:text-[#004a91]"
                             >
-                              <strong className="text-[6px] whitespace-nowrap pl-1">
-                                {text}
-                              </strong>
-
-                              <small className="text-[6px] leading-[8px]">
-                                {branch || "Central Hospital"}
-                              </small>
+                              +
                             </div>
                           )}
 
@@ -660,9 +939,6 @@ export default function DoctorProfile() {
                 </div>
 
               </div>
-
-
-
               <button
                 onClick={clearSchedule}
                 className="block ml-auto mt-[9px] border-0 bg-transparent text-[#666d76] text-[11px] cursor-pointer"
@@ -792,8 +1068,8 @@ export default function DoctorProfile() {
           {/* RIGHT COLUMN */}
           <aside className="min-w-0 max-[900px]:grid max-[900px]:grid-cols-2 max-[900px]:gap-5 max-[700px]:block">
 
-            {/* CALENDAR (Week tab only -- the Day tab's simpler layout never had a month calendar) */}
-            {activeTab === "week" && (
+            {/* CALENDAR (both Day & Week tabs) */}
+            {(activeTab === "week" || activeTab === "day") && (
             <section className="bg-white border border-[#edf0f4] rounded-[10px] p-[25px] mb-6 max-[900px]:mb-0 max-[700px]:mb-5">
 
               <div className="flex items-center justify-between mb-[22px]">
@@ -836,21 +1112,47 @@ export default function DoctorProfile() {
                 {calendarDays.map((cell, index) => {
                   const isInActiveWeek =
                     cell.inMonth && weekDates.some((d) => isSameDay(parseDate(d), cell.date));
+                  const isSelectedDay = activeTab === "day" && isSameDay(cell.date, dayViewDate);
                   const key = dateKey(cell.date);
                   const isToggled = toggledDates.has(key);
-                  const isHighlighted = isToggled ? !isInActiveWeek : isInActiveWeek;
+                  const isHighlighted = activeTab === "day"
+                    ? (isToggled ? !isSelectedDay : isSelectedDay)
+                    : (isToggled ? !isInActiveWeek : isInActiveWeek);
 
                   return (
                     <button
                       key={index}
-                      onClick={() =>
+                      onClick={(e) => {
+                        if (e.shiftKey) {
+                          setToggledDates((prev) => {
+                            const next = new Set(prev);
+                            const key = dateKey(cell.date);
+                            if (next.has(key)) next.delete(key);
+                            else next.add(key);
+                            return next;
+                          });
+                          return;
+                        }
+                        if (activeTab === "day") {
+                          setDayViewDate(cell.date);
+                        } else {
+                          setToggledDates((prev) => {
+                            const next = new Set(prev);
+                            const key = dateKey(cell.date);
+                            if (next.has(key)) next.delete(key);
+                            else next.add(key);
+                            return next;
+                          });
+                        }
+                      }}
+                      onDoubleClick={() => {
                         setToggledDates((prev) => {
                           const next = new Set(prev);
-                          if (next.has(key)) next.delete(key);
-                          else next.add(key);
+                          const key = dateKey(cell.date);
+                          next.add(key);
                           return next;
-                        })
-                      }
+                        });
+                      }}
                       className={`w-[31px] h-[31px] flex items-center justify-center rounded-full text-[11px] mx-auto border-0 cursor-pointer ${
                         !cell.inMonth
                           ? "text-[#c8ced7] bg-transparent"
@@ -865,6 +1167,24 @@ export default function DoctorProfile() {
                 })}
 
               </div>
+
+              {/* Selected dates scroll (max 7 visible, rest scrollable horizontally) */}
+              {toggledDates.size > 0 && (
+                <div className="mt-4 overflow-x-auto">
+                  <div className="flex gap-2 min-w-max">
+                    {Array.from(toggledDates).slice(0, 7).map((key) => (
+                      <span key={key} className="px-2 py-1 rounded bg-[#2167d5] text-white text-[10px] whitespace-nowrap">
+                        {new Date(key.split("-")[0], parseInt(key.split("-")[1]) - 1, key.split("-")[2]).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                      </span>
+                    ))}
+                    {toggledDates.size > 7 && (
+                      <span className="px-2 py-1 rounded bg-[#f1f3f5] text-[#555] text-[10px] whitespace-nowrap">
+                        +{toggledDates.size - 7} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
 
             </section>
             )}
@@ -963,6 +1283,7 @@ export default function DoctorProfile() {
         ref={slotModalRef}
         branches={doctorDetail?.branches ?? []}
         onAddSlot={handleAddSlot}
+        onUpdateSlot={handleUpdateSlot}
         onCancelSlot={handleCancelSlot}
       />
       <ConfirmationDialog

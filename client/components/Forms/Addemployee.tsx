@@ -15,6 +15,7 @@ import { employeeApi, CreateEmployeePayload, UpdateEmployeePayload, WorkingHourD
 import { branchApi, Branch, AssignableUser } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
 import { getUser } from "@/utils/token";
+import { validateRequiredFields, type RequiredField } from "@/lib/validation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -995,7 +996,7 @@ export default function AddEmployee() {
 
     const isSupportingStaff = formData.roleType === "STAFF";
 
-    const required: { key: keyof EmployeeFormData; label: string }[] = [
+    const required: RequiredField<keyof EmployeeFormData | "consultationMinutes">[] = [
       { key: "roleType", label: "Role" },
       { key: "firstName", label: "First Name" },
       { key: "lastName", label: "Last Name" },
@@ -1003,10 +1004,46 @@ export default function AddEmployee() {
       { key: "mobileNo", label: "Mobile Number" },
       { key: "designation", label: "Designation" },
       { key: "joiningDate", label: "Joining Date" },
+      { key: "bloodGroup", label: "Blood Group" },
+      { key: "experience", label: "Experience (years)" },
+      { key: "nationality", label: "Nationality" },
+      { key: "maritalStatus", label: "Marital Status" },
+      { key: "aadhaarNo", label: "Aadhaar No" },
+      { key: "panNo", label: "PAN No" },
+      { key: "currentAddress", label: "Current Address" },
+      { key: "currentArea", label: "Current Area" },
+      { key: "currentState", label: "Current State" },
+      { key: "currentDistrict", label: "Current District" },
+      { key: "currentPincode", label: "Current Pincode" },
+      { key: "permanentAddress", label: "Permanent Address" },
+      { key: "permanentArea", label: "Permanent Area" },
+      { key: "permanentState", label: "Permanent State" },
+      { key: "permanentDistrict", label: "Permanent District" },
+      { key: "permanentPincode", label: "Permanent Pincode" },
+      ...(emergencyOptional
+        ? []
+        : [
+            { key: "emergencyContactName" as const, label: "Emergency Contact Name" },
+            { key: "emergencyContactRelation" as const, label: "Emergency Contact Relation" },
+            { key: "emergencyContactNumber" as const, label: "Emergency Contact Number" },
+          ]),
+      ...(isMedical || displayRole === "Branch Admin" || displayRole === "Staff Admin" || formData.roleType === "STAFF"
+        ? [{ key: "departmentId" as const, label: isMedical ? "Specialization" : "Department" }]
+        : []),
+      ...(isMedical
+        ? [
+            { key: "qualification" as const, label: "Qualification" },
+            { key: "docLicenseNo" as const, label: "License No" },
+          ]
+        : []),
       ...(formData.roleType === "DOCTOR" ? [{ key: "doctorBio" as const, label: "Doctor Bio" }] : []),
+      ...(showSchedule ? [{ key: "consultationMinutes" as const, label: "Consultation Minutes" }] : []),
       ...(isSupportingStaff ? [] : [{ key: "username" as const, label: "Username" }]),
       ...(isEditMode
-        ? []
+        ? [
+            { key: "dateOfBirth" as const, label: "Date of Birth" },
+            { key: "gender" as const, label: "Gender" },
+          ]
         : [
             { key: "dateOfBirth" as const, label: "Date of Birth" },
             { key: "gender" as const, label: "Gender" },
@@ -1014,18 +1051,7 @@ export default function AddEmployee() {
           ]),
     ];
 
-    const missing = required.find((f) => {
-      const v = formData[f.key];
-      return Array.isArray(v) ? v.length === 0 : !String(v).trim();
-    });
-    if (missing) {
-      toast({
-        title: "Missing required field",
-        description: `Please fill in "${missing.label}".`,
-        variant: "destructive",
-      });
-      return;
-    }
+    if (!validateRequiredFields(required, { ...formData, consultationMinutes }, toast)) return;
 
     // A Branch Admin can be edited down to "no branch" (unassigned) — every
     // other case, including creating a Branch Admin, still needs a branch.
@@ -1063,11 +1089,11 @@ export default function AddEmployee() {
     }
 
     if (formData.roleType === "DOCTOR") {
-      const bad = schedule.find((s) => !s.day_of_week);
+      const bad = schedule.find((s) => !s.day_of_week || !s.start_time || !s.end_time);
       if (bad) {
         toast({
           title: "Incomplete schedule",
-          description: "Please select a day for every schedule time slot.",
+          description: "Please select a day, start time and end time for every schedule time slot.",
           variant: "destructive",
         });
         return;

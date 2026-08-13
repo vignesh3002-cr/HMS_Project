@@ -11,6 +11,7 @@ import { State as CSState, City } from "country-state-city";
 import type { IState } from "country-state-city";
 import { branchApi, Branch } from "@/api/branch.api";
 import { patientApi } from "@/api/patient.api";
+import { validateRequiredFields, type RequiredField } from "@/lib/validation";
 
 // Field names mirror the `patient_bio_data` table columns so every input
 // here has a real column to be saved into once the patients API exists.
@@ -360,14 +361,32 @@ export default function PatientRegistrationForm({
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (!formData.patient_type) {
-      toast({
-        title: "Missing required field",
-        description: 'Please select a "Patient type".',
-        variant: "destructive",
-      });
-      return;
-    }
+    const required: RequiredField<keyof FormData>[] = [
+      { key: "patient_first_name", label: "First name" },
+      { key: "patient_last_name", label: "Last name" },
+      { key: "patient_gender", label: "Gender" },
+      { key: "patient_dob", label: "Date of birth" },
+      { key: "patient_blood_group", label: "Blood group" },
+      { key: "patient_nationality", label: "Nationality" },
+      { key: "patient_marital_status", label: "Marital status" },
+      { key: "patient_type", label: "Patient type" },
+      { key: "patient_current_address", label: "Current address" },
+      { key: "patient_area", label: "Area" },
+      { key: "patient_state", label: "State" },
+      { key: "patient_district", label: "District" },
+      { key: "patient_pincode", label: "Pincode" },
+      { key: "patient_permanent_address", label: "Permanent address" },
+      { key: "patient_permanent_area", label: "Permanent area" },
+      { key: "patient_permanent_state", label: "Permanent state" },
+      { key: "patient_permanent_district", label: "Permanent district" },
+      { key: "patient_permanent_pincode", label: "Permanent pincode" },
+      { key: "patient_primary_mobile", label: "Primary mobile" },
+      { key: "patient_emergency_name", label: "Emergency contact name" },
+      { key: "patient_emergency_relation", label: "Emergency contact relation" },
+      { key: "patient_emergency_mobile", label: "Emergency mobile" },
+      { key: "branch_id", label: "Branch" },
+    ];
+    if (!validateRequiredFields(required, formData, toast)) return;
 
     if (
       formData.patient_type === OTHER_PATIENT_TYPE_VALUE &&
@@ -400,18 +419,15 @@ export default function PatientRegistrationForm({
     }
 
     if (formData.insurance_patient === "yes") {
-      const missingInsurance = [
-        { key: "insurance_provider" as const, label: "Insurance provider" },
-        { key: "insurance_plan" as const, label: "Insurance plan" },
-        { key: "policy_number" as const, label: "Policy number" },
-        { key: "policy_holder_name" as const, label: "Policy holder name" },
-        { key: "policy_holder_relation" as const, label: "Relation" },
-        { key: "validity_date" as const, label: "Validity date" },
-      ].find((f) => !formData[f.key].trim());
-      if (missingInsurance) {
-        toast({ title: "Missing required field", description: `Please fill in "${missingInsurance.label}".`, variant: "destructive" });
-        return;
-      }
+      const insuranceRequired: { key: keyof typeof formData; label: string }[] = [
+        { key: "insurance_provider", label: "Insurance provider" },
+        { key: "insurance_plan", label: "Insurance plan" },
+        { key: "policy_number", label: "Policy number" },
+        { key: "policy_holder_name", label: "Policy holder name" },
+        { key: "policy_holder_relation", label: "Relation" },
+        { key: "validity_date", label: "Validity date" },
+      ];
+      if (!validateRequiredFields(insuranceRequired, formData, toast)) return;
       if (insuranceFiles.length === 0) {
         toast({ title: "Missing required field", description: "Please upload at least one insurance document.", variant: "destructive" });
         return;

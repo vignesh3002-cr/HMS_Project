@@ -6,9 +6,11 @@ import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { branchApi, Branch } from "@/api/branch.api";
+import { getUser } from "@/utils/token";
 import { departmentApi, Department } from "@/api/department.api";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { appointmentApi, type AvailableSlot } from "@/api/appointment.api";
+import { validateRequiredFields, type RequiredField } from "@/lib/validation";
 
 interface AppointmentFormData {
   patientId: string;
@@ -313,11 +315,6 @@ export default function EditAppointment() {
 
     if (!id) return;
 
-    if (!formData.timeSlot) {
-      toast({ title: "Please select a time slot", variant: "destructive" });
-      return;
-    }
-
     if (appointmentStatus === "RESCHEDULE_REQUIRED" && !formData.doctorId) {
       toast({
         title: "Select a doctor to resolve the reschedule",
@@ -326,6 +323,15 @@ export default function EditAppointment() {
       });
       return;
     }
+
+    const required: RequiredField<keyof AppointmentFormData>[] = [
+      { key: "branchId", label: "Branch" },
+      { key: "departmentId", label: "Department" },
+      { key: "doctorId", label: "Doctor Name" },
+      { key: "selectDate", label: "Appointment Date" },
+      { key: "timeSlot", label: "Available Time Slots" },
+    ];
+    if (!validateRequiredFields(required, formData, toast)) return;
 
     setShowConfirm(true);
   };

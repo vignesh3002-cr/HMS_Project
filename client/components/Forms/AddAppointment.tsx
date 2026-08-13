@@ -7,10 +7,16 @@ import { FormDropdown } from "@/components/ui/form-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import CalendarPicker from "@/components/hms/Calender";
 import { branchApi, Branch } from "@/api/branch.api";
+import { getUser } from "@/utils/token";
 import { departmentApi, Department } from "@/api/department.api";
 import { employeeApi, type EmployeeRecord, type DoctorScheduleRecord } from "@/api/employee.api";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
-import { appointmentApi, type AvailableSlot, type AppointmentResponse } from "@/api/appointment.api";
+import {
+  appointmentApi,
+  type AvailableSlot,
+  type AppointmentResponse,
+} from "@/api/appointment.api";
+import { validateRequiredFields, type RequiredField } from "@/lib/validation";
 
 interface AppointmentFormData {
   patientId: string;
@@ -135,6 +141,16 @@ export default function AddAppointment() {
     } | null
   )?.slot;
 
+  // Branch Admin / Staff Admin sessions are tied to one branch (their active
+  // user_branch_mapping) -- default the Branch dropdown to it so the
+  // Department/Doctor dropdowns narrow to that branch automatically.
+  const currentUser = getUser();
+  const currentUserRole = String(currentUser?.role_type || currentUser?.role || "").toUpperCase();
+  const currentBranchId =
+    currentUserRole === "BRANCH_ADMIN" || currentUserRole === "ADMIN"
+      ? String(currentUser?.branch_id || "")
+      : "";
+
   const [formData, setFormData] = useState<AppointmentFormData>(() => {
     let base = preselectedPatient
       ? {
@@ -144,6 +160,9 @@ export default function AddAppointment() {
           patientNumber: preselectedPatient.patient_primary_mobile || "",
         }
       : emptyFormData;
+    // Admin's own branch is the default unless a Day View slot already
+    // decided the exact branch (preselectedSlot below still wins).
+    if (currentBranchId) base = { ...base, branchId: currentBranchId };
     if (preselectedDoctorId) base = { ...base, doctorId: preselectedDoctorId };
     if (preselectedSlot) {
       base = {
@@ -215,6 +234,7 @@ export default function AddAppointment() {
   // selected branch -- used to narrow the Department and Doctor dropdowns
   // down to what's actually available at that branch, once a branch is picked.
   const [branchDoctors, setBranchDoctors] = useState<EmployeeRecord[]>([]);
+  const [branchDoctorsLoading, setBranchDoctorsLoading] = useState(false);
 
   useEffect(() => {
     branchApi
@@ -251,15 +271,21 @@ export default function AddAppointment() {
   useEffect(() => {
     if (!formData.branchId) {
       setBranchDoctors([]);
+      setBranchDoctorsLoading(false);
       return;
     }
+    setBranchDoctorsLoading(true);
     employeeApi
       .getAll({ branchId: formData.branchId, limit: 1000 })
       .then((res) => {
         const allEmployees = res.data?.data?.employees || [];
         setBranchDoctors(allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR"));
+        setBranchDoctorsLoading(false);
       })
-      .catch(() => setBranchDoctors([]));
+      .catch(() => {
+        setBranchDoctors([]);
+        setBranchDoctorsLoading(false);
+      });
   }, [formData.branchId]);
 
   // Fetch available slots when branch + doctor + date changes
@@ -423,14 +449,17 @@ export default function AddAppointment() {
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (!formData.patientId) {
-      toast({ title: "Please select a patient", variant: "destructive" });
-      return;
-    }
-    if (!formData.timeSlot) {
-      toast({ title: "Please select a time slot", variant: "destructive" });
-      return;
-    }
+    const required: RequiredField<keyof AppointmentFormData>[] = [
+      { key: "patientId", label: "Patient" },
+      { key: "patientName", label: "Patient Name" },
+      { key: "branchId", label: "Branch" },
+      { key: "departmentId", label: "Department" },
+      { key: "doctorId", label: "Doctor Name" },
+      { key: "patientType", label: "Patient Type" },
+      { key: "selectDate", label: "Appointment Date" },
+      { key: "timeSlot", label: "Available Time Slots" },
+    ];
+    if (!validateRequiredFields(required, formData, toast)) return;
 
     setShowConfirm(true);
   };
@@ -487,8 +516,8 @@ export default function AddAppointment() {
       formData.timeSlot ||
       formData.patientType ||
       formData.patientComment
-  );
-
+);
+  
   // Once a branch is selected, only show departments that branch's doctors
   // actually belong to; otherwise fall back to the full department list.
   const departmentsForDropdown = formData.branchId
@@ -702,8 +731,11 @@ export default function AddAppointment() {
                     (b) => ({
                       label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
                       value: b.branch_id,
+                      highlight: currentBranchId ? b.branch_id === currentBranchId : false,
+                      badge: currentBranchId && b.branch_id === currentBranchId ? "Your branch" : undefined,
                     }),
                   )}
+
                   value={formData.branchId}
                   onValueChange={(val) => {
                     setFormData((prev) => ({
@@ -753,11 +785,13 @@ export default function AddAppointment() {
                     setFormData((prev) => ({ ...prev, departmentId: val, doctorId: "", timeSlot: "" }))
                   }
                   placeholder={
-                    formData.branchId && departmentsForDropdown.length === 0
-                      ? "No departments at this branch"
-                      : departments.length
-                        ? "Select Department"
-                        : "Loading departments..."
+                    branchDoctorsLoading
+                      ? "Loading departments..."
+                      : formData.branchId && departmentsForDropdown.length === 0
+                        ? "No departments at this branch"
+                        : departments.length
+                          ? "Select Department"
+                          : "Loading departments..."
                   }
                 />
               </div>

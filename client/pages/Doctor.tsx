@@ -14,7 +14,8 @@ import {
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
  
-import { FilterPopover, useFilterPanel, useDoctorFilters } from "@/components/Filter";
+import { useFilterPanel, useDoctorFilters } from "@/components/Filter";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
@@ -90,7 +91,7 @@ function SlotProgress({ booked, total, loading }: { booked: number; total: numbe
 }
  
 // Three-dot card menu (grid only)
-function CardMenu({ onView, onEdit, onDelete, onTransfer }: { onView: () => void; onEdit: () => void; onDelete: () => void; onTransfer: () => void }) {
+function CardMenu({ onView, onEdit, onDelete, onTransfer, onRestore, deactivated }: { onView: () => void; onEdit: () => void; onDelete: () => void; onTransfer: () => void; onRestore: () => void; deactivated?: boolean }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const { can } = usePermission();
@@ -122,11 +123,19 @@ function CardMenu({ onView, onEdit, onDelete, onTransfer }: { onView: () => void
         {can("doctor.update") && (
           <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
         )}
-        {can("doctor.transfer") && (
-          <button onClick={() => { onTransfer(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Transfer</button>
-        )}
-        {can("employee.delete") && (
-          <button onClick={() => { onDelete(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">Deactivate</button>
+        {deactivated ? (
+          can("doctor.update") && (
+            <button onClick={() => { onRestore(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-green-600 hover:bg-green-50">Activate</button>
+          )
+        ) : (
+          <>
+            {can("doctor.transfer") && (
+              <button onClick={() => { onTransfer(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Transfer</button>
+            )}
+            {can("employee.delete") && (
+              <button onClick={() => { onDelete(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">Deactivate</button>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -227,10 +236,11 @@ export default function Doctor() {
   // Real doctors fetched from the backend
   const [realDoctors, setRealDoctors] = useState<EmployeeRecord[] | null>(null);
   const [isDoctorsLoading, setIsDoctorsLoading] = useState(true);
- 
+  const [showDeactivated, setShowDeactivated] = useState(false);
+
   // Per-doctor slot booking summary for the selected date (list view progress bar)
   const [slotSummaries, setSlotSummaries] = useState<Record<string, { total: number; booked: number }>>({});
- 
+
   const fetchDoctors = useCallback(async () => {
     setIsDoctorsLoading(true);
     console.log("[Doctor Page] Fetching all employees from employeeApi...");
@@ -238,6 +248,7 @@ export default function Doctor() {
       const res = await employeeApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
         limit: 1000,
+        includeDeleted: showDeactivated,
       });
       console.log("[Doctor Page] Response:", res.data);
       const allEmployees = res.data?.data?.employees || [];
@@ -248,7 +259,8 @@ export default function Doctor() {
       const doctors = allEmployees.filter(
         (e) =>
           e.user_table?.role_type === "DOCTOR" &&
-          !(isAdmin && me?.employee_id && e.employee_id === me.employee_id)
+          !(isAdmin && me?.employee_id && e.employee_id === me.employee_id) &&
+          (showDeactivated ? !!e.deleted_at : !e.deleted_at)
       );
       setRealDoctors(doctors);
       if (doctors.length === 0) {
@@ -269,7 +281,7 @@ export default function Doctor() {
     } finally {
       setIsDoctorsLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches]);
+  }, [toast, selectedBranchId, isAllBranches, showDeactivated]);
  
   useEffect(() => {
     fetchDoctors();
@@ -442,8 +454,37 @@ export default function Doctor() {
 
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
 
   const handleDelete = (id: number | string) => setDeleteTarget(String(id));
+
+  const handleRestore = (id: number | string) => setRestoreTarget(String(id));
+
+  const handleConfirmRestore = async () => {
+    if (!restoreTarget) return;
+    setIsRestoring(true);
+    try {
+      const res = await employeeApi.restore(restoreTarget);
+      if (!res.data.success) {
+        throw new Error(res.data.message);
+      }
+      toast({
+        title: "Doctor restored",
+        description: `Doctor ${restoreTarget} has been reactivated.`,
+      });
+      setRestoreTarget(null);
+      fetchDoctors();
+    } catch (err: any) {
+      toast({
+        title: "Failed to restore doctor",
+        description: err.response?.data?.message ?? err.message ?? "Something went wrong.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRestoring(false);
+    }
+  };
 
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
@@ -540,6 +581,24 @@ export default function Doctor() {
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
                 </div>
  
+                {/* Active / Deactivated Toggle */}
+                <div className="flex border border-[#E5E7EB] rounded-md overflow-hidden bg-[#F2F4F6] p-0.5">
+                  <button
+                    onClick={() => setShowDeactivated(false)}
+                    title="Show active doctors"
+                    className={`px-2 py-1.5 rounded text-[11px] font-semibold ${!showDeactivated ? "bg-white shadow-sm text-[#00488D]" : "text-[#6B7280]"}`}
+                  >
+                    Active
+                  </button>
+                  <button
+                    onClick={() => setShowDeactivated(true)}
+                    title="Show deactivated doctors"
+                    className={`px-2 py-1.5 rounded text-[11px] font-semibold ${showDeactivated ? "bg-white shadow-sm text-[#00488D]" : "text-[#6B7280]"}`}
+                  >
+                    Deactivated
+                  </button>
+                </div>
+
                 {/* View Mode Toggle */}
                 <div className="flex border border-[#E5E7EB] rounded-md overflow-hidden bg-[#F2F4F6] p-0.5">
                   <button
@@ -600,7 +659,7 @@ export default function Doctor() {
                 </div>
  
                 {/* Filters */}
-                <FilterPopover
+                <ToolbarFilter
                   title="Filters"
                   fields={doctorFilterFields}
                   values={filterValues}
@@ -666,12 +725,24 @@ export default function Doctor() {
                           </svg>
                         </button>
                       )}
-                      {can("employee.delete") && (
-                        <button onClick={() => handleDelete(r.id)} title="Deactivate" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
-                            <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                          </svg>
-                        </button>
+                      {showDeactivated ? (
+                        can("doctor.update") && (
+                          <button onClick={() => handleRestore(r.id)} title="Activate" className="p-1.5 rounded transition-colors duration-200 hover:bg-green-50 group">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-green-600">
+                              <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+                              <circle cx="12" cy="12" r="3" />
+                              <circle cx="12" cy="12" r="7" fill="none" />
+                            </svg>
+                          </button>
+                        )
+                      ) : (
+                        can("employee.delete") && (
+                          <button onClick={() => handleDelete(r.id)} title="Deactivate" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
+                              <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                          </button>
+                        )
                       )}
                     </div>
                   )},
@@ -720,7 +791,7 @@ export default function Doctor() {
                           <p className="hms-content-text text-[#191C1E] mt-1 truncate">{doctor.branch}</p>
                         </div>
                         <div className="absolute top-3 right-3">
-                          <CardMenu onView={() => handleView(doctor.id)} onEdit={() => handleEdit(doctor.id)} onDelete={() => handleDelete(doctor.id)} onTransfer={() => handleTransfer(doctor.id)} />
+                          <CardMenu onView={() => handleView(doctor.id)} onEdit={() => handleEdit(doctor.id)} onDelete={() => handleDelete(doctor.id)} onTransfer={() => handleTransfer(doctor.id)} onRestore={() => handleRestore(doctor.id)} deactivated={showDeactivated} />
                         </div>
                       </div>
                     ))}
@@ -751,7 +822,7 @@ export default function Doctor() {
         title="Deactivate Doctor?"
         description={
           deleteTarget
-            ? `Doctor ${deleteTarget} will be deactivated. They will be hidden from all lists, blocked from login, their branch assignments removed, and their future appointments flagged "Reschedule Required" for reassignment. Historical records are kept. This cannot be undone from the app.`
+            ? `Doctor ${deleteTarget} will be deactivated. They will be hidden from all lists and blocked from login, and their future appointments flagged "Reschedule Required" for reassignment. Their branch assignment is kept so activating them again restores it. Historical records are kept.`
             : ""
         }
         confirmText="Deactivate"
@@ -759,6 +830,22 @@ export default function Doctor() {
         loading={isDeleting}
         onConfirm={handleConfirmDelete}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      <ConfirmationDialog
+        open={!!restoreTarget}
+        type="LockOpen"
+        title="Activate Doctor?"
+        description={
+          restoreTarget
+            ? `Doctor ${restoreTarget} will be restored. They will become visible in all lists, be able to log in again, and regain their previous branch assignment.`
+            : ""
+        }
+        confirmText="Activate"
+        cancelText="Cancel"
+        loading={isRestoring}
+        onConfirm={handleConfirmRestore}
+        onCancel={() => setRestoreTarget(null)}
       />
     </div>
   );

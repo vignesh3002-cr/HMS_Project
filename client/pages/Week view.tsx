@@ -16,7 +16,8 @@ import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { employeeApi } from "@/api/employee.api";
-import { FilterPopover, useFilterPanel, useScheduleFilters } from "@/components/Filter";
+import { useFilterPanel, useScheduleFilters } from "@/components/Filter";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { usePermission } from "@/context/PermissionContext";
 import { useToast } from "@/hooks/use-toast";
 
@@ -458,7 +459,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         </div>
 
         {/* Filter doctors */}
-        <FilterPopover
+        <ToolbarFilter
           title="Filter Doctors"
           fields={doctorFilterFields}
           values={filterValues}
