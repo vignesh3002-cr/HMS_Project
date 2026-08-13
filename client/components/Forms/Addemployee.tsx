@@ -1133,6 +1133,11 @@ export default function AddEmployee() {
           ]
         : []),
       ...(formData.roleType === "DOCTOR" ? [{ key: "doctorBio" as const, label: "Doctor Bio" }] : []),
+      ...(isMedical ? [
+        { key: "specialization" as const, label: isMedical ? "Specialization" : "Department" },
+        { key: "qualification" as const, label: "Qualification" },
+        { key: "docLicenseNo" as const, label: roleConfig?.licenseLabel ?? "License No" },
+      ] : []),
       ...(showSchedule ? [{ key: "consultationMinutes" as const, label: "Consultation Minutes" }] : []),
       ...(isSupportingStaff ? [] : [{ key: "username" as const, label: "Username" }]),
       ...(isEditMode
