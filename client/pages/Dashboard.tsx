@@ -12,6 +12,7 @@ import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { patientApi } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { getEffectiveAppointmentStatus } from "@/lib/appointmentStatus";
 import { branchApi } from "@/api/branch.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
@@ -197,7 +198,7 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
     reason: doc.reason_for_visit || "—",
     date: formatDateOnly(doc.appointment_date),
     time: formatTimeOnly(doc.appointment_time),
-    status: formatAppointmentStatus(doc.status),
+    status: formatAppointmentStatus(getEffectiveAppointmentStatus(doc)),
   };
 }
 
