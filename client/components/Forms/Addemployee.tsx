@@ -724,6 +724,9 @@ export default function AddEmployee() {
   const showSchedule = roleConfig?.showSchedule ?? false;
   const emergencyOptional = formData.maritalStatus === "Divorced";
   const todayStr = new Date().toISOString().slice(0, 10);
+  const joiningMaxStr = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
 
   const roleHintText = showSchedule
     ? `${displayRole} selected — specialization, qualification, license number and the schedule builder are shown below.`
@@ -1180,7 +1183,7 @@ export default function AddEmployee() {
       setShowLeaveConfirm(true);
       return;
     }
-    navigate("/dashboard");
+    navigate(-1);
   };
 
   if (loading) {
@@ -1469,7 +1472,7 @@ export default function AddEmployee() {
                 <input
                   type="date"
                   name="joiningDate"
-                  max={todayStr}
+                  max={joiningMaxStr}
                   className={inputCls + " text-gray-500"}
                   value={formData.joiningDate}
                   onChange={handleChange}
@@ -2249,7 +2252,7 @@ export default function AddEmployee() {
         cancelText="Stay"
         onConfirm={() => {
           setShowLeaveConfirm(false);
-          navigate("/dashboard");
+          navigate(-1);
         }}
         onCancel={() => setShowLeaveConfirm(false)}
       />
