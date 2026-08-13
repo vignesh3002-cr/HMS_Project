@@ -350,9 +350,6 @@ export default function PatientProfile() {
                 </div>
               </div>
               <div className="z-10 flex w-full flex-col items-center gap-4 md:w-auto md:flex-row">
-                <Button variant="outline" size="icon" className="rounded-full">
-                  <Phone className="h-4 w-4" />
-                </Button>
                 <div className="flex flex-col items-center gap-1 sm:items-stretch">
                   <Button
                     className="flex w-full items-center gap-2 bg-[#004785] hover:bg-[#003a6b] sm:w-auto"

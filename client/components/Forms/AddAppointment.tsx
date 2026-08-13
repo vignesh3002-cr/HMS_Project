@@ -230,11 +230,30 @@ export default function AddAppointment() {
   // so the calendar only enables those dates.
   const [doctorSchedules, setDoctorSchedules] = useState<DoctorScheduleRecord[]>([]);
 
-  // Doctors actually assigned (via employees.branch_id) to the currently
-  // selected branch -- used to narrow the Department and Doctor dropdowns
-  // down to what's actually available at that branch, once a branch is picked.
+  // Doctors actually assigned to the currently selected branch -- used to
+  // narrow the Department and Doctor dropdowns down to what's actually
+  // available at that branch, once a branch is picked.
   const [branchDoctors, setBranchDoctors] = useState<EmployeeRecord[]>([]);
   const [branchDoctorsLoading, setBranchDoctorsLoading] = useState(false);
+
+  // Every doctor's real active branch assignments, keyed by employee_id --
+  // a doctor can be mapped (via user_branch_mapping) to branches other than
+  // their single primary employees.branch_id, so filtering the dropdowns by
+  // that field alone (what GET /employees?branchId= does) wrongly hides a
+  // doctor at every branch except their primary one. status: 1 = active,
+  // 0 = deactivated/historical (see employee.repository.ts), so only active
+  // mappings count here -- matches what actual booking requires.
+  const [doctorBranchMap, setDoctorBranchMap] = useState<Record<string, Set<string>>>({});
+
+  // Tracks the three master-data fetches below (branches, departments,
+  // doctors) so the form can stay in a loading state until all of them have
+  // resolved -- arriving via a Day View slot click pre-fills branchId/
+  // departmentId/doctorId before these lists exist, and rendering the
+  // dropdowns against empty lists in the meantime would show them as blank
+  // instead of the preselected value.
+  const [loadingBranches, setLoadingBranches] = useState(true);
+  const [loadingDepartments, setLoadingDepartments] = useState(true);
+  const [loadingDoctors, setLoadingDoctors] = useState(true);
 
   useEffect(() => {
     branchApi
@@ -243,7 +262,8 @@ export default function AddAppointment() {
         if (res.data?.data) setBranches(res.data.data);
         else if (Array.isArray(res.data)) setBranches(res.data as unknown as Branch[]);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoadingBranches(false));
   }, []);
 
   useEffect(() => {
@@ -253,7 +273,8 @@ export default function AddAppointment() {
         if (res.data?.data) setDepartments(res.data.data);
         else if (Array.isArray(res.data)) setDepartments(res.data as unknown as Department[]);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoadingDepartments(false));
   }, []);
 
   useEffect(() => {
@@ -261,13 +282,40 @@ export default function AddAppointment() {
       .getAll({ limit: 1000 })
       .then((res) => {
         const allEmployees = res.data?.data?.employees || [];
-        setDoctors(allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR"));
+        const activeDoctors = allEmployees.filter(
+          (e) => e.user_table?.role_type === "DOCTOR" && e.emp_status !== false,
+        );
+        setDoctors(activeDoctors);
+
+        return Promise.all(
+          activeDoctors.map((doc) =>
+            employeeApi
+              .getOne(doc.employee_id)
+              .then((r) => ({
+                employeeId: doc.employee_id,
+                branchIds: (r.data?.data?.branches ?? [])
+                  .filter((b) => b.status === undefined || b.status === 1)
+                  .map((b) => b.branch_id),
+              }))
+              .catch(() => ({ employeeId: doc.employee_id, branchIds: [] as string[] })),
+          ),
+        ).then((entries) => {
+          setDoctorBranchMap(
+            Object.fromEntries(entries.map((e) => [e.employeeId, new Set(e.branchIds)])),
+          );
+        });
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoadingDoctors(false));
   }, []);
 
-  // Fetch the doctors assigned to the selected branch, so the Department and
-  // Doctor dropdowns can be narrowed down to what's actually at that branch.
+  // True while any of branches/departments/doctors is still loading -- the
+  // whole form (including a preselected slot's branch/department/doctor)
+  // stays behind a loader until all three are ready.
+  const isLoadingMasterData = loadingBranches || loadingDepartments || loadingDoctors;
+
+  // Narrow doctors down to the selected branch using each doctor's real
+  // active branch mappings, not just their primary employees.branch_id.
   useEffect(() => {
     if (!formData.branchId) {
       setBranchDoctors([]);
@@ -287,6 +335,11 @@ export default function AddAppointment() {
         setBranchDoctorsLoading(false);
       });
   }, [formData.branchId]);
+  useEffect(() => {
+    setBranchDoctors(
+      doctors.filter((doc) => doctorBranchMap[doc.employee_id]?.has(formData.branchId)),
+    );
+  }, [formData.branchId, doctors, doctorBranchMap]);
 
   // Fetch available slots when branch + doctor + date changes
   useEffect(() => {
@@ -313,6 +366,7 @@ export default function AddAppointment() {
           formData.doctorId,
           formData.branchId,
           formData.selectDate,
+          { includePast: true },
         );
         const slots = res.data.data?.slots || [];
         setAvailableSlots(slots.filter((s) => s.is_available));
@@ -392,9 +446,21 @@ export default function AddAppointment() {
         // highlighted.
         const preferredMinutes = timeStringToMinutes(preferredTime);
         const exact = openSlots.find((s) => timeStringToMinutes(s.time) === preferredMinutes);
+        const isToday = formData.selectDate === format(new Date(), "yyyy-MM-dd");
+        const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+        const preferredIsPast = isToday && preferredMinutes <= nowMinutes;
+
         if (exact) {
           setFormData((prev) => ({ ...prev, timeSlot: exact.time }));
-        } else {
+        } else if (!preferredIsPast) {
+          // Day View can show an hour as "available" (it deliberately
+          // displays the doctor's whole shift) that this real slot list no
+          // longer has -- e.g. it's fully booked. Keep the picked time in
+          // the list so the slots extend up to what was selected and it
+          // stays highlighted. Not done when the picked hour has already
+          // elapsed today -- the backend will never accept booking the
+          // past, so pinning it here would just offer a slot that can
+          // never actually be confirmed.
           setAvailableSlots((prev) => [
             ...prev,
             { schedule_id: "DAY_VIEW_SLOT", shift_name: "", time: preferredTime, is_available: true },
@@ -668,7 +734,12 @@ export default function AddAppointment() {
             </h4>
           </div>
 
-          {/* Form Body */}
+          {isLoadingMasterData ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-24 text-gray-400 text-sm">
+              <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+              Loading branches, departments and doctors...
+            </div>
+          ) : (
           <form onSubmit={handleSubmit} className="p-8">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-6 gap-y-6">
               {/* Patient Select */}
@@ -924,7 +995,9 @@ export default function AddAppointment() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                    {availableSlots.map((slot) => (
+                    {[...availableSlots]
+                      .sort((a, b) => timeStringToMinutes(a.time) - timeStringToMinutes(b.time))
+                      .map((slot) => (
                       <button
                         key={`${slot.schedule_id}-${slot.time}`}
                         type="button"
@@ -996,6 +1069,7 @@ export default function AddAppointment() {
               </button>
             </div>
           </form>
+          )}
         </div>
       </div>
 
