@@ -96,6 +96,17 @@ export interface EmployeeRecord {
     branch_name: string;
     branch_area?: string | null;
   } | null;
+  // Real branch assignments from user_branch_mapping (active mappings
+  // only). The legacy `branch` field above is the denormalized
+  // employees.branch_id column, which stays stale for multi-branch roles
+  // like DOCTOR — this list is the source of truth, with has_schedule
+  // flagging which assigned branches actually have an active schedule.
+  branches?: {
+    branch_id: string;
+    branch_name: string | null;
+    branch_area?: string | null;
+    has_schedule: boolean;
+  }[];
   photo?: string | null;
   employee_photo_URL?: string | null;
   employee_state?: string | null;
@@ -116,7 +127,14 @@ export interface EmployeeDetailResponse {
     parmanent_address?: string | null;
   };
   user: { role_type: string; user_status: number } | null;
-  branches: { branch_id: string; branch_name: string; status?: number }[];
+  branches: {
+    branch_id: string;
+    branch_name: string;
+    status?: number;
+    is_primary_branch?: boolean;
+    has_schedule?: boolean;
+    assigned_date?: string | null;
+  }[];
   doctorProfile?: {
     specialization: string | null;
     qualification: string | null;
@@ -281,8 +299,13 @@ export const employeeApi = {
   updateScheduleSlot: (employeeId: string, scheduleId: string | number, data: UpdateScheduleSlotPayload) =>
     API.put<AddScheduleSlotResponse>(`/employees/${employeeId}/schedules/${scheduleId}`, data),
 
+  // Soft-deletes the schedule row via the backend's
+  // DELETE /employees/:employeeId/:schedule_id endpoint, which flips
+  // doctor_schedule.is_active to false and stamps deleted_by with the
+  // acting user. Soft-deleted rows are excluded from every schedule query,
+  // so the slot disappears from all pages once refetched.
   removeScheduleSlot: (employeeId: string, scheduleId: string | number) =>
-    API.delete<{ success: boolean; message: string; data: { schedule_id: string; soft_closed: boolean } }>(
-      `/employees/${employeeId}/schedules/${scheduleId}`,
+    API.delete<{ success: boolean; message: string }>(
+      `/employees/${employeeId}/${scheduleId}`,
     ),
 };

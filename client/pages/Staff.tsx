@@ -10,7 +10,7 @@ import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
 
 import { useFilterPanel, useStaffFilters } from "@/components/Filter";
-import { ToolbarFilter } from "@/components/ui/toolbar-filter";
+import { ToolbarFilter, StatusToggle } from "@/components/ui/toolbar-filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
@@ -356,7 +356,7 @@ export default function Staff() {
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
 
   const handleAddStaff = () => {
-    navigate("/STAFF/add?role=staff");
+    navigate("/STAFF/add?role=STAFF");
   };
 
   // ---- ACTION HANDLERS (grid view's CardMenu -- list view's ActionIcons
@@ -746,23 +746,12 @@ export default function Staff() {
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
                 </div>
 
-                {/* Active / Deactivated Toggle */}
-                <div className="flex border border-[#E5E7EB] rounded-md overflow-hidden bg-[#F2F4F6] p-0.5">
-                  <button
-                    onClick={() => setShowDeactivated(false)}
-                    title="Show active staff"
-                    className={`px-2 py-1.5 rounded text-[11px] font-semibold ${!showDeactivated ? "bg-white shadow-sm text-[#00488D]" : "text-[#6B7280]"}`}
-                  >
-                    Active
-                  </button>
-                  <button
-                    onClick={() => setShowDeactivated(true)}
-                    title="Show deactivated staff"
-                    className={`px-2 py-1.5 rounded text-[11px] font-semibold ${showDeactivated ? "bg-white shadow-sm text-[#00488D]" : "text-[#6B7280]"}`}
-                  >
-                    Deactivated
-                  </button>
-                </div>
+                <StatusToggle
+  showDeactivated={showDeactivated}
+  onChange={setShowDeactivated}
+/>
+
+                {/* View Mode Toggle */}
 
                 {/* View Mode Toggle */}
                 <div className="flex border border-[#E5E7EB] rounded-md overflow-hidden bg-[#F2F4F6] p-0.5">

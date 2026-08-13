@@ -647,7 +647,7 @@ export default function AddAppointment() {
     setFormData((prev) => ({
       ...prev,
       doctorId: val,
-      departmentId: matchedDepartment?.department_id || selectedDoctor?.department_id || prev.departmentId,
+      departmentId: prev.departmentId ? prev.departmentId : (matchedDepartment?.department_id || selectedDoctor?.department_id),
       timeSlot: "",
     }));
 
@@ -667,14 +667,19 @@ export default function AddAppointment() {
         const nextBranchId =
           mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
           mappedBranches[0]?.branch_id ||
-          selectedDoctor?.branch_id ||
-          formData.branchId;
+          selectedDoctor?.branch_id;
 
-        if (!nextBranchId) return null;
+        setFormData((prev) => ({
+          ...prev,
+          branchId: prev.branchId ? prev.branchId : nextBranchId,
+        }));
 
-        setFormData((prev) => ({ ...prev, branchId: nextBranchId }));
+        // Use the effective branchId: user's existing branch if set, otherwise the doctor's mapped branch
+        const effectiveBranchId = formData.branchId || nextBranchId;
 
-        return findNearestAvailableDate(val, nextBranchId, formData.selectDate, maxSelectableDate);
+        if (!effectiveBranchId) return null;
+
+        return findNearestAvailableDate(val, effectiveBranchId, formData.selectDate, maxSelectableDate);
       })
       .then((date) => {
         if (date) {

@@ -369,11 +369,8 @@ export default function PatientRegistrationForm({
       { key: "patient_state", label: "State" },
       { key: "patient_district", label: "District" },
       { key: "patient_pincode", label: "Pincode" },
-      { key: "patient_permanent_address", label: "Permanent address" },
-      { key: "patient_permanent_area", label: "Permanent area" },
-      { key: "patient_permanent_state", label: "Permanent state" },
-      { key: "patient_permanent_district", label: "Permanent district" },
-      { key: "patient_permanent_pincode", label: "Permanent pincode" },
+      // Permanent-address fields are intentionally not on the form (the
+      // section is commented out) — do not require what cannot be filled in.
       { key: "patient_primary_mobile", label: "Primary mobile" },
       { key: "patient_emergency_name", label: "Emergency contact name" },
       { key: "patient_emergency_relation", label: "Emergency contact relation" },

@@ -14,6 +14,7 @@ import type { IState } from "country-state-city";
 import { employeeApi, CreateEmployeePayload, UpdateEmployeePayload, WorkingHourDto } from "@/api/employee.api";
 import { branchApi, Branch, AssignableUser } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
+import { qualificationApi, Qualification } from "@/api/qualification.api";
 import { getUser } from "@/utils/token";
 import { validateRequiredFields, type RequiredField } from "@/lib/validation";
 
@@ -81,6 +82,7 @@ function getCreatableRoles(callerRole: string): BackendRoleType[] {
 
 const OTHER_DEPARTMENT_VALUE = "__OTHER__";
 const ALL_DEPARTMENTS_VALUE = "__ALL__";
+const OTHER_QUALIFICATION_VALUE = "__OTHER_QUAL__";
 
 const DAYS_OF_WEEK: { value: WorkingHourDto["day_of_week"]; label: string }[] = [
   { value: "MONDAY", label: "Monday" },
@@ -264,6 +266,26 @@ const ROLE_CONFIG: Record<string, RoleConfig> = {
   },
 };
 
+// Qualification options for the selected role. Unlike specialization —
+// which is universal across employees — qualifications differ per role, so
+// only qualification-master rows whose designation matches the role are
+// offered. When the master table has no rows for that designation yet, fall
+// back to the role's original hardcoded list so the form stays usable.
+function getQualificationOptions(
+  roleConfig: RoleConfig | null,
+  displayRole: string,
+  master: Qualification[]
+): string[] {
+  const designation = displayRole.trim().toLowerCase();
+  const byDesignation = master.filter(
+    (q) => q.designation.trim().toLowerCase() === designation
+  );
+  if (byDesignation.length > 0) {
+    return byDesignation.map((q) => q.qualification_name);
+  }
+  return roleConfig?.qualifications ?? [];
+}
+
 interface EmployeeFormData {
   username: string;
   password: string;
@@ -407,9 +429,11 @@ export default function AddEmployee() {
   const [loading, setLoading] = useState(isEditMode);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [qualifications, setQualifications] = useState<Qualification[]>([]);
   const [assignableAdmins, setAssignableAdmins] = useState<AssignableUser[]>([]);
   const [confirmPassword, setConfirmPassword] = useState("");
   const [customDepartment, setCustomDepartment] = useState("");
+  const [customQualification, setCustomQualification] = useState("");
   const [formData, setFormData] = useState<EmployeeFormData>(emptyFormData);
   
   // Filter creatable roles based on caller's role
@@ -432,6 +456,12 @@ export default function AddEmployee() {
   // slot that already has appointment_history booked against it, so we must
   // avoid triggering that path unless the schedule actually changed.
   const initialScheduleRef = useRef<ScheduleEntry[] | null>(null);
+  // schedule_ids of existing (DB-backed) slots the admin removed in edit mode.
+  // They must be soft-deleted through the backend's schedule endpoint on save —
+  // the update path's delete-and-recreate skips rows still referenced by
+  // appointments/encounters, which would otherwise make a removed slot
+  // reappear on the pages.
+  const [removedScheduleIds, setRemovedScheduleIds] = useState<(string | number)[]>([]);
 
   // ── Edit-mode-only state ──────────────────────────────────────────────────
   const [isActive, setIsActive] = useState(true);
@@ -478,17 +508,17 @@ export default function AddEmployee() {
         );
         setRoleOptions(filteredRoles);
         const roleParam = searchParams.get("role");
-        if (roleParam) {
-          const display = toDisplayRole(roleParam as BackendRoleType);
-          if (filteredRoles.includes(display))
-            setFormData((p) => ({ ...p, roleType: roleParam as BackendRoleType }));
-        }
+        const normalizedRole = roleParam
+          ? (toBackendRole(roleParam) as BackendRoleType)
+          : null;
+        if (normalizedRole && filteredRoles.includes(toDisplayRole(normalizedRole)))
+          setFormData((p) => ({ ...p, roleType: normalizedRole }));
 
         setOriginalFormData({
           ...emptyFormData,
           roleType:
-            roleParam && filteredRoles.includes(toDisplayRole(roleParam as BackendRoleType))
-              ? (roleParam as BackendRoleType)
+            normalizedRole && filteredRoles.includes(toDisplayRole(normalizedRole))
+              ? normalizedRole
               : emptyFormData.roleType,
         });
       })
@@ -549,6 +579,15 @@ export default function AddEmployee() {
         if (res.data?.data) setDepartments(res.data.data);
         else if (Array.isArray(res.data))
           setDepartments(res.data as unknown as Department[]);
+      })
+      .catch(() => {});
+
+    qualificationApi
+      .getAll()
+      .then((res) => {
+        if (res.data?.data) setQualifications(res.data.data);
+        else if (Array.isArray(res.data))
+          setQualifications(res.data as unknown as Qualification[]);
       })
       .catch(() => {});
   }, []);
@@ -686,6 +725,7 @@ export default function AddEmployee() {
         }
 
         if (roleType === "DOCTOR") {
+          setRemovedScheduleIds([]);
           const dbSchedules: any[] = payload?.doctorSchedules || [];
           if (dbSchedules.length > 0) {
             const loadedSchedule = dbSchedules.map((s: any) => ({
@@ -791,6 +831,7 @@ export default function AddEmployee() {
     if (newRole !== "DOCTOR") {
       setSchedule([]);
       setConsultationMinutes("20");
+      setRemovedScheduleIds([]);
     }
   };
 
@@ -816,8 +857,19 @@ export default function AddEmployee() {
     ]);
   };
 
-  const removeSlot = (id: string) =>
+  // Removing a DB-backed slot (id "db-<schedule_id>") only drops it from the
+  // local form here; its schedule_id is remembered so saveEmployee can
+  // soft-delete it through the backend endpoint. Plain backend delete-and-
+  // recreate would leave it active whenever appointments reference it, making
+  // the removed slot reappear. Newly added slots need no tracking — they just
+  // aren't included in working_hours on submit.
+  const removeSlot = (id: string) => {
+    const dbMatch = id.match(/^db-(.+)$/);
+    if (dbMatch) {
+      setRemovedScheduleIds((p) => [...p, dbMatch[1]]);
+    }
     setSchedule((p) => p.filter((s) => s.id !== id));
+  };
 
   const updateSlot = (id: string, field: keyof ScheduleEntry, value: string) =>
     setSchedule((p) =>
@@ -855,6 +907,31 @@ export default function AddEmployee() {
         return;
       }
 
+      // "Others" qualification — create a new qualification-master row scoped
+      // to the selected role, then use its name in the employee payload.
+      let qualificationValue = formData.qualification || "";
+      if (qualificationValue.split(",").includes(OTHER_QUALIFICATION_VALUE)) {
+        if (!customQualification.trim()) {
+          toast({
+            title: "Missing qualification",
+            description: `Please type a new ${displayRole} qualification for "Others".`,
+            variant: "destructive",
+          });
+          return;
+        }
+        const created = await qualificationApi.create({
+          qualification_name: customQualification.trim(),
+          designation: displayRole,
+        });
+        setQualifications((p) => [...p, created.data.data]);
+        qualificationValue = [
+          ...qualificationValue
+            .split(",")
+            .filter((v) => v && v !== OTHER_QUALIFICATION_VALUE),
+          created.data.data.qualification_name,
+        ].join(",");
+      }
+
       const workingHours: WorkingHourDto[] = schedule.map((s) => ({
         branch_id: formData.branchIds.includes(s.branch_id)
           ? s.branch_id
@@ -872,6 +949,7 @@ export default function AddEmployee() {
           .join(";");
       const scheduleUnchanged =
         isEditMode &&
+        removedScheduleIds.length === 0 &&
         initialScheduleRef.current !== null &&
         scheduleSignature(schedule) === scheduleSignature(initialScheduleRef.current);
 
@@ -915,7 +993,7 @@ export default function AddEmployee() {
               ? customDepartment.trim() || undefined
               : departments.find((d) => d.department_id === departmentId)?.department_name || undefined
             : undefined,
-        qualification: formData.qualification || undefined,
+        qualification: qualificationValue || undefined,
         license_no: formData.docLicenseNo || undefined,
         doctor_bio: formData.doctorBio || undefined,
         joining_date: formData.joiningDate,
@@ -951,6 +1029,21 @@ export default function AddEmployee() {
         } as UpdateEmployeePayload);
 
         if (!response.data.success) throw new Error(response.data.message);
+
+        // Soft-delete every existing slot the admin removed from the schedule
+        // builder. The employee update's delete-and-recreate path keeps rows
+        // referenced by appointments/encounters active, so without this the
+        // removed slot would reappear. Best-effort: a row that was already
+        // hard-deleted by the update path just reports "Schedule not found",
+        // which is fine — it's gone either way.
+        if (removedScheduleIds.length > 0) {
+          await Promise.allSettled(
+            removedScheduleIds.map((scheduleId) =>
+              employeeApi.removeScheduleSlot(employeeId, scheduleId),
+            ),
+          );
+          setRemovedScheduleIds([]);
+        }
 
         setOriginalBranchId(formData.branchIds[0] ?? NONE_BRANCH_VALUE);
 
@@ -1115,6 +1208,18 @@ export default function AddEmployee() {
       return;
     }
 
+    if (
+      formData.qualification.split(",").includes(OTHER_QUALIFICATION_VALUE) &&
+      !customQualification.trim()
+    ) {
+      toast({
+        title: "Missing required field",
+        description: `Please type a new ${displayRole} qualification for "Others".`,
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (isEditMode && formData.roleType === "BRANCH_ADMIN") {
       const targetBranchId = formData.branchIds[0] ?? NONE_BRANCH_VALUE;
       const branchChanged = targetBranchId !== originalBranchId;
@@ -1195,9 +1300,11 @@ export default function AddEmployee() {
     setFormData(emptyFormData);
     setSameAsCurrent(false);
     setSchedule([]);
+    setRemovedScheduleIds([]);
     setConsultationMinutes("20");
     setConfirmPassword("");
     setCustomDepartment("");
+    setCustomQualification("");
   };
 
   const isDirty =
@@ -1857,14 +1964,29 @@ export default function AddEmployee() {
                     </label>
                     <MultiSelectDropdown
                       className={inputCls}
-                      options={roleConfig?.qualifications ?? []}
+                      options={[
+                        ...getQualificationOptions(roleConfig, displayRole, qualifications),
+                        { label: "Others", value: OTHER_QUALIFICATION_VALUE },
+                      ]}
                       value={formData.qualification ? formData.qualification.split(",").filter(Boolean) : []}
-                      onValueChange={(vals) =>
-                        setFormData((p) => ({ ...p, qualification: vals.join(",") }))
-                      }
+                      onValueChange={(vals) => {
+                        setFormData((p) => ({ ...p, qualification: vals.join(",") }));
+                        if (!vals.includes(OTHER_QUALIFICATION_VALUE)) setCustomQualification("");
+                      }}
                       placeholder="Select qualification(s)"
                       disabled={submitting || !roleConfig}
                     />
+                    {formData.qualification.split(",").includes(OTHER_QUALIFICATION_VALUE) && (
+                      <input
+                        type="text"
+                        placeholder={`Type a new ${displayRole} qualification`}
+                        maxLength={150}
+                        className={inputCls + " mt-2"}
+                        value={customQualification}
+                        onChange={(e) => setCustomQualification(e.target.value)}
+                        disabled={submitting}
+                      />
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>

@@ -145,8 +145,8 @@ export default function DoctorProfile() {
   const navigate = useNavigate();
   const { id } = useParams();
   const location = useLocation();
-  // Entering via /doctor/day-view/:id opens on the Day tab, /doctor/view/:id
-  // opens on Week -- both routes render this same merged page now, so the
+  // Entering via /doctor/day-view/:id opens on the Day tab, /doctor/view/:id/
+  // schedule opens on Week -- both routes render this same merged page, so the
   // entry URL just decides the initial tab instead of navigating to a
   // separate page.
   const [activeTab, setActiveTab] = useState(() =>
@@ -204,12 +204,15 @@ export default function DoctorProfile() {
   const doctorName = formatDoctorFullName(doctorEmployee);
   const doctorSpecialization = doctorDetail?.doctorProfile?.specialization || doctorEmployee?.specialization || "—";
   const doctorQualification = doctorDetail?.doctorProfile?.qualification || doctorEmployee?.qualification || "—";
-  const doctorBranchNames = (doctorDetail?.branches?.length
-    ? doctorDetail.branches.map((b) => b.branch_name)
+  // getEmployeeById returns every mapping this doctor ever had (status
+  // included) — only status 1 is a real, current assignment. Closed/historical
+  // mappings (status 0) must not show up here.
+  const activeBranches = (doctorDetail?.branches ?? []).filter((b) => b.status === 1);
+  const doctorBranchNames = activeBranches.length
+    ? activeBranches.map((b) => b.branch_name)
     : doctorEmployee?.branch?.branch_name
       ? [doctorEmployee.branch.branch_name]
-      : []
-  );
+      : [];
   const doctorIsAvailable = doctorEmployee?.emp_status === true || doctorDetail?.user?.user_status === 0;
   // Only a real photo URL from the backend is used -- no stock/fallback
   // image, so the avatar block simply doesn't render when the doctor has
@@ -227,7 +230,12 @@ export default function DoctorProfile() {
   const doctorGender = (doctorEmployee as any)?.gender || "—";
 
   useEffect(() => {
-    const branchId = doctorDetail?.branches?.[0]?.branch_id;
+    // Prefer an active assigned branch that actually has a schedule for
+    // the slots call — branches[0] is just the newest mapping, which may
+    // be a branch with no hours on it. Falls back to the newest mapping.
+    const mappedBranches = doctorDetail?.branches ?? [];
+    const scheduledBranch = mappedBranches.find((b) => b.status === 1 && b.has_schedule === true);
+    const branchId = scheduledBranch?.branch_id ?? mappedBranches[0]?.branch_id;
     if (!id || !branchId) return;
 
     setIsSlotsLoading(true);

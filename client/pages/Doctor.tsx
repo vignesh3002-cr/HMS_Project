@@ -15,7 +15,7 @@ import {
 import HmsTable from "@/components/hms/HmsTable";
  
 import { useFilterPanel, useDoctorFilters } from "@/components/Filter";
-import { ToolbarFilter } from "@/components/ui/toolbar-filter";
+import { ToolbarFilter, StatusToggle } from "@/components/ui/toolbar-filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
@@ -159,7 +159,26 @@ function formatBranch(branch: EmployeeRecord["branch"]): string {
   if (!branch?.branch_name) return "\u2014";
   return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
 }
- 
+
+function formatAssignedBranch(branch: NonNullable<EmployeeRecord["branches"]>[number]): string {
+  if (!branch?.branch_name) return "\u2014";
+  return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
+}
+
+// `branch` stays a single joined string of EVERY assigned branch (real
+// active mappings, not the stale employees.branch_id column), so the
+// search field and the Filter panel's branch multiselect — which both
+// match with includes() — keep working across all assignments at once.
+// The per-branch list is carried separately in `branches` for the grid.
+function formatAllBranches(
+  branches: EmployeeRecord["branches"],
+  fallback: EmployeeRecord["branch"],
+): string {
+  const list = branches ?? [];
+  if (list.length === 0) return formatBranch(fallback);
+  return list.map(formatAssignedBranch).join(", ");
+}
+
 function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
@@ -170,10 +189,16 @@ function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
     avatarColor: palette.avatarColor,
     initBg: palette.initBg,
     dept: emp.department_master?.department_name || emp.specialization || "Unassigned",
- 
+
     deptBg: "#E6E8EA",
     deptColor: "#475C7F",
-    branch: formatBranch(emp.branch),
+    branch: formatAllBranches(emp.branches, emp.branch),
+    branches: (emp.branches ?? []).map((b) => ({
+      branch_id: b.branch_id,
+      branch_name: b.branch_name ?? "",
+      branch_area: b.branch_area ?? null,
+      has_schedule: b.has_schedule,
+    })),
     status: (emp.emp_status === true || emp.user_table?.user_status === 0) ? "Active" : "Leave",
     qualification: emp.qualification || "—",
     mobile: emp.mobile_no || "—",
@@ -212,7 +237,7 @@ export default function Doctor() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
  
   const handleAddDoctor = () => {
-    navigate("/STAFF/add?role=Doctor");
+    navigate("/STAFF/add?role=DOCTOR");
   };
  
   const handleViewToggle = (mode: "list" | "grid") => {
@@ -369,7 +394,7 @@ export default function Doctor() {
 
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
-    let result: Record<string, string | number>[] = [...doctorRows];
+    let result: Record<string, any>[] = [...doctorRows];
 
     if (searchQuery) {
       result = result.filter((doctor) =>
@@ -448,7 +473,7 @@ export default function Doctor() {
     : filteredData;
  
   // ---- ACTION HANDLERS ----
-  const handleView = (id: number | string) => navigate(`/doctor/view/${id}`);
+  const handleView = (id: number | string) => navigate(`/doctor/view/${id}/schedule`);
   const handleEdit = (id: number | string) => navigate(`/doctor/edit/${id}`);
   const handleTransfer = (id: number | string) => navigate(`/doctor/transfer/${id}`);
 
@@ -567,37 +592,11 @@ export default function Doctor() {
                   </span>
                 </div>
               </div>
- 
               <div className="flex items-center gap-3 flex-wrap">
-                {/* Search Box */}
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Search..."
-                    value={searchQuery}
-                    onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-                    className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[250px]"
-                  />
-                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
-                </div>
- 
-                {/* Active / Deactivated Toggle */}
-                <div className="flex border border-[#E5E7EB] rounded-md overflow-hidden bg-[#F2F4F6] p-0.5">
-                  <button
-                    onClick={() => setShowDeactivated(false)}
-                    title="Show active doctors"
-                    className={`px-2 py-1.5 rounded text-[11px] font-semibold ${!showDeactivated ? "bg-white shadow-sm text-[#00488D]" : "text-[#6B7280]"}`}
-                  >
-                    Active
-                  </button>
-                  <button
-                    onClick={() => setShowDeactivated(true)}
-                    title="Show deactivated doctors"
-                    className={`px-2 py-1.5 rounded text-[11px] font-semibold ${showDeactivated ? "bg-white shadow-sm text-[#00488D]" : "text-[#6B7280]"}`}
-                  >
-                    Deactivated
-                  </button>
-                </div>
+                <StatusToggle
+                  showDeactivated={showDeactivated}
+                  onChange={setShowDeactivated}
+                />
 
                 {/* View Mode Toggle */}
                 <div className="flex border border-[#E5E7EB] rounded-md overflow-hidden bg-[#F2F4F6] p-0.5">
@@ -788,7 +787,25 @@ export default function Doctor() {
                             <span className="font-semibold">Status</span>{" : "}
                             <span className={doctor.status === "Active" ? "font-bold text-[#16A34A]" : "font-bold text-[#F97316]"}>{doctor.status}</span>
                           </p>
-                          <p className="hms-content-text text-[#191C1E] mt-1 truncate">{doctor.branch}</p>
+                          {doctor.branches?.length ? (
+                            <div className="mt-1.5 flex flex-wrap gap-1.5">
+                              {doctor.branches.map((b: { branch_id: string; branch_name: string; branch_area?: string | null; has_schedule: boolean }) => (
+                                <span
+                                  key={b.branch_id}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium"
+                                  style={{ backgroundColor: "#F0F4FA", color: "#00488D" }}
+                                  title={b.has_schedule ? "Schedule configured" : "No schedule"}
+                                >
+                                  {b.branch_name || "\u2014"}
+                                  <span className={b.has_schedule ? "text-[#16A34A]" : "text-[#F97316]"}>
+                                    · {b.has_schedule ? "Schedule configured" : "No schedule"}
+                                  </span>
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="hms-content-text text-[#191C1E] mt-1 truncate">{doctor.branch}</p>
+                          )}
                         </div>
                         <div className="absolute top-3 right-3">
                           <CardMenu onView={() => handleView(doctor.id)} onEdit={() => handleEdit(doctor.id)} onDelete={() => handleDelete(doctor.id)} onTransfer={() => handleTransfer(doctor.id)} onRestore={() => handleRestore(doctor.id)} deactivated={showDeactivated} />

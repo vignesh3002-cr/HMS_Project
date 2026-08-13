@@ -198,13 +198,20 @@ export default function TransferDoctor() {
     };
   }, [employee]);
 
-  // Doctor's currently assigned branches (from user_branch_mapping) - for From Branch dropdown
+  // Doctor's currently assigned branches (from user_branch_mapping, active
+  // status 1 only) — for the From Branch dropdown. "None" means the doctor
+  // is not leaving any branch: picking a To Branch then assigns them to a
+  // new branch instead of transferring between two existing ones.
   const fromBranchOptions = useMemo(
-    () =>
-      (employee?.branches ?? []).map((b) => ({
-        label: `${b.branch_name || b.branch_id}`,
-        value: b.branch_id,
-      })),
+    () => [
+      { label: "None (new assignment)", value: "" },
+      ...(employee?.branches ?? [])
+        .filter((b) => b.status === 1)
+        .map((b) => ({
+          label: `${b.branch_name || b.branch_id}`,
+          value: b.branch_id,
+        })),
+    ],
     [employee],
   );
 
@@ -282,10 +289,8 @@ export default function TransferDoctor() {
 
   const handleInitiate = async () => {
     if (!id) return;
-    if (!fromBranchId) {
-      toast({ title: "Select From Branch", variant: "destructive" });
-      return;
-    }
+    // From Branch is optional: "None" means this is a new branch assignment
+    // (no branch is being left). To Branch is always required.
     if (!toBranchId) {
       toast({ title: "Select To Branch", variant: "destructive" });
       return;
@@ -356,7 +361,9 @@ export default function TransferDoctor() {
       const allCompleted = newTransfer.result.status === "COMPLETED";
       toast({
         title: allCompleted ? "Transfer completed" : "Transfer request created",
-        description: `Transfer initiated for ${branchLabelOf(fromBranchId)} → ${branchLabelOf(toBranchId)}.`,
+        description: fromBranchId
+          ? `Transfer initiated for ${branchLabelOf(fromBranchId)} → ${branchLabelOf(toBranchId)}.`
+          : `Doctor assigned to ${branchLabelOf(toBranchId)}.`,
       });
     } catch (err: any) {
       toast({
@@ -628,7 +635,7 @@ export default function TransferDoctor() {
         {/* From Branch / To Branch */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className={labelCls}>From branch (current)</label>
+            <label className={labelCls}>From branch</label>
             <FormDropdown
               name="from-branch"
               className={inputCls}
@@ -638,6 +645,9 @@ export default function TransferDoctor() {
               placeholder="Select from branch"
               emptyMessage="No branches assigned to this doctor"
             />
+            <p className="text-[11px] text-[#94A3B8] mt-1">
+              None = assign the doctor to a new branch. Picking a branch = transfer from that branch.
+            </p>
           </div>
           <div>
             <label className={labelCls}>To branch</label>
@@ -647,9 +657,8 @@ export default function TransferDoctor() {
               options={toBranchOptions}
               value={toBranchId}
               onValueChange={handleToBranchChange}
-              disabled={!fromBranchId}
-              placeholder={fromBranchId ? "Select to branch" : "Select from branch first"}
-              emptyMessage="No other branches available"
+              placeholder="Select destination branch"
+              emptyMessage="No branches available"
             />
           </div>
         </div>
@@ -805,8 +814,14 @@ export default function TransferDoctor() {
               <div key={t.transferId} className="flex items-center gap-3 px-4 py-3">
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-[#191C1E] flex items-center gap-1.5 flex-wrap">
-                    <span>{branchLabelOf(t.fromBranchId)}</span>
-                    <ChevronRight className="h-3.5 w-3.5 text-[#94A3B8] shrink-0" />
+                    {t.fromBranchId ? (
+                      <>
+                        <span>{branchLabelOf(t.fromBranchId)}</span>
+                        <ChevronRight className="h-3.5 w-3.5 text-[#94A3B8] shrink-0" />
+                      </>
+                    ) : (
+                      <span className="text-[#94A3B8]">New assignment</span>
+                    )}
                     <span>{branchLabelOf(t.toBranchId)}</span>
                   </div>
                   <div className="text-xs text-[#64748B] mt-0.5">{t.effectiveDate}</div>
@@ -837,7 +852,11 @@ export default function TransferDoctor() {
           <DialogHeader>
             <DialogTitle>Transfer Details</DialogTitle>
             <DialogDescription className="text-xs">
-              {branchLabelOf(viewingTransfer?.fromBranchId)} → {branchLabelOf(viewingTransfer?.toBranchId)}
+              {viewingTransfer?.fromBranchId
+                ? branchLabelOf(viewingTransfer.fromBranchId)
+                : "New assignment"}
+              {" → "}
+              {branchLabelOf(viewingTransfer?.toBranchId)}
               {" · effective "}
               {viewingTransfer?.effectiveDate}
             </DialogDescription>
