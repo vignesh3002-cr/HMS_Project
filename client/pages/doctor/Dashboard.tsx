@@ -1,628 +1,706 @@
-import { useState, type ReactNode } from "react";
-import {
-  APPOINTMENTS,
-  AVAILABILITY,
-  FEEDBACK,
-  TREND_DATA,
-} from "../data/mockData";
-import type {
-  Appointment,
-  AvailabilitySlot,
-  FeedbackEntry,
-  TrendPoint,
-} from "../types";
+import React, { useEffect, useRef, useState } from "react";
 
-/* ---------- TopBar ---------- */
+type AppointmentStatus = "Check Out" | "Check In" | "Cancelled";
 
-interface TopBarProps {
-  doctorName: string;
-  doctorId: string;
-  rating: number;
-  reviewCount: number;
-  date: string;
+interface Appointment {
+  patient: string;
+  image: string;
+  dateTime: string;
+  phone: string;
+  status: AppointmentStatus;
 }
 
-function TopBar({
-  doctorName,
-  doctorId,
-  rating,
-  reviewCount,
-  date,
-}: TopBarProps) {
-  return (
-    <div className="flex items-start justify-between px-8 py-8">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900">
-          Welcome back, {doctorName}
-        </h2>
-
-        <div className="flex items-center gap-3 mt-2">
-          <span className="text-sm text-gray-500">{date}</span>
-
-          <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
-            {doctorId}
-          </span>
-
-          <span className="flex items-center gap-1 text-sm text-gray-700">
-            <span className="text-amber-400">★</span>
-            {rating.toFixed(1)}
-            <span className="text-gray-400">
-              ({reviewCount} reviews)
-            </span>
-          </span>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-4">
-        <button
-          aria-label="Notifications"
-          className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500"
-        >
-          <svg
-            className="w-5 h-5"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-          >
-            <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.7 21a2 2 0 01-3.4 0" />
-          </svg>
-        </button>
-
-        <span className="h-6 w-px bg-gray-200" />
-
-        <span className="flex items-center gap-2 text-sm text-gray-600">
-          <svg
-            className="w-4 h-4"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-          >
-            <rect x="3" y="4" width="18" height="17" rx="2" />
-            <path d="M3 9h18M8 2v4M16 2v4" />
-          </svg>
-          {date}
-        </span>
-      </div>
-    </div>
-  );
+interface AvailabilityItem {
+  day: string;
+  time?: string;
+  leave?: boolean;
 }
 
-/* ---------- StatCard ---------- */
+const appointments: Appointment[] = [
+  {
+    patient: "Alberto Ripley",
+    image:
+      "https://www.figma.com/api/mcp/asset/0174143d-d6a1-4d40-96d6-22a8b499a788.png",
+    dateTime: "27 May 2026 - 09:30 AM",
+    phone: "+1 56556 54565",
+    status: "Check Out",
+  },
+  {
+    patient: "Robert",
+    image:
+      "https://www.figma.com/api/mcp/asset/0174143d-d6a1-4d40-96d6-22a8b499a788.png",
+    dateTime: "27 May 2026 - 09:35 AM",
+    phone: "+1 565056 54565",
+    status: "Check Out",
+  },
+  {
+    patient: "Susan Babin",
+    image:
+      "https://www.figma.com/api/mcp/asset/ab38b57a-fa2d-4bec-9c05-76cd7828f028.png",
+    dateTime: "27 May 2026 - 10:15 AM",
+    phone: "+1 65658 95654",
+    status: "Check In",
+  },
+  {
+    patient: "Carol Lam",
+    image:
+      "https://www.figma.com/api/mcp/asset/045b41b8-d0ce-4adb-be51-0501943e83f5.png",
+    dateTime: "27 May 2026 - 12:40 PM",
+    phone: "+1 65658 56578",
+    status: "Cancelled",
+  },
+  {
+    patient: "Sharon",
+    image:
+      "https://www.figma.com/api/mcp/asset/045b41b8-d0ce-4adb-be51-0501943e83f5.png",
+    dateTime: "27 May 2026 - 02:40 PM",
+    phone: "+1 65758 56578",
+    status: "Cancelled",
+  },
+];
 
-interface StatCardProps {
-  label: string;
-  value: string;
-  iconBg: string;
-  icon: "calendar" | "patients" | "cancelled";
-  footer: ReactNode;
-}
+const availability: AvailabilityItem[] = [
+  { day: "Mon", time: "3:30 PM - 4:30 PM" },
+  { day: "Tue", time: "11:00 AM - 12:30 PM" },
+  { day: "Wed", time: "08:00 PM - 10:30 PM" },
+  { day: "Thu", time: "01:00 PM - 02:30 PM" },
+  { day: "Fri", time: "01:00 PM - 03:30 PM" },
+  { day: "Sat", time: "09:00 PM - 10:30 PM" },
+  { day: "Sun", leave: true },
+];
 
-function StatIcon({ icon }: { icon: StatCardProps["icon"] }) {
-  const common = "w-4 h-4";
+const chartData = [
+  { day: "Mon", completed: 153.59, rescheduled: 51.19 },
+  { day: "Tue", completed: 122.88, rescheduled: 81.91 },
+  { day: "Wed", completed: 184.31, rescheduled: 30.72 },
+  { day: "Thu", completed: 112.63, rescheduled: 92.16 },
+  { day: "Fri", completed: 174.06, rescheduled: 40.95 },
+  { day: "Sat", completed: 81.91, rescheduled: 20.47 },
+];
 
-  switch (icon) {
-    case "calendar":
-      return (
-        <svg
-          className={common}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <rect x="3" y="4" width="18" height="17" rx="2" />
-          <path d="M3 9h18M8 2v4M16 2v4" />
-        </svg>
-      );
+const periods = ["Last 7 Days", "Last 30 Days", "This Month", "This Year"];
 
-    case "patients":
-      return (
-        <svg
-          className={common}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <circle cx="9" cy="8" r="3" />
-          <path d="M2 20c0-3.3 2.7-6 7-6s7 2.7 7 6" />
-          <circle cx="17" cy="8" r="2.5" />
-          <path d="M15 20c0-2.4 1-4.3 3-5.2" />
-        </svg>
-      );
+const hospitals = [
+  "Central Hospital (Egmore)",
+  "City Hospital",
+  "Apollo Hospital",
+  "Government Hospital",
+];
 
-    case "cancelled":
-      return (
-        <svg
-          className={common}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <circle cx="12" cy="12" r="9" />
-          <path d="M9 9l6 6M15 9l-6 6" />
-        </svg>
-      );
-  }
-}
-
-function StatCard({
-  label,
-  value,
-  iconBg,
-  icon,
-  footer,
-}: StatCardProps) {
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-5 flex-1 min-w-[190px]">
-      <div className="flex items-start justify-between">
-        <p className="text-[11px] font-semibold tracking-wide text-gray-400">
-          {label}
-        </p>
-
-        <span
-          className={`w-8 h-8 rounded-lg flex items-center justify-center ${iconBg}`}
-        >
-          <StatIcon icon={icon} />
-        </span>
-      </div>
-
-      <p className="text-3xl font-bold text-gray-900 mt-2">
-        {value}
-      </p>
-
-      <div className="mt-3">{footer}</div>
-    </div>
-  );
-}
-
-/* ---------- AppointmentsTable ---------- */
-
-const STATUS_STYLES: Record<Appointment["status"], string> = {
-  "Check Out": "bg-emerald-50 text-emerald-600",
-  "Check In": "bg-amber-50 text-amber-600",
-  Cancelled: "bg-red-50 text-red-500",
-};
-
-interface AppointmentsTableProps {
-  appointments: Appointment[];
-  visibleCount?: number;
-  showAll: boolean;
-  onToggleShowAll: () => void;
-}
-
-function AppointmentsTable({
-  appointments,
-  visibleCount = 4,
-  showAll,
-  onToggleShowAll,
-}: AppointmentsTableProps) {
-  const visibleAppointments = showAll
-    ? appointments
-    : appointments.slice(0, visibleCount);
-
-  const hasMore = appointments.length > visibleCount;
-
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold text-gray-900">
-          Today's Appointments
-        </h3>
-
-        {hasMore && (
-          <button
-            onClick={onToggleShowAll}
-            className="text-sm font-medium text-blue-700 hover:underline text-right inline-block min-w-[68px]"
-          >
-            {showAll ? "View Less" : "View All"}
-          </button>
-        )}
-      </div>
-
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-xs text-gray-400">
-            <th className="font-medium pb-3">Patient</th>
-            <th className="font-medium pb-3">Date & Time</th>
-            <th className="font-medium pb-3">Phone</th>
-            <th className="font-medium pb-3">Status</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {visibleAppointments.map((appt) => (
-            <tr key={appt.id} className="border-t border-gray-50">
-              <td className="py-3">
-                <div className="flex items-center gap-3">
-                  <img
-                    src={appt.avatarUrl}
-                    alt={appt.patientName}
-                    className="w-8 h-8 rounded-full object-cover"
-                  />
-
-                  <span className="font-medium text-gray-800">
-                    {appt.patientName}
-                  </span>
-                </div>
-              </td>
-
-              <td className="py-3 text-gray-500">
-                {appt.dateTime}
-              </td>
-
-              <td className="py-3 text-gray-500">
-                {appt.phone}
-              </td>
-
-              <td className="py-3">
-                <span
-                  className={`text-xs font-medium px-3 py-1 rounded-full ${STATUS_STYLES[appt.status]}`}
-                >
-                  {appt.status}
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-/* ---------- AppointmentTrendsChart ---------- */
-
-const CHART_HEIGHT = 220;
-const BAR_WIDTH = 28;
-const BAR_GAP = 8;
-const GROUP_GAP = 46;
-const RADIUS = 6;
-
-function roundedTopBarPath(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  radius: number
-) {
-  const r = Math.min(radius, height, width / 2);
-
-  return `
-    M${x},${y + height}
-    L${x},${y + r}
-    Q${x},${y} ${x + r},${y}
-    L${x + width - r},${y}
-    Q${x + width},${y} ${x + width},${y + r}
-    L${x + width},${y + height}
-    Z
-  `;
-}
-
-function AppointmentTrendsChart({
-  data,
+function Icon({
+  name,
+  className = "h-5 w-5",
 }: {
-  data: TrendPoint[];
+  name:
+    | "bell"
+    | "calendar"
+    | "chevron"
+    | "clock"
+    | "users"
+    | "appointments"
+    | "cancel"
+    | "trend";
+  className?: string;
 }) {
-  const max = Math.max(
-    ...data.map((d) => Math.max(d.completed, d.rescheduled))
-  );
+  const common = {
+    className,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
 
-  const scale = (v: number) => (v / max) * CHART_HEIGHT;
-
-  const chartWidth =
-    data.length * (BAR_WIDTH * 2 + BAR_GAP + GROUP_GAP);
-
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h3 className="text-lg font-bold text-gray-900">
-            Appointment Trends
-          </h3>
-
-          <p className="text-sm text-gray-400 mt-0.5">
-            Weekly performance analysis
-          </p>
-        </div>
-
-        <div className="flex items-center gap-6">
-          <span className="flex items-center gap-2 text-sm text-gray-600">
-            <span className="w-3 h-3 rounded-full bg-blue-900" />
-            Completed
-          </span>
-
-          <span className="flex items-center gap-2 text-sm text-gray-600">
-            <span className="w-3 h-3 rounded-full bg-gray-300" />
-            Rescheduled
-          </span>
-
-          <div className="relative">
-            <select className="appearance-none text-sm bg-gray-50 border border-gray-100 rounded-lg pl-3 pr-8 py-2 text-gray-700 font-medium outline-none cursor-pointer">
-              <option>Last 7 Days</option>
-              <option>Last 30 Days</option>
-            </select>
-
-            <svg
-              className="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M6 9l6 6 6-6" />
-            </svg>
-          </div>
-        </div>
-      </div>
-
-      <svg
-        viewBox={`0 0 ${chartWidth} ${CHART_HEIGHT + 30}`}
-        className="w-full"
-        role="img"
-        aria-label="Bar chart of completed vs rescheduled appointments per day"
-      >
-        {data.map((d, i) => {
-          const groupX =
-            i * (BAR_WIDTH * 2 + BAR_GAP + GROUP_GAP);
-
-          const completedH = scale(d.completed);
-          const rescheduledH = scale(d.rescheduled);
-
-          return (
-            <g key={d.label}>
-              <path
-                d={roundedTopBarPath(
-                  groupX,
-                  CHART_HEIGHT - completedH,
-                  BAR_WIDTH,
-                  completedH,
-                  RADIUS
-                )}
-                fill="#1E3A8A"
-              />
-
-              <path
-                d={roundedTopBarPath(
-                  groupX + BAR_WIDTH + BAR_GAP,
-                  CHART_HEIGHT - rescheduledH,
-                  BAR_WIDTH,
-                  rescheduledH,
-                  RADIUS
-                )}
-                fill="#D1D5DB"
-              />
-
-              <text
-                x={groupX + BAR_WIDTH + BAR_GAP / 2}
-                y={CHART_HEIGHT + 24}
-                textAnchor="middle"
-                fontSize="14"
-                fontWeight={600}
-                fill="#111827"
-              >
-                {d.label}
-              </text>
-            </g>
-          );
-        })}
+  if (name === "bell") {
+    return (
+      <svg {...common}>
+        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
       </svg>
-    </div>
+    );
+  }
+
+  if (name === "calendar") {
+    return (
+      <svg {...common}>
+        <rect x="3" y="4" width="18" height="18" rx="2" />
+        <line x1="16" y1="2" x2="16" y2="6" />
+        <line x1="8" y1="2" x2="8" y2="6" />
+        <line x1="3" y1="10" x2="21" y2="10" />
+      </svg>
+    );
+  }
+
+  if (name === "clock") {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="9" />
+        <polyline points="12 7 12 12 15 14" />
+      </svg>
+    );
+  }
+
+  if (name === "users") {
+    return (
+      <svg {...common}>
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    );
+  }
+
+  if (name === "appointments") {
+    return (
+      <svg {...common}>
+        <rect x="3" y="4" width="18" height="18" rx="2" />
+        <line x1="16" y1="2" x2="16" y2="6" />
+        <line x1="8" y1="2" x2="8" y2="6" />
+        <line x1="3" y1="10" x2="21" y2="10" />
+      </svg>
+    );
+  }
+
+  if (name === "cancel") {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="9" />
+        <line x1="9" y1="9" x2="15" y2="15" />
+        <line x1="15" y1="9" x2="9" y2="15" />
+      </svg>
+    );
+  }
+
+  if (name === "trend") {
+    return (
+      <svg {...common}>
+        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+        <polyline points="17 6 23 6 23 12" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg {...common}>
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
   );
 }
 
-/* ---------- AvailabilityPanel ---------- */
+function statusClasses(status: AppointmentStatus) {
+  if (status === "Check Out") {
+    return "border border-green-200 bg-green-100 text-green-700";
+  }
 
-function AvailabilityPanel({
-  location,
-  slots,
-}: {
-  location: string;
-  slots: AvailabilitySlot[];
-}) {
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-5">
-      <div className="flex items-center justify-between mb-4 gap-3">
-        <h3 className="font-semibold text-gray-900 shrink-0">
-          Availability
-        </h3>
+  if (status === "Check In") {
+    return "border border-amber-200 bg-amber-100 text-amber-700";
+  }
 
-        <div className="relative w-full max-w-[220px]">
-          <select className="w-full appearance-none text-xs border border-gray-200 rounded-md pl-2.5 pr-7 py-2 text-gray-600 outline-none focus:ring-2 focus:ring-blue-100 whitespace-nowrap overflow-hidden text-ellipsis">
-            <option>{location}</option>
-          </select>
-
-          <svg
-            className="w-3.5 h-3.5 text-gray-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </div>
-      </div>
-
-      <ul className="space-y-3">
-        {slots.map((slot) => (
-          <li
-            key={slot.day}
-            className="flex items-center justify-between text-sm"
-          >
-            <span className="font-medium text-gray-700 w-10">
-              {slot.day}
-            </span>
-
-            {slot.time ? (
-              <span className="flex items-center gap-1.5 text-gray-500">
-                <svg
-                  className="w-3.5 h-3.5"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M12 7v5l3 3" />
-                </svg>
-
-                {slot.time}
-              </span>
-            ) : (
-              <span className="text-red-400 font-medium">
-                Leave
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-
-      <button className="w-full mt-5 bg-blue-50 text-blue-700 text-sm font-semibold rounded-lg py-2.5 hover:bg-blue-100 transition-colors">
-        Edit Availability
-      </button>
-    </div>
-  );
+  return "border border-red-200 bg-red-100 text-red-700";
 }
 
-/* ---------- PatientFeedback ---------- */
+export default function DoctorDashboard() {
+  const [periodOpen, setPeriodOpen] = useState(false);
+  const [hospitalOpen, setHospitalOpen] = useState(false);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [period, setPeriod] = useState("Last 7 Days");
+  const [hospital, setHospital] = useState("Central Hospital (Egmore)");
 
-function Stars({ rating }: { rating: number }) {
+  const periodRef = useRef<HTMLDivElement>(null);
+  const hospitalRef = useRef<HTMLDivElement>(null);
+  const notificationRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+
+      if (!periodRef.current?.contains(target)) setPeriodOpen(false);
+      if (!hospitalRef.current?.contains(target)) setHospitalOpen(false);
+      if (!notificationRef.current?.contains(target)) {
+        setNotificationOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPeriodOpen(false);
+        setHospitalOpen(false);
+        setNotificationOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
+
+  const displayHospital =
+    hospital === "Central Hospital (Egmore)" ? (
+      <>
+        Central Hospital
+        <br />
+        (Egmore)
+      </>
+    ) : (
+      hospital
+    );
+
   return (
-    <span className="text-amber-400 text-xs tracking-tight">
-      {"★".repeat(Math.round(rating))}
-      <span className="text-gray-200">
-        {"★".repeat(5 - Math.round(rating))}
-      </span>
-    </span>
-  );
-}
+    <main className="min-h-screen w-full bg-white font-['Inter',sans-serif] text-[#181c1e]">
+      <div className="mx-auto w-full max-w-[1120px] px-8 py-8 max-[1100px]:max-w-full max-[1100px]:px-6 max-[700px]:px-4 max-[700px]:py-5">
+        {/* Header */}
+        <header className="mb-8 flex items-center justify-between max-[700px]:items-start">
+          <div className="flex flex-col gap-2">
+            <h1 className="font-['Manrope',sans-serif] text-[28px] font-bold leading-[34px] tracking-[-0.56px] text-[#191c1e] max-[700px]:text-2xl max-[700px]:leading-8">
+              Welcome back, Dr. Jenkins
+            </h1>
 
-function PatientFeedback({
-  entries,
-}: {
-  entries: FeedbackEntry[];
-}) {
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-5">
-      <h3 className="font-semibold text-gray-900 mb-4">
-        Patient Feedback
-      </h3>
+            <div className="flex items-center gap-6 max-[700px]:flex-wrap max-[700px]:gap-2.5">
+              <div className="flex items-center gap-1">
+                <span className="font-['Manrope',sans-serif] text-xs font-bold uppercase leading-4 tracking-[0.6px] text-[#434654]">
+                  May 30, 2026
+                </span>
+                <span className="rounded bg-[#dae2ff] px-2 py-0.5 font-['Manrope',sans-serif] text-sm font-bold leading-5 tracking-[-0.14px] text-[#003d9b]">
+                  DOC-99283
+                </span>
+              </div>
 
-      <div className="space-y-4">
-        {entries.map((entry) => (
-          <div
-            key={entry.id}
-            className="pb-4 border-b border-gray-50 last:border-0 last:pb-0"
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-sm font-semibold text-gray-800">
-                {entry.name}
-              </span>
+              <div className="flex items-center gap-1">
+                <span className="text-[17px] leading-none text-yellow-500">★</span>
+                <span className="text-xs font-bold text-[#191c1e]">4.9</span>
+                <span className="text-[11px] font-medium text-[#434654]">
+                  (128 reviews)
+                </span>
+              </div>
+            </div>
+          </div>
 
-              <Stars rating={entry.rating} />
+          <div className="flex items-center gap-4 max-[700px]:hidden">
+            <div className="relative" ref={notificationRef}>
+              <button
+                type="button"
+                aria-label="Notifications"
+                onClick={() => setNotificationOpen((value) => !value)}
+                className="flex h-12 w-12 items-center justify-center rounded-xl text-[#434654] transition hover:bg-slate-100"
+              >
+                <Icon name="bell" />
+              </button>
+
+              {notificationOpen && (
+                <div className="absolute right-0 top-14 z-50 w-[300px] rounded-[10px] border border-slate-200 bg-white p-[18px] shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
+                  <h3 className="mb-3 text-base font-semibold">
+                    Notifications
+                  </h3>
+                  <div className="border-b border-slate-100 py-2.5 text-[13px] text-slate-600">
+                    You have 3 upcoming appointments today.
+                  </div>
+                  <div className="border-b border-slate-100 py-2.5 text-[13px] text-slate-600">
+                    Susan Babin checked in.
+                  </div>
+                  <div className="py-2.5 text-[13px] text-slate-600">
+                    Your weekly appointment report is ready.
+                  </div>
+                </div>
+              )}
             </div>
 
-            <p className="text-xs text-gray-500 leading-relaxed">
-              &ldquo;{entry.comment}&rdquo;
-            </p>
+            <div className="h-8 w-px bg-[#c3c6d6]" />
+
+            <div className="flex items-center gap-2 pl-2">
+              <span className="font-['Manrope',sans-serif] text-xs font-bold tracking-[0.6px] text-[#434654]">
+                March 24, 2026
+              </span>
+              <Icon name="calendar" className="h-5 w-5 text-[#434654]" />
+            </div>
           </div>
-        ))}
-      </div>
+        </header>
 
-      <button className="text-sm font-medium text-blue-700 hover:underline mt-2">
-        Read All Reviews
-      </button>
-    </div>
-  );
-}
-
-/* ---------- Dashboard page ---------- */
-
-export default function Dashboard() {
-  const [showAllAppointments, setShowAllAppointments] =
-    useState(false);
-
-  return (
-    <div className="space-y-6 space-x-8">
-      <TopBar
-        doctorName="Dr. Jenkins"
-        doctorId="DOC-99283"
-        rating={4.9}
-        reviewCount={128}
-        date="May 30, 2026"
-      />
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row gap-4">
-            <StatCard
-              label="TOTAL APPOINTMENTS"
-              value="42"
-              icon="calendar"
-              iconBg="bg-blue-50 text-blue-600"
-              footer={
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full w-4/5 bg-blue-700 rounded-full" />
+        <div className="grid grid-cols-[minmax(0,1fr)_336px] items-start gap-6 max-[900px]:grid-cols-1">
+          {/* Left column */}
+          <section className="min-w-0">
+            {/* Metrics */}
+            <div className="mb-[34px] grid h-[142px] grid-cols-3 gap-6 max-[700px]:h-auto max-[700px]:grid-cols-1">
+              <article className="flex min-w-0 flex-col justify-between rounded-xl border border-[#c3c6d6] bg-white p-[21px] shadow-[0_4px_6px_rgba(0,0,0,0.05)] max-[700px]:min-h-[142px]">
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs font-medium uppercase leading-4 tracking-[0.6px] text-[#434654]">
+                      Total
+                      <br />
+                      Appointments
+                    </div>
+                    <div className="text-2xl font-semibold leading-8 tracking-[-0.24px]">
+                      42
+                    </div>
                   </div>
 
-                  <span className="text-xs font-semibold text-emerald-500">
-                    +12%
-                  </span>
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#003d9b]/10 text-[#003d9b]">
+                    <Icon name="appointments" />
+                  </div>
                 </div>
-              }
-            />
 
-            <StatCard
-              label="TOTAL PATIENTS"
-              value="1,284"
-              icon="patients"
-              iconBg="bg-emerald-50 text-emerald-600"
-              footer={
-                <span className="text-xs font-semibold text-emerald-500 flex items-center gap-1">
-                  ↗ 84 new this month
-                </span>
-              }
-            />
+                <div className="pt-4">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-[5px] flex-1 items-end gap-0.5 overflow-hidden rounded-full">
+                      <span className="h-1 flex-1 rounded-[1px] bg-[#003d9b]" />
+                      <span className="h-[5px] flex-1 rounded-[1px] bg-[#003d9b]" />
+                      <span className="h-[6px] flex-1 rounded-[1px] bg-[#003d9b]" />
+                      <span className="h-[7px] flex-1 rounded-[1px] bg-[#003d9b]" />
+                      <span className="h-[6px] flex-1 rounded-[1px] bg-[#003d9b]" />
+                    </div>
+                    <span className="whitespace-nowrap text-xs font-bold text-[#003d9b]">
+                      +12%
+                    </span>
+                  </div>
+                </div>
+              </article>
 
-            <StatCard
-              label="CANCELLED"
-              value="35"
-              icon="cancelled"
-              iconBg="bg-red-50 text-red-500"
-              footer={
-                <span className="text-xs text-gray-400">
+              <article className="flex min-w-0 flex-col justify-between rounded-xl border border-[#c3c6d6] bg-white p-[21px] shadow-[0_4px_6px_rgba(0,0,0,0.05)] max-[700px]:min-h-[142px]">
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs font-medium uppercase leading-4 tracking-[0.6px] text-[#434654]">
+                      Total Patients
+                    </div>
+                    <div className="text-2xl font-semibold leading-8 tracking-[-0.24px]">
+                      1,284
+                    </div>
+                  </div>
+
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-green-500/10 text-green-600">
+                    <Icon name="users" />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-4 text-base leading-6 text-green-600">
+                  <Icon name="trend" className="h-3.5 w-3.5" />
+                  <span>84 new this month</span>
+                </div>
+              </article>
+
+              <article className="flex min-w-0 flex-col justify-between rounded-xl border border-[#c3c6d6] bg-white p-[21px] shadow-[0_4px_6px_rgba(0,0,0,0.05)] max-[700px]:min-h-[142px]">
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs font-medium uppercase leading-4 tracking-[0.6px] text-[#434654]">
+                      Cancelled
+                    </div>
+                    <div className="text-2xl font-semibold leading-8 tracking-[-0.24px]">
+                      35
+                    </div>
+                  </div>
+
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-600/10 text-red-700">
+                    <Icon name="cancel" />
+                  </div>
+                </div>
+
+                <div className="pt-4 text-xs font-medium leading-4 text-[#434654]">
                   12 slots remaining today
-                </span>
-              }
-            />
-          </div>
+                </div>
+              </article>
+            </div>
 
-          <AppointmentsTable
-            appointments={APPOINTMENTS}
-            visibleCount={4}
-            showAll={showAllAppointments}
-            onToggleShowAll={() =>
-              setShowAllAppointments((prev) => !prev)
-            }
-          />
+            {/* Appointments */}
+            <section className="mb-[29px] h-[293px] overflow-hidden rounded-lg border border-[#c3c6d6] bg-white max-[700px]:overflow-x-auto">
+              <div className="flex h-[54px] items-center justify-between border-b border-[#c3c6d6] px-4">
+                <h2 className="font-['Manrope',sans-serif] text-lg font-bold leading-6 text-[#191c1e]">
+                  Today's Appointments
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => alert("Opening all appointments...")}
+                  className="font-['Manrope',sans-serif] text-xs font-bold uppercase tracking-[0.6px] text-[#003d9b]"
+                >
+                  View All
+                </button>
+              </div>
 
-          <AppointmentTrendsChart data={TREND_DATA} />
-        </div>
+              <table className="w-full table-fixed border-collapse max-[700px]:min-w-[650px]">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="w-[31%] border-b border-slate-200 px-5 py-3 text-left font-['Manrope',sans-serif] text-xs font-bold leading-4 text-slate-500">
+                      Patient
+                    </th>
+                    <th className="w-[30%] border-b border-slate-200 px-5 py-3 text-center font-['Manrope',sans-serif] text-xs font-bold leading-4 text-slate-500">
+                      Date &amp; Time
+                    </th>
+                    <th className="w-[22%] border-b border-slate-200 px-5 py-3 text-center font-['Manrope',sans-serif] text-xs font-bold leading-4 text-slate-500">
+                      Phone
+                    </th>
+                    <th className="w-[17%] border-b border-slate-200 px-5 py-3 text-center font-['Manrope',sans-serif] text-xs font-bold leading-4 text-slate-500">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
 
-        <div className="space-y-6">
-          <AvailabilityPanel
-            location="Central Hospital (Tambaram)"
-            slots={AVAILABILITY}
-          />
+                <tbody>
+                  {appointments.map((appointment) => (
+                    <tr key={`${appointment.patient}-${appointment.dateTime}`}>
+                      <td className="h-[50px] overflow-hidden border-b border-slate-100 px-5 py-2 text-xs text-slate-600">
+                        <div className="flex items-center gap-3">
+                          <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-slate-100">
+                            <img
+                              src={appointment.image}
+                              alt={appointment.patient}
+                              className="h-full w-full object-cover"
+                            />
+                          </div>
+                          <span className="overflow-hidden text-ellipsis whitespace-nowrap font-['Manrope',sans-serif] text-xs font-bold text-slate-800">
+                            {appointment.patient}
+                          </span>
+                        </div>
+                      </td>
 
-          <PatientFeedback entries={FEEDBACK} />
+                      <td className="h-[50px] overflow-hidden text-ellipsis whitespace-nowrap border-b border-slate-100 px-5 py-2 text-center font-['Manrope',sans-serif] text-xs text-slate-600">
+                        {appointment.dateTime}
+                      </td>
+
+                      <td className="h-[50px] overflow-hidden text-ellipsis whitespace-nowrap border-b border-slate-100 px-5 py-2 text-center font-['Manrope',sans-serif] text-xs text-slate-600">
+                        {appointment.phone}
+                      </td>
+
+                      <td className="h-[50px] border-b border-slate-100 px-5 py-2 text-center">
+                        <span
+                          className={`inline-flex items-center justify-center rounded px-2 py-0.5 font-['Manrope',sans-serif] text-[10px] font-medium leading-5 ${statusClasses(
+                            appointment.status
+                          )}`}
+                        >
+                          {appointment.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+
+            {/* Trends */}
+            <section className="h-[370px] rounded-xl border border-[#c3c6d6] bg-white p-[25px] shadow-[0_4px_6px_rgba(0,0,0,0.05)]">
+              <div className="mb-6 flex items-center justify-between max-[700px]:flex-col max-[700px]:items-start max-[700px]:gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold leading-6 text-[#181c1e]">
+                    Appointment Trends
+                  </h2>
+                  <p className="text-xs font-medium leading-4 text-[#434654]">
+                    Weekly performance analysis
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-4 max-[700px]:w-full max-[700px]:justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full bg-[#003d9b]" />
+                    <span className="text-xs font-medium leading-4 text-[#181c1e]">
+                      Completed
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full bg-[#c3c6d6]" />
+                    <span className="text-xs font-medium leading-4 text-[#181c1e]">
+                      Rescheduled
+                    </span>
+                  </div>
+
+                  <div className="relative" ref={periodRef}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPeriodOpen((value) => !value);
+                        setHospitalOpen(false);
+                      }}
+                      className="flex h-7 min-w-[116px] items-center justify-between gap-[15px] rounded-md bg-[#ebeef1] px-3 text-xs font-medium text-[#181c1e]"
+                    >
+                      <span>{period}</span>
+                      <Icon
+                        name="chevron"
+                        className="h-4 w-4 text-slate-500"
+                      />
+                    </button>
+
+                    {periodOpen && (
+                      <div className="absolute right-0 top-[34px] z-30 w-[140px] overflow-hidden rounded-md border border-slate-200 bg-white shadow-[0_5px_15px_rgba(0,0,0,0.12)]">
+                        {periods.map((item) => (
+                          <button
+                            type="button"
+                            key={item}
+                            onClick={() => {
+                              setPeriod(item);
+                              setPeriodOpen(false);
+                            }}
+                            className="block w-full px-3 py-2.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                          >
+                            {item}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex h-[256px] items-end justify-center gap-6 px-4 max-[700px]:gap-2 max-[700px]:px-0">
+                {chartData.map((item) => (
+                  <div
+                    key={item.day}
+                    className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-2"
+                  >
+                    <div className="flex h-[208px] w-full items-end justify-center gap-1.5 pb-1">
+                      <div
+                        className="w-4 rounded-t-[2px] bg-[#003d9b]"
+                        style={{ height: `${item.completed}px` }}
+                      />
+                      <div
+                        className="w-4 rounded-t-[2px] bg-[#c3c6d6]"
+                        style={{ height: `${item.rescheduled}px` }}
+                      />
+                    </div>
+
+                    <span className="text-xs font-medium leading-4 text-[#434654]">
+                      {item.day}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </section>
+
+          {/* Right column */}
+          <aside className="min-w-0 max-[900px]:grid max-[900px]:grid-cols-2 max-[900px]:gap-6 max-[700px]:grid-cols-1">
+            {/* Availability */}
+            <section className="mb-6 overflow-hidden rounded border border-slate-200 bg-white shadow-[0_1px_1.5px_rgba(0,0,0,0.1),0_1px_1px_rgba(0,0,0,0.06)] max-[900px]:mb-0">
+              <div className="flex items-center justify-between gap-4 border-b border-slate-100 p-5">
+                <h2 className="text-lg font-bold leading-7 text-slate-900">
+                  Availability
+                </h2>
+
+                <div className="relative" ref={hospitalRef}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHospitalOpen((value) => !value);
+                      setPeriodOpen(false);
+                    }}
+                    className="relative min-h-[50px] min-w-[153px] rounded border border-slate-200 bg-white px-[13px] py-[5px] pr-[33px] text-left text-sm leading-5 text-slate-800"
+                  >
+                    {displayHospital}
+                    <Icon
+                      name="chevron"
+                      className="absolute right-2 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-500"
+                    />
+                  </button>
+
+                  {hospitalOpen && (
+                    <div className="absolute right-0 top-[55px] z-30 w-[180px] overflow-hidden rounded border border-slate-200 bg-white shadow-[0_5px_15px_rgba(0,0,0,0.12)]">
+                      {hospitals.map((item) => (
+                        <button
+                          type="button"
+                          key={item}
+                          onClick={() => {
+                            setHospital(item);
+                            setHospitalOpen(false);
+                          }}
+                          className="block w-full px-3 py-2.5 text-left text-[13px] text-slate-700 hover:bg-slate-50"
+                        >
+                          {item}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-5">
+                {availability.map((item) => (
+                  <div
+                    key={item.day}
+                    className="flex h-12 items-center justify-between border-b border-slate-50 last:border-0"
+                  >
+                    <span className="text-base font-semibold leading-6 text-slate-700">
+                      {item.day}
+                    </span>
+
+                    {item.leave ? (
+                      <span className="w-[148px] text-sm font-medium leading-5 text-red-500">
+                        Leave
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-2 text-sm leading-5 text-slate-500">
+                        <Icon name="clock" className="h-4 w-4" />
+                        {item.time}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-5">
+                <button
+                  type="button"
+                  onClick={() => alert("Opening availability editor...")}
+                  className="h-9 w-full rounded bg-slate-100 text-sm font-bold leading-5 text-[#0047ab] transition hover:bg-slate-200"
+                >
+                  Edit Availability
+                </button>
+              </div>
+            </section>
+
+            {/* Feedback */}
+            <section className="h-[370px] rounded-xl border border-[#c3c6d6] bg-white p-[25px] shadow-[0_4px_6px_rgba(0,0,0,0.05)]">
+              <h2 className="mb-4 text-lg font-semibold leading-6 text-[#181c1e]">
+                Patient Feedback
+              </h2>
+
+              <div className="flex flex-col gap-4">
+                <article className="flex flex-col gap-2 rounded-lg bg-[#f1f4f7] p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13px] font-semibold leading-[18px] tracking-[0.13px] text-[#181c1e]">
+                      Sarah J.
+                    </span>
+                    <div className="flex gap-px text-xs text-yellow-500">
+                      ★★★★★
+                    </div>
+                  </div>
+
+                  <p className="text-xs italic leading-[18px] text-[#434654]">
+                    "Dr. Smith was incredibly thorough and took the time to
+                    explain my results clearly."
+                  </p>
+                </article>
+
+                <article className="flex flex-col gap-2 rounded-lg bg-[#f1f4f7] p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13px] font-semibold leading-[18px] tracking-[0.13px] text-[#181c1e]">
+                      Michael R.
+                    </span>
+                    <div className="flex gap-px text-xs text-yellow-500">
+                      ★★★★☆
+                    </div>
+                  </div>
+
+                  <p className="text-xs italic leading-[18px] text-[#434654]">
+                    "Quick consultation, very professional staff. Highly
+                    recommend for cardio checkups."
+                  </p>
+                </article>
+
+                <div className="border-t border-[#c3c6d6] pb-2 pt-[9px] text-center">
+                  <button
+                    type="button"
+                    onClick={() => alert("Opening all patient reviews...")}
+                    className="text-xs font-medium leading-4 text-[#003d9b]"
+                  >
+                    Read All Reviews
+                  </button>
+                </div>
+              </div>
+            </section>
+          </aside>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
