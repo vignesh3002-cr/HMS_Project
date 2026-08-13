@@ -384,7 +384,7 @@ export default function EditAppointment() {
       setShowLeaveConfirm(true);
       return;
     }
-    navigate("/dashboard");
+    navigate(-1);
   };
 
   const handleCancelAppointment = () => {
@@ -761,7 +761,7 @@ export default function EditAppointment() {
         cancelText="Stay"
         onConfirm={() => {
           setShowLeaveConfirm(false);
-          navigate("/dashboard");
+          navigate(-1);
         }}
         onCancel={() => setShowLeaveConfirm(false)}
       />

@@ -142,10 +142,12 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
 
 
 function ActionMenu({
+  status,
   onView,
   onEdit,
   onCancel,
 }: {
+  status: string;
   onView: () => void;
   onEdit: () => void;
   onCancel: () => void;
@@ -166,6 +168,8 @@ function ActionMenu({
 
   if (!can("appointment.read") && !can("appointment.update") && !can("appointment.cancel")) return null;
 
+  const isCancelled = status.toLowerCase() === "cancelled";
+
   return (
     <div className="relative inline-block text-left" ref={wrapperRef}>
       <button
@@ -185,21 +189,21 @@ function ActionMenu({
           <button
             type="button"
             onClick={() => { setOpen(false); onView(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-green-400 hover:bg-[#F2F4F6]"
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
           >
             View Appointment
           </button>
         )}
-        {can("appointment.update") && (
+        {can("appointment.update") && !isCancelled && (
           <button
             type="button"
             onClick={() => { setOpen(false); onEdit(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-indigo-600 hover:bg-[#F2F4F6]"
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
           >
             Edit Appointment
           </button>
         )}
-        {can("appointment.cancel") && (
+        {can("appointment.cancel") && !isCancelled && (
           <button
             type="button"
             onClick={() => { setOpen(false); onCancel(); }}
@@ -658,6 +662,7 @@ const AppointmentSchedule: React.FC = () => {
                   )},
                   { key: "actions", label: "Action", sortable: false, className: "w-px !whitespace-normal !pl-3", headerClassName: "w-px !pl-3", render: (r: Appointment) => (
                     <ActionMenu
+                      status={r.status}
                       onView={() => navigate(`/appointments/view/${r.id}`)}
                       onEdit={() => navigate(`/appointments/edit/${r.id}`)}
                       onCancel={() => handleCancelAppointment(r)}

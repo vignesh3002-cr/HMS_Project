@@ -804,7 +804,7 @@ export default function AddBranch() {
       setShowLeaveConfirm(true);
       return;
     }
-    navigate("/dashboard");
+    navigate(-1);
   };
 
   const adminModeOptions = canReassignAdmin
@@ -1918,7 +1918,7 @@ export default function AddBranch() {
         cancelText="Stay"
         onConfirm={() => {
           setShowLeaveConfirm(false);
-          navigate("/dashboard");
+          navigate(-1);
         }}
         onCancel={() => setShowLeaveConfirm(false)}
       />
