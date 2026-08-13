@@ -1,28 +1,132 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { employeeApi, EmployeeRecord } from "@/api/employee.api";
-import { patientApi, PatientRecord } from "@/api/patient.api";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  employeeApi,
+  EmployeeRecord,
+} from "@/api/employee.api";
+import {
+  patientApi,
+  PatientRecord,
+} from "@/api/patient.api";
+import {
+  appointmentApi,
+} from "@/api/appointment.api";
 
-const DISMISSED_NOTIFICATIONS_KEY = "hms_dismissed_notifications";
+const DISMISSED_NOTIFICATIONS_KEY =
+  "hms_dismissed_notifications";
+
+const NOTIFICATION_SNAPSHOT_KEY =
+  "hms_notification_snapshot_v2";
+
+const POLLING_INTERVAL = 5000;
+
+/* -------------------------------------------------------------------------- */
+/* STORAGE                                                                    */
+/* -------------------------------------------------------------------------- */
 
 function loadDismissedIds(): Set<string> {
   try {
-    const raw = localStorage.getItem(DISMISSED_NOTIFICATIONS_KEY);
-    return raw ? new Set(JSON.parse(raw)) : new Set();
+    const raw = localStorage.getItem(
+      DISMISSED_NOTIFICATIONS_KEY
+    );
+
+    return raw
+      ? new Set<string>(JSON.parse(raw))
+      : new Set<string>();
   } catch {
-    return new Set();
+    return new Set<string>();
   }
 }
 
-function saveDismissedIds(ids: Set<string>) {
+function saveDismissedIds(
+  ids: Set<string>
+) {
   try {
-    localStorage.setItem(DISMISSED_NOTIFICATIONS_KEY, JSON.stringify(Array.from(ids)));
+    localStorage.setItem(
+      DISMISSED_NOTIFICATIONS_KEY,
+      JSON.stringify(Array.from(ids))
+    );
   } catch {
-    // localStorage unavailable (private browsing, quota, etc.) -- dismissals
-    // just won't survive a refresh in that case, no need to surface an error.
+    // Ignore localStorage errors.
   }
 }
 
-type NotificationRole = "doctor" | "staff" | "admin" | "patient";
+type StoredRecord = {
+  id: string;
+  fingerprint: string;
+  name: string;
+};
+
+type StoredSnapshot = {
+  employees: StoredRecord[];
+  patients: StoredRecord[];
+  appointments: StoredRecord[];
+};
+
+function loadSnapshot(): StoredSnapshot | null {
+  try {
+    const raw = localStorage.getItem(
+      NOTIFICATION_SNAPSHOT_KEY
+    );
+
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw);
+
+    return {
+      employees:
+        Array.isArray(parsed?.employees)
+          ? parsed.employees
+          : [],
+      patients:
+        Array.isArray(parsed?.patients)
+          ? parsed.patients
+          : [],
+      appointments:
+        Array.isArray(parsed?.appointments)
+          ? parsed.appointments
+          : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveSnapshot(
+  snapshot: StoredSnapshot
+) {
+  try {
+    localStorage.setItem(
+      NOTIFICATION_SNAPSHOT_KEY,
+      JSON.stringify(snapshot)
+    );
+  } catch {
+    // Ignore localStorage errors.
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* TYPES                                                                      */
+/* -------------------------------------------------------------------------- */
+
+type NotificationRole =
+  | "doctor"
+  | "staff"
+  | "admin"
+  | "patient"
+  | "appointment";
+
+type NotificationAction =
+  | "CREATE"
+  | "UPDATE"
+  | "DELETE";
 
 type NotificationItem = {
   id: string;
@@ -31,62 +135,225 @@ type NotificationItem = {
   time: string;
   createdAt: number;
   role: NotificationRole;
+  action?: NotificationAction;
   unread?: boolean;
 };
 
-const ROLE_TITLES: Record<NotificationRole, string> = {
+type GenericRecord = Record<
+  string,
+  any
+>;
+
+/* -------------------------------------------------------------------------- */
+/* TITLES                                                                     */
+/* -------------------------------------------------------------------------- */
+
+const ROLE_TITLES: Record<
+  NotificationRole,
+  string
+> = {
   doctor: "New Doctor Added",
   staff: "New Staff Added",
   admin: "New Admin Added",
   patient: "New Patient Registered",
+  appointment:
+    "New Appointment Created",
 };
 
-function roleTypeToNotificationRole(roleType?: string | null): NotificationRole {
-  const normalized = (roleType || "").toUpperCase();
-  if (normalized === "DOCTOR") return "doctor";
-  if (normalized === "BRANCH_ADMIN" || normalized === "ADMIN") return "admin";
+/* -------------------------------------------------------------------------- */
+/* ROLE                                                                     */
+/* -------------------------------------------------------------------------- */
+
+function roleTypeToNotificationRole(
+  roleType?: string | null
+): NotificationRole {
+  const normalized = (
+    roleType || ""
+  )
+    .toUpperCase()
+    .replace(/[\s-]/g, "_");
+
+  if (normalized === "DOCTOR") {
+    return "doctor";
+  }
+
+  if (
+    normalized === "BRANCH_ADMIN" ||
+    normalized === "ADMIN" ||
+    normalized === "ADMINISTRATOR"
+  ) {
+    return "admin";
+  }
+
   return "staff";
 }
 
-function formatEmployeeName(e: EmployeeRecord) {
-  return [e.first_name, e.middle_name, e.last_name].filter(Boolean).join(" ");
-}
+/* -------------------------------------------------------------------------- */
+/* NAME HELPERS                                                               */
+/* -------------------------------------------------------------------------- */
 
-function formatPatientName(p: PatientRecord) {
-  return [p.patient_first_name, p.patient_middle_name, p.patient_last_name]
+function formatEmployeeName(
+  e: EmployeeRecord
+) {
+  return [
+    e.first_name,
+    e.middle_name,
+    e.last_name,
+  ]
     .filter(Boolean)
     .join(" ");
 }
 
+function formatPatientName(
+  p: PatientRecord
+) {
+  return [
+    p.patient_first_name,
+    p.patient_middle_name,
+    p.patient_last_name,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function getGenericName(
+  item: GenericRecord,
+  fallback: string
+) {
+  const directName =
+    item.name ||
+    item.full_name ||
+    item.fullName ||
+    item.patient_name ||
+    item.patientName ||
+    item.doctor_name ||
+    item.doctorName ||
+    item.appointment_name ||
+    item.appointmentName;
+
+  if (directName) {
+    return String(directName);
+  }
+
+  const first =
+    item.first_name ||
+    item.firstName ||
+    item.patient_first_name ||
+    item.patientFirstName ||
+    "";
+
+  const middle =
+    item.middle_name ||
+    item.middleName ||
+    item.patient_middle_name ||
+    item.patientMiddleName ||
+    "";
+
+  const last =
+    item.last_name ||
+    item.lastName ||
+    item.patient_last_name ||
+    item.patientLastName ||
+    "";
+
+  const name = [
+    first,
+    middle,
+    last,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return name || fallback;
+}
+
+/* -------------------------------------------------------------------------- */
+/* TIME                                                                       */
+/* -------------------------------------------------------------------------- */
+
 function timeAgo(timestamp: number) {
-  const diffMs = Date.now() - timestamp;
-  const diffSec = Math.max(0, Math.floor(diffMs / 1000));
-  if (diffSec < 60) return "Just now";
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
+  const diffMs =
+    Date.now() - timestamp;
+
+  const diffSec = Math.max(
+    0,
+    Math.floor(diffMs / 1000)
+  );
+
+  if (diffSec < 60) {
+    return "Just now";
+  }
+
+  const diffMin =
+    Math.floor(diffSec / 60);
+
+  if (diffMin < 60) {
+    return `${diffMin}m ago`;
+  }
+
+  const diffHr =
+    Math.floor(diffMin / 60);
+
+  if (diffHr < 24) {
+    return `${diffHr}h ago`;
+  }
+
+  const diffDay =
+    Math.floor(diffHr / 24);
+
   return `${diffDay}d ago`;
 }
 
-function isSameDay(a: Date, b: Date) {
+/* -------------------------------------------------------------------------- */
+/* DATE                                                                       */
+/* -------------------------------------------------------------------------- */
+
+function isSameDay(
+  a: Date,
+  b: Date
+) {
   return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
+    a.getFullYear() ===
+      b.getFullYear() &&
+    a.getMonth() ===
+      b.getMonth() &&
+    a.getDate() ===
+      b.getDate()
   );
 }
 
-const Icon = ({ role }: { role: NotificationRole }) => {
+/* -------------------------------------------------------------------------- */
+/* ICONS                                                                      */
+/* -------------------------------------------------------------------------- */
+
+const Icon = ({
+  role,
+}: {
+  role: NotificationRole;
+}) => {
   if (role === "doctor") {
     return (
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#dde1ff] text-[#003ec7]">
-        <svg viewBox="0 0 24 24" className="h-6 w-6 fill-none stroke-current" strokeWidth="1.8">
-          <path d="M9 3v4a3 3 0 0 0 6 0V3" />
-          <path d="M6 5v4a6 6 0 0 0 12 0V5" />
-          <path d="M12 15v4" />
-          <circle cx="12" cy="21" r="1.5" />
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e9efff]">
+        <svg
+          viewBox="0 0 24 24"
+          className="h-5 w-5 text-[#003ec7]"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+        >
+          <path
+            d="M15 20a6 6 0 0 0-12 0"
+            strokeLinecap="round"
+          />
+          <circle
+            cx="9"
+            cy="7"
+            r="4"
+          />
+          <path
+            d="M19 8v6M16 11h6"
+            strokeLinecap="round"
+          />
         </svg>
       </div>
     );
@@ -94,10 +361,23 @@ const Icon = ({ role }: { role: NotificationRole }) => {
 
   if (role === "admin") {
     return (
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#ffdad6] text-[#93000a]">
-        <svg viewBox="0 0 24 24" className="h-6 w-6 fill-none stroke-current" strokeWidth="1.8">
-          <path d="M12 3 5 6v5c0 4.5 2.9 8.2 7 10 4.1-1.8 7-5.5 7-10V6l-7-3Z" />
-          <path d="m9.5 12 1.7 1.7 3.6-3.8" />
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#fff0e7]">
+        <svg
+          viewBox="0 0 24 24"
+          className="h-5 w-5 text-[#d65f00]"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+        >
+          <path
+            d="M12 3l7 3v5c0 4.5-2.9 7.8-7 10-4.1-2.2-7-5.5-7-10V6l7-3Z"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M9.5 12l1.7 1.7 3.5-3.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       </div>
     );
@@ -105,208 +385,1446 @@ const Icon = ({ role }: { role: NotificationRole }) => {
 
   if (role === "patient") {
     return (
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#eaedff] text-[#434656]">
-        <svg viewBox="0 0 24 24" className="h-6 w-6 fill-none stroke-current" strokeWidth="1.8">
-          <circle cx="12" cy="8" r="3.5" />
-          <path d="M5 20c1-4 4-6 7-6s6 2 7 6" />
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e9f8f1]">
+        <svg
+          viewBox="0 0 24 24"
+          className="h-5 w-5 text-[#138a52]"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+        >
+          <circle
+            cx="9"
+            cy="8"
+            r="3.5"
+          />
+          <path
+            d="M3 20a6 6 0 0 1 12 0"
+            strokeLinecap="round"
+          />
+          <path
+            d="M17 11v6M14 14h6"
+            strokeLinecap="round"
+          />
+        </svg>
+      </div>
+    );
+  }
+
+  if (role === "appointment") {
+    return (
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f0eaff]">
+        <svg
+          viewBox="0 0 24 24"
+          className="h-5 w-5 text-[#7046c9]"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+        >
+          <rect
+            x="3"
+            y="5"
+            width="18"
+            height="16"
+            rx="2"
+          />
+          <path
+            d="M16 3v4M8 3v4M3 10h18"
+            strokeLinecap="round"
+          />
+          <path
+            d="M8 14h3M8 17h5"
+            strokeLinecap="round"
+          />
         </svg>
       </div>
     );
   }
 
   return (
-    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#dae2fd] text-[#003ec7]">
-      <svg viewBox="0 0 24 24" className="h-6 w-6 fill-none stroke-current" strokeWidth="1.8">
-        <rect x="4" y="5" width="16" height="15" rx="2" />
-        <path d="M8 3v4M16 3v4M4 9h16M8 13h3M8 16h5" />
+    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#eef1f9]">
+      <svg
+        viewBox="0 0 24 24"
+        className="h-5 w-5 text-[#434656]"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      >
+        <circle
+          cx="9"
+          cy="8"
+          r="3.5"
+        />
+        <path
+          d="M3 20a6 6 0 0 1 12 0"
+          strokeLinecap="round"
+        />
+        <path
+          d="M17 8h4M19 6v4"
+          strokeLinecap="round"
+        />
       </svg>
     </div>
   );
 };
 
-export default function Notifications() {
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [readIds, setReadIds] = useState<Set<string>>(new Set());
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const dismissedIdsRef = useRef<Set<string>>(loadDismissedIds());
+/* -------------------------------------------------------------------------- */
+/* GENERIC API RESPONSE                                                       */
+/* -------------------------------------------------------------------------- */
 
-  const fetchNotifications = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const [employeesRes, patientsRes] = await Promise.allSettled([
-        employeeApi.getAll({ limit: 20 }),
-        patientApi.getAll({ limit: 20 }),
-      ]);
+function extractArray(
+  response: any,
+  possibleKeys: string[]
+): GenericRecord[] {
+  if (Array.isArray(response)) {
+    return response;
+  }
 
-      const items: NotificationItem[] = [];
+  const candidates = [
+    response?.data,
+    response?.data?.data,
+    response?.data?.data?.data,
+    response,
+  ];
 
-      if (employeesRes.status === "fulfilled") {
-        const employees = employeesRes.value.data?.data?.employees || [];
-        employees.forEach((e) => {
-          const role = roleTypeToNotificationRole(e.user_table?.role_type);
-          const createdAtStr = e.user_table?.created_at;
-          const createdAt = createdAtStr ? new Date(createdAtStr).getTime() : Date.now();
-          items.push({
-            id: `employee-${e.employee_id}`,
-            title: ROLE_TITLES[role],
-            message: `${formatEmployeeName(e)} was added as ${
-              role === "doctor" ? "a doctor" : role === "admin" ? "an admin" : "staff"
-            }.`,
-            time: createdAtStr ? timeAgo(createdAt) : "",
-            createdAt,
-            role,
-          });
-        });
-      }
-
-      if (patientsRes.status === "fulfilled") {
-        const patients = patientsRes.value.data?.data?.patients || [];
-        patients.forEach((p) => {
-          const createdAtStr = p.user_table?.created_at;
-          const createdAt = createdAtStr ? new Date(createdAtStr).getTime() : Date.now();
-          items.push({
-            id: `patient-${p.patient_id}`,
-            title: ROLE_TITLES.patient,
-            message: `${formatPatientName(p)} was registered as a patient.`,
-            time: createdAtStr ? timeAgo(createdAt) : "",
-            createdAt,
-            role: "patient",
-          });
-        });
-      }
-
-      items.sort((a, b) => b.createdAt - a.createdAt);
-      setNotifications(items.filter((item) => !dismissedIdsRef.current.has(item.id)));
-
-      if (employeesRes.status === "rejected" && patientsRes.status === "rejected") {
-        setError("Couldn't load notifications from the server.");
-      }
-    } finally {
-      setIsLoading(false);
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
     }
-  }, []);
+
+    if (
+      candidate &&
+      typeof candidate === "object"
+    ) {
+      for (const key of possibleKeys) {
+        if (
+          Array.isArray(candidate[key])
+        ) {
+          return candidate[key];
+        }
+      }
+    }
+  }
+
+  return [];
+}
+
+/* -------------------------------------------------------------------------- */
+/* RECORD ID                                                                  */
+/* -------------------------------------------------------------------------- */
+
+function getRecordId(
+  item: GenericRecord,
+  type: string,
+  index: number
+): string {
+  const possibleIds = [
+    item.id,
+    item.employee_id,
+    item.employeeId,
+    item.patient_id,
+    item.patientId,
+    item.appointment_id,
+    item.appointmentId,
+    item.user_id,
+    item.userId,
+    item.doctor_id,
+    item.doctorId,
+    item.staff_id,
+    item.staffId,
+    item.admin_id,
+    item.adminId,
+  ];
+
+  const found = possibleIds.find(
+    (value) =>
+      value !== undefined &&
+      value !== null &&
+      value !== ""
+  );
+
+  if (found !== undefined) {
+    return String(found);
+  }
+
+  return `${type}-${index}`;
+}
+
+/* -------------------------------------------------------------------------- */
+/* FINGERPRINT                                                                */
+/* -------------------------------------------------------------------------- */
+
+function createFingerprint(
+  item: GenericRecord
+): string {
+  /*
+   * Remove fields that naturally change between
+   * requests and should not trigger "Updated".
+   */
+  const ignoredKeys = new Set([
+    "updated_at",
+    "updatedAt",
+    "last_updated",
+    "lastUpdated",
+    "created_at",
+    "createdAt",
+  ]);
+
+  const clean: GenericRecord = {};
+
+  Object.keys(item)
+    .sort()
+    .forEach((key) => {
+      if (!ignoredKeys.has(key)) {
+        const value = item[key];
+
+        if (
+          value !== undefined &&
+          typeof value !== "function"
+        ) {
+          clean[key] = value;
+        }
+      }
+    });
+
+  try {
+    return JSON.stringify(clean);
+  } catch {
+    return String(item);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* EMPLOYEE SNAPSHOT                                                          */
+/* -------------------------------------------------------------------------- */
+
+function buildEmployeeSnapshot(
+  employees: EmployeeRecord[]
+): StoredRecord[] {
+  return employees.map(
+    (employee, index) => {
+      const id = getRecordId(
+        employee as any,
+        "employee",
+        index
+      );
+
+      const role =
+        roleTypeToNotificationRole(
+          employee.user_table?.role_type
+        );
+
+      const name =
+        formatEmployeeName(
+          employee
+        ) ||
+        (role === "doctor"
+          ? "Doctor"
+          : role === "admin"
+          ? "Admin"
+          : "Staff");
+
+      return {
+        id,
+        fingerprint: createFingerprint(
+          employee as any
+        ),
+        name,
+      };
+    }
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* PATIENT SNAPSHOT                                                           */
+/* -------------------------------------------------------------------------- */
+
+function buildPatientSnapshot(
+  patients: PatientRecord[]
+): StoredRecord[] {
+  return patients.map(
+    (patient, index) => {
+      const id = getRecordId(
+        patient as any,
+        "patient",
+        index
+      );
+
+      const name =
+        formatPatientName(
+          patient
+        ) || "Patient";
+
+      return {
+        id,
+        fingerprint: createFingerprint(
+          patient as any
+        ),
+        name,
+      };
+    }
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* APPOINTMENT SNAPSHOT                                                       */
+/* -------------------------------------------------------------------------- */
+
+function buildAppointmentSnapshot(
+  appointments: GenericRecord[]
+): StoredRecord[] {
+  return appointments.map(
+    (appointment, index) => {
+      const id = getRecordId(
+        appointment,
+        "appointment",
+        index
+      );
+
+      const name =
+        getGenericName(
+          appointment,
+          `Appointment #${id}`
+        );
+
+      return {
+        id,
+        fingerprint:
+          createFingerprint(
+            appointment
+          ),
+        name,
+      };
+    }
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* EMPLOYEE ROLE                                                              */
+/* -------------------------------------------------------------------------- */
+
+function getEmployeeRole(
+  employee: GenericRecord
+): NotificationRole {
+  return roleTypeToNotificationRole(
+    employee?.user_table?.role_type ||
+      employee?.role_type ||
+      employee?.roleType ||
+      employee?.role
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* CREATE NOTIFICATION                                                        */
+/* -------------------------------------------------------------------------- */
+
+function createNotification(
+  role: NotificationRole,
+  action: NotificationAction,
+  name: string,
+  recordId: string
+): NotificationItem {
+  let title = "";
+  let message = "";
+
+  if (action === "CREATE") {
+    if (role === "doctor") {
+      title = "New Doctor Added";
+      message = `${name} was added as a doctor.`;
+    } else if (role === "admin") {
+      title = "New Admin Added";
+      message = `${name} was added as an admin.`;
+    } else if (role === "staff") {
+      title = "New Staff Added";
+      message = `${name} was added as staff.`;
+    } else if (role === "patient") {
+      title = "New Patient Registered";
+      message = `${name} was registered as a patient.`;
+    } else {
+      title = "New Appointment Created";
+      message = `${name} was created.`;
+    }
+  }
+
+  if (action === "UPDATE") {
+    if (role === "doctor") {
+      title = "Doctor Updated";
+    } else if (role === "admin") {
+      title = "Admin Updated";
+    } else if (role === "staff") {
+      title = "Staff Updated";
+    } else if (role === "patient") {
+      title = "Patient Updated";
+    } else {
+      title = "Appointment Updated";
+    }
+
+    message = `${name} was updated.`;
+  }
+
+  if (action === "DELETE") {
+    if (role === "doctor") {
+      title = "Doctor Deleted";
+    } else if (role === "admin") {
+      title = "Admin Deleted";
+    } else if (role === "staff") {
+      title = "Staff Deleted";
+    } else if (role === "patient") {
+      title = "Patient Deleted";
+    } else {
+      title = "Appointment Deleted";
+    }
+
+    message = `${name} was deleted.`;
+  }
+
+  const createdAt =
+    Date.now();
+
+  return {
+    id: `event-${role}-${action}-${recordId}-${createdAt}`,
+    title,
+    message,
+    time: "Just now",
+    createdAt,
+    role,
+    action,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* COMPONENT                                                                  */
+/* -------------------------------------------------------------------------- */
+
+export default function Notifications() {
+  const [
+    notifications,
+    setNotifications,
+  ] = useState<NotificationItem[]>(
+    []
+  );
+
+  const [
+    readIds,
+    setReadIds,
+  ] = useState<Set<string>>(
+    new Set()
+  );
+
+  const [
+    isLoading,
+    setIsLoading,
+  ] = useState(true);
+
+  const [
+    error,
+    setError,
+  ] = useState<string | null>(
+    null
+  );
+
+  const dismissedIdsRef =
+    useRef<Set<string>>(
+      loadDismissedIds()
+    );
+
+  const previousSnapshotRef =
+    useRef<StoredSnapshot | null>(
+      loadSnapshot()
+    );
+
+  /* ------------------------------------------------------------------------ */
+  /* FETCH APPOINTMENTS                                                       */
+  /* ------------------------------------------------------------------------ */
+
+  const fetchAppointments =
+    useCallback(async (): Promise<
+      GenericRecord[]
+    > => {
+      try {
+        const pageSize = 100;
+        const sortBy = "created_at";
+        const sortOrder = "desc";
+
+        const firstPage =
+          await appointmentApi.getAll({
+            limit: pageSize,
+            page: 1,
+            sortBy,
+            sortOrder,
+          });
+
+        const total =
+          firstPage.data?.data
+            ?.total || 0;
+
+        const totalPages = Math.ceil(
+          total / pageSize
+        );
+
+        let all = extractArray(
+          firstPage,
+          [
+            "appointments",
+            "appointment",
+            "data",
+            "results",
+          ]
+        );
+
+        for (
+          let page = 2;
+          page <= totalPages &&
+          all.length < 2000;
+          page++
+        ) {
+          const response =
+            await appointmentApi.getAll({
+              limit: pageSize,
+              page,
+              sortBy,
+              sortOrder,
+            });
+
+          all = all.concat(
+            extractArray(
+              response,
+              [
+                "appointments",
+                "appointment",
+                "data",
+                "results",
+              ]
+            )
+          );
+        }
+
+        return all;
+      } catch {
+        /*
+         * Appointment API failure should NOT
+         * break employee/patient notifications.
+         */
+        return [];
+      }
+    }, []);
+
+  /* ------------------------------------------------------------------------ */
+  /* MAIN FETCH                                                               */
+  /* ------------------------------------------------------------------------ */
+
+  const fetchNotifications =
+    useCallback(async () => {
+      setError(null);
+
+      try {
+        const [
+          employeesRes,
+          patientsRes,
+          appointments,
+        ] =
+          await Promise.all([
+            employeeApi.getAll({
+              limit: 1000,
+            }),
+
+            patientApi.getAll({
+              limit: 1000,
+            }),
+
+            fetchAppointments(),
+          ]);
+
+        /* ---------------------------------------------------------------- */
+        /* GET CURRENT DATA                                                  */
+        /* ---------------------------------------------------------------- */
+
+        const employees =
+          employeesRes.data?.data
+            ?.employees || [];
+
+        const patients =
+          patientsRes.data?.data
+            ?.patients || [];
+
+        /* ---------------------------------------------------------------- */
+        /* BUILD CURRENT SNAPSHOT                                            */
+        /* ---------------------------------------------------------------- */
+
+        const currentSnapshot: StoredSnapshot =
+          {
+            employees:
+              buildEmployeeSnapshot(
+                employees
+              ),
+
+            patients:
+              buildPatientSnapshot(
+                patients
+              ),
+
+            appointments:
+              buildAppointmentSnapshot(
+                appointments
+              ),
+          };
+
+        const previousSnapshot =
+          previousSnapshotRef.current;
+
+        /* ---------------------------------------------------------------- */
+        /* FIRST LOAD                                                        */
+        /* ---------------------------------------------------------------- */
+
+        if (!previousSnapshot) {
+          /*
+           * Keep your existing behavior:
+           * records with created_at from backend
+           * are displayed as created notifications.
+           */
+
+          const initialItems: NotificationItem[] =
+            [];
+
+          employees.forEach(
+            (employee: EmployeeRecord) => {
+              const role =
+                roleTypeToNotificationRole(
+                  employee
+                    .user_table
+                    ?.role_type
+                );
+
+              const createdAtStr =
+                employee
+                  .user_table
+                  ?.created_at;
+
+              if (!createdAtStr) {
+                return;
+              }
+
+              const createdAt =
+                new Date(
+                  createdAtStr
+                ).getTime();
+
+              if (
+                Number.isNaN(createdAt)
+              ) {
+                return;
+              }
+
+              const name =
+                formatEmployeeName(
+                  employee
+                ) || "Employee";
+
+              initialItems.push({
+                id: `employee-${employee.employee_id}-created`,
+                title:
+                  ROLE_TITLES[
+                    role
+                  ],
+                message:
+                  `${name} was added as ${
+                    role === "doctor"
+                      ? "a doctor"
+                      : role ===
+                        "admin"
+                      ? "an admin"
+                      : "staff"
+                  }.`,
+                time:
+                  timeAgo(
+                    createdAt
+                  ),
+                createdAt,
+                role,
+                action:
+                  "CREATE",
+              });
+            }
+          );
+
+          patients.forEach(
+            (patient: PatientRecord) => {
+              const createdAtStr =
+                patient
+                  .user_table
+                  ?.created_at;
+
+              if (!createdAtStr) {
+                return;
+              }
+
+              const createdAt =
+                new Date(
+                  createdAtStr
+                ).getTime();
+
+              if (
+                Number.isNaN(createdAt)
+              ) {
+                return;
+              }
+
+              const name =
+                formatPatientName(
+                  patient
+                ) || "Patient";
+
+              initialItems.push({
+                id: `patient-${patient.patient_id}-created`,
+                title:
+                  "New Patient Registered",
+                message:
+                  `${name} was registered as a patient.`,
+                time:
+                  timeAgo(
+                    createdAt
+                  ),
+                createdAt,
+                role: "patient",
+                action:
+                  "CREATE",
+              });
+            }
+          );
+
+          initialItems.sort(
+            (a, b) =>
+              b.createdAt -
+              a.createdAt
+          );
+
+          const filtered =
+            initialItems.filter(
+              (item) =>
+                !dismissedIdsRef.current.has(
+                  item.id
+                )
+            );
+
+          setNotifications(
+            filtered
+          );
+
+          previousSnapshotRef.current =
+            currentSnapshot;
+
+          saveSnapshot(
+            currentSnapshot
+          );
+
+          setIsLoading(false);
+
+          return;
+        }
+
+        /* ---------------------------------------------------------------- */
+        /* DETECT CHANGES                                                   */
+        /* ---------------------------------------------------------------- */
+
+        const newEvents: NotificationItem[] =
+          [];
+
+        /* ---------------------------------------------------------------- */
+        /* EMPLOYEE CREATE / UPDATE / DELETE                               */
+        /* ---------------------------------------------------------------- */
+
+        const previousEmployees =
+          previousSnapshot.employees;
+
+        const currentEmployees =
+          currentSnapshot.employees;
+
+        const currentEmployeeMap =
+          new Map(
+            currentEmployees.map(
+              (item) => [
+                item.id,
+                item,
+              ]
+            )
+          );
+
+        const previousEmployeeMap =
+          new Map(
+            previousEmployees.map(
+              (item) => [
+                item.id,
+                item,
+              ]
+            )
+          );
+
+        /*
+         * CREATED / UPDATED
+         */
+
+        currentEmployees.forEach(
+          (current) => {
+            const previous =
+              previousEmployeeMap.get(
+                current.id
+              );
+
+            /*
+             * New employee
+             */
+            if (!previous) {
+              /*
+               * Need actual role.
+               * Find employee from API.
+               */
+              const employee =
+                employees.find(
+                  (
+                    e: EmployeeRecord,
+                    index: number
+                  ) =>
+                    getRecordId(
+                      e as any,
+                      "employee",
+                      index
+                    ) ===
+                    current.id
+                );
+
+              const role =
+                employee
+                  ? getEmployeeRole(
+                      employee as any
+                    )
+                  : "staff";
+
+              newEvents.push(
+                createNotification(
+                  role,
+                  "CREATE",
+                  current.name,
+                  current.id
+                )
+              );
+
+              return;
+            }
+
+            /*
+             * Existing employee changed
+             */
+            if (
+              previous.fingerprint !==
+              current.fingerprint
+            ) {
+              const employee =
+                employees.find(
+                  (
+                    e: EmployeeRecord,
+                    index: number
+                  ) =>
+                    getRecordId(
+                      e as any,
+                      "employee",
+                      index
+                    ) ===
+                    current.id
+                );
+
+              const role =
+                employee
+                  ? getEmployeeRole(
+                      employee as any
+                    )
+                  : "staff";
+
+              newEvents.push(
+                createNotification(
+                  role,
+                  "UPDATE",
+                  current.name,
+                  current.id
+                )
+              );
+            }
+          }
+        );
+
+        /*
+         * DELETED EMPLOYEES
+         */
+
+        previousEmployees.forEach(
+          (previous) => {
+            if (
+              !currentEmployeeMap.has(
+                previous.id
+              )
+            ) {
+              /*
+               * We cannot get role from the
+               * current backend record because
+               * it has already been deleted.
+               *
+               * Try to preserve role in the
+               * stored fingerprint if available.
+               */
+              let role:
+                | NotificationRole
+                | null = null;
+
+              try {
+                const parsed =
+                  JSON.parse(
+                    previous.fingerprint
+                  );
+
+                role =
+                  roleTypeToNotificationRole(
+                    parsed
+                      ?.user_table
+                      ?.role_type ||
+                      parsed
+                        ?.role_type ||
+                      parsed?.role
+                  );
+              } catch {
+                // fallback below
+              }
+
+              if (
+                !role ||
+                role ===
+                  "appointment" ||
+                role ===
+                  "patient"
+              ) {
+                role = "staff";
+              }
+
+              newEvents.push(
+                createNotification(
+                  role,
+                  "DELETE",
+                  previous.name,
+                  previous.id
+                )
+              );
+            }
+          }
+        );
+
+        /* ---------------------------------------------------------------- */
+        /* PATIENT CREATE / UPDATE / DELETE                                */
+        /* ---------------------------------------------------------------- */
+
+        const previousPatients =
+          previousSnapshot.patients;
+
+        const currentPatients =
+          currentSnapshot.patients;
+
+        const currentPatientMap =
+          new Map(
+            currentPatients.map(
+              (item) => [
+                item.id,
+                item,
+              ]
+            )
+          );
+
+        const previousPatientMap =
+          new Map(
+            previousPatients.map(
+              (item) => [
+                item.id,
+                item,
+              ]
+            )
+          );
+
+        currentPatients.forEach(
+          (current) => {
+            const previous =
+              previousPatientMap.get(
+                current.id
+              );
+
+            if (!previous) {
+              newEvents.push(
+                createNotification(
+                  "patient",
+                  "CREATE",
+                  current.name,
+                  current.id
+                )
+              );
+
+              return;
+            }
+
+            if (
+              previous.fingerprint !==
+              current.fingerprint
+            ) {
+              newEvents.push(
+                createNotification(
+                  "patient",
+                  "UPDATE",
+                  current.name,
+                  current.id
+                )
+              );
+            }
+          }
+        );
+
+        previousPatients.forEach(
+          (previous) => {
+            if (
+              !currentPatientMap.has(
+                previous.id
+              )
+            ) {
+              newEvents.push(
+                createNotification(
+                  "patient",
+                  "DELETE",
+                  previous.name,
+                  previous.id
+                )
+              );
+            }
+          }
+        );
+
+        /* ---------------------------------------------------------------- */
+        /* APPOINTMENT CREATE / UPDATE / DELETE                            */
+        /* ---------------------------------------------------------------- */
+
+        const previousAppointments =
+          previousSnapshot.appointments;
+
+        const currentAppointments =
+          currentSnapshot.appointments;
+
+        const currentAppointmentMap =
+          new Map(
+            currentAppointments.map(
+              (item) => [
+                item.id,
+                item,
+              ]
+            )
+          );
+
+        const previousAppointmentMap =
+          new Map(
+            previousAppointments.map(
+              (item) => [
+                item.id,
+                item,
+              ]
+            )
+          );
+
+        currentAppointments.forEach(
+          (current) => {
+            const previous =
+              previousAppointmentMap.get(
+                current.id
+              );
+
+            if (!previous) {
+              newEvents.push(
+                createNotification(
+                  "appointment",
+                  "CREATE",
+                  current.name,
+                  current.id
+                )
+              );
+
+              return;
+            }
+
+            if (
+              previous.fingerprint !==
+              current.fingerprint
+            ) {
+              newEvents.push(
+                createNotification(
+                  "appointment",
+                  "UPDATE",
+                  current.name,
+                  current.id
+                )
+              );
+            }
+          }
+        );
+
+        previousAppointments.forEach(
+          (previous) => {
+            if (
+              !currentAppointmentMap.has(
+                previous.id
+              )
+            ) {
+              newEvents.push(
+                createNotification(
+                  "appointment",
+                  "DELETE",
+                  previous.name,
+                  previous.id
+                )
+              );
+            }
+          }
+        );
+
+        /* ---------------------------------------------------------------- */
+        /* SAVE NEW SNAPSHOT                                                */
+        /* ---------------------------------------------------------------- */
+
+        previousSnapshotRef.current =
+          currentSnapshot;
+
+        saveSnapshot(
+          currentSnapshot
+        );
+
+        /* ---------------------------------------------------------------- */
+        /* ADD NEW EVENTS TO EXISTING LIST                                  */
+        /* ---------------------------------------------------------------- */
+
+        if (
+          newEvents.length > 0
+        ) {
+          setNotifications(
+            (existing) => {
+              const combined = [
+                ...newEvents,
+                ...existing,
+              ];
+
+              const unique =
+                Array.from(
+                  new Map(
+                    combined.map(
+                      (item) => [
+                        item.id,
+                        item,
+                      ]
+                    )
+                  ).values()
+                );
+
+              unique.sort(
+                (a, b) =>
+                  b.createdAt -
+                  a.createdAt
+              );
+
+              return unique.filter(
+                (item) =>
+                  !dismissedIdsRef.current.has(
+                    item.id
+                  )
+              );
+            }
+          );
+        }
+
+        setIsLoading(false);
+      } catch (err) {
+        console.error(
+          "Notification fetch error:",
+          err
+        );
+
+        setError(
+          "Couldn't load notifications from the server."
+        );
+
+        setIsLoading(false);
+      }
+    }, [fetchAppointments]);
+
+  /* ------------------------------------------------------------------------ */
+  /* FIRST FETCH                                                              */
+  /* ------------------------------------------------------------------------ */
 
   useEffect(() => {
     fetchNotifications();
   }, [fetchNotifications]);
 
-  const markAllAsRead = () => {
-    setReadIds(new Set(notifications.map((n) => n.id)));
-  };
+  /* ------------------------------------------------------------------------ */
+  /* AUTOMATIC REFRESH                                                        */
+  /* ------------------------------------------------------------------------ */
 
-  const removeNotification = (id: string) => {
-    dismissedIdsRef.current.add(id);
-    saveDismissedIds(dismissedIdsRef.current);
+  useEffect(() => {
+    const interval =
+      window.setInterval(() => {
+        fetchNotifications();
+      }, POLLING_INTERVAL);
 
-    setNotifications((items) => items.filter((item) => item.id !== id));
-    setReadIds((ids) => {
-      const next = new Set(ids);
-      next.delete(id);
-      return next;
-    });
-  };
+    return () => {
+      window.clearInterval(
+        interval
+      );
+    };
+  }, [fetchNotifications]);
 
-  const clearAll = () => {
-    notifications.forEach((item) => dismissedIdsRef.current.add(item.id));
-    saveDismissedIds(dismissedIdsRef.current);
+  /* ------------------------------------------------------------------------ */
+  /* MARK ALL READ                                                            */
+  /* ------------------------------------------------------------------------ */
+
+  const markAllAsRead =
+    useCallback(() => {
+      setReadIds(
+        new Set(
+          notifications.map(
+            (notification) =>
+              notification.id
+          )
+        )
+      );
+    }, [notifications]);
+
+  /* ------------------------------------------------------------------------ */
+  /* REMOVE                                                                   */
+  /* ------------------------------------------------------------------------ */
+
+  const removeNotification = useCallback(
+    (id: string) => {
+      dismissedIdsRef.current.add(
+        id
+      );
+
+      saveDismissedIds(
+        dismissedIdsRef.current
+      );
+
+      setNotifications(
+        (items) =>
+          items.filter(
+            (item) =>
+              item.id !== id
+          )
+      );
+
+      setReadIds((ids) => {
+        const next =
+          new Set(ids);
+
+        next.delete(id);
+
+        return next;
+      });
+    },
+    []
+  );
+
+  /* ------------------------------------------------------------------------ */
+  /* CLEAR ALL                                                                */
+  /* ------------------------------------------------------------------------ */
+
+  const clearAll = useCallback(() => {
+    notifications.forEach(
+      (item) => {
+        dismissedIdsRef.current.add(
+          item.id
+        );
+      }
+    );
+
+    saveDismissedIds(
+      dismissedIdsRef.current
+    );
 
     setNotifications([]);
+
     setReadIds(new Set());
-  };
-
-  const { todayItems, yesterdayItems, earlierItems } = useMemo(() => {
-    const now = new Date();
-    const yesterday = new Date(now);
-    yesterday.setDate(now.getDate() - 1);
-
-    const today: NotificationItem[] = [];
-    const yest: NotificationItem[] = [];
-    const earlier: NotificationItem[] = [];
-
-    notifications.forEach((item) => {
-      const d = new Date(item.createdAt);
-      if (isSameDay(d, now)) today.push(item);
-      else if (isSameDay(d, yesterday)) yest.push(item);
-      else earlier.push(item);
-    });
-
-    return { todayItems: today, yesterdayItems: yest, earlierItems: earlier };
   }, [notifications]);
 
-  const renderNotification = (item: NotificationItem) => {
-    const unread = !readIds.has(item.id);
-    return (
-      <article
-        key={item.id}
-        className={[
-          "relative flex items-start gap-4 overflow-hidden rounded-xl bg-white p-4",
-          "shadow-[0_2px_8px_rgba(0,62,199,0.06)]",
-          unread ? "" : "opacity-80",
-        ].join(" ")}
-      >
-        {unread && <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#003ec7]" />}
+  /* ------------------------------------------------------------------------ */
+  /* GROUP                                                                    */
+  /* ------------------------------------------------------------------------ */
 
-        <Icon role={item.role} />
+  const {
+    todayItems,
+    yesterdayItems,
+    earlierItems,
+  } = useMemo(() => {
+    const now = new Date();
 
-        <div className="min-w-0 flex-1">
-          <div className="mb-1 flex items-start justify-between gap-3">
-            <h3 className="truncate text-xs font-semibold tracking-[0.02em] text-[#131b2e]">
-              {item.title}
-            </h3>
+    const yesterday =
+      new Date(now);
 
-            <div className="flex shrink-0 items-center gap-2">
-              <span
-                className={[
-                  "text-[11px] font-medium leading-[14px]",
-                  unread ? "text-[#003ec7]" : "text-[#434656]",
-                ].join(" ")}
-              >
-                {item.time}
-              </span>
-
-              {unread && (
-                <span
-                  aria-label="Unread indicator"
-                  className="h-2 w-2 rounded-full bg-[#003ec7]"
-                />
-              )}
-
-              <button
-                type="button"
-                onClick={() => removeNotification(item.id)}
-                aria-label="Delete notification"
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
-              >
-                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-none stroke-current" strokeWidth="2">
-                  <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          <p className="text-[13px] font-normal leading-[18px] text-[#434656]">
-            {item.message}
-          </p>
-        </div>
-      </article>
+    yesterday.setDate(
+      now.getDate() - 1
     );
-  };
 
-  const hasAny = todayItems.length > 0 || yesterdayItems.length > 0 || earlierItems.length > 0;
+    const today: NotificationItem[] =
+      [];
+
+    const yesterdayList: NotificationItem[] =
+      [];
+
+    const earlier: NotificationItem[] =
+      [];
+
+    notifications.forEach(
+      (item) => {
+        const date =
+          new Date(
+            item.createdAt
+          );
+
+        if (
+          isSameDay(
+            date,
+            now
+          )
+        ) {
+          today.push(item);
+        } else if (
+          isSameDay(
+            date,
+            yesterday
+          )
+        ) {
+          yesterdayList.push(
+            item
+          );
+        } else {
+          earlier.push(item);
+        }
+      }
+    );
+
+    return {
+      todayItems: today,
+      yesterdayItems:
+        yesterdayList,
+      earlierItems: earlier,
+    };
+  }, [notifications]);
+
+  /* ------------------------------------------------------------------------ */
+  /* RENDER                                                                   */
+  /* ------------------------------------------------------------------------ */
+
+  const renderNotification =
+    useCallback(
+      (
+        item: NotificationItem
+      ) => {
+        const unread =
+          !readIds.has(
+            item.id
+          );
+
+        return (
+          <article
+            key={item.id}
+            className="relative flex gap-3 rounded-lg px-2 py-3 transition-colors"
+          >
+            {unread && (
+              <span className="absolute left-0 top-5 h-2 w-2 rounded-full bg-[#003ec7]" />
+            )}
+
+            <Icon
+              role={item.role}
+            />
+
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 flex items-start justify-between gap-3">
+                <h3 className="truncate text-xs font-semibold tracking-[0.02em] text-[#131b2e]">
+                  {item.title}
+                </h3>
+
+                <div className="flex shrink-0 items-center gap-2">
+                  <span
+                    className={[
+                      "text-[11px] font-medium leading-[14px]",
+                      unread
+                        ? "text-[#003ec7]"
+                        : "text-[#434656]",
+                    ].join(" ")}
+                  >
+                    {item.time}
+                  </span>
+
+                  {unread && (
+                    <span
+                      aria-label="Unread indicator"
+                      className="h-2 w-2 rounded-full bg-[#003ec7]"
+                    />
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      removeNotification(
+                        item.id
+                      )
+                    }
+                    aria-label="Delete notification"
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-3.5 w-3.5 fill-none stroke-current"
+                      strokeWidth="2"
+                    >
+                      <path
+                        d="M6 6l12 12M18 6L6 18"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-[13px] font-normal leading-[18px] text-[#434656]">
+                {item.message}
+              </p>
+            </div>
+          </article>
+        );
+      },
+      [
+        readIds,
+        removeNotification,
+      ]
+    );
+
+  const hasAny =
+    todayItems.length > 0 ||
+    yesterdayItems.length > 0 ||
+    earlierItems.length > 0;
+
+  /* ------------------------------------------------------------------------ */
+  /* UI                                                                       */
+  /* ------------------------------------------------------------------------ */
 
   return (
-    <div className="flex w-full flex-col font-['Inter',sans-serif] text-[#131b2e] antialiased">
-      <header className="flex items-center justify-between px-4 py-3 border-b border-[#E5E7EB]">
-        <h1 className="font-['Hanken_Grotesk',sans-serif] text-sm font-semibold leading-6 text-[#131b2e]">
+    <div className="w-full overflow-hidden rounded-xl bg-white">
+      <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
+        <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">
           Notifications
         </h1>
 
         <div className="flex shrink-0 items-center gap-3">
           <button
             type="button"
-            onClick={markAllAsRead}
+            onClick={
+              markAllAsRead
+            }
             className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
           >
             Mark all as read
@@ -314,8 +1832,13 @@ export default function Notifications() {
 
           <button
             type="button"
-            onClick={clearAll}
-            disabled={notifications.length === 0}
+            onClick={
+              clearAll
+            }
+            disabled={
+              notifications.length ===
+              0
+            }
             className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40"
           >
             Clear all
@@ -325,53 +1848,89 @@ export default function Notifications() {
 
       <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
         {isLoading && (
-          <p className="text-center text-xs text-[#434656]">Loading notifications...</p>
+          <p className="text-center text-xs text-[#434656]">
+            Loading notifications...
+          </p>
         )}
 
-        {!isLoading && error && (
-          <p className="text-center text-xs text-[#93000a]">{error}</p>
-        )}
+        {!isLoading &&
+          error && (
+            <p className="text-center text-xs text-[#93000a]">
+              {error}
+            </p>
+          )}
 
-        {!isLoading && !error && !hasAny && (
-          <p className="text-center text-xs text-[#434656]">No notifications yet.</p>
-        )}
+        {!isLoading &&
+          !error &&
+          !hasAny && (
+            <p className="text-center text-xs text-[#434656]">
+              No notifications yet.
+            </p>
+          )}
 
-        {!isLoading && todayItems.length > 0 && (
-          <section>
-            <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-[#434656]">
-              Today
-            </h2>
-            <div className="flex flex-col gap-1">{todayItems.map(renderNotification)}</div>
-          </section>
-        )}
-
-        {!isLoading && yesterdayItems.length > 0 && (
-          <>
-            {todayItems.length > 0 && (
-              <div className="ml-16 h-px w-[calc(100%-4rem)] rounded-full bg-[#c3c5d9]" />
-            )}
+        {!isLoading &&
+          todayItems.length >
+            0 && (
             <section>
               <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-[#434656]">
-                Yesterday
+                Today
               </h2>
-              <div className="flex flex-col gap-1">{yesterdayItems.map(renderNotification)}</div>
-            </section>
-          </>
-        )}
 
-        {!isLoading && earlierItems.length > 0 && (
-          <>
-            {(todayItems.length > 0 || yesterdayItems.length > 0) && (
-              <div className="ml-16 h-px w-[calc(100%-4rem)] rounded-full bg-[#c3c5d9]" />
-            )}
-            <section>
-              <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-[#434656]">
-                Earlier
-              </h2>
-              <div className="flex flex-col gap-1">{earlierItems.map(renderNotification)}</div>
+              <div className="flex flex-col gap-1">
+                {todayItems.map(
+                  renderNotification
+                )}
+              </div>
             </section>
-          </>
-        )}
+          )}
+
+        {!isLoading &&
+          yesterdayItems.length >
+            0 && (
+            <>
+              {todayItems.length >
+                0 && (
+                <div className="ml-16 h-px w-[calc(100%-4rem)] rounded-full bg-[#c3c5d9]" />
+              )}
+
+              <section>
+                <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-[#434656]">
+                  Yesterday
+                </h2>
+
+                <div className="flex flex-col gap-1">
+                  {yesterdayItems.map(
+                    renderNotification
+                  )}
+                </div>
+              </section>
+            </>
+          )}
+
+        {!isLoading &&
+          earlierItems.length >
+            0 && (
+            <>
+              {(todayItems.length >
+                0 ||
+                yesterdayItems.length >
+                  0) && (
+                <div className="ml-16 h-px w-[calc(100%-4rem)] rounded-full bg-[#c3c5d9]" />
+              )}
+
+              <section>
+                <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-[#434656]">
+                  Earlier
+                </h2>
+
+                <div className="flex flex-col gap-1">
+                  {earlierItems.map(
+                    renderNotification
+                  )}
+                </div>
+              </section>
+            </>
+          )}
       </main>
     </div>
   );

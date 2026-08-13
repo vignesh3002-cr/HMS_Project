@@ -1,159 +1,103 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  appointmentApi,
+  type AppointmentRecord,
+} from "../../api/appointment.api";
+import { employeeApi } from "../../api/employee.api";
+import { getActiveBranchId } from "../../api/axios";
+import { getUser } from "../../utils/token";
 
 type AppointmentStatus =
   | "Checked Out"
   | "Confirmed"
   | "Checked In"
   | "Cancelled"
-  | "Reschedule";
+  | "Reschedule"
+  | "In Consultation"
+  | "No Show"
+  | "Transfer Review"
+  | "Reschedule Required";
 
 interface Patient {
-  id: number;
+  id: string;
   name: string;
   patientCode: string;
-  age: number;
-  gender: string;
-  phone: string;
-  bloodGroup: string;
+  age?: number;
+  gender?: string;
+  phone?: string;
+  bloodGroup?: string;
   appointmentDate: string;
   status: AppointmentStatus;
   avatarUrl?: string;
 }
 
-const PATIENTS: Patient[] = [
-  {
-    id: 1,
-    name: "Arun Kumar",
-    patientCode: "PAT001",
-    age: 32,
-    gender: "Male",
-    phone: "9876543210",
-    bloodGroup: "O+",
-    appointmentDate: "09:00 AM",
-    status: "Confirmed",
-  },
-  {
-    id: 2,
-    name: "Priya Sharma",
-    patientCode: "PAT002",
-    age: 28,
-    gender: "Female",
-    phone: "9876543211",
-    bloodGroup: "A+",
-    appointmentDate: "09:30 AM",
-    status: "Checked In",
-  },
-  {
-    id: 3,
-    name: "Rahul Raj",
-    patientCode: "PAT003",
-    age: 45,
-    gender: "Male",
-    phone: "9876543212",
-    bloodGroup: "B+",
-    appointmentDate: "10:00 AM",
-    status: "Checked Out",
-  },
-  {
-    id: 4,
-    name: "Divya Krishnan",
-    patientCode: "PAT004",
-    age: 35,
-    gender: "Female",
-    phone: "9876543213",
-    bloodGroup: "AB+",
-    appointmentDate: "10:30 AM",
-    status: "Confirmed",
-  },
-  {
-    id: 5,
-    name: "Vijay Kumar",
-    patientCode: "PAT005",
-    age: 51,
-    gender: "Male",
-    phone: "9876543214",
-    bloodGroup: "O-",
-    appointmentDate: "11:00 AM",
-    status: "Reschedule",
-  },
-  {
-    id: 6,
-    name: "Sneha Devi",
-    patientCode: "PAT006",
-    age: 24,
-    gender: "Female",
-    phone: "9876543215",
-    bloodGroup: "A-",
-    appointmentDate: "11:30 AM",
-    status: "Confirmed",
-  },
-  {
-    id: 7,
-    name: "Karthik S",
-    patientCode: "PAT007",
-    age: 39,
-    gender: "Male",
-    phone: "9876543216",
-    bloodGroup: "B-",
-    appointmentDate: "12:00 PM",
-    status: "Cancelled",
-  },
-  {
-    id: 8,
-    name: "Meena R",
-    patientCode: "PAT008",
-    age: 42,
-    gender: "Female",
-    phone: "9876543217",
-    bloodGroup: "O+",
-    appointmentDate: "12:30 PM",
-    status: "Checked In",
-  },
-  {
-    id: 9,
-    name: "Suresh Babu",
-    patientCode: "PAT009",
-    age: 47,
-    gender: "Male",
-    phone: "9876543218",
-    bloodGroup: "A+",
-    appointmentDate: "01:00 PM",
-    status: "Confirmed",
-  },
-  {
-    id: 10,
-    name: "Anitha P",
-    patientCode: "PAT010",
-    age: 31,
-    gender: "Female",
-    phone: "9876543219",
-    bloodGroup: "B+",
-    appointmentDate: "02:00 PM",
-    status: "Checked Out",
-  },
-  {
-    id: 11,
-    name: "Mohan Das",
-    patientCode: "PAT011",
-    age: 55,
-    gender: "Male",
-    phone: "9876543220",
-    bloodGroup: "O+",
-    appointmentDate: "02:30 PM",
-    status: "Confirmed",
-  },
-  {
-    id: 12,
-    name: "Lakshmi Devi",
-    patientCode: "PAT012",
-    age: 36,
-    gender: "Female",
-    phone: "9876543221",
-    bloodGroup: "AB-",
-    appointmentDate: "03:00 PM",
-    status: "Checked In",
-  },
-];
+const STATUS_TO_DISPLAY: Record<string, AppointmentStatus> = {
+  SCHEDULED: "Confirmed",
+  RESCHEDULED: "Reschedule",
+  CHECKED_IN: "Checked In",
+  IN_CONSULTATION: "In Consultation",
+  COMPLETED: "Checked Out",
+  CANCELLED: "Cancelled",
+  NO_SHOW: "No Show",
+  TRANSFER_REVIEW_REQUIRED: "Transfer Review",
+  RESCHEDULE_REQUIRED: "Reschedule Required",
+};
+
+function toDisplayStatus(status: string | null | undefined): AppointmentStatus {
+  if (!status) return "Confirmed";
+  return STATUS_TO_DISPLAY[status] ?? "Confirmed";
+}
+
+function buildPatientName(bio?: AppointmentRecord["patient_bio_data"]): string {
+  if (!bio) return "Unknown Patient";
+  const parts = [
+    bio.patient_first_name,
+    bio.patient_middle_name,
+    bio.patient_last_name,
+  ].filter(Boolean);
+  return parts.join(" ") || "Unknown Patient";
+}
+
+function formatAppointmentTime(time?: string | null): string {
+  if (!time) return "";
+  let hours: number;
+  let minutes: number;
+  if (time.includes("T")) {
+    const date = new Date(time);
+    if (isNaN(date.getTime())) return time;
+    hours = date.getUTCHours();
+    minutes = date.getUTCMinutes();
+  } else {
+    const [h, m] = time.split(":");
+    hours = Number(h);
+    minutes = Number(m ?? "0");
+    if (isNaN(hours)) return time;
+  }
+  const period = hours < 12 ? "AM" : "PM";
+  const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+  return `${String(hour12).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${period}`;
+}
+
+function toPatient(a: AppointmentRecord): Patient {
+  const bio = a.patient_bio_data;
+  const gender = bio?.patient_gender
+    ? bio.patient_gender.charAt(0).toUpperCase() +
+      bio.patient_gender.slice(1).toLowerCase()
+    : "—";
+  const dateFallback = a.appointment_date
+    ? a.appointment_date.slice(0, 10)
+    : "—";
+
+  return {
+    id: a.appointment_id,
+    name: buildPatientName(bio),
+    patientCode: bio?.patient_id ?? `Token ${a.token_number ?? ""}`.trim(),
+    gender,
+    phone: bio?.patient_primary_mobile ?? "—",
+    appointmentDate: formatAppointmentTime(a.appointment_time) || dateFallback,
+    status: toDisplayStatus(a.status),
+  };
+}
 
 const PAGE_SIZE = 9;
 
@@ -177,6 +121,10 @@ const STATUS_STYLES: Record<AppointmentStatus, string> = {
   "Checked In": "bg-amber-50 text-amber-600",
   Cancelled: "bg-red-50 text-red-500",
   Reschedule: "bg-purple-50 text-purple-600",
+  "In Consultation": "bg-cyan-50 text-cyan-600",
+  "No Show": "bg-gray-50 text-gray-500",
+  "Transfer Review": "bg-indigo-50 text-indigo-600",
+  "Reschedule Required": "bg-purple-50 text-purple-600",
 };
 
 function StatusBadge({ status }: { status: AppointmentStatus }) {
@@ -205,122 +153,150 @@ function AppointmentToolbar({
   onSearchChange,
 }: ToolbarProps) {
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-4 flex flex-wrap items-center gap-4">
+    <div className="flex items-center justify-between gap-4 flex-wrap px-5 py-3 border-b border-[rgba(194,198,212,0.10)]">
       <div className="flex items-center gap-3">
-        <span className="text-sm font-semibold text-gray-800">
+        <span className="text-xs font-semibold tracking-[1.2px] uppercase text-[#424752]">
           Appointment
         </span>
 
-        <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full">
+        <span className="px-2.5 py-1 rounded-full bg-[#EEF2FF] text-[#4F46E5] text-[10px] font-semibold">
           Total Patients : {totalPatients}
         </span>
       </div>
 
-      <div className="flex-1 min-w-[180px] relative">
-        <svg
-          className="w-4 h-4 text-gray-300 absolute left-3 top-1/2 -translate-y-1/2"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <circle cx="11" cy="11" r="7" />
-          <path d="M21 21l-3.8-3.8" />
-        </svg>
+      <div className="flex items-center gap-2 flex-wrap justify-end">
+        {/* Search */}
+        <div className="relative">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search..."
+            className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[250px]"
+          />
+          <svg
+            className="absolute left-2 top-1/2 -translate-y-1/2"
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+          >
+            <path
+              d="M11.0667 11.5713L6.86667 7.3713C6.53333 7.638 6.15 7.8491 5.71667 8.0046C5.28333 8.1602 4.82222 8.238 4.33333 8.238C3.12222 8.238 2.09722 7.8185 1.25833 6.9796C0.419444 6.1407 0 5.1157 0 3.90462C0 2.69351.419444 1.66851 1.25833.82962C2.09722-.00927 3.12222-.42871 4.33333-.42871C5.54444-.42871 6.56944-.00927 7.40833.82962C8.24722 1.66851 8.66667 2.69351 8.66667 3.90462C8.66667 4.3935 8.58889 4.8546 8.43333 5.288C8.27778 5.7213 8.06667 6.1046 7.8 6.438L12 10.638L11.0667 11.5713ZM4.33333 6.9046C5.16667 6.9046 5.875 6.613 6.45833 6.0296C7.04167 5.4463 7.33333 4.738 7.33333 3.90462C7.33333 3.07129 7.04167 2.36296 6.45833 1.77962C5.875 1.19629 5.16667.90462 4.33333.90462C3.5.90462 2.79167 1.19629 2.20833 1.77962C1.625 2.36296 1.33333 3.07129 1.33333 3.90462C1.33333 4.738 1.625 5.4463 2.20833 6.0296C2.79167 6.613 3.5 6.9046 4.33333 6.9046Z"
+              fill="#424752"
+            />
+          </svg>
+        </div>
 
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search..."
-          className="w-full text-sm bg-gray-50 rounded-lg pl-9 pr-3 py-2 outline-none focus:ring-2 focus:ring-blue-100"
-        />
-      </div>
+        {/* View toggle */}
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={() => onViewChange("list")}
+            aria-label="List view"
+            aria-pressed={view === "list"}
+            className={`flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 ${
+              view === "list"
+                ? "bg-[#00488D] text-white"
+                : "bg-white text-[#424752] hover:bg-[#F2F4F6]"
+            }`}
+          >
+            <svg
+              className="w-3.5 h-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
 
-      <div className="flex items-center gap-1 bg-gray-50 rounded-lg p-1">
+          <button
+            type="button"
+            onClick={() => onViewChange("grid")}
+            aria-label="Grid view"
+            aria-pressed={view === "grid"}
+            className={`flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 ${
+              view === "grid"
+                ? "bg-[#00488D] text-white"
+                : "bg-white text-[#424752] hover:bg-[#F2F4F6]"
+            }`}
+          >
+            <svg
+              className="w-3.5 h-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <rect x="3" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="3" width="7" height="7" rx="1.5" />
+              <rect x="3" y="14" width="7" height="7" rx="1.5" />
+              <rect x="14" y="14" width="7" height="7" rx="1.5" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Date nav */}
+        <div className="flex items-center">
+          <button
+            type="button"
+            aria-label="Previous day"
+            className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+          >
+            <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
+              <path
+                d="M5 1L1 5L5 9"
+                stroke="black"
+                strokeWidth="1.33"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]"
+          >
+            Today
+          </button>
+
+          <button
+            type="button"
+            aria-label="Next day"
+            className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+          >
+            <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
+              <path
+                d="M1 1L5 5L1 9"
+                stroke="black"
+                strokeWidth="1.33"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+
+        {/* Filters */}
         <button
           type="button"
-          onClick={() => onViewChange("list")}
-          aria-label="List view"
-          aria-pressed={view === "list"}
-          className={`w-8 h-8 flex items-center justify-center rounded-md ${
-            view === "list"
-              ? "bg-white shadow-sm text-gray-700"
-              : "text-gray-400"
-          }`}
+          className="flex items-center gap-1.5 px-4 py-2 bg-[#004785] rounded-[10px] text-white text-xs font-semibold whitespace-nowrap hover:opacity-90 transition-opacity"
         >
           <svg
-            className="w-4 h-4"
+            className="w-3.5 h-3.5"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
           >
-            <path d="M4 6h16M4 12h16M4 18h16" />
+            <path d="M4 5h16l-6 8v5l-4 2v-7L4 5z" />
           </svg>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onViewChange("grid")}
-          aria-label="Grid view"
-          aria-pressed={view === "grid"}
-          className={`w-8 h-8 flex items-center justify-center rounded-md ${
-            view === "grid"
-              ? "bg-white shadow-sm text-blue-700"
-              : "text-gray-400"
-          }`}
-        >
-          <svg
-            className="w-4 h-4"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <rect x="3" y="3" width="7" height="7" rx="1.5" />
-            <rect x="14" y="3" width="7" height="7" rx="1.5" />
-            <rect x="3" y="14" width="7" height="7" rx="1.5" />
-            <rect x="14" y="14" width="7" height="7" rx="1.5" />
-          </svg>
+          Filters
         </button>
       </div>
-
-      <div className="flex items-center gap-2 text-sm text-gray-600">
-        <button
-          type="button"
-          aria-label="Previous day"
-          className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-50"
-        >
-          ‹
-        </button>
-
-        <span className="px-2 font-medium">Today</span>
-
-        <button
-          type="button"
-          aria-label="Next day"
-          className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-50"
-        >
-          ›
-        </button>
-      </div>
-
-      <button
-        type="button"
-        className="flex items-center gap-2 text-sm text-gray-600 border border-gray-200 rounded-lg px-3 py-2 hover:bg-gray-50"
-      >
-        <svg
-          className="w-4 h-4"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M4 5h16l-6 8v5l-4 2v-7L4 5z" />
-        </svg>
-        Filters
-      </button>
     </div>
   );
 }
@@ -367,14 +343,16 @@ function PatientCard({ patient }: { patient: Patient }) {
         </p>
 
         <p className="text-xs text-gray-400 mt-0.5">
-          {patient.age}/{patient.gender}
+          {patient.age !== undefined
+            ? `${patient.age}/${patient.gender}`
+            : patient.gender}
         </p>
 
         <p className="text-xs text-gray-500 mt-2">{patient.phone}</p>
 
         <div className="flex items-center justify-between mt-2">
           <span className="text-sm font-semibold text-gray-700">
-            {patient.bloodGroup}
+            {patient.bloodGroup ?? "—"}
           </span>
 
           <button
@@ -430,7 +408,7 @@ function SortIcon() {
 
 function PatientTable({ patients }: { patients: Patient[] }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto px-5">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
@@ -488,7 +466,9 @@ function PatientTable({ patients }: { patients: Patient[] }) {
                 </td>
 
                 <td className="py-3 px-3 text-gray-600 whitespace-nowrap">
-                  {patient.age} / {patient.gender}
+                  {patient.age !== undefined
+                    ? `${patient.age} / ${patient.gender}`
+                    : patient.gender}
                 </td>
 
                 <td className="py-3 px-3 text-gray-600 whitespace-nowrap">
@@ -497,7 +477,7 @@ function PatientTable({ patients }: { patients: Patient[] }) {
 
                 <td className="py-3 px-3">
                   <span className="text-xs font-semibold text-red-500 bg-red-50 px-2.5 py-1 rounded-md">
-                    {patient.bloodGroup}
+                    {patient.bloodGroup ?? "—"}
                   </span>
                 </td>
 
@@ -586,7 +566,7 @@ function Pagination({
   rangeLabel,
 }: PaginationProps) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between px-5 py-4">
       <p className="text-sm text-gray-500">{rangeLabel}</p>
 
       <div className="flex items-center gap-1">
@@ -638,14 +618,181 @@ export default function AppointmentPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [loadErrorMsg, setLoadErrorMsg] = useState("");
+
+  // This page is the logged-in doctor's appointment list. It must only ever
+  // show patients booked with THAT doctor ("Senthil") -- never everyone
+  // else's. Resolve the doctor's employee_id from the employee list (name
+  // match on "senthil"), falling back to the logged-in user's own
+  // employee_id, then filter every GET /appointments call by it.
+  const [targetDoctorId, setTargetDoctorId] = useState<string | null>(null);
+  // The branches this user is actually mapped to (GET /employees/me →
+  // data.branches). A doctor's appointments can live in a branch OTHER than
+  // their primary one (Senthil's all sit in BRA005, his primary mapping is
+  // BRA004), and the backend branchScope 403s multi-branch users unless an
+  // explicit branch is sent -- so we must query every mapped branch.
+  const [branchIds, setBranchIds] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const resolveDoctorAndBranches = async () => {
+      let doctorId: string | null = null;
+
+      try {
+        const firstPage = await employeeApi.getAll({
+          roleType: "DOCTOR",
+          page: 1,
+          limit: 1000,
+        });
+        const firstData = firstPage.data?.data;
+        const remainingPages = Array.from(
+          { length: Math.max(0, (firstData?.totalPages ?? 1) - 1) },
+          (_, index) =>
+            employeeApi.getAll({
+              roleType: "DOCTOR",
+              page: index + 2,
+              limit: 1000,
+            }),
+        );
+        const remainingResults = await Promise.all(remainingPages);
+        const employees = [
+          ...(firstData?.employees ?? []),
+          ...remainingResults.flatMap((res) => res.data?.data?.employees ?? []),
+        ];
+
+        const senthil = employees.find((emp) =>
+          `${emp.first_name} ${emp.middle_name ?? ""} ${emp.last_name ?? ""}`
+            .toLowerCase()
+            .includes("senthil"),
+        );
+
+        doctorId = senthil?.employee_id ?? null;
+      } catch (err) {
+        console.error("[AppointmentPage] Failed to resolve doctor:", err);
+      }
+
+      if (!cancelled) {
+        setTargetDoctorId(doctorId ?? getUser()?.employee_id ?? null);
+      }
+
+      try {
+        const me = await employeeApi.getMe();
+        const branches = (me.data?.data?.branches ?? [])
+          .filter((b) => b.status !== 0)
+          .map((b) => b.branch_id)
+          .filter((b): b is string => Boolean(b));
+        if (!cancelled) {
+          setBranchIds(branches.length > 0 ? [...new Set(branches)] : null);
+        }
+      } catch (err) {
+        console.error("[AppointmentPage] Failed to resolve branches:", err);
+        if (!cancelled) {
+          setBranchIds(null);
+        }
+      }
+    };
+
+    void resolveDoctorAndBranches();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const fetchAppointments = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setLoadError(false);
+      setLoadErrorMsg("");
+
+      const employeeId = targetDoctorId ?? getUser()?.employee_id ?? undefined;
+      // GET /appointments is branch-scoped on the backend (branchScope
+      // middleware 403s "Please select a branch first." when no branch is
+      // sent and the user maps to more than one branch).
+      const primaryBranchId =
+        getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+
+      let appointments: AppointmentRecord[] = [];
+
+      if (branchIds && branchIds.length > 0) {
+        // Query every branch the doctor is mapped to and merge the results,
+        // so appointments booked in a non-primary branch are not missed.
+        const results = await Promise.all(
+          branchIds.map((branchId) =>
+            appointmentApi
+              .getAll({
+                branchId,
+                employeeId,
+                page: 1,
+                limit: 100,
+              })
+              .catch(() => null),
+          ),
+        );
+        const seen = new Set<string>();
+        for (const res of results) {
+          for (const appointment of res?.data?.data?.appointments ?? []) {
+            if (!seen.has(appointment.appointment_id)) {
+              seen.add(appointment.appointment_id);
+              appointments.push(appointment);
+            }
+          }
+        }
+      } else {
+        const res = await appointmentApi.getAll({
+          branchId: primaryBranchId,
+          employeeId,
+          page: 1,
+          limit: 100,
+        });
+        appointments = res.data?.data?.appointments ?? [];
+      }
+
+      // Belt and braces: even if the employee_id filter is missed (e.g.
+      // doctor_name stored differently), never surface another doctor's
+      // patient on this page.
+      const senthilAppointments = appointments
+        .filter(
+          (a) =>
+            (a.doctor_name ?? "").toLowerCase().includes("senthil") ||
+            (employeeId != null && a.employees?.employee_id === employeeId),
+        )
+        .sort((x, y) =>
+          (y.appointment_date ?? "").localeCompare(x.appointment_date ?? ""),
+        );
+
+      setPatients(senthilAppointments.map(toPatient));
+    } catch (err: any) {
+      console.error(
+        "[AppointmentPage] Failed to load appointments:",
+        err
+      );
+      setLoadError(true);
+      setLoadErrorMsg(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Failed to load appointments."
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [targetDoctorId, branchIds]);
+
+  useEffect(() => {
+    fetchAppointments();
+  }, [fetchAppointments]);
+
   const filtered = useMemo(
     () =>
-      PATIENTS.filter((p) =>
+      patients.filter((p) =>
         `${p.name} ${p.patientCode}`
           .toLowerCase()
           .includes(search.toLowerCase())
       ),
-    [search]
+    [patients, search]
   );
 
   const totalPages = Math.max(
@@ -664,10 +811,13 @@ export default function AppointmentPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">
-          Appointment
-        </h2>
+      <div className="flex items-end justify-between">
+        <div>
+          <h2 className="hms-heading">Appointment</h2>
+          <p className="hms-subheading">
+            Real-time doctor appointments and patients.
+          </p>
+        </div>
 
         <div className="flex items-center gap-4">
           <button
@@ -689,7 +839,7 @@ export default function AppointmentPage() {
 
           <span className="h-6 w-px bg-gray-200" />
 
-          <span className="flex items-center gap-2 text-sm text-gray-600">
+          <span className="flex items-center gap-2 h-[27px] px-3 border border-[#E5E7EB] rounded-lg bg-white text-xs font-medium text-[#424752]">
             <svg
               className="w-4 h-4"
               viewBox="0 0 24 24"
@@ -712,9 +862,9 @@ export default function AppointmentPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-5">
+      <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col overflow-hidden">
         <AppointmentToolbar
-          totalPatients={PATIENTS.length}
+          totalPatients={patients.length}
           view={view}
           onViewChange={setView}
           search={search}
@@ -724,9 +874,24 @@ export default function AppointmentPage() {
           }}
         />
 
-        {pageItems.length > 0 ? (
+        {isLoading ? (
+          <div className="text-center text-sm text-gray-500 py-10">
+            Loading appointments...
+          </div>
+        ) : loadError ? (
+          <div className="text-center text-sm text-gray-500 py-10 space-y-3">
+            <p>{loadErrorMsg || "Failed to load appointments."}</p>
+            <button
+              type="button"
+              onClick={fetchAppointments}
+              className="text-blue-600 font-medium hover:underline"
+            >
+              Retry
+            </button>
+          </div>
+        ) : pageItems.length > 0 ? (
           view === "grid" ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-5">
               {pageItems.map((patient) => (
                 <PatientCard
                   key={patient.id}
@@ -743,17 +908,19 @@ export default function AppointmentPage() {
           </div>
         )}
 
-        <Pagination
-          page={currentPage}
-          totalPages={totalPages}
-          onPageChange={setPage}
-          rangeLabel={`Showing ${
-            filtered.length === 0 ? 0 : start + 1
-          } to ${Math.min(
-            start + PAGE_SIZE,
-            filtered.length
-          )} of ${filtered.length} patients`}
-        />
+        {!isLoading && !loadError && (
+          <Pagination
+            page={currentPage}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            rangeLabel={`Showing ${
+              filtered.length === 0 ? 0 : start + 1
+            } to ${Math.min(
+              start + PAGE_SIZE,
+              filtered.length
+            )} of ${filtered.length} patients`}
+          />
+        )}
       </div>
     </div>
   );

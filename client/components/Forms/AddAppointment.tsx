@@ -125,13 +125,13 @@ export default function AddAppointment() {
   // and their branch/department auto-filled.
   const preselectedDoctorId = (location.state as { doctorId?: string } | null)?.doctorId;
 
-  // Arriving from the Day View grid's "New slot available" click carries the
-  // exact doctor/branch/department/date/time that cell represented, so
-  // everything except the patient is already decided -- no nearest-date
-  // search needed, since the clicked cell IS a real open slot.
+  // Arriving from the Day/Week View grids' "New slot available" click carries
+  // the exact doctor/branch/department/date (and the Day View's hour) that
+  // cell represented, so everything except the patient is already decided --
+  // no nearest-date search needed, since the clicked cell IS a real open slot.
   const preselectedSlot = (
     location.state as {
-      slot?: { doctorId: string; branchId: string; departmentId: string; date: string; time: string };
+      slot?: { doctorId: string; branchId: string; departmentId: string; date: string; time?: string };
     } | null
   )?.slot;
 
@@ -296,15 +296,23 @@ export default function AddAppointment() {
 
   // Narrow doctors down to the selected branch using each doctor's real
   // active branch mappings, not just their primary employees.branch_id.
+  // The already-selected doctor is always kept in the list so picking a
+  // doctor first (before any branch) never makes them vanish from the
+  // dropdown when their branch auto-fills -- even if the per-doctor branch
+  // lookup above failed for them.
   useEffect(() => {
     if (!formData.branchId) {
       setBranchDoctors([]);
       return;
     }
     setBranchDoctors(
-      doctors.filter((doc) => doctorBranchMap[doc.employee_id]?.has(formData.branchId)),
+      doctors.filter(
+        (doc) =>
+          doc.employee_id === formData.doctorId ||
+          doctorBranchMap[doc.employee_id]?.has(formData.branchId),
+      ),
     );
-  }, [formData.branchId, doctors, doctorBranchMap]);
+  }, [formData.branchId, doctors, doctorBranchMap, formData.doctorId]);
 
   // Fetch available slots when branch + doctor + date changes
   useEffect(() => {
@@ -638,6 +646,15 @@ export default function AddAppointment() {
 
         return findNearestAvailableDate(val, nextBranchId, formData.selectDate, maxSelectableDate);
       })
+      .catch(() => {
+        // Doctor lookup failed (backend hiccup etc.) -- fall back to their
+        // primary branch so the doctor-first flow still auto-fills a branch
+        // and finds a date; the slots API validates the real mapping.
+        const fallbackBranchId = selectedDoctor?.branch_id || formData.branchId;
+        if (!fallbackBranchId) return null;
+        setFormData((prev) => ({ ...prev, branchId: fallbackBranchId }));
+        return findNearestAvailableDate(val, fallbackBranchId, formData.selectDate, maxSelectableDate);
+      })
       .then((date) => {
         if (date) {
           setFormData((prev) => ({ ...prev, selectDate: date, timeSlot: "" }));
@@ -768,30 +785,24 @@ export default function AddAppointment() {
                   )}
                   value={formData.branchId}
                   onValueChange={(val) => {
+                    // With a doctor already chosen, the Branch dropdown only
+                    // lists branches that doctor is mapped to -- switching
+                    // between them keeps the doctor, department and date
+                    // exactly as they were, and only reloads the slots for
+                    // the new branch (the slots effect below refetches on
+                    // branch change). Only when no doctor is picked yet does
+                    // a branch change reset department/doctor, since their
+                    // options depend on the branch.
+                    const doctorLocked = Boolean(formData.doctorId);
                     setFormData((prev) => ({
                       ...prev,
                       branchId: val,
-                      departmentId: "",
-                      doctorId: "",
+                      departmentId: doctorLocked ? prev.departmentId : "",
+                      doctorId: doctorLocked ? prev.doctorId : "",
                       timeSlot: "",
                     }));
 
-                    if (!val || !formData.doctorId) return;
-
-                    setFindingNearestDate(true);
-                    findNearestAvailableDate(formData.doctorId, val, formData.selectDate, maxSelectableDate)
-                      .then((date) => {
-                        if (date) {
-                          setFormData((prev) => ({ ...prev, selectDate: date, timeSlot: "" }));
-                        } else if (date === null) {
-                          toast({
-                            title: "No available date found",
-                            description: "This doctor has no open slots this week or next week at this branch.",
-                            variant: "destructive",
-                          });
-                        }
-                      })
-                      .finally(() => setFindingNearestDate(false));
+                    if (!val || !doctorLocked) return;
                   }}
                   placeholder={
                     formData.doctorId && doctorBranches.length === 0
