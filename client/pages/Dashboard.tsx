@@ -5,7 +5,8 @@ import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
-import { FilterPopover, useFilterPanel, useDashboardFilters } from "@/components/Filter";
+import { useFilterPanel, useDashboardFilters } from "@/components/Filter";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { applySearchAndFilter } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
@@ -966,7 +967,7 @@ export default function Dashboard() {
                   </button>
                 </div>
                 {/* Filters */}
-                <FilterPopover
+                <ToolbarFilter
                   title="Advanced Filters"
                   fields={activeFilterFields}
                   values={filterValues}

@@ -20,7 +20,8 @@ import CalendarPicker from "@/components/hms/Calender";
 import { Button } from "@/components/ui/button";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import { StatusBadge } from "@/components/hms/StatusBadge";
-import { FilterPopover, useFilterPanel } from "@/components/Filter";
+import { useFilterPanel } from "@/components/Filter";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
@@ -536,7 +537,7 @@ export default function PatientProfile() {
                   </svg>
                 </div>
                 {/* Filters */}
-                <FilterPopover
+                <ToolbarFilter
                   title="Filters"
                   fields={filterFields}
                   values={filterValues}

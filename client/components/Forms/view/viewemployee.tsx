@@ -117,8 +117,12 @@ export default function DoctorDetailView() {
   const doctorName = formatDoctorFullName(doctorEmployee);
   const doctorSpecialization = doctorDetail.doctorProfile?.specialization || doctorEmployee?.specialization || "—";
   const doctorQualification = doctorDetail.doctorProfile?.qualification || doctorEmployee?.qualification || "—";
-  const doctorBranchNames = doctorDetail.branches?.length
-    ? doctorDetail.branches.map((b) => b.branch_name)
+  // getEmployeeById returns every mapping this doctor ever had (status
+  // included) — only status 1 is a real, current assignment. Closed/historical
+  // mappings (status 0) must not show up here.
+  const activeBranches = (doctorDetail.branches ?? []).filter((b) => b.status === 1);
+  const doctorBranchNames = activeBranches.length
+    ? activeBranches.map((b) => b.branch_name)
     : doctorEmployee?.branch?.branch_name
       ? [doctorEmployee.branch.branch_name]
       : [];
@@ -224,7 +228,7 @@ export default function DoctorDetailView() {
             <InfoCell icon={IdCard} title="Medical License No" value={val(doctorLicenseNo)} />
             <InfoCell icon={Cake} title="Joining Date" value={val(doctorEmployee?.joining_date)} />
           </div>
-          <BranchesSection branches={doctorDetail.branches ?? []} />
+          <BranchesSection branches={activeBranches} />
         </Section>
 
         {/* CURRENT ADDRESS */}

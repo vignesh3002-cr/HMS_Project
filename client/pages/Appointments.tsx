@@ -15,7 +15,8 @@ import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
-import { FilterPopover, useFilterPanel, useAppointmentFilters } from "@/components/Filter";
+import { useFilterPanel, useAppointmentFilters } from "@/components/Filter";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { getEffectiveAppointmentStatus } from "@/lib/appointmentStatus";
@@ -604,7 +605,7 @@ const AppointmentSchedule: React.FC = () => {
 
 {/* Filters */}
 
-                <FilterPopover
+                <ToolbarFilter
                   title="Filters"
                   fields={appointmentFilterFields}
                   values={filterValues}

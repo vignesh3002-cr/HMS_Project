@@ -193,8 +193,12 @@ export default function ViewEmployee() {
   const licenseNo = detail.doctorProfile?.license_no || employee?.license_no || "—";
   const bio = detail.doctorProfile?.doctor_bio?.trim() || "—";
 
-  const branchNames = detail.branches?.length
-    ? detail.branches.map((b) => b.branch_name)
+  // getEmployeeById returns every mapping this employee ever had (status
+  // included) — only status 1 is a real, current assignment. Closed/historical
+  // mappings (status 0) must not show up here.
+  const activeBranches = (detail.branches ?? []).filter((b) => b.status === 1);
+  const branchNames = activeBranches.length
+    ? activeBranches.map((b) => b.branch_name)
     : employee?.branch?.branch_name
       ? [employee.branch.branch_name]
       : [];
@@ -290,7 +294,7 @@ export default function ViewEmployee() {
             <InfoItem icon={Cake} title="Joining Date" value={formatDateOnly(employee?.joining_date)} />
           </div>
           <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
-            <BranchesSection branches={detail.branches ?? []} />
+            <BranchesSection branches={activeBranches} />
           </div>
         </Section>
 
