@@ -17,12 +17,6 @@ interface Appointment {
   status: AppointmentStatus;
 }
 
-interface AvailabilityItem {
-  day: string;
-  time?: string;
-  leave?: boolean;
-}
-
 const chartData = [
   { day: "Mon", completed: 153.59, rescheduled: 51.19 },
   { day: "Tue", completed: 122.88, rescheduled: 81.91 },
@@ -422,6 +416,7 @@ export default function DoctorDashboard() {
               </div>
 
               <div className="flex items-center gap-1">
+                <span className="text-[17px] leading-none text-yellow-500">★</span>
                 <span className="text-[17px] leading-none text-yellow-500">
                   ★
                 </span>
@@ -449,15 +444,12 @@ export default function DoctorDashboard() {
                   <h3 className="mb-3 text-base font-semibold">
                     Notifications
                   </h3>
-
                   <div className="border-b border-slate-100 py-2.5 text-[13px] text-slate-600">
                     You have 3 upcoming appointments today.
                   </div>
-
                   <div className="border-b border-slate-100 py-2.5 text-[13px] text-slate-600">
                     Susan Babin checked in.
                   </div>
-
                   <div className="py-2.5 text-[13px] text-slate-600">
                     Your weekly appointment report is ready.
                   </div>

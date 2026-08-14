@@ -19,7 +19,8 @@ import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
 import { downloadExportPdf } from "@/lib/exportPdf";
 
 // Filter system
-import { FilterPopover, useFilterPanel, usePatientFilters } from "@/components/Filter";
+import { useFilterPanel, usePatientFilters } from "@/components/Filter";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
@@ -647,7 +648,7 @@ export default function PatientsManagement() {
                 </div>
 
                 {/* Filters */}
-                <FilterPopover
+                <ToolbarFilter
                   title="Filters"
                   fields={patientFilterFields}
                   values={filterValues}

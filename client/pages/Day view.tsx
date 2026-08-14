@@ -11,7 +11,8 @@ import { formatPatientName, formatDoctorName, formatAppointmentDate, formatAppoi
 import { useToast } from "@/hooks/use-toast";
 import { appointmentApi, type AppointmentRecord, type AvailableSlot } from "@/api/appointment.api";
 import { employeeApi, type EmployeeRecord, type DoctorScheduleRecord, type DayOfWeek } from "@/api/employee.api";
-import { FilterPopover, useFilterPanel, useScheduleFilters } from "@/components/Filter";
+import { useFilterPanel, useScheduleFilters } from "@/components/Filter";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { usePermission } from "@/context/PermissionContext";
 import { branchApi } from "@/api/branch.api";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
@@ -1020,7 +1021,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         </div>
 
         {/* Filter doctors */}
-        <FilterPopover
+        <ToolbarFilter
           title="Filter Doctors"
           fields={doctorFilterFields}
           values={filterValues}

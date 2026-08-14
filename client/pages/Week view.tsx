@@ -18,7 +18,8 @@ import { downloadExportPdf } from "@/lib/exportPdf";
 import { formatPatientName, formatDoctorName, formatAppointmentDate, formatAppointmentTime } from "@/lib/appointmentFormat";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { employeeApi } from "@/api/employee.api";
-import { FilterPopover, useFilterPanel, useScheduleFilters } from "@/components/Filter";
+import { useFilterPanel, useScheduleFilters } from "@/components/Filter";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { usePermission } from "@/context/PermissionContext";
 import { useToast } from "@/hooks/use-toast";
 
@@ -27,11 +28,21 @@ interface Schedule {
   progress: number;
   color: "blue" | "green" | "red" | "gray";
   off?: boolean;
+  // Present only on an open ("New slot available") cell -- carries what
+  // AddAppointment needs to open pre-filled with just the patient left to pick.
+  booking?: {
+    doctorId: string;
+    branchId: string;
+    departmentId: string;
+    date: string;
+  };
 }
 
 interface Doctor {
   name: string;
   department: string;
+  departmentId: string;
+  employeeIds: string[];
   schedule: Schedule[];
 }
 
@@ -168,7 +179,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   // All doctors (not just ones with an appointment this week), so every
   // doctor gets a row -- same approach as Day view.tsx.
   const [allDoctors, setAllDoctors] = useState<
-    { employeeId: string; branchId: string; name: string; department: string }[]
+    { employeeId: string; branchId: string; departmentId: string; name: string; department: string }[]
   >([]);
 
   useEffect(() => {
@@ -180,6 +191,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           employees.map((emp) => ({
             employeeId: emp.employee_id,
             branchId: emp.branch_id,
+            departmentId: emp.department_id,
             name: `Dr. ${[emp.first_name, emp.middle_name, emp.last_name].filter(Boolean).join(" ")}`,
             department: (emp.department_master?.department_name || emp.specialization || "General").toUpperCase(),
           })),
@@ -201,8 +213,10 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   // Real per-doctor available slots for each day of the selected week, from
   // GET /appointments/available-slots -- lets an unbooked-but-scheduled day
   // show "New slot available" instead of "OFF" (same distinction Day
-  // view.tsx makes). Keyed by `${employeeId}|${yyyy-MM-dd}`.
-  const [availableByDoctorDay, setAvailableByDoctorDay] = useState<Record<string, boolean>>({});
+  // view.tsx makes). Keyed by `${employeeId}|${yyyy-MM-dd}`; the value is
+  // the branch id that has an open slot (null = none), so a clicked cell can
+  // hand AddAppointment the exact doctor/branch the availability is real on.
+  const [availableByDoctorDay, setAvailableByDoctorDay] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
     const byIdForSlots = new Map<string, { employeeId: string; branchId: string }>();
@@ -247,7 +261,13 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                   .then((res) => (res.data?.data?.slots ?? []).some((s) => s.is_available))
                   .catch(() => false),
               ),
-            ).then((results) => [`${doc.employeeId}|${dateStr}`, results.some(Boolean)] as const),
+            ).then((results) => {
+              const openIndex = results.findIndex(Boolean);
+              return [
+                `${doc.employeeId}|${dateStr}`,
+                openIndex >= 0 ? branchIds[openIndex] : null,
+              ] as const;
+            }),
           );
         }),
       );
@@ -259,7 +279,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   useEffect(() => {
     const dayKeys = weekDays.map((d) => format(d, "yyyy-MM-dd"));
 
-    const byId = new Map<string, { employeeId: string; name: string; department: string }>();
+    const byId = new Map<string, { employeeId: string; name: string; department: string; departmentId: string }>();
     allDoctors.forEach((doc) => byId.set(doc.employeeId, doc));
     weekAppointments.forEach((appt) => {
       const emp = appt.employees;
@@ -268,6 +288,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         employeeId: emp.employee_id,
         name: `Dr. ${[emp.first_name, emp.middle_name, emp.last_name].filter(Boolean).join(" ")}`,
         department: (emp.specialization || "General").toUpperCase(),
+        departmentId: appt.department_id || "",
       });
     });
 
@@ -275,19 +296,29 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     // multi-branch mappings) -- group by name so they render as one row
     // instead of repeating, while still counting appointments from every
     // employee_id that maps to that name.
-    const byName = new Map<string, { employeeIds: string[]; name: string; department: string }>();
+    const byName = new Map<
+      string,
+      { employeeIds: string[]; name: string; department: string; departmentId: string }
+    >();
     byId.forEach((doc) => {
       const existing = byName.get(doc.name);
       if (existing) {
         existing.employeeIds.push(doc.employeeId);
       } else {
-        byName.set(doc.name, { employeeIds: [doc.employeeId], name: doc.name, department: doc.department });
+        byName.set(doc.name, {
+          employeeIds: [doc.employeeId],
+          name: doc.name,
+          department: doc.department,
+          departmentId: doc.departmentId,
+        });
       }
     });
 
     const derivedDoctors: Doctor[] = Array.from(byName.values()).map((doc) => ({
       name: doc.name,
       department: doc.department,
+      departmentId: doc.departmentId,
+      employeeIds: doc.employeeIds,
       schedule: dayKeys.map((key) => {
         const count = weekAppointments.filter(
           (appt) =>
@@ -296,10 +327,28 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         ).length;
 
         if (count === 0) {
-          const hasOpenSlot = doc.employeeIds.some((id) => availableByDoctorDay[`${id}|${key}`]);
-          return hasOpenSlot
-            ? { patients: 0, progress: 0, color: "blue", off: false }
-            : { patients: 0, progress: 0, color: "gray", off: true };
+          // Pick the employee_id (and its branch) that actually has an open
+          // slot on this day, so the clicked cell hands AddAppointment a
+          // doctor/branch combination the backend really accepts.
+          const openEntry = doc.employeeIds
+            .map((id) => ({ id, branchId: availableByDoctorDay[`${id}|${key}`] }))
+            .find((entry) => entry.branchId != null);
+
+          if (openEntry) {
+            return {
+              patients: 0,
+              progress: 0,
+              color: "blue",
+              off: false,
+              booking: {
+                doctorId: openEntry.id,
+                branchId: openEntry.branchId as string,
+                departmentId: doc.departmentId,
+                date: key,
+              },
+            };
+          }
+          return { patients: 0, progress: 0, color: "gray", off: true };
         }
 
         const progress = Math.min(100, count * 10);
@@ -480,7 +529,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         </div>
 
         {/* Filter doctors */}
-        <FilterPopover
+        <ToolbarFilter
           title="Filter Doctors"
           fields={doctorFilterFields}
           values={filterValues}
@@ -616,11 +665,18 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
                   if (item.patients === 0) {
                     return (
                       <td key={index} className="border-r border-[#c3c6d7] last:border-r-0 p-1">
-                        <div className="flex h-[52px] w-full items-center justify-center rounded-[2px] border-l-2 border-l-[#004ac6] bg-[rgba(0,74,198,0.05)] p-1 text-center">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            item.booking &&
+                            navigate("/appointments/add", { state: { slot: item.booking } })
+                          }
+                          className="flex h-[52px] w-full items-center justify-center rounded-[2px] border-l-2 border-l-[#004ac6] bg-[rgba(0,74,198,0.05)] p-1 text-center transition-opacity hover:opacity-80"
+                        >
                           <span className="font-['Manrope',sans-serif] text-[9px] font-bold leading-[13px] text-[#004ac6]">
                             New slot available
                           </span>
-                        </div>
+                        </button>
                       </td>
                     );
                   }
