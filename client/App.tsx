@@ -83,6 +83,7 @@ import DoctorAppointments from "./pages/doctor/AppointmentPage";
 import DoctorLeave from "./pages/doctor/LeavePage";
 import DoctorSchedule from "./pages/doctor/MySchedulePage";
 import DoctorReviews from "./pages/doctor/ReviewPage";
+import Consultation from "./pages/doctor/Patientconsut";
 
 // ============================================================
 // HOOKS / AUTH
@@ -134,6 +135,10 @@ const doctorRoutes = [
   {
     path: "/doctor/reviews",
     element: <DoctorReviews />,
+  },
+  {
+    path: "/doctor/patient-consultation",
+    element: <Consultation />,
   },
 ];
 
