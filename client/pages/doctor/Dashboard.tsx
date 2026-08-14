@@ -335,7 +335,6 @@ export default function DoctorDashboard() {
             status: item.status as AppointmentStatus,
             appointmentId: item.appointment_id,
             originalStatus: item.status,
-            appointmentTime: item.appointment_time, // Keep for sorting
           })
         )
         // Sort by appointment_time ascending
