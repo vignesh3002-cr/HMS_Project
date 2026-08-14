@@ -9,7 +9,7 @@ import {
   Check,
   Loader2,
 } from "lucide-react";
-import { format, addDays, subDays, startOfWeek, isSameWeek } from "date-fns";
+import { format, addDays, subDays, startOfWeek, isSameWeek, startOfDay, endOfDay } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
@@ -157,6 +157,21 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   // from this instead of dummy data.
   const [weekAppointments, setWeekAppointments] = useState<AppointmentRecord[]>([]);
   const [isLoadingWeek, setIsLoadingWeek] = useState(true);
+
+  // Filter: hide cancelled appointments for today, show cancelled for yesterday and before
+  const filteredWeekAppointments = useMemo(() => {
+    const now = new Date();
+    const todayStart = startOfDay(now).getTime();
+    const todayEnd = endOfDay(now).getTime();
+
+    return weekAppointments.filter((appt) => {
+      const isCancelled = appt.status === "CANCELLED";
+      if (!isCancelled) return true;
+
+      const apptDate = new Date(appt.appointment_date).getTime();
+      return apptDate < todayStart || apptDate > todayEnd;
+    });
+  }, [weekAppointments]);
 
   useEffect(() => {
     setIsLoadingWeek(true);
@@ -320,7 +335,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       departmentId: doc.departmentId,
       employeeIds: doc.employeeIds,
       schedule: dayKeys.map((key) => {
-        const count = weekAppointments.filter(
+        const count = filteredWeekAppointments.filter(
           (appt) =>
             appt.employees && doc.employeeIds.includes(appt.employees.employee_id) &&
             utcDateKey(appt.appointment_date) === key,
@@ -383,14 +398,14 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     return true;
   });
 
-  const totalAppointments = weekAppointments.length;
+  const totalAppointments = filteredWeekAppointments.length;
 
   // ---- EXPORT ----
   const handleExport = async (exportFormat: string) => {
     if (exportFormat === "pdf") {
       downloadExportPdf({
         title: "Appointment Schedule - Week",
-        subtitle: `${format(weekStart, "dd MMM yyyy")} to ${format(addDays(weekStart, 6), "dd MMM yyyy")} - ${weekAppointments.length} appointment${weekAppointments.length === 1 ? "" : "s"}`,
+        subtitle: `${format(weekStart, "dd MMM yyyy")} to ${format(addDays(weekStart, 6), "dd MMM yyyy")} - ${filteredWeekAppointments.length} appointment${filteredWeekAppointments.length === 1 ? "" : "s"}`,
         filename: `appointments-week-${format(weekStart, "yyyy-MM-dd")}.pdf`,
         columns: [
           { header: "Appointment No", cell: (r: AppointmentRecord) => r.appointment_id },
@@ -402,7 +417,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           { header: "Time", cell: (r: AppointmentRecord) => formatAppointmentTime(r.appointment_time) },
           { header: "Status", cell: (r: AppointmentRecord) => r.status ?? "—" },
         ],
-        rows: weekAppointments,
+        rows: filteredWeekAppointments,
       });
       toast({ title: "Export complete", description: "The PDF file has been downloaded." });
       return;

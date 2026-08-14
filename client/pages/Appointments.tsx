@@ -12,7 +12,7 @@ import {
   MoreVertical,
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
-import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { format, isToday, isTomorrow, isYesterday, addDays, subDays, startOfDay } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import { useFilterPanel, useAppointmentFilters } from "@/components/Filter";
@@ -111,6 +111,21 @@ function formatAppointmentTime(time: string): string {
   const period = t.getUTCHours() >= 12 ? "PM" : "AM";
   const hours12 = t.getUTCHours() % 12 || 12;
   return `${String(hours12).padStart(2, "0")}:${minutes} ${period}`;
+}
+
+function isAppointmentTimePast(appointmentTime: string): boolean {
+  const now = new Date();
+  const appt = new Date(appointmentTime);
+  if (isNaN(appt.getTime())) return false;
+  return appt < now;
+}
+
+function formatAppointmentTimeConditional(record: Appointment): string {
+  const dateStr = record.date;
+  const todayStr = format(new Date(), "MM/dd/yyyy");
+  if (dateStr !== todayStr) return record.time;
+  if (isAppointmentTimePast(record.time)) return "—";
+  return record.time;
 }
 
 function mapAppointmentRecord(record: AppointmentRecord, index: number): Appointment {
@@ -362,6 +377,17 @@ const AppointmentSchedule: React.FC = () => {
         ),
       );
     }
+
+    const now = new Date();
+    const todayStart = startOfDay(now).getTime();
+
+    result = result.filter((item) => {
+      const isCancelled = item.status.toLowerCase() === "cancelled";
+      if (!isCancelled) return true;
+
+      const apptTime = item.sortDate;
+      return apptTime < todayStart;
+    });
 
     result = filterDataByValues(
       result as unknown as Record<string, string | number>[],
@@ -679,7 +705,7 @@ const AppointmentSchedule: React.FC = () => {
                     </div>
                   )},
                   { key: "date", label: "Appointment Date", className: "!whitespace-normal", render: (r: Appointment) => (
-                    <div className="hms-content-text text-[#191C1E] leading-4"><div>{r.date}</div><div className="text-[11px] font-medium text-[#8C8D8F] mt-1">{r.time}</div></div>
+                    <div className="hms-content-text text-[#191C1E] leading-4"><div>{r.date}</div><div className="text-[11px] font-medium text-[#8C8D8F] mt-1">{formatAppointmentTimeConditional(r)}</div></div>
                   )},
                   { key: "status", label: "Status", render: (r: Appointment) => (
                     <StatusBadge status={r.status} />

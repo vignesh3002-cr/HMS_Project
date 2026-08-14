@@ -16,8 +16,7 @@ interface ExportReportProps {
 
 export default function ExportReport({
   options = [
-    // PDF export is currently disabled — kept for future re-enablement.
-    // { id: "pdf", label: "Export as PDF", icon: FileText },
+    { id: "pdf", label: "Export as PDF", icon: FileText },
     { id: "csv", label: "Export as CSV", icon: FileSpreadsheet },
   ],
   buttonClassName = "flex items-center gap-2 px-4 py-2 border border-[#E5E7EB] bg-white rounded-lg text-[#424752] text-xs font-semibold shadow-sm hover:bg-[#F2F4F6] transition-colors",
