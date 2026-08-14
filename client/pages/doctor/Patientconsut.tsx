@@ -463,9 +463,9 @@ vomiting. Appetite normal.`
           APP
       ======================================================== */}
 
-      <div className="mx-auto h-[1480px] w-[1280px] overflow-hidden bg-slate-50">
+      <div className="mx-auto h-[1480px] w-full overflow-hidden bg-slate-50">
 
-        <div className="relative flex h-[1431px] w-[1280px] border border-slate-200 bg-slate-50">
+        <div className="relative flex h-[1431px] w-full border border-slate-200 bg-slate-50">
 
           {/* ====================================================
               SIDEBAR
@@ -646,13 +646,13 @@ vomiting. Appetite normal.`
               MAIN
           ==================================================== */}
 
-          <main className="relative h-[1479px] w-[1000px] overflow-hidden bg-slate-50">
+          <main className="relative h-[1479px] flex-1 overflow-hidden bg-slate-50">
 
             {/* ==================================================
                 HEADER
             ================================================== */}
 
-            <header className="absolute left-0 top-0 z-30 flex h-16 w-[1000px] items-center justify-between border-b border-slate-200 bg-white px-6">
+            <header className="absolute left-0 top-0 z-30 flex h-16 w-full items-center justify-between border-b border-slate-200 bg-white px-6">
 
               <div className="flex items-center gap-4">
 
@@ -727,9 +727,9 @@ vomiting. Appetite normal.`
                 STEPS
             ================================================== */}
 
-            <div className="absolute left-0 top-16 z-20 h-[88px] w-[1000px] overflow-hidden bg-white">
+            <div className="absolute left-0 top-16 z-20 h-[88px] w-full overflow-hidden bg-white">
 
-              <div className="hide-scrollbar ml-0 flex h-[88.5px] w-[896px] overflow-x-auto">
+              <div className="hide-scrollbar ml-0 flex h-[88.5px] w-full overflow-x-auto">
 
                 {steps.map((step, index) => (
 
@@ -785,9 +785,9 @@ vomiting. Appetite normal.`
                 CONTENT
             ================================================== */}
 
-            <section className="absolute left-0 top-[152px] h-[1327px] w-[1000px] overflow-hidden bg-slate-50 px-[22px] pt-7">
+            <section className="absolute left-0 top-[152px] h-[1327px] w-full overflow-hidden bg-slate-50 px-[22px] pt-7">
 
-              <div className="flex w-[942px] flex-col gap-6">
+              <div className="flex w-full flex-col gap-6">
 
                 {showLabReview ? (
                   <LabReview embedded />
@@ -799,7 +799,7 @@ vomiting. Appetite normal.`
                     CONSULTATION SUMMARY
                 ================================================= */}
 
-                <section className="flex h-[500px] w-[942px] flex-col gap-6 rounded-xl border border-slate-200 bg-white p-[25px]">
+                <section className="flex h-[500px] w-full flex-col gap-6 rounded-xl border border-slate-200 bg-white p-[25px]">
 
                   <div className="text-lg font-bold leading-7 text-slate-800">
                     Consultation Summary
@@ -1186,7 +1186,7 @@ vomiting. Appetite normal.`
                     INVESTIGATIONS
                 ================================================= */}
 
-                <section className="flex h-[297px] w-[942px] flex-col gap-4 rounded-xl border border-slate-200 bg-white p-[25px]">
+                <section className="flex h-[297px] w-full flex-col gap-4 rounded-xl border border-slate-200 bg-white p-[25px]">
 
                   <div className="text-lg font-bold leading-7 text-slate-800">
                     Investigations / Scans
@@ -1242,7 +1242,7 @@ vomiting. Appetite normal.`
                     PRESCRIPTION
                 ================================================= */}
 
-                <section className="h-[300px] w-[942px] overflow-hidden rounded-xl border border-slate-200 bg-white p-[25px] shadow-sm">
+                <section className="h-[300px] w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-[25px] shadow-sm">
 
                   <div className="w-full pb-4">
 
@@ -1256,7 +1256,7 @@ vomiting. Appetite normal.`
 
                     {/* HEADER */}
 
-                    <div className="grid h-[35px] w-full grid-cols-[169.63px_81.2px_120px_92px_336.39px] justify-between border-b border-slate-100 bg-slate-50">
+                    <div className="grid h-[35px] w-full grid-cols-[2.1fr_1fr_1.5fr_1.15fr_4.2fr] justify-between border-b border-slate-100 bg-slate-50">
 
                       <div className="px-3 py-[9px] text-[10.4px] font-bold uppercase tracking-[0.52px] text-slate-400">
                         MEDICATION
@@ -1286,12 +1286,12 @@ vomiting. Appetite normal.`
 
                       <div
                         key={index}
-                        className="grid h-[59px] w-full grid-cols-[169.63px_81.2px_120px_92px_336.39px] justify-between border-b border-slate-100 py-[10.5px]"
+                        className="grid h-[59px] w-full grid-cols-[2.1fr_1fr_1.5fr_1.15fr_4.2fr] justify-between border-b border-slate-100 py-[10.5px]"
                       >
 
                         {/* MEDICATION */}
 
-                        <div className="relative h-[30px] w-[153.63px] overflow-hidden rounded-md border border-slate-200 bg-white">
+                        <div className="relative h-[30px] w-full overflow-hidden rounded-md border border-slate-200 bg-white">
 
                           <select
                             value={medication.medication}
@@ -1450,7 +1450,7 @@ vomiting. Appetite normal.`
                               e.target.value
                             )
                           }
-                          className="h-[30px] w-[320.39px] rounded-md border border-slate-200 bg-white px-[13px] py-[7px] text-sm leading-5 text-slate-600 outline-none"
+                          className="h-[30px] w-full rounded-md border border-slate-200 bg-white px-[13px] py-[7px] text-sm leading-5 text-slate-600 outline-none"
                         />
 
                       </div>
@@ -1482,7 +1482,7 @@ vomiting. Appetite normal.`
                     ACTION BUTTONS
                 ================================================= */}
 
-                <div className="flex h-[60px] w-[942px] items-start justify-between pb-6">
+                <div className="flex h-[60px] w-full items-start justify-between pb-6">
 
                   {/* PRINT */}
 
