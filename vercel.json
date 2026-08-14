@@ -1,5 +1,4 @@
 {
-  "rootDirectory": "figma-to-react-85f",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]
