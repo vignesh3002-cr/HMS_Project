@@ -36,7 +36,7 @@ function formatDateValue(value: string | undefined) {
 }
 
 export function FilterField({ field, value, onChange }: FilterFieldProps) {
-  const { id, label, type, placeholder, options, rows } = field;
+  const { id, label, type, placeholder, options, rows, compact } = field;
   const [openDatePicker, setOpenDatePicker] = useState(false);
   const [openCombobox, setOpenCombobox] = useState(false);
   const [openMultiselect, setOpenMultiselect] = useState(false);
@@ -178,14 +178,21 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
                     {options?.map((opt) => (
                       <CommandItem
                         key={opt.value}
-                        value={opt.label}
+                        value={`${opt.label} ${opt.sublabel ?? ""}`}
                         onSelect={() => {
                           onChange(id, String(opt.value));
                           setOpenCombobox(false);
                         }}
                         className="text-[13px] text-clinical-body"
                       >
-                        {opt.label}
+                        {opt.sublabel ? (
+                          <div className="flex flex-col gap-0.5 py-0.5">
+                            <span className="text-[13px] font-medium text-clinical-body">{opt.label}</span>
+                            <span className="text-[11px] text-gray-400">{opt.sublabel}</span>
+                          </div>
+                        ) : (
+                          opt.label
+                        )}
                       </CommandItem>
                     ))}
                   </CommandGroup>
@@ -229,9 +236,21 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className="flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-[13px] text-clinical-body shadow-sm outline-none transition-all duration-150 hover:border-clinical-blue-mid focus:border-clinical-blue focus:ring-2 focus:ring-clinical-blue/15"
+                className={
+                  compact
+                    ? "flex h-9 w-full items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 text-[13px] text-clinical-body shadow-sm outline-none transition-all duration-150 hover:border-clinical-blue-mid focus:border-clinical-blue focus:ring-2 focus:ring-clinical-blue/15"
+                    : "flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-[13px] text-clinical-body shadow-sm outline-none transition-all duration-150 hover:border-clinical-blue-mid focus:border-clinical-blue focus:ring-2 focus:ring-clinical-blue/15"
+                }
               >
-                {selectedValues.length === 0 ? (
+                {compact ? (
+                  <span className={`truncate ${selectedValues.length === 0 ? "text-clinical-label" : "text-clinical-body"}`}>
+                    {selectedValues.length === 0
+                      ? placeholder ?? "All"
+                      : selectedValues.length === 1
+                        ? options?.find((o) => String(o.value) === selectedValues[0])?.label ?? selectedValues[0]
+                        : `${selectedValues.length} selected`}
+                  </span>
+                ) : selectedValues.length === 0 ? (
                   <span className="text-clinical-label">{placeholder ?? `All`}</span>
                 ) : (
                   selectedValues.map((v) => {
@@ -259,7 +278,11 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
                 <ChevronDown className="ml-auto h-4 w-4 flex-shrink-0 text-clinical-label" />
               </button>
             </PopoverTrigger>
-            <PopoverContent className="w-full min-w-[200px] rounded-lg border-[#E2E8F0] p-1.5 shadow-lg" align="start">
+            <PopoverContent
+              className="min-w-[200px] rounded-lg border-[#E2E8F0] p-1.5 shadow-lg"
+              style={{ width: "var(--radix-popper-anchor-width)" }}
+              align="start"
+            >
               <input
                 type="text"
                 autoFocus
@@ -268,7 +291,7 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
                 placeholder="Type to search..."
                 className="mb-1.5 w-full rounded-md border border-[#E2E8F0] px-2.5 py-1.5 text-[13px] text-clinical-body placeholder:text-clinical-label outline-none focus:border-clinical-blue focus:ring-2 focus:ring-clinical-blue/15"
               />
-              <div className="space-y-0.5">
+              <div className="max-h-[260px] space-y-0.5 overflow-y-auto">
                 {filteredOptions.map((opt) => {
                   const isSelected = selectedValues.includes(String(opt.value));
                   return (

@@ -21,6 +21,9 @@ export interface ConfirmationDialogProps {
   showCloseButton?: boolean;
   closeOnBackdrop?: boolean;
   closeOnEscape?: boolean;
+  // Replaces the default Cancel/Confirm button row entirely (e.g. a custom
+  // "OK / Home" footer after the action has completed).
+  footer?: ReactNode;
   children?: ReactNode;
   onConfirm: () => void;
   onCancel: () => void;

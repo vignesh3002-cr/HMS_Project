@@ -1,7 +1,7 @@
 import { useState, useEffect, ChangeEvent, FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { startOfWeek, endOfWeek, addWeeks, format } from "date-fns";
-import { ArrowLeft, CalendarPlus, Loader2, Check } from "lucide-react";
+import { ArrowLeft, CalendarPlus, Loader2, Check, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
@@ -120,6 +120,7 @@ export default function EditAppointment() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  const [appointmentStatus, setAppointmentStatus] = useState("");
 
 
   const [originalSlot, setOriginalSlot] = useState<{
@@ -210,6 +211,8 @@ export default function EditAppointment() {
         const patient = record.patient_bio_data;
         const date = toDateInputValue(record.appointment_date);
         const time = toTimeInputValue(record.appointment_time);
+
+        setAppointmentStatus(record.status ?? "");
 
         setFormData({
           patientId: record.patient_id,
@@ -315,6 +318,15 @@ export default function EditAppointment() {
       return;
     }
 
+    if (appointmentStatus === "RESCHEDULE_REQUIRED" && !formData.doctorId) {
+      toast({
+        title: "Select a doctor to resolve the reschedule",
+        description: "This appointment has no doctor. Choose one so it can leave the reschedule queue.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setShowConfirm(true);
   };
 
@@ -366,7 +378,7 @@ export default function EditAppointment() {
       setShowLeaveConfirm(true);
       return;
     }
-    navigate("/dashboard");
+    navigate(-1);
   };
 
   const handleCancelAppointment = () => {
@@ -431,6 +443,18 @@ export default function EditAppointment() {
 
           {/* Form Body */}
           <form onSubmit={handleSubmit} className="p-8">
+            {appointmentStatus === "RESCHEDULE_REQUIRED" && (
+              <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-sm font-bold text-amber-800">Reschedule required</p>
+                  <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
+                    This appointment lost its doctor and is sitting in the reschedule queue. Pick a
+                    doctor below to assign it and clear the queue entry.
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-6 gap-y-6">
               {/* Patient (read-only -- patient can't be changed on an edit) */}
               <div>
@@ -639,7 +663,7 @@ export default function EditAppointment() {
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
                     Select a branch, doctor and date to see available time slots
                   </div>
-                ) : loadingSlots ? (
+                ) : loadingSlots || findingNearestDate ? (
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl flex items-center justify-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
                     Loading available slots...
@@ -731,7 +755,7 @@ export default function EditAppointment() {
         cancelText="Stay"
         onConfirm={() => {
           setShowLeaveConfirm(false);
-          navigate("/dashboard");
+          navigate(-1);
         }}
         onCancel={() => setShowLeaveConfirm(false)}
       />

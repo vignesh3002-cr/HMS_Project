@@ -1,558 +1,330 @@
-import React from "react";
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { format } from "date-fns";
+import {
+  IdCard,
+  Phone,
+  Mail,
+  MapPin,
+  Cake,
+  Droplet,
+  VenusAndMars,
+  Briefcase,
+  ShieldCheck,
+  FileText,
+  Building2,
+  Award,
+  User,
+} from "lucide-react";
+import { employeeApi, type EmployeeDetailResponse } from "@/api/employee.api";
 
-interface TableRow {
-  role?: string;
-  hospital?: string;
-  degree?: string;
-  university?: string;
-  certificate?: string;
-  from: string;
-  to: string;
+// Role-based extra fields, mirroring Addemployee.tsx's ROLE_CONFIG /
+// isMedical logic exactly: only Doctor/Nurse/Pharmacist/Lab Technician are
+// "medical" roles with a qualification + license/registration number, each
+// under its own label; Branch Admin/Staff Admin/Staff show "Department"
+// instead of "Specialization" and never have a qualification or license
+// number (that form never collects one for them). Bio only exists for
+// Doctor -- it comes from a separate doctorProfile join, not a field every
+// employee has.
+interface RoleMeta {
+  displayRole: string;
+  isMedical: boolean;
+  licenseLabel: string;
+  specializationLabel: string;
+  showBio: boolean;
 }
 
-interface Doctor {
-  name: string;
-  username: string;
-  phone: string;
-  emergency: string;
-  alternate: string;
-  department: string;
-  email: string;
-  dob: string;
-  experience: string;
-  license: string;
-  shift: string;
-  bloodGroup: string;
-  maritalStatus: string;
-  language: string;
-  gender: string;
-  nationality: string;
-  religion: string;
-  joining: string;
-  leaving: string;
-  pan: string;
-  aadhaar: string;
-  motherTongue: string;
-  bio: string;
+function getRoleMeta(roleType: string | undefined): RoleMeta {
+  switch ((roleType || "STAFF").toUpperCase()) {
+    case "DOCTOR":
+      return { displayRole: "Doctor", isMedical: true, licenseLabel: "Medical License No", specializationLabel: "Specialization", showBio: true };
+    case "NURSE":
+      return { displayRole: "Nurse", isMedical: true, licenseLabel: "Nurse Registration No", specializationLabel: "Specialization", showBio: false };
+    case "PHARMACIST":
+      return { displayRole: "Pharmacist", isMedical: true, licenseLabel: "Pharmacist License No", specializationLabel: "Specialization", showBio: false };
+    case "LAB_TECHNICIAN":
+      return { displayRole: "Laboratory Technician", isMedical: true, licenseLabel: "Lab License No", specializationLabel: "Specialization", showBio: false };
+    case "BRANCH_ADMIN":
+      return { displayRole: "Branch Admin", isMedical: false, licenseLabel: "", specializationLabel: "Department", showBio: false };
+    case "ADMIN":
+      return { displayRole: "Staff Admin", isMedical: false, licenseLabel: "", specializationLabel: "Department", showBio: false };
+    default:
+      return { displayRole: "Staff", isMedical: false, licenseLabel: "", specializationLabel: "Department", showBio: false };
+  }
 }
 
-const doctor: Doctor = {
-  name: "John Smith",
-  username: "DOC-9042",
-  phone: "+91 90020 90456",
-  emergency: "+91 90220 22352",
-  alternate: "+91 90020 92352",
-  department: "Cardiology",
-  email: "john@gmail.com",
-  dob: "01/25/1990",
-  experience: "12",
-  license: "ML566659898",
-  shift: "Morning",
-  bloodGroup: "A1B+",
-  maritalStatus: "Married",
-  language: "English, Tamil",
-  gender: "Male",
-  nationality: "Indian",
-  religion: "Hindu",
-  joining: "10/20/2008",
-  leaving: "-",
-  pan: "HASHJ239PN",
-  aadhaar: "5666 5989 8290",
-  motherTongue: "Tamil",
-  bio: "About Doctor",
+function getDesignationLabel(roleType: string | undefined, rawDesignation: string | null | undefined, meta: RoleMeta): string {
+  const rt = (roleType || "STAFF").toUpperCase();
+  if (rt === "BRANCH_ADMIN") return "Branch Admin";
+  if (rt === "ADMIN" || rt === "STAFF") return rawDesignation || meta.displayRole;
+  return rawDesignation || meta.displayRole;
+}
+
+function formatFullName(e: EmployeeDetailResponse["employee"] | null, roleType: string | undefined): string {
+  if (!e) return "Employee";
+  const name = [e.first_name, e.middle_name, e.last_name].filter(Boolean).join(" ");
+  return (roleType || "").toUpperCase() === "DOCTOR" ? `Dr. ${name}` : name;
+}
+
+const val = (v?: string | null | number): string =>
+  v !== undefined && v !== null && String(v).trim() !== "" ? String(v) : "—";
+
+// joining_date (and any other plain date field) comes back as a full ISO
+// timestamp (e.g. "2026-08-01T00:00:00.000Z") -- render it as MM/DD/YYYY
+// instead of passing the raw string through val().
+const formatDateOnly = (iso?: string | null): string => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  return format(d, "MM/dd/yyyy");
 };
 
-const experienceData: TableRow[] = [
-  {
-    role: "Cardiologist",
-    hospital: "Central Hospital",
-    from: "01/01/2018",
-    to: "31/12/2022",
-  },
-];
+const calculateAge = (dob?: string | null): string => {
+  if (!dob) return "—";
+  const birthDate = new Date(dob);
+  if (isNaN(birthDate.getTime())) return "—";
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return `${age}`;
+};
 
-const educationData: TableRow[] = [
-  {
-    degree: "MBBS, MD (Cardiology)",
-    university: "ABC University",
-    from: "01/07/2007",
-    to: "30/06/2012",
-  },
-];
-
-const certificationData: TableRow[] = [
-  {
-    certificate: "Fellowship in Interventional Cardiology",
-    from: "01/01/2013",
-    to: "31/12/2013",
-  },
-];
+const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <section className="bg-white border border-[#E5E7EB] rounded-xl p-5 mb-4">
+    <h2 className="hms-heading text-lg mb-4">{title}</h2>
+    {children}
+  </section>
+);
 
 const InfoItem = ({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) => (
-  <div>
-    <p className="text-sm font-semibold text-gray-900">{label}</p>
-    <p className="mt-1 text-gray-600">{value}</p>
-  </div>
-);
-
-const Card = ({
+  icon: Icon,
   title,
-  children,
+  value,
+  span = 1,
 }: {
+  icon: React.ComponentType<{ className?: string; strokeWidth?: string | number }>;
   title: string;
-  children: React.ReactNode;
+  value: string;
+  span?: number;
 }) => (
-  <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm mb-6">
-    <div className="border-b border-gray-200 px-6 py-4">
-      <h2 className="text-xl font-bold text-gray-900">{title}</h2>
+  <div className={span > 1 ? "col-span-2" : ""}>
+    <div className="flex items-start gap-3">
+      <div className="w-[23px] h-[23px] flex items-center justify-center text-[#424752] shrink-0">
+        <Icon className="w-[17px] h-[17px]" strokeWidth={1.75} />
+      </div>
+      <div className="flex flex-col gap-[3px]">
+        <strong className="hms-department-text text-[#191C1E]">{title}</strong>
+        <span className="hms-content-text text-[#424752]">{value}</span>
+      </div>
     </div>
-
-    <div className="p-6">{children}</div>
   </div>
 );
 
-const ViewDoctor = () => {
+const BranchesSection = ({ branches }: { branches: { branch_id: string; branch_name: string }[] }) => (
+  <div className="col-span-2 md:col-span-4">
+    <strong className="hms-department-text text-[#191C1E] block mb-2">Branches</strong>
+    {branches.length > 0 ? (
+      <div className="flex flex-wrap gap-2">
+        {branches.map((b) => (
+          <span key={b.branch_id} className="inline-flex items-center gap-1 px-2 py-0.5 hms-department-text text-[#475C7F] bg-[#E6E8EA] rounded-lg">
+            <Building2 className="w-3.5 h-3.5" />
+            {b.branch_name}
+          </span>
+        ))}
+      </div>
+    ) : (
+      <span className="hms-content-text text-[#8C8D8F]">—</span>
+    )}
+  </div>
+);
+
+export default function ViewEmployee() {
+  const { id } = useParams();
+  const [detail, setDetail] = useState<EmployeeDetailResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!id) return;
+    employeeApi
+      .getOne(id)
+      .then((res) => setDetail(res.data?.data ?? null))
+      .catch((err) => {
+        console.error("[ViewEmployee] Failed to load employee:", err);
+        setDetail(null);
+      })
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen items-center justify-center">
+        <div className="w-8 h-8 border-4 border-[#00488D] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen items-center justify-center">
+        <div className="text-center">
+          <p className="hms-subheading">Failed to load employee details.</p>
+          <button onClick={() => window.history.back()} className="mt-4 text-[#00488D] underline text-sm font-semibold">
+            Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const employee = detail.employee ?? null;
+  const roleType = detail.user?.role_type || employee?.user_table?.role_type;
+  const meta = getRoleMeta(roleType);
+  const name = formatFullName(employee, roleType);
+  const designation = getDesignationLabel(roleType, employee?.designation, meta);
+
+  // For medical roles this is a real specialization; for everyone else the
+  // same underlying field holds their department/area name -- see
+  // Addemployee.tsx's isMedical ? "specialization" : "department" labeling.
+  const specializationOrDept = detail.doctorProfile?.specialization || employee?.specialization || "—";
+  const qualification = detail.doctorProfile?.qualification || employee?.qualification || "—";
+  const licenseNo = detail.doctorProfile?.license_no || employee?.license_no || "—";
+  const bio = detail.doctorProfile?.doctor_bio?.trim() || "—";
+
+  const branchNames = detail.branches?.length
+    ? detail.branches.map((b) => b.branch_name)
+    : employee?.branch?.branch_name
+      ? [employee.branch.branch_name]
+      : [];
+  const isAvailable = employee?.emp_status === true || detail.user?.user_status === 0;
+  const photo = employee?.employee_photo_URL || "";
+  const phone = employee?.mobile_no || "—";
+  const email = employee?.email || "—";
+  const experience = employee?.employee_no_experence != null ? `${employee.employee_no_experence}+ yrs` : "—";
+  const dob = (employee as any)?.dob ? format(new Date((employee as any).dob), "dd MMM yyyy") : "—";
+  const age = calculateAge((employee as any)?.dob);
+  const gender = (employee as any)?.gender || "—";
+
   return (
-    <div className="min-h-screen bg-slate-100 p-6">
-      <div className="mx-auto max-w-7xl">
-
-        {/* Header */}
-
-        <div className="mb-6 flex items-center gap-4">
+    <div className="min-h-screen bg-[#F7F9FB] font-[Manrope,sans-serif]">
+      <main className="w-full p-4 max-w-[1200px] mx-auto">
+        {/* HEADER */}
+        <div className="flex items-start gap-2 mb-4">
           <button
             onClick={() => window.history.back()}
-            className="flex h-10 w-10 items-center justify-center rounded-full border bg-white hover:bg-gray-100"
+            className="flex items-center gap-2 border-0 bg-transparent text-[#424752] text-sm cursor-pointer"
           >
-            ←
+            <span className="text-[25px] leading-none">‹</span>
           </button>
-
-          <div>
-            <h1 className="text-4xl font-bold text-slate-900">
-              View Doctor
-            </h1>
-
-            <p className="text-gray-500">
-              View full doctor profile
-            </p>
+          <div className="flex-1">
+            <h1 className="hms-heading">{name}</h1>
+            <p className="hms-subheading mt-1">View full employee profile</p>
           </div>
         </div>
 
-        {/* Contact */}
-
-        <Card title="Contact Information">
-
-          <div className="flex flex-col gap-8 border-b pb-8 md:flex-row">
-
-            <img
-              src="https://i.pravatar.cc/150?img=12"
-              alt="doctor"
-              className="h-24 w-24 rounded-full border-4 border-gray-200 object-cover"
-            />
-
+        {/* CONTACT */}
+        <Section title="Contact Information">
+          <div className="flex flex-col md:flex-row gap-6">
+            <div className="w-32 h-32 rounded-lg overflow-hidden shrink-0 bg-[#E6E8EA] flex items-center justify-center">
+              {photo ? (
+                <img src={photo} alt={name} className="w-full h-full object-cover" />
+              ) : (
+                <User className="w-1/2 h-1/2 text-[#8C8D8F]" strokeWidth={1.5} />
+              )}
+            </div>
             <div className="flex-1">
-
-              <h2 className="mb-6 text-4xl font-bold">
-                {doctor.name}
-              </h2>
-
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-
-                <InfoItem
-                  label="Username"
-                  value={doctor.username}
-                />
-
-                <InfoItem
-                  label="Phone Number"
-                  value={doctor.phone}
-                />
-
-                <InfoItem
-                  label="Emergency Number"
-                  value={doctor.emergency}
-                />
-
-                <InfoItem
-                  label="Alternative Number"
-                  value={doctor.alternate}
-                />
-
+              <div className="flex items-center gap-2 flex-wrap mb-3">
+                <span className="inline-flex items-center gap-[5px] bg-[#D6E3FF] text-[#00488D] px-[9px] py-1 rounded-full hms-department-text">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#00488D]" />
+                  {designation}
+                </span>
+                <span className={`hms-content-text ${isAvailable ? "text-[#16A34A]" : "text-[#8C8D8F]"}`}>
+                  {isAvailable ? "Active" : "Inactive"}
+                </span>
               </div>
-
-              <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
-
-                <InfoItem
-                  label="Department"
-                  value={doctor.department}
-                />
-
-                <InfoItem
-                  label="Email"
-                  value={doctor.email}
-                />
-
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <InfoItem icon={Mail} title="Email" value={val(email)} />
+                <InfoItem icon={Phone} title="Mobile No" value={val(phone)} />
+                {meta.isMedical && <InfoItem icon={IdCard} title={meta.licenseLabel} value={val(licenseNo)} />}
               </div>
-                            {/* Doctor Information */}
-
-              <div className="mt-10 grid grid-cols-1 gap-x-8 gap-y-8 md:grid-cols-2 xl:grid-cols-4">
-
-                <InfoItem
-                  label="DOB"
-                  value={doctor.dob}
-                />
-
-                <InfoItem
-                  label="Year Of Experience"
-                  value={doctor.experience}
-                />
-
-                <InfoItem
-                  label="Medical License Number"
-                  value={doctor.license}
-                />
-
-                <div />
-
-                <InfoItem
-                  label="Department"
-                  value={doctor.department}
-                />
-
-                <InfoItem
-                  label="Shift"
-                  value={doctor.shift}
-                />
-
-                <InfoItem
-                  label="Blood Group"
-                  value={doctor.bloodGroup}
-                />
-
-                <InfoItem
-                  label="Marital Status"
-                  value={doctor.maritalStatus}
-                />
-
-                <InfoItem
-                  label="Language Spoken"
-                  value={doctor.language}
-                />
-
-                <InfoItem
-                  label="Gender"
-                  value={doctor.gender}
-                />
-
-                <InfoItem
-                  label="Nationality"
-                  value={doctor.nationality}
-                />
-
-                <InfoItem
-                  label="Religion"
-                  value={doctor.religion}
-                />
-
-                <InfoItem
-                  label="Date of Joining"
-                  value={doctor.joining}
-                />
-
-                <InfoItem
-                  label="Date of Leaving"
-                  value={doctor.leaving}
-                />
-
-                <InfoItem
-                  label="PAN Card"
-                  value={doctor.pan}
-                />
-
-                <InfoItem
-                  label="Aadhaar Card"
-                  value={doctor.aadhaar}
-                />
-
-                <InfoItem
-                  label="Mother Tongue"
-                  value={doctor.motherTongue}
-                />
-
-                <InfoItem
-                  label="Bio"
-                  value={doctor.bio}
-                />
-
-              </div>
-
             </div>
-
           </div>
 
-        </Card>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+            <InfoItem icon={Cake} title="Date of Birth" value={dob} />
+            <InfoItem icon={Cake} title="Age" value={age} />
+            <InfoItem icon={VenusAndMars} title="Gender" value={gender} />
+            <InfoItem icon={Droplet} title="Blood Group" value={val(employee?.blood_group)} />
+            <InfoItem icon={ShieldCheck} title="Experience" value={experience} />
+          </div>
+        </Section>
 
-        {/* Department & Role */}
-
-        <Card title="Department & Role">
-
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-
-            <div className="border-r border-gray-200 pr-6">
-              <p className="text-sm font-semibold text-gray-900">
-                Specialist
-              </p>
-
-              <p className="mt-2 text-lg font-semibold">
-                Cardiology
-              </p>
+        {/* PERSONAL INFORMATION */}
+        <Section title="Personal Information">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <InfoItem icon={User} title="Nationality" value={val(employee?.nationality)} />
+            <InfoItem icon={Award} title="Marital Status" value={val(employee?.marital_status)} />
+            <InfoItem icon={IdCard} title="Aadhaar No" value={val(employee?.aadhaar_no)} />
+            <InfoItem icon={FileText} title="PAN No" value={val(employee?.pan_no)} />
+            <InfoItem icon={FileText} title="Passport No" value={val(employee?.passport_no)} />
+            <InfoItem icon={Briefcase} title="Designation" value={designation} />
+            {meta.isMedical && <InfoItem icon={Award} title="Qualification" value={val(qualification)} />}
+          </div>
+          {meta.showBio && (
+            <div className="mt-4">
+              <strong className="hms-department-text text-[#191C1E] block mb-2">Bio</strong>
+              <p className="hms-content-text text-[#424752] leading-[22px]">{bio}</p>
             </div>
+          )}
+        </Section>
 
-            <div className="border-r border-gray-200 pr-6">
-              <p className="text-sm font-semibold text-gray-900">
-                Experience
-              </p>
-
-              <p className="mt-2 text-lg font-semibold">
-                12 Years
-              </p>
-            </div>
-
-            <div className="border-r border-gray-200 pr-6">
-              <p className="text-sm font-semibold text-gray-900">
-                Surgical
-              </p>
-
-              <p className="mt-2 text-lg font-semibold">
-                No
-              </p>
-            </div>
-
-            <div>
-              <p className="text-sm font-semibold text-gray-900">
-                Emergency Support
-              </p>
-
-              <p className="mt-2 text-lg font-semibold">
-                Not Assigned
-              </p>
-            </div>
-
+        {/* DEPARTMENT & ROLE */}
+        <Section title="Department & Role">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <InfoItem icon={Building2} title={meta.specializationLabel} value={val(specializationOrDept)} />
+            {meta.isMedical && <InfoItem icon={Award} title="Qualification" value={val(qualification)} />}
+            <InfoItem icon={Briefcase} title="Experience" value={experience} />
+            {meta.isMedical && <InfoItem icon={IdCard} title={meta.licenseLabel} value={val(licenseNo)} />}
+            <InfoItem icon={Cake} title="Joining Date" value={formatDateOnly(employee?.joining_date)} />
           </div>
-
-        </Card>
-
-        {/* Experience */}
-
-        <Card title="Experience">
-
-          <div className="overflow-x-auto">
-
-            <table className="min-w-full">
-
-              <thead className="bg-slate-50">
-
-                <tr>
-
-                  <th className="border-b px-4 py-3 text-left text-sm font-semibold">
-                    Role
-                  </th>
-
-                  <th className="border-b px-4 py-3 text-left text-sm font-semibold">
-                    Hospital / Clinic Name
-                  </th>
-
-                  <th className="border-b px-4 py-3 text-left text-sm font-semibold">
-                    From
-                  </th>
-
-                  <th className="border-b px-4 py-3 text-left text-sm font-semibold">
-                    To
-                  </th>
-
-                </tr>
-
-              </thead>
-
-              <tbody>
-
-                {experienceData.map((item, index) => (
-
-                  <tr key={index}>
-
-                    <td className="border-b px-4 py-4">
-                      {item.role}
-                    </td>
-
-                    <td className="border-b px-4 py-4">
-                      {item.hospital}
-                    </td>
-
-                    <td className="border-b px-4 py-4">
-                      {item.from}
-                    </td>
-
-                    <td className="border-b px-4 py-4">
-                      {item.to}
-                    </td>
-
-                  </tr>
-
-                ))}
-
-              </tbody>
-
-            </table>
-
+          <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+            <BranchesSection branches={detail.branches ?? []} />
           </div>
+        </Section>
 
-        </Card>
-                {/* Educational Information */}
-
-        <Card title="Educational Information">
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="border-b px-4 py-3 text-left text-sm font-semibold">
-                    Educational Degree
-                  </th>
-
-                  <th className="border-b px-4 py-3 text-left text-sm font-semibold">
-                    University
-                  </th>
-
-                  <th className="border-b px-4 py-3 text-left text-sm font-semibold">
-                    From
-                  </th>
-
-                  <th className="border-b px-4 py-3 text-left text-sm font-semibold">
-                    To
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {educationData.map((item, index) => (
-                  <tr key={index}>
-                    <td className="border-b px-4 py-4">
-                      {item.degree}
-                    </td>
-
-                    <td className="border-b px-4 py-4">
-                      {item.university}
-                    </td>
-
-                    <td className="border-b px-4 py-4">
-                      {item.from}
-                    </td>
-
-                    <td className="border-b px-4 py-4">
-                      {item.to}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* CURRENT ADDRESS */}
+        <Section title="Current Address">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <InfoItem icon={MapPin} title="Address" value={val(employee?.current_address)} span={2} />
+            <InfoItem icon={MapPin} title="Area" value={val(employee?.employee_area)} />
+            <InfoItem icon={MapPin} title="City" value={val(employee?.employee_district)} />
+            <InfoItem icon={MapPin} title="State" value={val(employee?.employee_state)} />
+            <InfoItem icon={MapPin} title="Pincode" value={val(employee?.employee_pincode)} />
           </div>
-        </Card>
+        </Section>
 
-        {/* Certifications */}
-
-        <Card title="Certifications">
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="border-b px-4 py-3 text-left text-sm font-semibold">
-                    Name
-                  </th>
-
-                  <th className="border-b px-4 py-3 text-left text-sm font-semibold">
-                    From
-                  </th>
-
-                  <th className="border-b px-4 py-3 text-left text-sm font-semibold">
-                    To
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {certificationData.map((item, index) => (
-                  <tr key={index}>
-                    <td className="border-b px-4 py-4">
-                      {item.certificate}
-                    </td>
-
-                    <td className="border-b px-4 py-4">
-                      {item.from}
-                    </td>
-
-                    <td className="border-b px-4 py-4">
-                      {item.to}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* PERMANENT ADDRESS */}
+        <Section title="Permanent Address">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <InfoItem icon={MapPin} title="Address" value={val(employee?.parmanent_address)} span={2} />
+            <InfoItem icon={MapPin} title="Area" value={val((employee as any)?.permanent_employee_area)} />
+            <InfoItem icon={MapPin} title="City" value={val((employee as any)?.permanent_employee_district)} />
+            <InfoItem icon={MapPin} title="State" value={val((employee as any)?.permanent_employee_state)} />
+            <InfoItem icon={MapPin} title="Pincode" value={val((employee as any)?.permanent_employee_pincode)} />
           </div>
-        </Card>
+        </Section>
 
-        {/* Current Address */}
-
-        <Card title="Current Address">
-          <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-
-            <InfoItem
-              label="Address"
-              value="123, Green Avenue, Near City Hospital"
-            />
-
-            <InfoItem
-              label="City"
-              value="Bangalore"
-            />
-
-            <InfoItem
-              label="State"
-              value="Karnataka"
-            />
-
+        {/* EMERGENCY CONTACT */}
+        <Section title="Emergency Contact">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <InfoItem icon={User} title="Contact Name" value={val(employee?.emergency_contact_name)} />
+            <InfoItem icon={Phone} title="Relation" value={val(employee?.emergency_contact_relationship)} />
+            <InfoItem icon={Phone} title="Contact Number" value={val(employee?.emergency_contact_number)} />
           </div>
-        </Card>
-
-        {/* Permanent Address */}
-
-        <Card title="Permanent Address">
-          <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-
-            <InfoItem
-              label="Address"
-              value="123, Green Avenue, Near City Hospital"
-            />
-
-            <InfoItem
-              label="City"
-              value="Bangalore"
-            />
-
-            <InfoItem
-              label="State"
-              value="Karnataka"
-            />
-
-          </div>
-        </Card>
-
-      </div>
+        </Section>
+      </main>
     </div>
   );
-};
-
-export default ViewDoctor;
+}

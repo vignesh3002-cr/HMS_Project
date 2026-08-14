@@ -4,8 +4,7 @@ import { Activity, BedDouble, Building2, UsersRound } from "lucide-react";
 import { DataPanel } from "@/components/hms/DataPanel";
 import { PageHeader } from "@/components/hms/PageHeader";
 import { StatusBadge } from "@/components/hms/StatusBadge";
-import { FilterPopover, useFilterPanel } from "@/components/Filter";
-import type { FilterField } from "@/components/Filter/types";
+import { FilterPopover, useFilterPanel, useDepartmentFilters } from "@/components/Filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import ExportReport from "@/components/ui/ExportReport";
 
@@ -77,24 +76,7 @@ export default function Departments() {
     handleClear: handleClearFilter,
   } = useFilterPanel();
 
-  const departmentFilterFields: FilterField[] = [
-    { id: "name", label: "Department", type: "multiselect", options: [
-      { label: "Emergency", value: "Emergency" },
-      { label: "Cardiology", value: "Cardiology" },
-      { label: "Pediatrics", value: "Pediatrics" },
-      { label: "Surgery", value: "Surgery" },
-      { label: "Maternity", value: "Maternity" },
-      { label: "Diagnostics", value: "Diagnostics" },
-    ]},
-    { id: "lead", label: "Department Head", type: "text", placeholder: "Search by name" },
-    { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "High load", value: "High load" },
-      { label: "Stable", value: "Stable" },
-      { label: "Full review", value: "Full review" },
-      { label: "Normal", value: "Normal" },
-    ]},
-    { id: "utilization", label: "Min Utilization", type: "number", placeholder: "Minimum %", min: 0, max: 100 },
-  ];
+  const { departmentFilterFields } = useDepartmentFilters({ departmentRows: departments });
 
   const filteredDepartments = useMemo(() => {
     const result = filterDataByValues(departments, appliedValues);

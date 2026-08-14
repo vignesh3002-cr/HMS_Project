@@ -24,6 +24,10 @@ export interface CreatePatientPayload {
   patient_district?: string;
   patient_area?: string;
   patient_pincode?: number;
+  current_address?: string;
+  emergency_name?: string;
+  emergency_relation?: string;
+  emergency_mobile?: string;
   photo?: string;
   branch_id: string;
   created_by: string;
@@ -70,6 +74,10 @@ export interface UpdatePatientPayload {
   marital_status?: string;
   nationality?: string;
   patient_type?: string;
+  current_address?: string;
+  emergency_name?: string;
+  emergency_relation?: string;
+  emergency_mobile?: string;
   photo?: string;
 }
 
@@ -102,7 +110,7 @@ export interface PatientRecord {
   patient_area: string | null;
   patient_pincode: number | null;
   branch: { branch_name: string | null } | null;
-  user_table: { role_type: string | null; user_status: number | null } | null;
+  user_table: { role_type: string | null; user_status: number | null; created_at?: string | null } | null;
 }
 
 export interface GetPatientsParams {

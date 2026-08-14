@@ -90,6 +90,7 @@ export interface EmployeeRecord {
   user_table: {
     role_type: string;
     user_status: number;
+    created_at?: string | null;
   };
   branch: {
     branch_name: string;
@@ -102,8 +103,8 @@ export interface EmployeeRecord {
   employee_area?: string | null;
   employee_pincode?: string | number | null;
   employee_no_experence?: string | number | null;
-  emp_gender?: string | null;
-  emp_DOB?: string | null;
+  gender?: string | null;
+  dob?: string | null;
 }
 
 export interface EmployeeDetailResponse {
@@ -114,7 +115,7 @@ export interface EmployeeDetailResponse {
     parmanent_address?: string | null;
   };
   user: { role_type: string; user_status: number } | null;
-  branches: { branch_id: string; branch_name: string }[];
+  branches: { branch_id: string; branch_name: string; status?: number }[];
   doctorProfile?: {
     specialization: string | null;
     qualification: string | null;
@@ -156,11 +157,26 @@ export interface CreateEmployeeResponse {
   };
 }
 
+export interface AddScheduleSlotPayload {
+  branch_id: string;
+  day_of_week: DayOfWeek;
+  shift_name?: string;
+  start_time: string;
+  end_time: string;
+}
+
+export interface AddScheduleSlotResponse {
+  success: boolean;
+  message: string;
+  data: DoctorScheduleRecord;
+}
+
 export interface GetEmployeesParams {
   roleType?: string;
   branchId?: string;
   department?: string;
   status?: boolean;
+  includeDeleted?: boolean;
   search?: string;
   page?: number;
   limit?: number;
@@ -224,9 +240,26 @@ export const employeeApi = {
   getOne: (employeeId: string) =>
     API.get<{ success: boolean; data: EmployeeDetailResponse }>(`/employees/${employeeId}`),
 
+  getMe: () =>
+    API.get<{ success: boolean; data: EmployeeDetailResponse }>(`/employees/me`),
+
   update: (employeeId: string, data: UpdateEmployeePayload) =>
     API.put<{ success: boolean; data: any; message?: string }>(`/employees/${employeeId}`, data),
 
+  updatePhoto: (employeeId: string, employee_photo_URL: string) =>
+    API.patch<{ success: boolean; data: any; message?: string }>(
+      `/employees/${employeeId}/photo`,
+      { employee_photo_URL }
+    ),
+
   remove: (employeeId: string) =>
     API.delete<{ success: boolean; message: string }>(`/employees/${employeeId}`),
+
+  addScheduleSlot: (employeeId: string, data: AddScheduleSlotPayload) =>
+    API.post<AddScheduleSlotResponse>(`/employees/${employeeId}/schedules`, data),
+
+  removeScheduleSlot: (employeeId: string, scheduleId: string | number) =>
+    API.delete<{ success: boolean; message: string; data: { schedule_id: string; soft_closed: boolean } }>(
+      `/employees/${employeeId}/schedules/${scheduleId}`,
+    ),
 };

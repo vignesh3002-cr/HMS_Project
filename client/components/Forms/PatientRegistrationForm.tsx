@@ -1,7 +1,7 @@
 import { useEffect, useState, ChangeEvent, FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Loader2, Plus, UserRound } from "lucide-react";
+import { ArrowLeft, Check, Loader2, Plus, UserRound } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
@@ -149,13 +149,20 @@ function Section({
   );
 }
 
-export default function PatientRegistrationForm() {
+export default function PatientRegistrationForm({
+  editMode = false,
+  patientId,
+}: {
+  editMode?: boolean;
+  patientId?: string;
+}) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
   const [formData, setFormData] = useState<FormData>(emptyFormData);
   const [sameAsCurrent, setSameAsCurrent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(editMode);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [insuranceFiles, setInsuranceFiles] = useState<File[]>([]);
   const [indianStates, setIndianStates] = useState<IState[]>([]);
@@ -163,10 +170,13 @@ export default function PatientRegistrationForm() {
   const [permanentDistrictOptions, setPermanentDistrictOptions] = useState<string[]>([]);
   // Re-typed password — must match before submit is allowed. Username has
   // no confirm field; it's a single required field (matches Addemployee.tsx).
+  // Not used in edit mode — the edit view has no login fields.
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [originalFormData, setOriginalFormData] = useState<FormData | null>(null);
+
 
   const addInsuranceFiles = (files: FileList | File[]) => {
     const arr = Array.from(files).filter(
@@ -196,6 +206,75 @@ export default function PatientRegistrationForm() {
   useEffect(() => {
     setIndianStates(CSState.getStatesOfCountry("IN"));
   }, []);
+
+  // Edit mode: load the existing patient into the form so it can be updated
+  // through the same structure as registration.
+  useEffect(() => {
+    if (!editMode || !patientId) return;
+    patientApi
+      .getById(patientId)
+      .then((res) => {
+        const patient = res.data.data;
+        if (patient) {
+          const isKnownType =
+            patient.patient_type &&
+            (PATIENT_TYPE_OPTIONS.includes(patient.patient_type) ||
+              patient.patient_type === OTHER_PATIENT_TYPE_VALUE);
+          const loadedFormData: FormData = {
+            branch_id: patient.branch_id || "",
+            patient_first_name: patient.patient_first_name || "",
+            patient_middle_name: patient.patient_middle_name || "",
+            patient_last_name: patient.patient_last_name || "",
+            patient_gender: patient.patient_gender || "",
+            patient_dob: (patient as any).patient_dob || "",
+            patient_blood_group: patient.patient_blood_group || "",
+            patient_type: isKnownType || !patient.patient_type ? (patient.patient_type || "") : OTHER_PATIENT_TYPE_VALUE,
+            patient_type_other: isKnownType || !patient.patient_type ? "" : (patient.patient_type || ""),
+            patient_primary_mobile: patient.patient_primary_mobile || "",
+            patient_alternate_mobile: patient.patient_alternate_mobile || "",
+            patient_email: patient.patient_email || "",
+            patient_marital_status: patient.patient_marital_status || "",
+            patient_nationality: patient.patient_nationality || "",
+            patient_state: patient.patient_state || "",
+            patient_district: patient.patient_district || "",
+            patient_area: patient.patient_area || "",
+            patient_pincode: patient.patient_pincode ? String(patient.patient_pincode) : "",
+            patient_current_address: (patient as any).current_address || "",
+            patient_permanent_address: (patient as any).permanent_address || "",
+            patient_permanent_area: "",
+            patient_permanent_state: "",
+            patient_permanent_district: "",
+            patient_permanent_pincode: "",
+            patient_username: "",
+            patient_password: "",
+            patient_emergency_mobile: (patient as any).emergency_mobile || "",
+            patient_emergency_name: (patient as any).emergency_name || "",
+            patient_emergency_relation: (patient as any).emergency_relation || "",
+            patient_photo_url: patient.patient_photo_url || null,
+            insurance_patient: "no",
+            insurance_provider: "",
+            insurance_plan: "",
+            policy_number: "",
+            policy_holder_name: "",
+            policy_holder_relation: "",
+            validity_date: "",
+          };
+          setFormData(loadedFormData);
+          setOriginalFormData(loadedFormData);
+          if ((patient as any).current_address && !(patient as any).permanent_address) {
+            setSameAsCurrent(true);
+          }
+        }
+      })
+      .catch((error: any) => {
+        toast({
+          title: "Failed to load patient",
+          description: error.response?.data?.message ?? error.message ?? "Something went wrong.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => setLoading(false));
+  }, [editMode, patientId, toast]);
 
   useEffect(() => {
     if (formData.patient_state) {
@@ -296,7 +375,7 @@ export default function PatientRegistrationForm() {
       return;
     }
 
-    if (!confirmPassword.trim()) {
+    if (!editMode && !confirmPassword.trim()) {
       toast({
         title: "Missing required field",
         description: "Please confirm your Password.",
@@ -305,7 +384,7 @@ export default function PatientRegistrationForm() {
       return;
     }
 
-    if (formData.patient_password !== confirmPassword) {
+    if (!editMode && formData.patient_password !== confirmPassword) {
       toast({
         title: "Password mismatch",
         description: "Password and Confirm Password do not match.",
@@ -347,10 +426,45 @@ export default function PatientRegistrationForm() {
     setSubmitting(true);
 
     try {
-      // Address and emergency-contact fields aren't sent — patient_bio_data
-      // has no columns for those yet. created_by is required by the backend
-      // validation even though the controller actually derives it from the
-      // logged-in user's auth token.
+      if (editMode && patientId) {
+        const response = await patientApi.update(patientId, {
+          branch_id: formData.branch_id,
+          first_name: formData.patient_first_name,
+          middle_name: formData.patient_middle_name || undefined,
+          last_name: formData.patient_last_name || undefined,
+          gender: formData.patient_gender || undefined,
+          dob: formData.patient_dob || undefined,
+          blood_group: formData.patient_blood_group || undefined,
+          mobile: formData.patient_primary_mobile,
+          alternate_mobile: formData.patient_alternate_mobile || undefined,
+          email: formData.patient_email || undefined,
+          marital_status: formData.patient_marital_status || undefined,
+          nationality: formData.patient_nationality || undefined,
+          current_address: formData.patient_current_address || undefined,
+          emergency_name: formData.patient_emergency_name || undefined,
+          emergency_relation: formData.patient_emergency_relation || undefined,
+          emergency_mobile: formData.patient_emergency_mobile || undefined,
+          photo: formData.patient_photo_url || undefined,
+        });
+
+        if (!response.data.success) {
+          throw new Error(response.data.message);
+        }
+
+        toast({
+          title: "Patient updated",
+          description: `${formData.patient_first_name} ${formData.patient_last_name} was updated successfully.`,
+        });
+
+        navigate(-1);
+        return;
+      }
+
+      // Address and emergency-contact fields map onto the patient_bio_data
+      // columns Patient_address / Patient_Emergency_contact_name /
+      // Emergency_contact_relation / Patient_emergency_mobile in the backend
+      // service. created_by is required by the backend validation even though
+      // the controller actually derives it from the logged-in user's auth token.
       const response = await patientApi.create({
         username: formData.patient_username,
         password: formData.patient_password,
@@ -374,6 +488,10 @@ export default function PatientRegistrationForm() {
         patient_district: formData.patient_district || undefined,
         patient_area: formData.patient_area || undefined,
         patient_pincode: formData.patient_pincode ? Number(formData.patient_pincode) : undefined,
+        current_address: formData.patient_current_address || undefined,
+        emergency_name: formData.patient_emergency_name || undefined,
+        emergency_relation: formData.patient_emergency_relation || undefined,
+        emergency_mobile: formData.patient_emergency_mobile || undefined,
         photo: formData.patient_photo_url || undefined,
         created_by: "SYSTEM",
       });
@@ -407,22 +525,34 @@ export default function PatientRegistrationForm() {
 
   const handleConfirmReset = () => {
     setShowResetConfirm(false);
-    setFormData(emptyFormData);
+    setFormData(editMode && originalFormData ? originalFormData : emptyFormData);
     setSameAsCurrent(false);
     setConfirmPassword("");
     setInsuranceFiles([]);
   };
 
-  const isDirty =
-    JSON.stringify(formData) !== JSON.stringify(emptyFormData) || insuranceFiles.length > 0;
+  const isDirty = editMode
+    ? !!originalFormData &&
+      (JSON.stringify(formData) !== JSON.stringify(originalFormData) || insuranceFiles.length > 0)
+    : JSON.stringify(formData) !== JSON.stringify(emptyFormData) || insuranceFiles.length > 0;
 
   const handleBack = () => {
     if (isDirty) {
       setShowLeaveConfirm(true);
       return;
     }
-    navigate("/dashboard");
+    navigate(-1);
   };
+
+  if (loading && editMode) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-8 px-4 flex items-center justify-center">
+        <div className="w-full max-w-5xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100 p-8 flex items-center justify-center">
+          <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
@@ -441,7 +571,7 @@ export default function PatientRegistrationForm() {
             <UserRound className="w-5 h-5" />
           </div>
           <h4 className="hms-heading text-gray-900 tracking-tight">
-            Patient Registration
+            {editMode ? "Edit Patient" : "Patient Registration"}
           </h4>
         </div>
 
@@ -680,6 +810,7 @@ export default function PatientRegistrationForm() {
               </div>
 
 
+              {/* ── Permanent Address section — commented out (kept for future use) ──
               <div className="col-span-3 flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -769,6 +900,7 @@ export default function PatientRegistrationForm() {
                   disabled={submitting || sameAsCurrent}
                 />
               </div>
+              ────────────────────────────────────────────────────────────── */}
             </div>
           </Section>
 
@@ -784,7 +916,6 @@ export default function PatientRegistrationForm() {
                   value={formData.patient_primary_mobile}
                   onChange={(value) => handleInputChange({ target: { name: "patient_primary_mobile", value } } as any, "patient_primary_mobile")}
                   placeholder="+91 98765 43210"
-                  required
                   disabled={submitting}
                   defaultCountry="in"
                 />
@@ -797,7 +928,6 @@ export default function PatientRegistrationForm() {
                   value={formData.patient_alternate_mobile}
                   onChange={(value) => handleInputChange({ target: { name: "patient_alternate_mobile", value } } as any, "patient_alternate_mobile")}
                   placeholder="+91 98765 43210"
-                  optional
                   disabled={submitting}
                   defaultCountry="in"
                 />
@@ -816,17 +946,6 @@ export default function PatientRegistrationForm() {
                 />
               </div>
 
-              <div>
-                <label className={labelCls}>Emergency mobile <Req /></label>
-                <PhoneInput
-                  value={formData.patient_emergency_mobile}
-                  onChange={(value) => handleInputChange({ target: { name: "patient_emergency_mobile", value } } as any, "patient_emergency_mobile")}
-                  placeholder="+91 98765 43210"
-                  required
-                  disabled={submitting}
-                  defaultCountry="in"
-                />
-              </div>
               <div>
                 <label className={labelCls}>Emergency contact name <Req /></label>
                 <input
@@ -849,6 +968,16 @@ export default function PatientRegistrationForm() {
                   onChange={(e) => handleInputChange(e, "patient_emergency_relation")}
                   disabled={submitting}
                   required
+                />
+              </div>
+                            <div>
+                <label className={labelCls}>Emergency mobile <Req /></label>
+                <PhoneInput
+                  value={formData.patient_emergency_mobile}
+                  onChange={(value) => handleInputChange({ target: { name: "patient_emergency_mobile", value } } as any, "patient_emergency_mobile")}
+                  placeholder="+91 98765 43210"
+                  disabled={submitting}
+                  defaultCountry="in"
                 />
               </div>
             </div>
@@ -986,7 +1115,7 @@ export default function PatientRegistrationForm() {
                       <label className={labelCls}>Validity date <Req /></label>
                       <input
                         type="date"
-                        max={new Date().toISOString().split("T")[0]}
+                        min={new Date().toISOString().split("T")[0]}
                         className={inputCls + " text-gray-500"}
                         value={formData.validity_date}
                         onChange={(e) => setField("validity_date", e.target.value)}
@@ -1078,6 +1207,10 @@ export default function PatientRegistrationForm() {
           */}
 
           {/* ── Account credentials ── */}
+          {/* Not shown in edit mode — username/password are set at registration
+              and are not editable here (matches Addemployee.tsx's split between
+              the add-only login fields and the shared editable fields). */}
+          {!editMode && (
           <Section
             title="Account credentials"
             sub="Login details for portal access."
@@ -1122,6 +1255,7 @@ export default function PatientRegistrationForm() {
               </div>
             </div>
           </Section>
+          )}
 
           {/* ── Actions ── */}
           <div className="flex justify-end gap-3.5 pt-5 mt-1.5 border-t border-gray-100">
@@ -1141,7 +1275,12 @@ export default function PatientRegistrationForm() {
               {submitting ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Saving…
+                  {editMode ? "Saving…" : "Adding…"}
+                </>
+              ) : editMode ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  Save changes
                 </>
               ) : (
                 <>
@@ -1158,10 +1297,14 @@ export default function PatientRegistrationForm() {
         open={showSubmitConfirm}
         onConfirm={handleConfirmSubmit}
         onCancel={() => setShowSubmitConfirm(false)}
-        type="question"
-        title="Add patient?"
-        description="Are you sure you want to register this new patient?"
-        confirmText="Save patient"
+        type={editMode ? "warning" : "question"}
+        title={editMode ? "Save changes?" : "Add patient?"}
+        description={
+          editMode
+            ? "Are you sure you want to save the changes to this patient?"
+            : "Are you sure you want to register this new patient?"
+        }
+        confirmText={editMode ? "Save changes" : "Save patient"}
         cancelText="Cancel"
         loading={submitting}
       />
@@ -1170,7 +1313,11 @@ export default function PatientRegistrationForm() {
         open={showResetConfirm}
         type="info"
         title="Reset Form?"
-        description="All entered values will be cleared."
+        description={
+          editMode
+            ? "All fields will be reset to their original values."
+            : "All entered values will be cleared."
+        }
         confirmText="Reset"
         cancelText="Cancel"
         onConfirm={handleConfirmReset}
@@ -1186,7 +1333,7 @@ export default function PatientRegistrationForm() {
         cancelText="Stay"
         onConfirm={() => {
           setShowLeaveConfirm(false);
-          navigate("/dashboard");
+          navigate(-1);
         }}
         onCancel={() => setShowLeaveConfirm(false)}
       />

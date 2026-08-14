@@ -130,11 +130,11 @@ export default function DoctorDetailView() {
   const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanent_address || "—";
   const doctorBloodGroup = doctorEmployee?.blood_group || "—";
   const doctorExperience = doctorEmployee?.employee_no_experence != null ? `${doctorEmployee.employee_no_experence}+ yrs` : "—";
-  const doctorDOB = (doctorEmployee as any)?.emp_DOB
-    ? format(new Date((doctorEmployee as any).emp_DOB), "dd MMM yyyy")
+  const doctorDOB = (doctorEmployee as any)?.dob
+    ? format(new Date((doctorEmployee as any).dob), "dd MMM yyyy")
     : "—";
-  const doctorAge = calculateAge((doctorEmployee as any)?.emp_DOB);
-  const doctorGender = (doctorEmployee as any)?.emp_gender || "—";
+  const doctorAge = calculateAge((doctorEmployee as any)?.dob);
+  const doctorGender = (doctorEmployee as any)?.gender || "—";
   const doctorBio = doctorDetail.doctorProfile?.doctor_bio?.trim() || "—";
 
   return (
@@ -242,10 +242,11 @@ export default function DoctorDetailView() {
         <Section title="Permanent Address">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <InfoCell icon={MapPin} title="Address" value={val(doctorEmployee?.parmanent_address)} span={2} />
+            <InfoCell icon={MapPin} title="Pincode" value={val((doctorEmployee as any)?.permanent_employee_pincode)} />
             <InfoCell icon={MapPin} title="City" value={val((doctorEmployee as any)?.permanent_employee_district)} />
             <InfoCell icon={MapPin} title="State" value={val((doctorEmployee as any)?.permanent_employee_state)} />
             <InfoCell icon={MapPin} title="Area" value={val((doctorEmployee as any)?.permanent_employee_area)} />
-            <InfoCell icon={MapPin} title="Pincode" value={val((doctorEmployee as any)?.permanent_employee_pincode)} />
+            
           </div>
         </Section>
 

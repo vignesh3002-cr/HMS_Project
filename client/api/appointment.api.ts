@@ -106,9 +106,14 @@ export const appointmentApi = {
   create: (data: CreateAppointmentPayload) =>
     API.post<{ success: boolean; message: string; data: AppointmentResponse }>("/appointments", data),
 
-  getAvailableSlots: (employeeId: string, branchId: string, date: string) =>
+  getAvailableSlots: (
+    employeeId: string,
+    branchId: string,
+    date: string,
+    options?: { includePast?: boolean },
+  ) =>
     API.get<{ success: boolean; data: AvailableSlotsResult }>("/appointments/available-slots", {
-      params: { employeeId, branchId, date },
+      params: { employeeId, branchId, date, ...options },
     }),
 
   getDoctorSlotSummary: (employeeId: string, date: string) =>

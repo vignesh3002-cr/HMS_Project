@@ -1,21 +1,24 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2 } from "lucide-react";
+import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2, MoreVertical } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
-import { FilterPopover, useFilterPanel } from "@/components/Filter";
-import type { FilterField } from "@/components/Filter/types";
-import { filterDataByValues } from "@/components/Filter/utils";
+import { FilterPopover, useFilterPanel, useDashboardFilters } from "@/components/Filter";
+import { applySearchAndFilter } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { patientApi } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { encounterApi } from "@/api/encounter.api";
 import { branchApi } from "@/api/branch.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
+import { DepartmentPill, DepartmentAvatarText } from "@/components/hms/DepartmentBadge";
 import { useBranchFilter } from "@/context/BranchFilterContext";
+import { usePermission } from "@/context/PermissionContext";
 
 const navItems = [
   {
@@ -122,7 +125,7 @@ function formatBranch(branch: EmployeeRecord["branch"]): string {
 function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${doc.first_name} ${doc.middle_name ? doc.middle_name + " " : ""}${doc.last_name}`;
-  const role = doc.user_table?.role_type || "DOCTOR";
+  const role = doc.user_table?.role_type || "STAFF";
   const branchName = formatBranch(doc.branch);
   const isActive = doc.emp_status === true || doc.user_table?.user_status === 0;
   return {
@@ -136,6 +139,7 @@ function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
     deptColor: "#475C7F",
     branch: branchName,
     status: isActive ? "Active" : "Inactive",
+    role,
   };
 }
 
@@ -230,11 +234,116 @@ function CountUp({ target, duration = 1800 }: { target: number; duration?: numbe
   return <>{formatStatValue(count)}</>;
 }
 
+function AppointmentActionMenu({
+  status,
+  onView,
+  onEdit,
+  onCancel,
+  onCheckIn,
+  onCheckOut,
+}: {
+  status: string;
+  onView: () => void;
+  onEdit: () => void;
+  onCancel: () => void;
+  onCheckIn: () => void;
+  onCheckOut: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const { can } = usePermission();
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  if (!can("appointment.read") && !can("appointment.update") && !can("appointment.cancel")) return null;
+
+  const isCancelled = status.toLowerCase() === "cancelled";
+  const isScheduled = status.toLowerCase() === "scheduled";
+  const isCheckIn = status.toLowerCase() === "check in" || status.toLowerCase() === "in consultation";
+
+  return (
+    <div className="relative inline-block text-left" ref={wrapperRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center justify-center p-1.5 border border-[#E5E7EB] rounded-md hover:border-[#00488D] transition-colors"
+      >
+        <MoreVertical className="w-4 h-4 text-[#6B7280]" />
+      </button>
+
+      <div
+        className={`absolute right-0 top-full mt-1 w-44 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-40 transition-all duration-150 ${
+          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
+        }`}
+      >
+        {can("appointment.read") && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onView(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
+          >
+            View Appointment
+          </button>
+        )}
+        {can("appointment.update") && !isCancelled && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onEdit(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
+          >
+            Edit Appointment
+          </button>
+        )}
+        {can("appointment.update") && isScheduled && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onCheckIn(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-green-600 hover:bg-green-50"
+          >
+            Check In
+          </button>
+        )}
+        {can("appointment.update") && isCheckIn && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onCheckOut(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-blue-600 hover:bg-blue-50"
+          >
+            Check Out
+          </button>
+        )}
+        {can("appointment.cancel") && !isCancelled && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onCancel(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-red-600 hover:bg-red-50"
+          >
+            Cancel Appointment
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("doctors");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { toast } = useToast();
-  const { selectedBranchId, isAllBranches } = useBranchFilter();
+  // Aliased -- this page already has its own local `branches` state below
+  // for the branch-performance widget, so the real branch directory from
+  // the shared hook (same one Staff.tsx uses for its Branch filter) needs a
+  // different name.
+  const { selectedBranchId, isAllBranches, branches: branchDirectory } = useBranchFilter();
+  const { can, canAny, permissions, loading: permissionsLoading } = usePermission();
 
  
   const [realDoctors, setRealDoctors] = useState<Record<string, unknown>[] | null>(null);
@@ -248,7 +357,18 @@ export default function Dashboard() {
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
   const [appointmentCount, setAppointmentCount] = useState<number>(0);
 
+  // Date selection state -- declared early since fetchAppointments below
+  // depends on it to scope the Appointments tab to the selected day.
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+
   const fetchEmployees = useCallback(async () => {
+    if (!permissions.some((p) => p === "employee.read" || p === "doctor.read")) {
+      setIsEmployeesLoading(false);
+      setRealDoctors(null);
+      setRealStaff(null);
+      return;
+    }
     setIsEmployeesLoading(true);
     try {
       console.log("[Dashboard] Fetching all employees from employeeApi...");
@@ -288,7 +408,7 @@ export default function Dashboard() {
     } finally {
       setIsEmployeesLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches]);
+  }, [toast, selectedBranchId, isAllBranches, permissions]);
 
   // Branch progress bar state — branches come from the real /branch API.
   // Each branch's pct/color is driven purely by its own real total
@@ -345,6 +465,12 @@ export default function Dashboard() {
   }, []);
 
   const fetchAppointments = useCallback(async () => {
+    if (!permissions.includes("appointment.read")) {
+      setIsAppointmentsLoading(false);
+      setRealAppointments(null);
+      setAppointmentCount(0);
+      return;
+    }
     setIsAppointmentsLoading(true);
     try {
       const res = await appointmentApi.getAll({
@@ -352,6 +478,7 @@ export default function Dashboard() {
         sortBy: "appointment_date",
         sortOrder: "desc",
         branchId: isAllBranches ? undefined : selectedBranchId,
+        date: format(selectedDate, "yyyy-MM-dd"),
       });
       const rows = res.data?.data?.appointments || [];
       setRealAppointments(rows.map(mapAppointmentRecord));
@@ -367,13 +494,17 @@ export default function Dashboard() {
     } finally {
       setIsAppointmentsLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches, fetchBranchPerformance]);
+  }, [toast, selectedBranchId, isAllBranches, fetchBranchPerformance, selectedDate]);
 
   useEffect(() => {
     fetchAppointments();
   }, [fetchAppointments]);
 
   useEffect(() => {
+    if (!permissions.includes("patient.read")) {
+      setPatientCount(0);
+      return;
+    }
     patientApi
       .getAll({ limit: 1, branchId: isAllBranches ? undefined : selectedBranchId })
       .then((res) => {
@@ -382,7 +513,7 @@ export default function Dashboard() {
       .catch(() => {
         setPatientCount(0);
       });
-  }, [selectedBranchId, isAllBranches]);
+  }, [selectedBranchId, isAllBranches, permissions]);
 
   useEffect(() => {
     fetchEmployees();
@@ -391,6 +522,8 @@ export default function Dashboard() {
   const liveStats = useMemo(() => [
     {
       label: "Doctors",
+      permission: "doctor.read",
+      loading: isEmployeesLoading,
       value: (realDoctors?.length ?? 0).toLocaleString(),
       change: "",
       changeType: "positive",
@@ -402,6 +535,7 @@ export default function Dashboard() {
     },
     {
       label: "Patients",
+      permission: "patient.read",
       value: patientCount.toLocaleString(),
       change: "",
       changeType: "positive",
@@ -413,6 +547,8 @@ export default function Dashboard() {
     },
     {
       label: "Staff",
+      permission: "employee.read",
+      loading: isEmployeesLoading,
       value: (realStaff?.length ?? 0).toLocaleString(),
       change: "",
       changeType: "neutral",
@@ -424,6 +560,8 @@ export default function Dashboard() {
     },
     {
       label: "Appointments",
+      permission: "appointment.read",
+      loading: isAppointmentsLoading,
       value: appointmentCount.toLocaleString(),
       change: "",
       changeType: "positive",
@@ -435,6 +573,7 @@ export default function Dashboard() {
     },
     {
       label: "Prescription Generated",
+      permission: undefined,
       value: "8,432",
       change: "124",
       changeType: "negative",
@@ -446,6 +585,7 @@ export default function Dashboard() {
     },
     {
       label: "Bills Generated",
+      permission: undefined,
       value: "2700",
       change: "+160",
       changeType: "positive",
@@ -455,7 +595,9 @@ export default function Dashboard() {
       icon: <Receipt className="h-4 w-4" color="#00488D" />,
       iconBg: "rgba(255,255,255,0.20)",
     },
-  ], [realDoctors, realStaff, patientCount, appointmentCount]);
+  ], [realDoctors, realStaff, patientCount, appointmentCount, isEmployeesLoading, isAppointmentsLoading]);
+
+  const visibleStats = liveStats.filter((stat) => !stat.permission || can(stat.permission));
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -472,9 +614,6 @@ export default function Dashboard() {
   const tabsContainerRef = useRef<HTMLDivElement>(null);
   const [underline, setUnderline] = useState({ left: 0, width: 0 });
 
-  // Date selection state
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const {
     values: filterValues,
     appliedValues,
@@ -489,83 +628,60 @@ export default function Dashboard() {
     handleClearFilter();
   }, [activeTab]);
 
-  const doctorFilterFields: FilterField[] = [
-    { id: "name", label: "Doctor Name", type: "text", placeholder: "Search by name" },
-    { id: "dept", label: "Department", type: "multiselect", options: [
-      { label: "Cardiology", value: "Cardiology" },
-      { label: "Neurology", value: "Neurology" },
-      { label: "Orthopedics", value: "Orthopedics" },
-      { label: "Dermatology", value: "Dermatology" },
-      { label: "ENT", value: "ENT" },
-      { label: "Gynecology", value: "Gynecology" },
-      { label: "Urology", value: "Urology" },
-      { label: "Orthology", value: "Orthology" },
-    ]},
-    { id: "branch", label: "Branch", type: "multiselect", options: [
-      { label: "Central Hospital (Tambaram)", value: "Central Hospital (Tambaram)" },
-      { label: "Central Hospital (Saidapet)", value: "Central Hospital (Saidapet)" },
-      { label: "Central Hospital (Egmore)", value: "Central Hospital (Egmore)" },
-    ]},
-    { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "Active", value: "Active" },
-      { label: "Leave", value: "Leave" },
-    ]},
-  ];
+  // Filter UI, state, and field/option logic all live in Filter/ now --
+  // useFilterPanel() (state, above) and useDashboardFilters() (field
+  // definitions + real-data-derived options) are the single source of
+  // truth; Dashboard just receives activeFilterFields and renders it via
+  // FilterPopover below. Branch/Department/Status/Name options are built
+  // from the same real, already-fetched realDoctors/realStaff/
+  // realAppointments/branchDirectory Dashboard already has -- no new or
+  // duplicate API calls.
+  const { activeFilterFields } = useDashboardFilters({
+    activeTab,
+    realDoctors,
+    realStaff,
+    realAppointments,
+    branches: branchDirectory,
+  });
 
-  const staffFilterFields: FilterField[] = [
-    { id: "name", label: "Staff Name", type: "text", placeholder: "Search by name" },
-    { id: "dept", label: "Department", type: "multiselect", options: [
-      { label: "Emergency", value: "Emergency" },
-      { label: "Radiology", value: "Radiology" },
-      { label: "Surgery", value: "Surgery" },
-      { label: "Pathology", value: "Pathology" },
-      { label: "Maternity", value: "Maternity" },
-      { label: "Pharmacy", value: "Pharmacy" },
-      { label: "Pulmonology", value: "Pulmonology" },
-      { label: "Neurology", value: "Neurology" },
-    ]},
-    { id: "branch", label: "Branch", type: "multiselect", options: [
-      { label: "Central Hospital (Tambaram)", value: "Central Hospital (Tambaram)" },
-      { label: "Central Hospital (Saidapet)", value: "Central Hospital (Saidapet)" },
-      { label: "Central Hospital (Egmore)", value: "Central Hospital (Egmore)" },
-    ]},
-    { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "Active", value: "Active" },
-      { label: "Leave", value: "Leave" },
-    ]},
-  ];
+  const availableTabs = useMemo(() => [
+    { key: "doctors", label: "Doctors", show: canAny(["doctor.read", "employee.read"]) },
+    { key: "staff", label: "Staff", show: can("employee.read") },
+    { key: "appointments", label: "Appointments", show: can("appointment.read") },
+  ].filter((tab) => tab.show), [permissions]);
 
-  const appointmentFilterFields: FilterField[] = [
-    { id: "patientName", label: "Patient Name", type: "text", placeholder: "Search by name" },
-    { id: "doctorName", label: "Doctor Name", type: "text", placeholder: "Search by doctor" },
-    { id: "reason", label: "Reason", type: "text", placeholder: "Search reason" },
-    { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "Booked", value: "Booked" },
-      { label: "Confirmed", value: "Confirmed" },
-      { label: "Checked In", value: "Checked In" },
-      { label: "In Consultation", value: "In Consultation" },
-      { label: "Completed", value: "Completed" },
-      { label: "Cancelled", value: "Cancelled" },
-      { label: "No Show", value: "No Show" },
-    ]},
-  ];
-
-  const activeFilterFields = useMemo(() => {
-    switch (activeTab) {
-      case "staff": return staffFilterFields;
-      case "appointments": return appointmentFilterFields;
-      default: return doctorFilterFields;
+  useEffect(() => {
+    if (availableTabs.length === 0) return;
+    if (!availableTabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab(availableTabs[0].key);
     }
-  }, [activeTab]);
+  }, [availableTabs, activeTab]);
 
   useEffect(() => {
     const container = tabsContainerRef.current;
     if (!container) return;
-    const activeButton = container.querySelector<HTMLButtonElement>(`[data-tab="${activeTab}"]`);
-    if (activeButton) {
-      setUnderline({ left: activeButton.offsetLeft, width: activeButton.offsetWidth });
+
+    const measure = () => {
+      const activeButton = container.querySelector<HTMLButtonElement>(`[data-tab="${activeTab}"]`);
+      if (activeButton) {
+        setUnderline({ left: activeButton.offsetLeft, width: activeButton.offsetWidth });
+      }
+    };
+
+    measure();
+
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(measure);
     }
-  }, [activeTab]);
+
+    const ro = new ResizeObserver(measure);
+    ro.observe(container);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [activeTab, availableTabs]);
 
   const handleSort = (field: string) => {
     if (sortField[activeTab] === field) {
@@ -591,23 +707,14 @@ export default function Dashboard() {
       ? ["appointmentNo", "patientName", "doctorName", "reason", "status"]
       : ["name", "id", "dept", "branch", "status"];
 
-  const filteredData = useMemo(() => {
-    let result = [...activeData];
-
-    if (searchQuery) {
-      result = result.filter((item) =>
-        searchableFields.some((field) =>
-          String(item[field] ?? "")
-            .toLowerCase()
-            .includes(searchQuery.toLowerCase())
-        )
-      );
-    }
-
-    result = filterDataByValues(result, appliedValues);
-
-    return result;
-  }, [searchQuery, activeTab, appliedValues, realDoctors, realStaff, realAppointments]);
+  // Dashboard receives its filtered rows straight from Filter/'s
+  // applySearchAndFilter() -- same search-then-filter sequence as before,
+  // now a single reusable call instead of Dashboard orchestrating both
+  // steps itself.
+  const filteredData = useMemo(
+    () => applySearchAndFilter(activeData, searchQuery, searchableFields, appliedValues, activeFilterFields),
+    [searchQuery, activeTab, appliedValues, activeFilterFields, realDoctors, realStaff, realAppointments],
+  );
 
   const currentSortField = sortField[activeTab];
   const currentSortDirection = sortDirection[activeTab];
@@ -634,76 +741,43 @@ export default function Dashboard() {
   const visibleEnd = Math.min(endIndex, totalRecords);
 
   const [animatedValues, setAnimatedValues] = useState<Record<string, number>>({});
-  const branchRef = useRef<HTMLDivElement>(null);
-  const hasAnimated = useRef(false);
 
-  // Initial trigger on scroll
+  // Animate each branch's bar from its current displayed value to its real
+  // pct whenever `branches` loads/changes -- no scroll-visibility gating,
+  // since that depended on this card being the first thing to intersect the
+  // viewport and silently never animated otherwise. Cleans up its own
+  // intervals so repeated branch/date changes can't leak overlapping timers.
   useEffect(() => {
-    const el = branchRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && !hasAnimated.current) {
-          hasAnimated.current = true;
-          observer.disconnect();
-
-          branches.forEach((branch, index) => {
-            setTimeout(() => {
-              let current = 0;
-              const interval = setInterval(() => {
-                current += 1;
-                setAnimatedValues((prev) => ({
-                  ...prev,
-                  [branch.id]: current,
-                }));
-                if (current >= branch.pct) {
-                  clearInterval(interval);
-                }
-              }, 30);
-            }, index * 200);
-          });
-        }
-      },
-      { threshold: 0.1 },
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  // Animate only the branch whose pct changed
-useEffect(() => {
-  if (!hasAnimated.current) return;
-
-  branches.forEach((branch) => {
-    const current = animatedValues[branch.id] ?? 0;
-
-    if (current !== branch.pct) {
-      const interval = setInterval(() => {
+    const intervals = branches.map((branch) => {
+      const interval = window.setInterval(() => {
         setAnimatedValues((prev) => {
           const value = prev[branch.id] ?? 0;
 
           if (value === branch.pct) {
-            clearInterval(interval);
+            window.clearInterval(interval);
             return prev;
           }
 
           return {
             ...prev,
-            [branch.id]:
-              value < branch.pct ? value + 1 : value - 1,
+            [branch.id]: value < branch.pct ? value + 1 : value - 1,
           };
         });
       }, 30);
-    }
-  });
-}, [branches]);
+      return interval;
+    });
+
+    return () => intervals.forEach((interval) => window.clearInterval(interval));
+  }, [branches]);
 
   const navigate = useNavigate();
 
   const handleEdit = (id: string | number) => {
-    navigate(`/destination-edit/${id}`);
+    navigate(`/appointments/edit/${id}`);
+  };
+
+  const handleEditStaff = (id: string | number, role: string) => {
+    navigate(`/staff/edit/${id}?role=${role}`);
   };
 
   // Doctor rows always route to the real Edit Doctor page, regardless of
@@ -716,6 +790,77 @@ useEffect(() => {
   const handleView = (id: string | number) => {
     navigate(`/doctor/day-view/${id}`);
   };
+
+  const [cancelTarget, setCancelTarget] = useState<Record<string, unknown> | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+
+  const handleCancelAppointment = (target: Record<string, unknown>) => {
+    setCancelReason("");
+    setCancelTarget(target);
+  };
+
+  const handleConfirmCancelAppointment = () => {
+    if (!cancelTarget) return;
+
+    if (!cancelReason.trim()) {
+      toast({ title: "A cancellation reason is required", variant: "destructive" });
+      return;
+    }
+
+    const targetId = cancelTarget.id;
+    setRealAppointments((prev) =>
+      (prev ?? []).map((appt) =>
+        appt.id === targetId ? { ...appt, status: "Cancelled" } : appt,
+      ),
+    );
+    toast({
+      title: "Appointment cancelled",
+      description: `Appointment ${targetId} has been cancelled.`,
+    });
+    setCancelTarget(null);
+    setCancelReason("");
+  };
+
+  const handleCheckIn = async (appointment: Record<string, unknown>) => {
+    const appointmentId = appointment.id as string;
+    try {
+      // First update appointment status to CHECKED_IN
+      await appointmentApi.updateStatus(appointmentId, "CHECKED_IN");
+      // Then create encounter
+      await encounterApi.create({ appointment_id: appointmentId });
+      // Refresh appointments
+      await fetchAppointments();
+      toast({ title: "Patient checked in", description: "Encounter created successfully." });
+    } catch (error: any) {
+      toast({ title: "Check-in failed", description: error.response?.data?.message || "Failed to check in patient", variant: "destructive" });
+    }
+  };
+
+  const handleCheckOut = async (appointment: Record<string, unknown>) => {
+    const appointmentId = appointment.id as string;
+    try {
+      // First find the encounter for this appointment
+      const encounters = await encounterApi.getAll({ appointmentId });
+      const encounter = encounters.data?.data?.encounters?.[0];
+      if (encounter) {
+        await encounterApi.close(encounter.encounter_no, "DOCTOR");
+      }
+      // Refresh appointments
+      await fetchAppointments();
+      toast({ title: "Patient checked out", description: "Encounter closed successfully." });
+    } catch (error: any) {
+      toast({ title: "Check-out failed", description: error.response?.data?.message || "Failed to check out patient", variant: "destructive" });
+    }
+  };
+
+  // Only the very first load (waiting on permissions) shows the full-page
+  // skeleton. Branch/date changes and manual refreshes just flip
+  // isEmployeesLoading/isAppointmentsLoading — those are handled inline
+  // (stat cards + table spinner below) so the shell never unmounts, same
+  // as the Staff page.
+  if (permissionsLoading) {
+    return <DashboardSkeleton />;
+  }
 
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB]">
@@ -735,7 +880,7 @@ useEffect(() => {
         <main className="flex flex-col gap-6 border-t border-[#E5E7EB] pt-6">
           {/* Stats Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-8">
-            {liveStats.map((stat) => (
+            {visibleStats.map((stat) => (
               <div
                 key={stat.label}
                 className="flex flex-col p-4 rounded-xl shadow-[2px_2px_16px_0_rgba(0,0,0,0.25)] transition-all duration-200 hover:-translate-y-1 hover:shadow-lg cursor-pointer"
@@ -759,7 +904,11 @@ useEffect(() => {
                 </div>
                 <div className="pt-2">
                   <div className="font-extrabold text-xl leading-7 tracking-[-1px]" style={{ color: stat.valueColor }}>
-                    <CountUp target={parseStatValue(stat.value)} />
+                    {stat.loading ? (
+                      <div className="w-12 h-5 rounded-md bg-black/10 animate-pulse" />
+                    ) : (
+                      <CountUp target={parseStatValue(stat.value)} />
+                    )}
                   </div>
                   <div className="text-[rgba(0,0,0,0.70)] text-[9px] font-semibold tracking-[0.9px] capitalize leading-[13.5px]">
                     {stat.label}
@@ -775,6 +924,7 @@ useEffect(() => {
                <h2 className="hms-heading">Admin Overview</h2>
                <p className="hms-subheading">Real-time performance across all branches.</p>
              </div>
+             {can("appointment.create") && (
              <button
                onClick={() => navigate("/appointments/add")}
                className="flex items-center gap-1.5 px-5 py-2.5 bg-[#004785] rounded-[10px] text-white text-xs font-semibold whitespace-nowrap hover:opacity-90 transition-opacity"
@@ -784,6 +934,7 @@ useEffect(() => {
                </svg>
                Add Appointment
              </button>
+             )}
            </div>
 
           {/* Table Card */}
@@ -792,11 +943,7 @@ useEffect(() => {
               {/* Table Header */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-[rgba(194,198,212,0.10)]">
               <div className="relative flex items-center gap-6" ref={tabsContainerRef}>
-                {[
-                  { key: "doctors", label: "Doctors" },
-                  { key: "staff", label: "Staff" },
-                  { key: "appointments", label: "Appointments" },
-                ].map((tab) => (
+                {availableTabs.map((tab) => (
                   <button
                     key={tab.key}
                     data-tab={tab.key}
@@ -804,15 +951,15 @@ useEffect(() => {
                       setActiveTab(tab.key);
                       setCurrentPage(1);
                     }}
-                    className="relative pb-1 text-xs font-semibold tracking-[1.2px] capitalize transition-colors duration-200"
+                    className="relative pb-2 text-xs font-semibold tracking-[1.2px] capitalize transition-colors duration-200"
                     style={{ color: activeTab === tab.key ? "#00488D" : "#424752" }}
                   >
                     {tab.label}
                   </button>
                 ))}
                 <div
-                  className="absolute bottom-0 h-0.5 bg-[#00488D] transition-all duration-300 ease-out"
-                  style={{ left: underline.left, width: underline.width }}
+                    className="absolute bottom-0 h-[2px] bg-[#00488D] transition-all duration-300 ease-out max-[1024px]:hidden"
+                    style={{ left: underline.left, width: underline.width }}
                 />
               </div>
               <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -901,6 +1048,7 @@ useEffect(() => {
               </div>
             ) : (
               <HmsTable
+                scrollable={false}
                 columns={activeTab === "appointments" ? [
                   { key: "patientName", label: "Patient Name", render: (r: any) => (
                     <div className="flex items-center gap-2">
@@ -925,30 +1073,24 @@ useEffect(() => {
                     <StatusBadge status={String(r.status)} />
                   )},
                   { key: "actions", label: "Action", sortable: false, render: (r: any) => (
-                    <div className="flex items-center gap-1">
-                      <button title="View" onClick={() => handleView(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] group-hover:stroke-[#505F76]">
-                          <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-                          <circle cx="12" cy="12" r="3" />
-                        </svg>
-                      </button>
-                      <button title="Edit" onClick={() => handleEdit(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] group-hover:stroke-[#5E87CF]">
-                          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                          <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
-                        </svg>
-                      </button>
-                    </div>
+                    <AppointmentActionMenu
+                      status={r.status}
+                      onView={() => navigate(`/appointments/view/${r.id}`)}
+                      onEdit={() => handleEdit(r.id)}
+                      onCancel={() => handleCancelAppointment(r)}
+                      onCheckIn={() => handleCheckIn(r)}
+                      onCheckOut={() => handleCheckOut(r)}
+                    />
                   )},
                 ] : [
                   { key: "name", label: "Name", render: (r: any) => (
                     <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.initBg, color: r.avatarColor }}>{r.avatar}</div>
+                      <DepartmentAvatarText department={r.dept}>{r.avatar}</DepartmentAvatarText>
                       <div><div className="hms-name-text">{r.name}</div><div className="hms-id-text">{r.id}</div></div>
                     </div>
                   )},
                   { key: "dept", label: "Department", render: (r: any) => (
-                    <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize" style={{ background: r.deptBg, color: r.deptColor }}>{r.dept}</span>
+                    <DepartmentPill department={r.dept}>{r.dept}</DepartmentPill>
                   )},
                   { key: "branch", label: "Branch", render: (r: any) => <span className="text-[#191C1E] hms-content-text leading-4">{r.branch}</span> },
                   { key: "status", label: "Status", render: (r: any) => (
@@ -956,18 +1098,26 @@ useEffect(() => {
                   )},
                   { key: "actions", label: "Actions", sortable: false, render: (r: any) => (
                     <div className="flex items-center gap-1">
+                      {can("doctor.read") && (
                       <button title="View" onClick={() => handleView(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] group-hover:stroke-[#505F76]">
                           <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
                           <circle cx="12" cy="12" r="3" />
                         </svg>
                       </button>
-                      <button title="Edit" onClick={() => (activeTab === "doctors" ? handleEditDoctor : handleEdit)(r.id)} className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
+                      )}
+                      {can(activeTab === "doctors" ? "doctor.update" : "employee.update") && (
+                      <button title="Edit" onClick={() => {
+                        if (activeTab === "doctors") handleEditDoctor(r.id);
+                        else if (activeTab === "staff") handleEditStaff(r.id, r.role);
+                        else handleEdit(r.id);
+                      }} className="p-1.5 rounded transition-colors duration-200 hover:bg-blue-50 group">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] group-hover:stroke-[#5E87CF]">
                           <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                           <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
                         </svg>
                       </button>
+                      )}
                     </div>
                   )},
                 ]}
@@ -994,7 +1144,8 @@ useEffect(() => {
           {/* Bottom Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
             {/* Branch Performance */}
-            <div ref={branchRef} className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+            {can("appointment.read") && (
+            <div className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="text-[#191C1E] font-extrabold text-base leading-6 tracking-[-0.4px]">Branch Performance</h3>
@@ -1018,6 +1169,7 @@ useEffect(() => {
                 ))}
               </div>
             </div>
+            )}
 
             {/* System Integrity */}
             <div className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
@@ -1054,6 +1206,82 @@ useEffect(() => {
           </div>
         </main>
       </div>
+
+      <ConfirmationDialog
+        open={!!cancelTarget}
+        type="danger"
+        title="Cancel Appointment?"
+        description={
+          cancelTarget
+            ? `Appointment ${cancelTarget.id} will be cancelled. Please enter a reason for cancellation.`
+            : ""
+        }
+        confirmText="Cancel Appointment"
+        cancelText="Keep Appointment"
+        onConfirm={handleConfirmCancelAppointment}
+        onCancel={() => setCancelTarget(null)}
+      >
+        <textarea
+          value={cancelReason}
+          onChange={(e) => setCancelReason(e.target.value)}
+          placeholder="Reason for cancellation (required)"
+          rows={3}
+          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      </ConfirmationDialog>
     </div>
   );
 };
+
+function DashboardSkeleton() {
+  return (
+    <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB]">
+      <div className="flex flex-col flex-1 min-w-0">
+        <main className="flex flex-col gap-6 border-t border-[#E5E7EB] pt-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-8">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div
+                key={i}
+                className="flex flex-col gap-3 p-4 rounded-xl border border-slate-200 bg-white shadow-sm"
+              >
+                <div className="w-8 h-8 bg-slate-200 rounded-[4px] animate-pulse" />
+                <div className="w-16 h-6 bg-slate-200 rounded-md animate-pulse" />
+                <div className="w-20 h-3 bg-slate-100 rounded-md animate-pulse" />
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-end justify-between">
+            <div className="flex flex-col gap-2">
+              <div className="w-44 h-6 bg-slate-200 rounded-md animate-pulse" />
+              <div className="w-72 h-3 bg-slate-100 rounded-md animate-pulse" />
+            </div>
+            <div className="w-32 h-9 bg-slate-200 rounded-[10px] animate-pulse" />
+          </div>
+
+          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+              <div className="flex items-center gap-6">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="w-14 h-4 bg-slate-100 rounded-md animate-pulse" />
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-[200px] h-7 bg-slate-100 rounded-md animate-pulse" />
+                <div className="w-24 h-7 bg-slate-100 rounded-md animate-pulse" />
+              </div>
+            </div>
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="flex items-center gap-4 px-5 py-4 border-b border-slate-100">
+                <div className="w-1/5 h-4 bg-slate-100 rounded-md animate-pulse" />
+                <div className="w-1/6 h-4 bg-slate-100 rounded-md animate-pulse" />
+                <div className="flex-1 h-4 bg-slate-50 rounded-md animate-pulse" />
+                <div className="w-16 h-5 bg-slate-100 rounded-full animate-pulse" />
+              </div>
+            ))}
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}

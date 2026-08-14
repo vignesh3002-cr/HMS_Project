@@ -164,6 +164,12 @@ interface CalendarProps {
   minYear?: number;
   /** Latest year selectable in the year dropdown. Defaults to 10 years after the current year. */
   maxYear?: number;
+  /** Earliest date users may pick (dates before it are disabled). */
+  minDate?: Date;
+  /** Latest date users may pick (dates after it are disabled). */
+  maxDate?: Date;
+  /** Extra per-date disablement (e.g. non-working days). Disabled dates are greyed out and unselectable. */
+  isDateDisabled?: (date: Date) => boolean;
 }
 
 export default function Calendar({
@@ -174,6 +180,9 @@ export default function Calendar({
   defaultCustomColors,
   minYear,
   maxYear,
+  minDate,
+  maxDate,
+  isDateDisabled,
 }: CalendarProps) {
   const [internalTheme, setInternalTheme] = useState<ThemeName>("light");
   const [customColors, setCustomColors] = useState<CustomColors>(
@@ -241,9 +250,16 @@ export default function Calendar({
     setCursor((c) => new Date(year, c.getMonth(), 1));
  
   const handlePick = (date: Date) => {
+    if (isDisabled(date)) return;
     setInternalSelected(date);
     onSelect?.(date);
   };
+
+  const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const isDisabled = (date: Date) =>
+    (minDate && dayStart(date) < dayStart(minDate)) ||
+    (maxDate && dayStart(date) > dayStart(maxDate)) ||
+    (isDateDisabled ? isDateDisabled(date) : false);
  
   return (
     <div
@@ -300,14 +316,17 @@ export default function Calendar({
           {days.map(({ date, inMonth }, i) => {
             const isToday = isSameDay(date, today);
             const isSelected = selected && isSameDay(date, selected);
+            const disabled = isDisabled(date);
             return (
               <button
                 key={i}
                 onClick={() => handlePick(date)}
+                disabled={disabled}
                 className="cal-day"
                 data-in-month={inMonth}
                 data-today={isToday}
                 data-selected={isSelected}
+                data-disabled={disabled}
               >
                 {date.getDate()}
               </button>
@@ -499,6 +518,13 @@ export default function Calendar({
           background: var(--cal-accent);
           color: var(--cal-accent-text);
           font-weight: 600;
+        }
+        .cal-day[data-disabled="true"] {
+          opacity: 0.35;
+          cursor: not-allowed;
+        }
+        .cal-day[data-disabled="true"]:hover {
+          background: transparent;
         }
         .cal-theme-picker {
           display: flex;

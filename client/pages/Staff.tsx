@@ -3,18 +3,22 @@ import CalendarPicker from "@/components/hms/Calender";
 import { useNavigate } from "react-router-dom";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Search, Plus, Loader2 } from "lucide-react";
+import { Search, Plus, Loader2, List, LayoutGrid, MoreVertical, User } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import ExportReport from "@/components/ui/ExportReport";
+import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
 
-import { FilterPopover, useFilterPanel } from "@/components/Filter";
-import type { FilterField } from "@/components/Filter/types";
+import { FilterPopover, useFilterPanel, useStaffFilters } from "@/components/Filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { StatusBadge } from "@/components/hms/StatusBadge";
+import { DepartmentPill, DepartmentAvatarText } from "@/components/hms/DepartmentBadge";
+import { usePermission } from "@/context/PermissionContext";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { getUser } from "@/utils/token";
 
 interface StaffMember {
   initials: string;
@@ -38,6 +42,7 @@ interface MedicalStaffRow {
   branch: string;
   roleType: string;
   status: "active" | "inactive";
+  photo: string;
 }
 
 interface AdministrativeStaffRow {
@@ -51,11 +56,10 @@ interface AdministrativeStaffRow {
   designation: string;
   designationColor: "purple" | "indigo";
   branch: string;
-  access: string;
-  accessColor: "purple" | "indigo";
   login: string;
   loginDot: "green" | "orange";
   status: "active" | "inactive";
+  photo: string;
 }
 
 interface SupportStaffRow {
@@ -69,7 +73,21 @@ interface SupportStaffRow {
   branch: string;
   roleType: string;
   status: "active" | "inactive";
+  photo: string;
 }
+
+// Photo avatar with fallback (grid only) -- same treatment as Doctor.tsx's
+// DoctorPhoto, since employee_photo_URL is a general employee field, not
+// doctor-specific.
+const StaffPhoto = ({ photo, name }: { photo: string; name: string }) => (
+  <div className="w-16 h-16 rounded-full overflow-hidden bg-[#E5E7EB] flex items-center justify-center flex-shrink-0">
+    {photo ? (
+      <img src={photo} alt={name} className="w-full h-full object-cover" />
+    ) : (
+      <User className="w-8 h-8 text-[#B0B4BB]" strokeWidth={1.5} />
+    )}
+  </div>
+);
 
 const TABS = ["All staff", "Medical Staff", "Admin", "Supporting"];
 
@@ -98,22 +116,6 @@ function formatBranch(branch: EmployeeRecord["branch"]): string {
   return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
 }
 
-const STAFF_DESIGNATION_CATEGORY: Record<string, "administrative" | "support"> = {
-  "receptionist": "administrative",
-  "admin executive": "administrative",
-  "accountant": "administrative",
-  "hr executive": "administrative",
-  "it support": "administrative",
-  "office manager": "administrative",
-  "security officer": "support",
-  "housekeeping staff": "support",
-};
-
-function classifyStaffDesignation(designation: string | null | undefined): "administrative" | "support" {
-  const key = designation?.toLowerCase().trim() || "";
-  return STAFF_DESIGNATION_CATEGORY[key] ?? "administrative";
-}
-
 function getDesignationLabel(emp: EmployeeRecord): string {
   const roleType = (emp.user_table?.role_type || "STAFF").toUpperCase();
   const designation = emp.designation || "";
@@ -129,12 +131,17 @@ function getDesignationLabel(emp: EmployeeRecord): string {
   }
 }
 
+// Category follows the employee's real role_type (see Addemployee.tsx's
+// BackendRoleType/ROLE_CONFIG): NURSE/PHARMACIST/LAB_TECHNICIAN -> Medical,
+// BRANCH_ADMIN/ADMIN (displayed there as "Staff Admin") -> Admin, and STAFF
+// is always Supporting -- its designations (Housekeeping, Security, Ward
+// Assistant, Attender, Driver, Maintenance Staff, Office Assistant, Other)
+// are all support-type work, none of them administrative.
 function getStaffCategory(emp: EmployeeRecord): "medical" | "admin" | "staff" | "doctor" {
   const roleType = (emp.user_table?.role_type || "STAFF").toUpperCase();
   if (roleType === "DOCTOR") return "doctor";
   if (roleType === "NURSE" || roleType === "PHARMACIST" || roleType === "LAB_TECHNICIAN") return "medical";
   if (roleType === "ADMIN" || roleType === "BRANCH_ADMIN") return "admin";
-  if (roleType === "STAFF") return classifyStaffDesignation(emp.designation) === "administrative" ? "admin" : "staff";
   return "staff";
 }
 
@@ -158,6 +165,7 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
       branch: branchName,
       roleType,
       status: isActive ? "active" : "inactive",
+      photo: emp.employee_photo_URL || "",
     } as MedicalStaffRow;
   } else if (roleType === "ADMIN" || roleType === "BRANCH_ADMIN") {
     return {
@@ -171,46 +179,31 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
       designation: getDesignationLabel(emp),
       designationColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
       branch: branchName,
-      access: "Full Access",
-      accessColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
       login: isActive ? "Online" : "Offline",
       loginDot: isActive ? "green" : "orange",
       status: isActive ? "active" : "inactive",
+      photo: emp.employee_photo_URL || "",
     } as AdministrativeStaffRow;
   } else if (roleType === "STAFF") {
-    const isAdmin = classifyStaffDesignation(emp.designation) === "administrative";
-    if (isAdmin) {
-        return {
-          initials: getInitials(fullName),
-          avatar: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
-          name: fullName,
-          id: emp.employee_id,
-          roleType,
-          phone: emp.mobile_no,
-          dept: deptName,
-          designation: getDesignationLabel(emp),
-          designationColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
-          branch: branchName,
-          access: "Full Access",
-          accessColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
-          login: isActive ? "Online" : "Offline",
-          loginDot: isActive ? "green" : "orange",
-          status: isActive ? "active" : "inactive",
-        } as AdministrativeStaffRow;
-    } else {
-      return {
-        initials: getInitials(fullName),
-        name: fullName,
-        phone: emp.mobile_no,
-        id: emp.employee_id,
-        dept: deptName,
-        designation: getDesignationLabel(emp),
-        deptClass: "blue",
-        branch: branchName,
-        roleType,
-        status: isActive ? "active" : "inactive",
-      } as SupportStaffRow;
-    }
+    // Generic Staff has no real department_master row -- its Addemployee.tsx
+    // designation (Housekeeping, Security, Ward Assistant, Attender, Driver,
+    // Maintenance Staff, Office Assistant, Other) is the meaningful category
+    // for this role, so that's what the Department column shows here instead
+    // of the usual department_master name.
+    const staffDesignation = getDesignationLabel(emp);
+    return {
+      initials: getInitials(fullName),
+      name: fullName,
+      phone: emp.mobile_no,
+      id: emp.employee_id,
+      dept: staffDesignation,
+      designation: staffDesignation,
+      deptClass: "blue",
+      branch: branchName,
+      roleType,
+      status: isActive ? "active" : "inactive",
+      photo: emp.employee_photo_URL || "",
+    } as SupportStaffRow;
   }
   return {
     initials: getInitials(fullName),
@@ -223,18 +216,13 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
     branch: branchName,
     roleType,
     status: isActive ? "active" : "inactive",
+    photo: emp.employee_photo_URL || "",
   } as MedicalStaffRow;
 }
 
-const badgeClass = (color: "purple" | "indigo") =>
-  color === "purple"
-    ? "bg-purple-200/60 text-purple-800"
-    : "bg-indigo-100 text-indigo-700";
-
-
-
-const ActionIcons = ({ id, roleType }: { id?: string; roleType?: string } = {}) => {
+const ActionIcons = ({ id, roleType, onDelete }: { id?: string; roleType?: string; onDelete?: (id: string) => void } = {}) => {
   const navigate = useNavigate();
+  const { can } = usePermission();
   // Every role now edits through the same AddEmployee.tsx form (Create/Edit
   // mode) — Doctors keep the /doctor/edit/:id path, everyone else uses
   // /staff/edit/:id; both routes render the same component.
@@ -243,44 +231,152 @@ const ActionIcons = ({ id, roleType }: { id?: string; roleType?: string } = {}) 
 
   return (
     <div className="flex items-center gap-1">
-      <button title="View" className="p-1.5 rounded transition-colors duration-200 hover:bg-none group">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
-          <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-      </button>
-      <button
-        title="Edit"
-        onClick={canEdit ? () => navigate(editPath) : undefined}
-        disabled={!canEdit}
-        className={`p-1.5 rounded transition-colors duration-200 group ${canEdit ? "hover:bg-blue-50 cursor-pointer" : "opacity-40 cursor-not-allowed"}`}
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
-          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-          <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
-        </svg>
-      </button>
-      <button title="Delete" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
-        <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
-          <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-        </svg>
-      </button>
+      {can("employee.read") && (
+        <button
+          title="View"
+          onClick={id ? () => navigate(`/staff/view/${id}`) : undefined}
+          disabled={!id}
+          className={`p-1.5 rounded transition-colors duration-200 group ${id ? "hover:bg-none cursor-pointer" : "opacity-40 cursor-not-allowed"}`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#1B1D20] hover:stroke-slate-500">
+            <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </button>
+      )}
+      {can("employee.update") && (
+        <button
+          title="Edit"
+          onClick={canEdit ? () => navigate(editPath) : undefined}
+          disabled={!canEdit}
+          className={`p-1.5 rounded transition-colors duration-200 group ${canEdit ? "hover:bg-blue-50 cursor-pointer" : "opacity-40 cursor-not-allowed"}`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.36" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#003EA8] hover:stroke-[#5E87CF]">
+            <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
+          </svg>
+        </button>
+      )}
+      {can("employee.delete") && (
+        <button
+          title="Deactivate"
+          onClick={id ? () => onDelete?.(id) : undefined}
+          disabled={!id}
+          className={`p-1.5 rounded transition-colors duration-200 group ${id ? "hover:bg-red-50 cursor-pointer" : "opacity-40 cursor-not-allowed"}`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
+            <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+          </svg>
+        </button>
+      )}
     </div>
   );
 };
 
+// Three-dot card menu (grid only) -- mirrors Doctor.tsx's CardMenu exactly
+// (same callback props, position, and styling), just without the Transfer
+// item since that's doctor-specific. List view keeps the inline ActionIcons
+// in its Action column instead.
+function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: () => void; onDelete: () => void }) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const { can } = usePermission();
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  if (!can("employee.read") && !can("employee.update") && !can("employee.delete")) return null;
+
+  return (
+    <div className="relative" ref={wrapperRef}>
+      <button onClick={() => setOpen((o) => !o)} className="p-1 rounded hover:bg-[#F2F4F6] transition-colors">
+        <MoreVertical className="w-4 h-4 text-[#6B7280]" />
+      </button>
+      <div className={`absolute right-0 top-full mt-1 w-28 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
+          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
+        }`}
+      >
+        {can("employee.read") && (
+          <button onClick={() => { onView(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">View</button>
+        )}
+        {can("employee.update") && (
+          <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
+        )}
+        {can("employee.delete") && (
+          <button onClick={() => { onDelete(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">Deactivate</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Staff() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { selectedBranchId, isAllBranches } = useBranchFilter();
+  const { can } = usePermission();
+  const { selectedBranchId, isAllBranches, branches } = useBranchFilter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
   const tabsMenuRef = useRef<HTMLElement>(null);
   const tabsContainerRef = useRef<HTMLUListElement>(null);
   const [underline, setUnderline] = useState({ left: 0, width: 0 });
+  // Same toolbar (tabs, search, filters, refresh) drives both views -- only
+  // the body below switches, same pattern as Doctor.tsx / Patients.tsx.
+  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
 
   const handleAddStaff = () => {
     navigate("/STAFF/add?role=staff");
+  };
+
+  // ---- ACTION HANDLERS (grid view's CardMenu -- list view's ActionIcons
+  // handles its own navigation directly) ----
+  // /staff/view/:id renders the same role-adaptive detail page for every
+  // role shown on this page (Nurse, Pharmacist, Lab Technician, Branch
+  // Admin, Staff Admin, generic Staff) -- it fetches the employee and shows
+  // different fields depending on their actual role_type, so there's no
+  // per-role branching needed here.
+  const handleView = (id: string) => navigate(`/staff/view/${id}`);
+  const handleEdit = (id: string, roleType: string) =>
+    navigate(roleType === "DOCTOR" ? `/doctor/edit/${id}` : `/staff/edit/${id}`);
+
+  const [deleteTarget, setDeleteTarget] = useState<EmployeeRecord | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteClick = (id: string) => {
+    const target = realStaff?.find((e) => e.employee_id === id) ?? null;
+    setDeleteTarget(target);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      const res = await employeeApi.remove(deleteTarget.employee_id);
+      if (!res.data.success) {
+        throw new Error(res.data.message);
+      }
+      toast({
+        title: "Employee deactivated",
+        description: `${deleteTarget.first_name} ${deleteTarget.last_name} has been deactivated.`,
+      });
+      setDeleteTarget(null);
+      fetchStaff();
+    } catch (err: any) {
+      toast({
+        title: "Failed to deactivate employee",
+        description: err.response?.data?.message ?? err.message ?? "Something went wrong.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   useEffect(() => {
@@ -326,7 +422,6 @@ export default function Staff() {
   const activeTabName = TABS[activeTab];
   const isMedicalTab = activeTabName === "Medical Staff";
   const isAdminTab = activeTabName === "Admin";
-  const isStaffTab = activeTabName === "Staff";
   const isSupportingTab = activeTabName === "Supporting";
 
   const [realStaff, setRealStaff] = useState<EmployeeRecord[] | null>(null);
@@ -338,10 +433,19 @@ export default function Staff() {
     try {
       const res = await employeeApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
+        limit: 1000,
       });
       console.log("[Staff Page] Response:", res.data);
       const allEmployees = res.data?.data?.employees || [];
-      const staff = allEmployees.filter((e) => e.user_table?.role_type !== "DOCTOR");
+      const me = getUser();
+      const isAdmin = ["SUPER_ADMIN", "HEAD_ADMIN", "BRANCH_ADMIN"].includes(
+        String(me?.role_type ?? "").toUpperCase()
+      );
+      const staff = allEmployees.filter(
+        (e) =>
+          e.user_table?.role_type !== "DOCTOR" &&
+          !(isAdmin && me?.employee_id && e.employee_id === me.employee_id)
+      );
       setRealStaff(staff);
       if (staff.length === 0) {
         toast({
@@ -372,65 +476,27 @@ export default function Staff() {
     handleClearFilter();
   }, [activeTab]);
 
-  const staffFilterFields: FilterField[] = [
-    { id: "id", label: "Staff ID", type: "text", placeholder: "Enter ID" },
-    {
-      id: "dept", label: "Department", type: "multiselect", options: [
-        { label: "Neuroscience", value: "Neuroscience" },
-        { label: "Cardiology", value: "Cardiology" },
-        { label: "Pediatrics", value: "Pediatrics" },
-        { label: "Nursing", value: "Nursing" },
-        { label: "Admin", value: "Admin" },
-      ],
-    },
-    {
-      id: "branch", label: "Branch", type: "multiselect", options: [
-        { label: "Central Hospital", value: "Central Hospital" },
-        { label: "Tambaram", value: "Tambaram" },
-        { label: "Saidapet", value: "Saidapet" },
-        { label: "Egmore", value: "Egmore" },
-        { label: "East wing", value: "East wing" },
-        { label: "North wing", value: "North wing" },
-      ],
-    },
-    {
-      id: "status", label: "Status", type: "multiselect", options: [
-        { label: "Active", value: "active" },
-        { label: "Inactive", value: "inactive" },
-        { label: "Resigned", value: "Resigned" },
-        { label: "Suspended", value: "Suspended" },
-      ],
-    },
-    { id: "designation", label: "Designation", type: "multiselect", options: [
-      { label: "Doctor", value: "Doctor" },
-      { label: "Nurse", value: "Nurse" },
-      { label: "Pharmacist", value: "Pharmacist" },
-      { label: "Laboratory Technician", value: "Laboratory Technician" },
-      { label: "Head Admin", value: "Head Admin" },
-      { label: "Branch Admin", value: "Branch Admin" },
-      { label: "Staff Admin", value: "Staff Admin" },
-      { label: "Receptionist", value: "Receptionist" },
-    ]},
-  ];
+  // ---- TAB DATA (real employees for the active tab, mapped to row shape --
+  // shared by the filter option lists below and the search/filter step) ----
+  const tabStaff = useMemo(() => {
+    if (!realStaff) return [];
+    if (isMedicalTab) return realStaff.filter((e) => getStaffCategory(e) === "medical");
+    if (isAdminTab) return realStaff.filter((e) => getStaffCategory(e) === "admin");
+    if (isSupportingTab) return realStaff.filter((e) => getStaffCategory(e) === "staff");
+    return realStaff.filter((e) => getStaffCategory(e) !== "doctor");
+  }, [realStaff, isMedicalTab, isAdminTab, isSupportingTab]);
+
+  const tabRows = useMemo(
+    () => tabStaff.map((e, i) => mapEmployeeToStaffData(e, i)),
+    [tabStaff],
+  );
+
+  // ---- FILTER FIELDS -- derived from real data, not static lists ----
+  const { staffFilterFields } = useStaffFilters({ staffRows: tabRows, branches });
 
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
-    const employeesForTab = !realStaff
-      ? []
-      : isMedicalTab
-        ? realStaff.filter((e) => getStaffCategory(e) === "medical")
-        : isAdminTab
-          ? realStaff.filter((e) => getStaffCategory(e) === "admin")
-          : isSupportingTab
-            ? realStaff.filter((e) => getStaffCategory(e) === "staff")
-            : isStaffTab
-              ? realStaff.filter((e) => getStaffCategory(e) === "staff")
-              : realStaff.filter((e) => getStaffCategory(e) !== "doctor");
-
-    const sourceData: (StaffMember | MedicalStaffRow | AdministrativeStaffRow | SupportStaffRow)[] =
-      employeesForTab.map((e, i) => mapEmployeeToStaffData(e, i));
-
-    let result = sourceData;
+    let result: (StaffMember | MedicalStaffRow | AdministrativeStaffRow | SupportStaffRow)[] = tabRows;
 
     if (searchQuery) {
       result = result.filter((staff) =>
@@ -442,10 +508,10 @@ export default function Staff() {
       );
     }
 
-    result = filterDataByValues(result, appliedValues);
+    result = filterDataByValues(result, appliedValues, staffFilterFields);
 
     return result;
-  }, [searchQuery, appliedValues, isMedicalTab, isAdminTab, isStaffTab, isSupportingTab, realStaff]);
+  }, [searchQuery, appliedValues, tabRows]);
 
   // ---- SORTING ----
   const handleSort = (field: string) => {
@@ -475,80 +541,52 @@ export default function Staff() {
   const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
   const visibleEnd = Math.min(endIndex, totalRecords);
 
-  const baseColumns = [
-    { key: "name", label: "Name" },
-    { key: "phone", label: "Phone Number" },
-    { key: "dept", label: "Department" },
-    { key: "branch", label: "Branch" },
-    { key: "status", label: "Status" },
-    { key: "actions", label: "Action" },
+  // Grid view has no page-navigation controls (unlike the list view's
+  // HmsTable), so it shows every staff member matching the current
+  // search/filters -- same as Doctor.tsx's grid -- instead of just the
+  // first `rowsPerPage` of them.
+  const displayCards = filteredData;
+
+  // Same column set for every tab (All staff, Medical, Admin, Supporting) --
+  // Name, Phone Number, Department, Branch, Status, Action.
+  const columns = [
+    { key: "name", label: "Name", render: (r: any) => (
+      <div className="flex items-center gap-3">
+        <DepartmentAvatarText department={r.dept}>{r.initials}</DepartmentAvatarText>
+        <div><div className="hms-name-text">{r.name}</div><div className="hms-id-text">{r.id}</div></div>
+      </div>
+    )},
+    { key: "phone", label: "Phone Number", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.phone}</span> },
+    { key: "designation", label: "Department", render: (r: any) => (
+      <DepartmentPill department={r.dept}>{r.designation}</DepartmentPill>
+    )},
+    { key: "branch", label: "Branch", render: (r: any) => (
+      <span className="text-[#191C1E] hms-content-text">
+        {(Array.isArray(r.branch) ? r.branch : [r.branch]).map((b: string, i: number) => (
+          <span key={b}>{b}{i < (Array.isArray(r.branch) ? r.branch.length : 1) - 1 && <br />}</span>
+        ))}
+      </span>
+    )},
+    { key: "status", label: "Status", render: (r: any) => <StatusBadge status={r.status} /> },
+    { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} onDelete={handleDeleteClick} /> },
   ];
 
-  const hmsColumnsByTab = (): any[] => {
-    if (isAdminTab) {
-      return [
-        { key: "name", label: "Name", render: (r: any) => (
-          <div className="flex items-center gap-3">
-            <div className={`flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text ${badgeClass(r.avatar)}`}>{r.initials}</div>
-            <div><div className="hms-name-text">{r.name}</div><div className="hms-id-text">{r.id}</div></div>
-          </div>
-        )},
-        { key: "designation", label: "Department", render: (r: any) => (
-          <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${badgeClass(r.designationColor)}`}>{r.designation}</span>
-        )},
-        { key: "branch", label: "Branch", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.branch}</span> },
-        { key: "access", label: "Access Level", render: (r: any) => (
-          <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${badgeClass(r.accessColor)}`}>{r.access}</span>
-        )},
-        { key: "login", label: "Last Login", render: (r: any) => (
-          <span className="inline-flex items-center gap-1.5">
-            <span className={`w-1.5 h-1.5 rounded-full ${r.loginDot === "green" ? "bg-green-500" : "bg-orange-500"}`} />
-            <span className="text-[#191C1E] hms-content-text whitespace-nowrap">{r.login}</span>
-          </span>
-        )},
-        { key: "status", label: "Status", render: (r: any) => <StatusBadge status={r.status} /> },
-        { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} /> },
-      ];
+  // ---- EXPORT ----
+  const handleExport = async (exportFormat: string) => {
+    if (exportFormat !== "csv") return;
+    try {
+      await downloadExportCsv("employees", {
+        branchId: isAllBranches ? undefined : selectedBranchId,
+        excludeRoleType: "DOCTOR",
+      });
+      toast({ title: "Export complete", description: "The CSV file has been downloaded." });
+    } catch (err: any) {
+      toast({
+        title: "Export failed",
+        description: exportErrorMessage(err),
+        variant: "destructive",
+      });
     }
-    if (isStaffTab) {
-      return [
-        { key: "name", label: "Name", render: (r: any) => (
-          <div className="flex items-center gap-3">
-            <div className={`flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text ${supportBadgeColors[r.deptClass]}`}>{r.initials}</div>
-            <div><div className="hms-name-text">{r.name}</div><div className="hms-id-text">{r.id}</div></div>
-          </div>
-        )},
-        { key: "phone", label: "Phone Number", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.phone}</span> },
-        { key: "designation", label: "Department", render: (r: any) => (
-          <span className={`px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] ${supportBadgeColors[r.deptClass]}`}>{r.designation}</span>
-        )},
-        { key: "branch", label: "Branch", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.branch}</span> },
-        { key: "status", label: "Status", render: (r: any) => <StatusBadge status={r.status} /> },
-        { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} /> },
-      ];
-    }
-    // Medical or All staff
-    return [
-      { key: "name", label: "Name", render: (r: any) => (
-        <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 bg-emerald-100 text-emerald-600 hms-avatar-text">{r.initials}</div>
-          <div><div className="hms-name-text">{r.name}</div><div className="hms-id-text">{r.id}</div></div>
-        </div>
-      )},
-      { key: "phone", label: "Phone Number", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.phone}</span> },
-      { key: "designation", label: "Department", render: (r: any) => (
-        <span className="px-1.5 py-0.5 rounded-sm hms-department-text tracking-[-0.4px] capitalize bg-emerald-100 text-emerald-700">{r.designation}</span>
-      )},
-      { key: "branch", label: "Branch", render: (r: any) => (
-        <span className="text-[#191C1E] hms-content-text">
-          {(Array.isArray(r.branch) ? r.branch : [r.branch]).map((b: string, i: number) => (
-            <span key={b}>{b}{i < (Array.isArray(r.branch) ? r.branch.length : 1) - 1 && <br />}</span>
-          ))}
-        </span>
-      )},
-      { key: "status", label: "Status", render: (r: any) => <StatusBadge status={r.status} /> },
-      { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} /> },
-    ];
   };
 
   return (
@@ -563,15 +601,17 @@ export default function Staff() {
               <p className="hms-subheading">Manage and overview all staff members across branches.</p>
             </div>
             <div className="flex items-center gap-3">
-              <ExportReport />
+              {can("report.export") && <ExportReport onExport={handleExport} />}
 
-              <button
-                onClick={handleAddStaff}
-                className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Add new staff
-              </button>
+              {can("employee.create") && (
+                <button
+                  onClick={handleAddStaff}
+                  className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add new staff
+                </button>
+              )}
             </div>
           </div>
 
@@ -647,6 +687,24 @@ export default function Staff() {
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
                 </div>
 
+                {/* View Mode Toggle */}
+                <div className="flex border border-[#E5E7EB] rounded-md overflow-hidden bg-[#F2F4F6] p-0.5">
+                  <button
+                    onClick={() => setViewMode("list")}
+                    title="List view"
+                    className={`p-1.5 rounded ${viewMode === "list" ? "bg-white shadow-sm" : "text-[#6B7280]"}`}
+                  >
+                    <List className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setViewMode("grid")}
+                    title="Grid view"
+                    className={`p-1.5 rounded ${viewMode === "grid" ? "bg-white shadow-sm" : "text-[#6B7280]"}`}
+                  >
+                    <LayoutGrid className="w-4 h-4" />
+                  </button>
+                </div>
+
                 <div className="flex items-center">
                   <button
                     onClick={() => setSelectedDate((prev) => subDays(prev, 1))}
@@ -689,29 +747,19 @@ export default function Staff() {
                   </button>
                 </div>
 
-                <FilterPopover
-                  title="Filters"
-                  fields={staffFilterFields}
-                  values={filterValues}
-                  onChange={handleFilterChange}
-                  onApply={handleApplyFilter}
-                  onClear={handleClearFilter}
-                  open={isFilterOpen}
-                  onOpenChange={setIsFilterOpen}
-                />
                 <RefreshButton onClick={fetchStaff} isLoading={isStaffLoading} />
               </div>
             </div>
 
-            {/* ==================== TABLE ==================== */}
+            {/* ==================== BODY: LIST OR GRID ==================== */}
             {isStaffLoading ? (
               <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
                 <Loader2 size={24} className="animate-spin text-[#00488D]" />
                 Loading staff data...
               </div>
-            ) : (
+            ) : viewMode === "list" ? (
               <HmsTable
-                columns={hmsColumnsByTab()}
+                columns={columns}
                 data={currentRows}
                 sortField={sortField}
                 sortDirection={sortDirection}
@@ -728,10 +776,97 @@ export default function Staff() {
                 emptyMessage="No staff found matching the current filters."
                 rowKey={(r: any, i: number) => String(r.id) + i}
               />
+            ) : (
+              <>
+              <div className="flex-1 p-5 hide-scrollbar overflow-y-auto max-h-[450px]">
+                {displayCards.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {displayCards.map((r: any, i: number) => (
+                      <div
+                        key={String(r.id) + i}
+                        className="relative flex items-start gap-4 p-4 border border-[#E5E7EB] rounded-xl hover:shadow-md hover:border-[#D6E3FF] transition-all duration-200 group"
+                      >
+                        <StaffPhoto photo={r.photo} name={r.name} />
+                        <div className="flex-1 min-w-0">
+                          <p
+                            onClick={() => handleView(r.id)}
+                            className="hms-name-text truncate cursor-pointer hover:underline hover:text-[#00488D]"
+                          >
+                            {r.name}
+                          </p>
+                          <p className="hms-id-text">{r.id}</p>
+                          <DepartmentPill department={r.dept}>{r.designation}</DepartmentPill>
+                          <p className="hms-content-text text-[#191C1E] mt-1.5">
+                            <span className="font-semibold">Status</span>{" : "}
+                            <span className={r.status === "active" ? "font-bold text-[#16A34A]" : "font-bold text-[#F97316]"}>
+                              {r.status === "active" ? "Active" : "Inactive"}
+                            </span>
+                          </p>
+                          <p className="hms-content-text text-[#191C1E] mt-1 truncate">
+                            {(Array.isArray(r.branch) ? r.branch : [r.branch]).join(", ")}
+                          </p>
+                        </div>
+                        <div className="absolute top-3 right-3">
+                          <CardMenu
+                            onView={() => handleView(r.id)}
+                            onEdit={() => handleEdit(r.id, r.roleType)}
+                            onDelete={() => handleDeleteClick(r.id)}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-full py-16 text-center text-[#6B7280] text-sm">No staff found matching the current filters.</div>
+                )}
+              </div>
+              <div className="mt-auto shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur gap-2">
+                <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
+                  Showing all {totalRecords} staff
+                </span>
+              </div>
+              </>
             )}
           </div>
         </main>
       </div>
+
+      {/* Fixed to the viewport (not the scrolling page content) so Filters
+          stays reachable no matter how far down a long staff list is
+          scrolled -- same FilterPopover/FilterPanel UI as before, just
+          repositioned out of the toolbar. Offset left of QuickAddFab
+          (AppLayout.tsx, fixed bottom-6 right-6 z-50 on every page) -- same
+          bottom-right corner would otherwise stack the two buttons directly
+          on top of each other, with the FAB's higher z-index winning and
+          hiding/eating clicks for this one entirely. */}
+      <div className="fixed bottom-6 right-24 z-40">
+        <FilterPopover
+          title="Filters"
+          fields={staffFilterFields}
+          values={filterValues}
+          onChange={handleFilterChange}
+          onApply={handleApplyFilter}
+          onClear={handleClearFilter}
+          open={isFilterOpen}
+          onOpenChange={setIsFilterOpen}
+        />
+      </div>
+
+      <ConfirmationDialog
+        open={!!deleteTarget}
+        type="danger"
+        title="Deactivate Employee?"
+        description={
+          deleteTarget
+            ? `${deleteTarget.first_name} ${deleteTarget.last_name} (${deleteTarget.employee_id}) will be deactivated. They will be hidden from all lists, blocked from login, their branch assignments removed, and their future appointments flagged "Reschedule Required" for reassignment. Historical records are kept. This cannot be undone from the app.`
+            : ""
+        }
+        confirmText="Deactivate"
+        cancelText="Cancel"
+        loading={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

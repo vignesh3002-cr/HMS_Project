@@ -236,6 +236,14 @@ const ROLE_CONFIG: Record<string, RoleConfig> = {
     isMedical: false,
     showSchedule: false,
   },
+  "Staff Admin": {
+    designations: ["Branch Admin", "Staff Admin", "Receptionist"],
+    qualifications: [],
+    licenseLabel: "License no",
+    licensePlaceholder: "",
+    isMedical: false,
+    showSchedule: false,
+  },
   Staff: {
     designations: [
       "Housekeeping",
@@ -380,6 +388,10 @@ export default function AddEmployee() {
   const { id: employeeId } = useParams<{ id: string }>();
   const isEditMode = Boolean(employeeId);
   const [searchParams] = useSearchParams();
+  // Set when navigating here from Profile's "Edit Profile" — the account
+  // owner editing their own record, as opposed to an admin editing someone
+  // else. Only affects which fields render, not permissions/behavior.
+  const isSelfEdit = searchParams.get("self") === "1";
   const { toast } = useToast();
 
   // Get current user's role for permission checks
@@ -428,7 +440,7 @@ export default function AddEmployee() {
   const [reassignTargetBranchName, setReassignTargetBranchName] = useState("");
   const [reassignOccupantName, setReassignOccupantName] = useState("");
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
-  const [pendingAction, setPendingAction] = useState<"save" | "unassign">("save");
+  const [pendingAction, setPendingAction] = useState<"save" | "unassign" | "assign">("save");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [originalFormData, setOriginalFormData] = useState<EmployeeFormData | null>(null);
@@ -437,8 +449,8 @@ export default function AddEmployee() {
   // ── Bootstrap ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    // For BRANCH_ADMIN and STAFF_ADMIN, default branch to their assigned branch
-    if ((isBranchAdmin || isStaffAdmin) && callerBranchId && !isEditMode) {
+    // For non-top-level admins, default branch to their assigned branch
+    if (!isTopLevelAdmin && callerBranchId && !isEditMode) {
       setFormData((p) => ({ ...p, branchIds: [callerBranchId] }));
     }
 
@@ -572,6 +584,10 @@ export default function AddEmployee() {
 
         // `branches` includes every mapping this user has ever had — only the
         // active ones (status 1) reflect where they're really assigned today.
+        // Deactivating a Branch Admin no longer releases this — same as
+        // every other role, active/inactive status doesn't touch it — so
+        // this is simply "whatever branch they're really on," no special
+        // casing needed for a deactivated admin.
         const activeBranchIds =
           (payload?.branches as { branch_id: string; status: number }[] | undefined)
             ?.filter((b) => b.status === 1)
@@ -589,8 +605,8 @@ export default function AddEmployee() {
           firstName: employee.first_name || "",
           middleName: employee.middle_name || "",
           lastName: employee.last_name || "",
-          dateOfBirth: employee.emp_DOB ? String(employee.emp_DOB).slice(0, 10) : "",
-          gender: employee.emp_gender || "",
+          dateOfBirth: employee.dob ? String(employee.dob).slice(0, 10) : "",
+          gender: employee.gender || "",
           bloodGroup: employee.blood_group || "",
           nationality: employee.nationality || "",
           maritalStatus: employee.marital_status || "",
@@ -662,7 +678,10 @@ export default function AddEmployee() {
         setOriginalFormData(syncedFormData);
 
         if (roleType === "BRANCH_ADMIN") {
-          setOriginalBranchId(branchIds[0] ?? NONE_BRANCH_VALUE);
+          // Only a real, active mapping counts as "originally assigned" -
+          // never trust a possibly-stale employees.branch_id fallback here,
+          // or a save with nothing touched could misreport a branch change.
+          setOriginalBranchId(activeBranchIds[0] ?? NONE_BRANCH_VALUE);
         }
 
         if (roleType === "DOCTOR") {
@@ -705,6 +724,9 @@ export default function AddEmployee() {
   const showSchedule = roleConfig?.showSchedule ?? false;
   const emergencyOptional = formData.maritalStatus === "Divorced";
   const todayStr = new Date().toISOString().slice(0, 10);
+  const joiningMaxStr = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
 
   const roleHintText = showSchedule
     ? `${displayRole} selected — specialization, qualification, license number and the schedule builder are shown below.`
@@ -761,11 +783,9 @@ export default function AddEmployee() {
       qualification: "",
       docLicenseNo: "",
       doctorBio: "",
-      branchIds: newRole === "DOCTOR" 
-        ? p.branchIds 
-        : (isBranchAdmin || isStaffAdmin) 
-          ? (callerBranchId ? [callerBranchId] : [])
-          : p.branchIds.slice(0, 1),
+      branchIds: isTopLevelAdmin
+        ? p.branchIds.slice(0, 1)
+        : (callerBranchId ? [callerBranchId] : []),
     }));
     if (newRole !== "DOCTOR") {
       setSchedule([]);
@@ -1103,7 +1123,10 @@ export default function AddEmployee() {
           setSubmitting(false);
         }
 
-        setPendingAction("save");
+        // Branch is vacant (no occupant to warn about evicting) - still
+        // needs the real assignAdmin call so employees.branch_id actually
+        // gets updated, same as the reassign-modal path does.
+        setPendingAction("assign");
         setShowSubmitConfirm(true);
         return;
       }
@@ -1115,7 +1138,9 @@ export default function AddEmployee() {
 
   const handleConfirmSubmit = () => {
     setShowSubmitConfirm(false);
-    saveEmployee(pendingAction === "unassign" ? "unassign" : undefined);
+    saveEmployee(
+      pendingAction === "unassign" ? "unassign" : pendingAction === "assign" ? "assign" : undefined,
+    );
   };
 
   const handleConfirmReassign = async () => {
@@ -1158,7 +1183,7 @@ export default function AddEmployee() {
       setShowLeaveConfirm(true);
       return;
     }
-    navigate("/dashboard");
+    navigate(-1);
   };
 
   if (loading) {
@@ -1173,7 +1198,7 @@ export default function AddEmployee() {
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="w-full bg-white rounded-2xl shadow-sm border border-gray-100">
+      <div className="max-w-5xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100">
         {/* ── Header ── */}
         <div className="flex items-center gap-3 px-8 py-5 border-b border-gray-100">
           <button
@@ -1196,7 +1221,7 @@ export default function AddEmployee() {
         <form onSubmit={handleSubmit} className="px-8 pt-7 pb-8">
 
           {/* Photo + Role */}
-          <div className="flex items-start gap-10 pb-6 border-b border-gray-100 mb-7">
+          <div className="flex items-start gap-x-[600px] pb-6 border-b border-gray-100 mb-7">
             <AvatarUpload
               value={formData.photoUrl}
               onChange={(url) => setFormData((p) => ({ ...p, photoUrl: url }))}
@@ -1204,13 +1229,49 @@ export default function AddEmployee() {
               hint="Click or drag an image to upload (Max 1MB)"
               size={96}
             />
-            <div className="w-px self-stretch bg-gray-200" aria-hidden />
 
-            {!isEditMode && (
-              <div className="w-[36rem] max-w-full">
-                <label className={labelCls}>
-                  Role <Req />
-                </label>
+            {isEditMode && !isSelfEdit && (isTopLevelAdmin || isBranchAdmin) && (
+            <div className="w-64">
+              <label className={labelCls}>Status <Req /></label>
+              <div className="flex items-center gap-3 h-10">
+                <button
+                  type="button"
+                  onClick={() => setIsActive(!isActive)}
+                  disabled={submitting}
+                  className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    isActive ? "bg-blue-500" : "bg-gray-300"
+                  }`}
+                  role="switch"
+                  aria-checked={isActive}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition-transform duration-200 ${
+                      isActive ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[13px] font-medium ${isActive ? "text-green-700" : "text-gray-500"}`}>
+                    {isActive ? "Active" : "Inactive"}
+                  </span>
+                  {isActive ? (
+                    <span className="text-xs text-blue-600">✓</span>
+                  ) : (
+                    <span className="text-xs text-gray-400">✕</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            )}
+          </div>
+
+          {/* Role Section - Only show in create mode */}
+          {!isEditMode && (
+            <Section
+              title="Select Role"
+              sub="Select role based on requirements."
+            >
+              <div className="w-full max-w-md">
                 <FormDropdown
                   name="role"
                   className={inputCls}
@@ -1221,40 +1282,9 @@ export default function AddEmployee() {
                   disabled={submitting || roleOptions.length === 0}
                 />
               </div>
-            )}
+            </Section>
+          )}
 
-            {isEditMode && (
-                <div className="w-64">
-                  <label className={labelCls}>Status <Req /></label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsActive(true)}
-                      disabled={submitting}
-                      className={`h-10 rounded-xl border-2 text-[13px] font-semibold transition-colors ${
-                        isActive
-                          ? "border-green-500 bg-green-50 text-green-700"
-                          : "border-gray-200 text-gray-600 hover:border-gray-300"
-                      }`}
-                    >
-                      Active
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsActive(false)}
-                      disabled={submitting}
-                      className={`h-10 rounded-xl border-2 text-[13px] font-semibold transition-colors ${
-                        !isActive
-                          ? "border-red-400 bg-red-50 text-red-700"
-                          : "border-gray-200 text-gray-600 hover:border-gray-300"
-                      }`}
-                    >
-                      Inactive
-                    </button>
-                  </div>
-                </div>
-            )}
-          </div>
 
           {/* Role hint banner */}
           <div className="text-[11.5px] text-blue-600 bg-blue-50 rounded-lg px-3.5 py-2.5 mb-6">
@@ -1442,7 +1472,7 @@ export default function AddEmployee() {
                 <input
                   type="date"
                   name="joiningDate"
-                  max={todayStr}
+                  max={joiningMaxStr}
                   className={inputCls + " text-gray-500"}
                   value={formData.joiningDate}
                   onChange={handleChange}
@@ -1734,7 +1764,7 @@ export default function AddEmployee() {
               </div>
 
               <AnimatePresence>
-                {(isMedical || displayRole === "Branch Admin" || formData.roleType === "STAFF") && (
+                {(isMedical || displayRole === "Branch Admin" || displayRole === "Staff Admin" || formData.roleType === "STAFF") && (
                   <motion.div
                     key="specialization"
                     layout
@@ -1839,62 +1869,48 @@ export default function AddEmployee() {
                 )}
               </AnimatePresence>
 
-              <AnimatePresence>
-                {isMedical && (
-                  <motion.div
-                    key="bio"
-                    layout
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    <label className={labelCls}>
-                      {displayRole} bio <Req />
-                    </label>
-                    <textarea
-                      name="doctorBio"
-                      placeholder="Brief professional biography (max 200 characters)"
-                      maxLength={200}
-                      rows={4}
-                      className={inputCls + " resize-y h-auto min-h-[96px]"}
-                      value={formData.doctorBio}
-                      onChange={handleChange}
-                      disabled={submitting || !roleConfig}
-                    />
-                    <p className="text-[11px] text-gray-400 mt-1">
-                      {formData.doctorBio.length}/200 characters
-                    </p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Branch — multi for Doctor, single for TOP_LEVEL_ADMIN, hidden for BRANCH_ADMIN/STAFF_ADMIN non-DOCTOR */}
+              {/* Branch — multi for Doctor (top-level only), single for TOP_LEVEL_ADMIN, read-only for all others */}
               <div className="col-span-2">
                 <label className={labelCls}>Branch <Req /></label>
-                {formData.roleType === "DOCTOR" ? (
-                  <>
-                    <MultiSelectDropdown
-                      options={branchOptions}
-                      value={formData.branchIds}
-                      onValueChange={(vals) =>
-                        setFormData((p) => ({ ...p, branchIds: vals }))
+                {isTopLevelAdmin ? (
+                  formData.roleType === "DOCTOR" ? (
+                    <>
+                      <MultiSelectDropdown
+                        options={branchOptions}
+                        value={formData.branchIds}
+                        onValueChange={(vals) =>
+                          setFormData((p) => ({ ...p, branchIds: vals }))
+                        }
+                        placeholder={
+                          branches.length ? "Select branch(es)" : "No branches available"
+                        }
+                        disabled={submitting || branches.length === 0 || isEditMode}
+                      />
+                      {isEditMode && (
+                        <p className="text-[11px] text-gray-400 mt-1">
+                          A doctor's branch can't be changed from here — it requires a
+                          dedicated transfer flow to preserve appointment history, which
+                          isn't available yet.
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <FormDropdown
+                      name="branchId"
+                      className={inputCls}
+                      options={singleBranchOptions}
+                      value={formData.branchIds[0] ?? ""}
+                      onValueChange={(v) =>
+                        setFormData((p) => ({ ...p, branchIds: v ? [v] : [] }))
                       }
                       placeholder={
-                        branches.length ? "Select branch(es)" : "No branches available"
+                        branches.length ? "Select branch" : "No branches available"
                       }
-                      disabled={submitting || branches.length === 0 || isEditMode}
+                      disabled={submitting || branches.length === 0}
                     />
-                    {isEditMode && (
-                      <p className="text-[11px] text-gray-400 mt-1">
-                        A doctor's branch can't be changed from here — it requires a
-                        dedicated transfer flow to preserve appointment history, which
-                        isn't available yet.
-                      </p>
-                    )}
-                  </>
-                ) : (isBranchAdmin || isStaffAdmin) ? (
-                  // For BRANCH_ADMIN and STAFF_ADMIN, branch is fixed to their assigned branch
+                  )
+                ) : (
+                  // For all non-top-level admins, branch is fixed to their assigned branch
                   <>
                     <div className={inputCls + " bg-gray-50 text-gray-600"}>
                       {branches.find(b => b.branch_id === callerBranchId)?.branch_name || callerBranchId || "Your assigned branch"}
@@ -1904,24 +1920,48 @@ export default function AddEmployee() {
                       Branch is automatically set to your assigned branch.
                     </p>
                   </>
-                ) : (
-                  <FormDropdown
-                    name="branchId"
-                    className={inputCls}
-                    options={singleBranchOptions}
-                    value={formData.branchIds[0] ?? ""}
-                    onValueChange={(v) =>
-                      setFormData((p) => ({ ...p, branchIds: v ? [v] : [] }))
-                    }
-                    placeholder={
-                      branches.length ? "Select branch" : "No branches available"
-                    }
-                    disabled={submitting || branches.length === 0}
-                  />
                 )}
               </div>
             </div>
           </Section>
+
+          {/* ── Doctor Bio ── */}
+          <AnimatePresence>
+            {isMedical && (
+              <motion.div
+                key="doctor-bio-section"
+                layout
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <Section
+                  title="Doctor Bio"
+                  sub="A brief professional biography for the employee profile."
+                >
+                  <div className="max-w-2xl">
+                    <label className={labelCls}>
+                      Bio <Req />
+                    </label>
+                    <textarea
+                      name="doctorBio"
+                      placeholder="Brief professional biography (max 200 characters)"
+                      maxLength={200}
+                      rows={2}
+                      className={inputCls + " resize-y h-auto min-h-[96px]"}
+                      value={formData.doctorBio}
+                      onChange={handleChange}
+                      disabled={submitting || !roleConfig}
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      {formData.doctorBio.length}/200 characters
+                    </p>
+                  </div>
+                </Section>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* ── Schedule (Doctor only) ── */}
           <AnimatePresence>
@@ -1969,7 +2009,7 @@ export default function AddEmployee() {
                         {/* Day */}
                         <div className="flex flex-col">
                           <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5">
-                            Day
+                            Day <Req />
                           </label>
                           <FormDropdown
                             name={`day-${entry.id}`}
@@ -1985,7 +2025,7 @@ export default function AddEmployee() {
                         {/* Start time */}
                         <div className="flex flex-col">
                           <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5">
-                            Start time
+                            Start time <Req />
                           </label>
                           <TimepickerWheel
                             value={entry.start_time}
@@ -1998,7 +2038,7 @@ export default function AddEmployee() {
                         {/* End time */}
                         <div className="flex flex-col">
                           <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5">
-                            End time
+                            End time <Req />
                           </label>
                           <TimepickerWheel
                             value={entry.end_time}
@@ -2011,7 +2051,7 @@ export default function AddEmployee() {
                         {/* Branch */}
                         <div className="flex flex-col">
                           <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5">
-                            Branch
+                            Branch <Req />
                           </label>
                           <FormDropdown
                             name={`branch-${entry.id}`}
@@ -2058,10 +2098,13 @@ export default function AddEmployee() {
           </AnimatePresence>
 
           {/* ── Account credentials ── */}
-          {formData.roleType !== "STAFF" && (
+          {/* Edit mode never shows this, for self-edit or an admin editing
+              someone else — credential changes only happen via the account
+              owner's own Security page, never from this form. */}
+          {formData.roleType !== "STAFF" && !isEditMode && (
           <Section
             title="Account credentials"
-            sub={isEditMode ? "Leave the password fields blank to keep the current password." : "Login details for portal access."}
+            sub="Login details for portal access."
           >
             <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
               <div>
@@ -2209,7 +2252,7 @@ export default function AddEmployee() {
         cancelText="Stay"
         onConfirm={() => {
           setShowLeaveConfirm(false);
-          navigate("/dashboard");
+          navigate(-1);
         }}
         onCancel={() => setShowLeaveConfirm(false)}
       />

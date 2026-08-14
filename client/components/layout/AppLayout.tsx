@@ -7,9 +7,11 @@ import { cn } from "@/lib/utils";
 import { BranchSelector } from "@/components/hms/BranchSelector";
 import { BranchFilterProvider } from "@/context/BranchFilterContext";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
-import { usePermissions } from "@/hooks/usePermissions";
+import { usePermission } from "@/context/PermissionContext";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import Notifications from "@/components/Forms/view/Notification";
 import {
   LayoutDashboard,
   Users,
@@ -25,6 +27,7 @@ import {
   ChevronDown,
   Shield,
   Key,
+  ClipboardList,
 } from "lucide-react";
 
 const navIcon: Record<string, React.ReactNode> = {
@@ -33,6 +36,7 @@ const navIcon: Record<string, React.ReactNode> = {
   Doctor: <Stethoscope size={16} />,
   Patients: <UserRound size={16} />,
   Appointment: <Calendar size={16} />,
+  "Reschedule Queue": <ClipboardList size={16} />,
   Billing: <Receipt size={16} />,
   Protocol: <FileText size={16} />,
   Admin: <Settings size={16} />,
@@ -109,10 +113,17 @@ export function AppLayout() {
     branch: "",
   });
 
-  const isHeadAdmin = userData.role === "HEAD_ADMIN" || userData.role === "SUPER_ADMIN";
-
-  const { can, loading: permissionsLoading } = usePermissions();
+  const { can, loading: permissionsLoading } = usePermission();
   const hasPermission = (perm?: string) => !perm || permissionsLoading || can(perm);
+
+  // Both Permissions and Roles pages are guarded by permission.manage on the
+  // backend (permission.routes.ts + role.routes.ts), so one check covers both.
+  const adminChildren = can("permission.manage")
+    ? [
+        { label: "Permissions", to: "/admin/permissions" },
+        { label: "Roles", to: "/admin/roles" },
+      ]
+    : [];
 
   const navItems = [
     { label: "Dashboard", to: "/dashboard" },
@@ -124,17 +135,19 @@ export function AppLayout() {
     // live under /patients/... and should keep this item highlighted too.
     { label: "Patients", to: "/patients", matchPrefix: true, permission: "patient.read" },
     { label: "Appointment", to: "/appointments", permission: "appointment.read" },
+    {
+      label: "Reschedule Queue",
+      to: "/appointments/reschedule-queue",
+      permission: "doctor.transfer",
+    },
     { label: "Billing", to: "/billing" },
     { label: "Protocol", to: "/protocol", hasArrow: true },
-    ...(isHeadAdmin
+    ...(adminChildren.length > 0
       ? [
           {
             label: "Admin",
             permission: "permission.manage",
-            children: [
-              { label: "Permissions", to: "/admin/permissions" },
-              { label: "Roles", to: "/admin/roles" },
-            ],
+            children: adminChildren,
           },
         ]
       : []),
@@ -329,10 +342,17 @@ export function AppLayout() {
             {/* RIGHT */}
             <div className="flex items-center gap-4">
               {/* NOTIFICATION */}
-              <button className="relative p-2 rounded-full hover:bg-slate-100 transition-colors">
-                <Bell size={18} className="text-[#334155]" />
-                <span className="absolute top-1 right-1 w-2 h-2 bg-red-600 rounded-full"></span>
-              </button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button className="relative p-2 rounded-full hover:bg-slate-100 transition-colors">
+                    <Bell size={18} className="text-[#334155]" />
+                    <span className="absolute top-1 right-1 w-2 h-2 bg-red-600 rounded-full"></span>
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[380px] overflow-hidden rounded-[16px] border border-[#E5E7EB] bg-white p-0 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.16)]" align="end">
+                  <Notifications />
+                </PopoverContent>
+              </Popover>
 
               <div className="w-px h-6 bg-[rgba(194,198,212,0.30)]" />
 

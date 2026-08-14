@@ -1,5 +1,5 @@
 import axios from "axios";
-import { remove } from "../utils/token";
+import { getToken, remove } from "../utils/token";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_BACKEND_URL,
@@ -13,14 +13,14 @@ export function setActiveBranchId(id: string | null) {
 }
 
 export function getActiveBranchId(): string | null {
-  if (activeBranchId) return activeBranchId;
+  if (activeBranchId) return activeBranchId; 
   const stored = localStorage.getItem("hms_selected_branch_id");
   if (stored && stored !== "__ALL_BRANCHES__") return stored;
   return null;
 }
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
+  const token = getToken();
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
