@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { getActiveBranchId } from "../../api/axios";
 import {
   doctorDashboardApi,
@@ -13,20 +14,16 @@ import { useToast } from "@/hooks/use-toast";
 type AppointmentStatus = "Check Out" | "Check In" | "Cancelled";
 
 interface Appointment {
+  patientId: string;
   patient: string;
   image: string;
   dateTime: string;
+  appointmentDate: string;
+  appointmentTime: string;
   phone: string;
   status: AppointmentStatus;
   appointmentId: string;
   originalStatus: string;
-  appointmentTime: string;
-}
-
-interface AvailabilityItem {
-  day: string;
-  time?: string;
-  leave?: boolean;
 }
 
 const chartData = [
@@ -201,7 +198,8 @@ function formatScheduleRange(start?: string | null, end?: string | null) {
 }
 
 export default function DoctorDashboard() {
-  const { toast } = useToast();
+  const navigate = useNavigate();
+
   const [periodOpen, setPeriodOpen] = useState(false);
   const [hospitalOpen, setHospitalOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
@@ -318,6 +316,7 @@ export default function DoctorDashboard() {
       const mappedAppointments = appointmentsResponse.data.data.appointments
         .map(
           (item: DashboardAppointment): Appointment => ({
+            patientId: item.patient_bio_data?.patient_id || "",
             patient: [
               item.patient_bio_data?.patient_first_name,
               item.patient_bio_data?.patient_middle_name,
@@ -330,6 +329,8 @@ export default function DoctorDashboard() {
             dateTime: `${formatDate(item.appointment_date)} - ${formatTime(
               item.appointment_time
             )}`,
+            appointmentDate: item.appointment_date,
+            appointmentTime: item.appointment_time,
             phone: item.patient_bio_data?.patient_primary_mobile || "-",
             status: item.status as AppointmentStatus,
             appointmentId: item.appointment_id,
@@ -476,6 +477,7 @@ export default function DoctorDashboard() {
               </div>
 
               <div className="flex items-center gap-1">
+                <span className="text-[17px] leading-none text-yellow-500">★</span>
                 <span className="text-[17px] leading-none text-yellow-500">
                   ★
                 </span>
@@ -503,15 +505,12 @@ export default function DoctorDashboard() {
                   <h3 className="mb-3 text-base font-semibold">
                     Notifications
                   </h3>
-
                   <div className="border-b border-slate-100 py-2.5 text-[13px] text-slate-600">
                     You have 3 upcoming appointments today.
                   </div>
-
                   <div className="border-b border-slate-100 py-2.5 text-[13px] text-slate-600">
                     Susan Babin checked in.
                   </div>
-
                   <div className="py-2.5 text-[13px] text-slate-600">
                     Your weekly appointment report is ready.
                   </div>
@@ -737,6 +736,17 @@ export default function DoctorDashboard() {
                   {dashboardAppointments.map((appointment) => (
                     <tr
                       key={`${appointment.patient}-${appointment.dateTime}`}
+                      onClick={() =>
+                        navigate("/doctor/patient-consultation", {
+                          state: {
+                            patientId: appointment.patientId,
+                            appointmentDate: appointment.appointmentDate,
+                            appointmentTime: appointment.appointmentTime,
+                            consultedBy: doctorName,
+                          },
+                        })
+                      }
+                      className="cursor-pointer transition hover:bg-slate-50"
                     >
                       <td className="h-[50px] overflow-hidden border-b border-slate-100 px-5 py-2 text-xs text-slate-600">
                         <div className="flex items-center gap-3">

@@ -12,12 +12,14 @@ import {
   MoreVertical,
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
-import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { format, isToday, isTomorrow, isYesterday, addDays, subDays, startOfDay } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
-import { FilterPopover, useFilterPanel, useAppointmentFilters } from "@/components/Filter";
+import { useFilterPanel, useAppointmentFilters } from "@/components/Filter";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { getEffectiveAppointmentStatus } from "@/lib/appointmentStatus";
 import { useToast } from "@/hooks/use-toast";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
@@ -29,6 +31,7 @@ import DayView from "./Day view";
 import WeekView from "./Week view";
 import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
+import { downloadExportPdf } from "@/lib/exportPdf";
 
 
 interface Appointment {
@@ -110,6 +113,21 @@ function formatAppointmentTime(time: string): string {
   return `${String(hours12).padStart(2, "0")}:${minutes} ${period}`;
 }
 
+function isAppointmentTimePast(appointmentTime: string): boolean {
+  const now = new Date();
+  const appt = new Date(appointmentTime);
+  if (isNaN(appt.getTime())) return false;
+  return appt < now;
+}
+
+function formatAppointmentTimeConditional(record: Appointment): string {
+  const dateStr = record.date;
+  const todayStr = format(new Date(), "MM/dd/yyyy");
+  if (dateStr !== todayStr) return record.time;
+  if (isAppointmentTimePast(record.time)) return "—";
+  return record.time;
+}
+
 function mapAppointmentRecord(record: AppointmentRecord, index: number): Appointment {
   const patientName = formatPatientName(record.patient_bio_data);
   const doctorName = formatDoctorName(record.employees);
@@ -135,7 +153,7 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
     date: formatAppointmentDate(record.appointment_date),
     time: formatAppointmentTime(record.appointment_time),
     sortDate,
-    status: STATUS_LABELS[record.status ?? ""] ?? (record.status || "Unknown"),
+    status: STATUS_LABELS[getEffectiveAppointmentStatus(record)] ?? (record.status || "Unknown"),
   };
 }
 
@@ -360,6 +378,17 @@ const AppointmentSchedule: React.FC = () => {
       );
     }
 
+    const now = new Date();
+    const todayStart = startOfDay(now).getTime();
+
+    result = result.filter((item) => {
+      const isCancelled = item.status.toLowerCase() === "cancelled";
+      if (!isCancelled) return true;
+
+      const apptTime = item.sortDate;
+      return apptTime < todayStart;
+    });
+
     result = filterDataByValues(
       result as unknown as Record<string, string | number>[],
       appliedValues,
@@ -411,6 +440,28 @@ const AppointmentSchedule: React.FC = () => {
 
   // ---- EXPORT ----
   const handleExport = async (exportFormat: string) => {
+    if (exportFormat === "pdf") {
+      downloadExportPdf({
+        title: "Appointment Schedule",
+        subtitle: `${sortedData.length} appointment${sortedData.length === 1 ? "" : "s"} — exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `appointments-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        columns: [
+          { header: "Appointment No", cell: (r: Appointment) => r.id },
+          { header: "Token", cell: (r: Appointment) => r.tokenId },
+          { header: "Patient", cell: (r: Appointment) => r.patient },
+          { header: "Patient ID", cell: (r: Appointment) => r.patientId },
+          { header: "Branch", cell: (r: Appointment) => r.branch },
+          { header: "Doctor", cell: (r: Appointment) => r.doctor },
+          { header: "Doctor ID", cell: (r: Appointment) => r.doctorId },
+          { header: "Date", cell: (r: Appointment) => r.date },
+          { header: "Time", cell: (r: Appointment) => r.time },
+          { header: "Status", cell: (r: Appointment) => r.status },
+        ],
+        rows: sortedData,
+      });
+      toast({ title: "Export complete", description: "The PDF file has been downloaded." });
+      return;
+    }
     if (exportFormat !== "csv") return;
     try {
       await downloadExportCsv("appointments", {
@@ -603,7 +654,7 @@ const AppointmentSchedule: React.FC = () => {
 
 {/* Filters */}
 
-                <FilterPopover
+                <ToolbarFilter
                   title="Filters"
                   fields={appointmentFilterFields}
                   values={filterValues}
@@ -654,7 +705,7 @@ const AppointmentSchedule: React.FC = () => {
                     </div>
                   )},
                   { key: "date", label: "Appointment Date", className: "!whitespace-normal", render: (r: Appointment) => (
-                    <div className="hms-content-text text-[#191C1E] leading-4"><div>{r.date}</div><div className="text-[11px] font-medium text-[#8C8D8F] mt-1">{r.time}</div></div>
+                    <div className="hms-content-text text-[#191C1E] leading-4"><div>{r.date}</div><div className="text-[11px] font-medium text-[#8C8D8F] mt-1">{formatAppointmentTimeConditional(r)}</div></div>
                   )},
                   { key: "status", label: "Status", render: (r: Appointment) => (
                     <StatusBadge status={r.status} />

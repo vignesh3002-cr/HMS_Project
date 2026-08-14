@@ -76,6 +76,14 @@ export interface AppointmentRecord {
     department_id: string;
     department_name: string;
   } | null;
+  doctor_schedule?: {
+    schedule_id: string | number | null;
+    day_of_week: string | null;
+    shift_name: string | null;
+    start_time: string | null;
+    end_time: string | null;
+    consultation_minutes: number | null;
+  } | null;
 }
 
 export interface UpdateAppointmentPayload {

@@ -1,15 +1,18 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Loader2 } from "lucide-react";
-import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { format, isToday, isTomorrow, isYesterday, addDays, subDays, startOfDay, endOfDay } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
+import { downloadExportPdf } from "@/lib/exportPdf";
+import { formatPatientName, formatDoctorName, formatAppointmentDate, formatAppointmentTime } from "@/lib/appointmentFormat";
 import { useToast } from "@/hooks/use-toast";
 import { appointmentApi, type AppointmentRecord, type AvailableSlot } from "@/api/appointment.api";
 import { employeeApi, type EmployeeRecord, type DoctorScheduleRecord, type DayOfWeek } from "@/api/employee.api";
-import { FilterPopover, useFilterPanel, useScheduleFilters } from "@/components/Filter";
+import { useFilterPanel, useScheduleFilters } from "@/components/Filter";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { usePermission } from "@/context/PermissionContext";
 import { branchApi } from "@/api/branch.api";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
@@ -688,15 +691,27 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       }
     }
 
-    const appointmentsAt = (doc: DayDoctorColumn, time: string): AppointmentRecord[] =>
-      dayAppointments.filter((appt) => {
+const appointmentsAt = (doc: DayDoctorColumn, time: string): AppointmentRecord[] => {
+      const now = new Date();
+      const todayStart = startOfDay(now).getTime();
+      const todayEnd = endOfDay(now).getTime();
+      const selectedDateStart = startOfDay(selectedDate).getTime();
+      const isSelectedDateToday = selectedDateStart >= todayStart && selectedDateStart <= todayEnd;
+
+      return dayAppointments.filter((appt) => {
         if (appt.employees?.employee_id !== doc.employeeId) return false;
-        if (appt.status && NON_BLOCKING_STATUSES.has(appt.status)) return false;
+
+        const isCancelled = appt.status && NON_BLOCKING_STATUSES.has(appt.status);
+        if (isCancelled) {
+          if (isSelectedDateToday) return false;
+        }
+
         const t = new Date(appt.appointment_time);
         if (isNaN(t.getTime())) return false;
         const apptTime = `${String(t.getUTCHours()).padStart(2, "0")}:${String(t.getUTCMinutes()).padStart(2, "0")}`;
         return apptTime === time;
       });
+    };
 
     const patientNameOf = (appt: AppointmentRecord): string => {
       const bio = appt.patient_bio_data;
@@ -880,6 +895,26 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   // ---- EXPORT ----
   const handleExport = async (exportFormat: string) => {
+    if (exportFormat === "pdf") {
+      downloadExportPdf({
+        title: "Appointment Schedule - Day",
+        subtitle: `${format(selectedDate, "dd MMM yyyy")} - ${dayAppointments.length} appointment${dayAppointments.length === 1 ? "" : "s"}`,
+        filename: `appointments-${format(selectedDate, "yyyy-MM-dd")}.pdf`,
+        columns: [
+          { header: "Appointment No", cell: (r: AppointmentRecord) => r.appointment_id },
+          { header: "Token", cell: (r: AppointmentRecord) => (r.token_number != null ? String(r.token_number) : "—") },
+          { header: "Patient", cell: (r: AppointmentRecord) => formatPatientName(r.patient_bio_data) },
+          { header: "Branch", cell: (r: AppointmentRecord) => r.branch?.branch_name ?? "—" },
+          { header: "Doctor", cell: (r: AppointmentRecord) => formatDoctorName(r.employees) },
+          { header: "Date", cell: (r: AppointmentRecord) => formatAppointmentDate(r.appointment_date) },
+          { header: "Time", cell: (r: AppointmentRecord) => formatAppointmentTime(r.appointment_time) },
+          { header: "Status", cell: (r: AppointmentRecord) => r.status ?? "—" },
+        ],
+        rows: dayAppointments,
+      });
+      toast({ title: "Export complete", description: "The PDF file has been downloaded." });
+      return;
+    }
     if (exportFormat !== "csv") return;
     try {
       const day = format(selectedDate, "yyyy-MM-dd");
@@ -998,7 +1033,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         </div>
 
         {/* Filter doctors */}
-        <FilterPopover
+        <ToolbarFilter
           title="Filter Doctors"
           fields={doctorFilterFields}
           values={filterValues}

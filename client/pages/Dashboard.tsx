@@ -2,17 +2,18 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2, MoreVertical } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import HmsTable from "@/components/hms/HmsTable";
-import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { format, isToday, isTomorrow, isYesterday, addDays, subDays, startOfDay, endOfDay } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
-import { FilterPopover, useFilterPanel, useDashboardFilters } from "@/components/Filter";
+import { useFilterPanel, useDashboardFilters } from "@/components/Filter";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { applySearchAndFilter } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { patientApi } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
-import { encounterApi } from "@/api/encounter.api";
+import { getEffectiveAppointmentStatus } from "@/lib/appointmentStatus";
 import { branchApi } from "@/api/branch.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
@@ -198,7 +199,7 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
     reason: doc.reason_for_visit || "—",
     date: formatDateOnly(doc.appointment_date),
     time: formatTimeOnly(doc.appointment_time),
-    status: formatAppointmentStatus(doc.status),
+    status: formatAppointmentStatus(getEffectiveAppointmentStatus(doc)),
   };
 }
 
@@ -711,10 +712,45 @@ export default function Dashboard() {
   // applySearchAndFilter() -- same search-then-filter sequence as before,
   // now a single reusable call instead of Dashboard orchestrating both
   // steps itself.
-  const filteredData = useMemo(
-    () => applySearchAndFilter(activeData, searchQuery, searchableFields, appliedValues, activeFilterFields),
-    [searchQuery, activeTab, appliedValues, activeFilterFields, realDoctors, realStaff, realAppointments],
-  );
+  const filteredData = useMemo(() => {
+    let result: Record<string, unknown>[] = [...activeData];
+
+    // Hide cancelled appointments for today (but show yesterday's cancelled)
+    if (activeTab === "appointments") {
+      const now = new Date();
+      const todayStart = startOfDay(now).getTime();
+      const todayEnd = endOfDay(now).getTime();
+
+      result = result.filter((item) => {
+        const isCancelled = String(item.status ?? "").toLowerCase() === "cancelled";
+        if (!isCancelled) return true;
+
+        // Parse date (dd-MM-yyyy) and time (hh:mm AM/PM) to timestamp
+        const dateStr = String(item.date ?? "");
+        const timeStr = String(item.time ?? "");
+        const [day, month, year] = dateStr.split("-").map(Number);
+        let hours = 0;
+        let minutes = 0;
+        if (timeStr) {
+          const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+          if (timeMatch) {
+            hours = parseInt(timeMatch[1], 10);
+            minutes = parseInt(timeMatch[2], 10);
+            const period = timeMatch[3].toUpperCase();
+            if (period === "PM" && hours !== 12) hours += 12;
+            if (period === "AM" && hours === 12) hours = 0;
+          }
+        }
+        const apptDate = new Date(year, month - 1, day, hours, minutes);
+        const apptTime = apptDate.getTime();
+
+        const isTodayAppt = apptTime >= todayStart && apptTime <= todayEnd;
+        return !isTodayAppt;
+      });
+    }
+
+    return applySearchAndFilter(result, searchQuery, searchableFields, appliedValues, activeFilterFields);
+  }, [searchQuery, activeTab, appliedValues, activeFilterFields, realDoctors, realStaff, realAppointments]);
 
   const currentSortField = sortField[activeTab];
   const currentSortDirection = sortDirection[activeTab];
@@ -1022,7 +1058,7 @@ export default function Dashboard() {
                   </button>
                 </div>
                 {/* Filters */}
-                <FilterPopover
+                <ToolbarFilter
                   title="Advanced Filters"
                   fields={activeFilterFields}
                   values={filterValues}

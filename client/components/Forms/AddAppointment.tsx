@@ -7,10 +7,16 @@ import { FormDropdown } from "@/components/ui/form-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import CalendarPicker from "@/components/hms/Calender";
 import { branchApi, Branch } from "@/api/branch.api";
+import { getUser } from "@/utils/token";
 import { departmentApi, Department } from "@/api/department.api";
 import { employeeApi, type EmployeeRecord, type DoctorScheduleRecord } from "@/api/employee.api";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
-import { appointmentApi, type AvailableSlot, type AppointmentResponse } from "@/api/appointment.api";
+import {
+  appointmentApi,
+  type AvailableSlot,
+  type AppointmentResponse,
+} from "@/api/appointment.api";
+import { validateRequiredFields, type RequiredField } from "@/lib/validation";
 
 interface AppointmentFormData {
   patientId: string;
@@ -125,15 +131,25 @@ export default function AddAppointment() {
   // and their branch/department auto-filled.
   const preselectedDoctorId = (location.state as { doctorId?: string } | null)?.doctorId;
 
-  // Arriving from the Day View grid's "New slot available" click carries the
-  // exact doctor/branch/department/date/time that cell represented, so
-  // everything except the patient is already decided -- no nearest-date
-  // search needed, since the clicked cell IS a real open slot.
+  // Arriving from the Day/Week View grids' "New slot available" click carries
+  // the exact doctor/branch/department/date (and the Day View's hour) that
+  // cell represented, so everything except the patient is already decided --
+  // no nearest-date search needed, since the clicked cell IS a real open slot.
   const preselectedSlot = (
     location.state as {
-      slot?: { doctorId: string; branchId: string; departmentId: string; date: string; time: string };
+      slot?: { doctorId: string; branchId: string; departmentId: string; date: string; time?: string };
     } | null
   )?.slot;
+
+  // Branch Admin / Staff Admin sessions are tied to one branch (their active
+  // user_branch_mapping) -- default the Branch dropdown to it so the
+  // Department/Doctor dropdowns narrow to that branch automatically.
+  const currentUser = getUser();
+  const currentUserRole = String(currentUser?.role_type || currentUser?.role || "").toUpperCase();
+  const currentBranchId =
+    currentUserRole === "BRANCH_ADMIN" || currentUserRole === "ADMIN"
+      ? String(currentUser?.branch_id || "")
+      : "";
 
   const [formData, setFormData] = useState<AppointmentFormData>(() => {
     let base = preselectedPatient
@@ -144,6 +160,9 @@ export default function AddAppointment() {
           patientNumber: preselectedPatient.patient_primary_mobile || "",
         }
       : emptyFormData;
+    // Admin's own branch is the default unless a Day View slot already
+    // decided the exact branch (preselectedSlot below still wins).
+    if (currentBranchId) base = { ...base, branchId: currentBranchId };
     if (preselectedDoctorId) base = { ...base, doctorId: preselectedDoctorId };
     if (preselectedSlot) {
       base = {
@@ -215,6 +234,7 @@ export default function AddAppointment() {
   // narrow the Department and Doctor dropdowns down to what's actually
   // available at that branch, once a branch is picked.
   const [branchDoctors, setBranchDoctors] = useState<EmployeeRecord[]>([]);
+  const [branchDoctorsLoading, setBranchDoctorsLoading] = useState(false);
 
   // Every doctor's real active branch assignments, keyed by employee_id --
   // a doctor can be mapped (via user_branch_mapping) to branches other than
@@ -296,15 +316,38 @@ export default function AddAppointment() {
 
   // Narrow doctors down to the selected branch using each doctor's real
   // active branch mappings, not just their primary employees.branch_id.
+  // The already-selected doctor is always kept in the list so picking a
+  // doctor first (before any branch) never makes them vanish from the
+  // dropdown when their branch auto-fills -- even if the per-doctor branch
+  // lookup above failed for them.
   useEffect(() => {
     if (!formData.branchId) {
       setBranchDoctors([]);
+      setBranchDoctorsLoading(false);
       return;
     }
+    setBranchDoctorsLoading(true);
+    employeeApi
+      .getAll({ branchId: formData.branchId, limit: 1000 })
+      .then((res) => {
+        const allEmployees = res.data?.data?.employees || [];
+        setBranchDoctors(allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR"));
+        setBranchDoctorsLoading(false);
+      })
+      .catch(() => {
+        setBranchDoctors([]);
+        setBranchDoctorsLoading(false);
+      });
+  }, [formData.branchId]);
+  useEffect(() => {
     setBranchDoctors(
-      doctors.filter((doc) => doctorBranchMap[doc.employee_id]?.has(formData.branchId)),
+      doctors.filter(
+        (doc) =>
+          doc.employee_id === formData.doctorId ||
+          doctorBranchMap[doc.employee_id]?.has(formData.branchId),
+      ),
     );
-  }, [formData.branchId, doctors, doctorBranchMap]);
+  }, [formData.branchId, doctors, doctorBranchMap, formData.doctorId]);
 
   // Fetch available slots when branch + doctor + date changes
   useEffect(() => {
@@ -480,14 +523,17 @@ export default function AddAppointment() {
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (!formData.patientId) {
-      toast({ title: "Please select a patient", variant: "destructive" });
-      return;
-    }
-    if (!formData.timeSlot) {
-      toast({ title: "Please select a time slot", variant: "destructive" });
-      return;
-    }
+    const required: RequiredField<keyof AppointmentFormData>[] = [
+      { key: "patientId", label: "Patient" },
+      { key: "patientName", label: "Patient Name" },
+      { key: "branchId", label: "Branch" },
+      { key: "departmentId", label: "Department" },
+      { key: "doctorId", label: "Doctor Name" },
+      { key: "patientType", label: "Patient Type" },
+      { key: "selectDate", label: "Appointment Date" },
+      { key: "timeSlot", label: "Available Time Slots" },
+    ];
+    if (!validateRequiredFields(required, formData, toast)) return;
 
     setShowConfirm(true);
   };
@@ -544,8 +590,8 @@ export default function AddAppointment() {
       formData.timeSlot ||
       formData.patientType ||
       formData.patientComment
-  );
-
+);
+  
   // Once a branch is selected, only show departments that branch's doctors
   // actually belong to; otherwise fall back to the full department list.
   const departmentsForDropdown = formData.branchId
@@ -609,7 +655,7 @@ export default function AddAppointment() {
     setFormData((prev) => ({
       ...prev,
       doctorId: val,
-      departmentId: matchedDepartment?.department_id || selectedDoctor?.department_id || prev.departmentId,
+      departmentId: prev.departmentId ? prev.departmentId : (matchedDepartment?.department_id || selectedDoctor?.department_id),
       timeSlot: "",
     }));
 
@@ -629,14 +675,28 @@ export default function AddAppointment() {
         const nextBranchId =
           mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
           mappedBranches[0]?.branch_id ||
-          selectedDoctor?.branch_id ||
-          formData.branchId;
+          selectedDoctor?.branch_id;
 
-        if (!nextBranchId) return null;
+        setFormData((prev) => ({
+          ...prev,
+          branchId: prev.branchId ? prev.branchId : nextBranchId,
+        }));
 
-        setFormData((prev) => ({ ...prev, branchId: nextBranchId }));
+        // Use the effective branchId: user's existing branch if set, otherwise the doctor's mapped branch
+        const effectiveBranchId = formData.branchId || nextBranchId;
 
-        return findNearestAvailableDate(val, nextBranchId, formData.selectDate, maxSelectableDate);
+        if (!effectiveBranchId) return null;
+
+        return findNearestAvailableDate(val, effectiveBranchId, formData.selectDate, maxSelectableDate);
+      })
+      .catch(() => {
+        // Doctor lookup failed (backend hiccup etc.) -- fall back to their
+        // primary branch so the doctor-first flow still auto-fills a branch
+        // and finds a date; the slots API validates the real mapping.
+        const fallbackBranchId = selectedDoctor?.branch_id || formData.branchId;
+        if (!fallbackBranchId) return null;
+        setFormData((prev) => ({ ...prev, branchId: fallbackBranchId }));
+        return findNearestAvailableDate(val, fallbackBranchId, formData.selectDate, maxSelectableDate);
       })
       .then((date) => {
         if (date) {
@@ -764,34 +824,31 @@ export default function AddAppointment() {
                     (b) => ({
                       label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
                       value: b.branch_id,
+                      highlight: currentBranchId ? b.branch_id === currentBranchId : false,
+                      badge: currentBranchId && b.branch_id === currentBranchId ? "Your branch" : undefined,
                     }),
                   )}
+
                   value={formData.branchId}
                   onValueChange={(val) => {
+                    // With a doctor already chosen, the Branch dropdown only
+                    // lists branches that doctor is mapped to -- switching
+                    // between them keeps the doctor, department and date
+                    // exactly as they were, and only reloads the slots for
+                    // the new branch (the slots effect below refetches on
+                    // branch change). Only when no doctor is picked yet does
+                    // a branch change reset department/doctor, since their
+                    // options depend on the branch.
+                    const doctorLocked = Boolean(formData.doctorId);
                     setFormData((prev) => ({
                       ...prev,
                       branchId: val,
-                      departmentId: "",
-                      doctorId: "",
+                      departmentId: doctorLocked ? prev.departmentId : "",
+                      doctorId: doctorLocked ? prev.doctorId : "",
                       timeSlot: "",
                     }));
 
-                    if (!val || !formData.doctorId) return;
-
-                    setFindingNearestDate(true);
-                    findNearestAvailableDate(formData.doctorId, val, formData.selectDate, maxSelectableDate)
-                      .then((date) => {
-                        if (date) {
-                          setFormData((prev) => ({ ...prev, selectDate: date, timeSlot: "" }));
-                        } else if (date === null) {
-                          toast({
-                            title: "No available date found",
-                            description: "This doctor has no open slots this week or next week at this branch.",
-                            variant: "destructive",
-                          });
-                        }
-                      })
-                      .finally(() => setFindingNearestDate(false));
+                    if (!val || !doctorLocked) return;
                   }}
                   placeholder={
                     formData.doctorId && doctorBranches.length === 0
@@ -815,11 +872,13 @@ export default function AddAppointment() {
                     setFormData((prev) => ({ ...prev, departmentId: val, doctorId: "", timeSlot: "" }))
                   }
                   placeholder={
-                    formData.branchId && departmentsForDropdown.length === 0
-                      ? "No departments at this branch"
-                      : departments.length
-                        ? "Select Department"
-                        : "Loading departments..."
+                    branchDoctorsLoading
+                      ? "Loading departments..."
+                      : formData.branchId && departmentsForDropdown.length === 0
+                        ? "No departments at this branch"
+                        : departments.length
+                          ? "Select Department"
+                          : "Loading departments..."
                   }
                 />
               </div>

@@ -8,8 +8,10 @@ import HmsTable from "@/components/hms/HmsTable";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
+import { downloadExportPdf } from "@/lib/exportPdf";
 
-import { FilterPopover, useFilterPanel, useStaffFilters } from "@/components/Filter";
+import { useFilterPanel, useStaffFilters } from "@/components/Filter";
+import { ToolbarFilter, StatusToggle } from "@/components/ui/toolbar-filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
@@ -220,7 +222,7 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
   } as MedicalStaffRow;
 }
 
-const ActionIcons = ({ id, roleType, onDelete }: { id?: string; roleType?: string; onDelete?: (id: string) => void } = {}) => {
+const ActionIcons = ({ id, roleType, deactivated, onDelete, onRestore }: { id?: string; roleType?: string; deactivated?: boolean; onDelete?: (id: string) => void; onRestore?: (id: string) => void } = {}) => {
   const navigate = useNavigate();
   const { can } = usePermission();
   // Every role now edits through the same AddEmployee.tsx form (Create/Edit
@@ -257,17 +259,34 @@ const ActionIcons = ({ id, roleType, onDelete }: { id?: string; roleType?: strin
           </svg>
         </button>
       )}
-      {can("employee.delete") && (
-        <button
-          title="Deactivate"
-          onClick={id ? () => onDelete?.(id) : undefined}
-          disabled={!id}
-          className={`p-1.5 rounded transition-colors duration-200 group ${id ? "hover:bg-red-50 cursor-pointer" : "opacity-40 cursor-not-allowed"}`}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
-            <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-          </svg>
-        </button>
+      {deactivated ? (
+        can("employee.update") && (
+          <button
+            title="Activate"
+            onClick={id ? () => onRestore?.(id) : undefined}
+            disabled={!id}
+            className={`p-1.5 rounded transition-colors duration-200 group ${id ? "hover:bg-green-50 cursor-pointer" : "opacity-40 cursor-not-allowed"}`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-green-600">
+              <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+              <circle cx="12" cy="12" r="3" />
+              <circle cx="12" cy="12" r="7" fill="none" />
+            </svg>
+          </button>
+        )
+      ) : (
+        can("employee.delete") && (
+          <button
+            title="Deactivate"
+            onClick={id ? () => onDelete?.(id) : undefined}
+            disabled={!id}
+            className={`p-1.5 rounded transition-colors duration-200 group ${id ? "hover:bg-red-50 cursor-pointer" : "opacity-40 cursor-not-allowed"}`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
+              <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+          </button>
+        )
       )}
     </div>
   );
@@ -277,7 +296,7 @@ const ActionIcons = ({ id, roleType, onDelete }: { id?: string; roleType?: strin
 // (same callback props, position, and styling), just without the Transfer
 // item since that's doctor-specific. List view keeps the inline ActionIcons
 // in its Action column instead.
-function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: () => void; onDelete: () => void }) {
+function CardMenu({ onView, onEdit, onDelete, onRestore, deactivated }: { onView: () => void; onEdit: () => void; onDelete: () => void; onRestore: () => void; deactivated?: boolean }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const { can } = usePermission();
@@ -309,8 +328,14 @@ function CardMenu({ onView, onEdit, onDelete }: { onView: () => void; onEdit: ()
         {can("employee.update") && (
           <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
         )}
-        {can("employee.delete") && (
-          <button onClick={() => { onDelete(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">Deactivate</button>
+        {deactivated ? (
+          can("employee.update") && (
+            <button onClick={() => { onRestore(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-green-600 hover:bg-green-50">Activate</button>
+          )
+        ) : (
+          can("employee.delete") && (
+            <button onClick={() => { onDelete(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">Deactivate</button>
+          )
         )}
       </div>
     </div>
@@ -332,7 +357,7 @@ export default function Staff() {
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
 
   const handleAddStaff = () => {
-    navigate("/STAFF/add?role=staff");
+    navigate("/STAFF/add?role=STAFF");
   };
 
   // ---- ACTION HANDLERS (grid view's CardMenu -- list view's ActionIcons
@@ -348,10 +373,42 @@ export default function Staff() {
 
   const [deleteTarget, setDeleteTarget] = useState<EmployeeRecord | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState<EmployeeRecord | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
 
   const handleDeleteClick = (id: string) => {
     const target = realStaff?.find((e) => e.employee_id === id) ?? null;
     setDeleteTarget(target);
+  };
+
+  const handleRestoreClick = (id: string) => {
+    const target = realStaff?.find((e) => e.employee_id === id) ?? null;
+    setRestoreTarget(target);
+  };
+
+  const handleConfirmRestore = async () => {
+    if (!restoreTarget) return;
+    setIsRestoring(true);
+    try {
+      const res = await employeeApi.restore(restoreTarget.employee_id);
+      if (!res.data.success) {
+        throw new Error(res.data.message);
+      }
+      toast({
+        title: "Employee restored",
+        description: `${restoreTarget.first_name} ${restoreTarget.last_name} has been reactivated.`,
+      });
+      setRestoreTarget(null);
+      fetchStaff();
+    } catch (err: any) {
+      toast({
+        title: "Failed to restore employee",
+        description: err.response?.data?.message ?? err.message ?? "Something went wrong.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRestoring(false);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -426,6 +483,7 @@ export default function Staff() {
 
   const [realStaff, setRealStaff] = useState<EmployeeRecord[] | null>(null);
   const [isStaffLoading, setIsStaffLoading] = useState(true);
+  const [showDeactivated, setShowDeactivated] = useState(false);
 
   const fetchStaff = useCallback(async () => {
     setIsStaffLoading(true);
@@ -434,6 +492,7 @@ export default function Staff() {
       const res = await employeeApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
         limit: 1000,
+        includeDeleted: showDeactivated,
       });
       console.log("[Staff Page] Response:", res.data);
       const allEmployees = res.data?.data?.employees || [];
@@ -444,7 +503,8 @@ export default function Staff() {
       const staff = allEmployees.filter(
         (e) =>
           e.user_table?.role_type !== "DOCTOR" &&
-          !(isAdmin && me?.employee_id && e.employee_id === me.employee_id)
+          !(isAdmin && me?.employee_id && e.employee_id === me.employee_id) &&
+          (showDeactivated ? !!e.deleted_at : !e.deleted_at)
       );
       setRealStaff(staff);
       if (staff.length === 0) {
@@ -465,7 +525,7 @@ export default function Staff() {
     } finally {
       setIsStaffLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches]);
+  }, [toast, selectedBranchId, isAllBranches, showDeactivated]);
 
   useEffect(() => {
     fetchStaff();
@@ -568,11 +628,31 @@ export default function Staff() {
       </span>
     )},
     { key: "status", label: "Status", render: (r: any) => <StatusBadge status={r.status} /> },
-    { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} onDelete={handleDeleteClick} /> },
+    { key: "actions", label: "Action", sortable: false, render: (r: any) => <ActionIcons id={r.id} roleType={r.roleType} deactivated={showDeactivated} onDelete={handleDeleteClick} onRestore={handleRestoreClick} /> },
   ];
 
   // ---- EXPORT ----
   const handleExport = async (exportFormat: string) => {
+    if (exportFormat === "pdf") {
+      downloadExportPdf({
+        title: "Staff Management",
+        subtitle: `${sortedData.length} staff member${sortedData.length === 1 ? "" : "s"} - exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `staff-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        columns: [
+          { header: "Staff ID", cell: (r: any) => r.id },
+          { header: "Name", cell: (r: any) => r.name },
+          { header: "Role", cell: (r: any) => r.roleType ?? "—" },
+          { header: "Department", cell: (r: any) => r.dept },
+          { header: "Designation", cell: (r: any) => r.designation ?? r.dept },
+          { header: "Branch", cell: (r: any) => (Array.isArray(r.branch) ? r.branch.join(", ") : r.branch) },
+          { header: "Phone", cell: (r: any) => r.phone ?? "—" },
+          { header: "Status", cell: (r: any) => (r.status === "active" ? "Active" : r.status === "inactive" ? "Inactive" : String(r.status ?? "—")) },
+        ],
+        rows: sortedData,
+      });
+      toast({ title: "Export complete", description: "The PDF file has been downloaded." });
+      return;
+    }
     if (exportFormat !== "csv") return;
     try {
       await downloadExportCsv("employees", {
@@ -687,6 +767,13 @@ export default function Staff() {
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
                 </div>
 
+                <StatusToggle
+  showDeactivated={showDeactivated}
+  onChange={setShowDeactivated}
+/>
+
+                {/* View Mode Toggle */}
+
                 {/* View Mode Toggle */}
                 <div className="flex border border-[#E5E7EB] rounded-md overflow-hidden bg-[#F2F4F6] p-0.5">
                   <button
@@ -746,6 +833,17 @@ export default function Staff() {
                     </svg>
                   </button>
                 </div>
+
+                <ToolbarFilter
+                  title="Filters"
+                  fields={staffFilterFields}
+                  values={filterValues}
+                  onChange={handleFilterChange}
+                  onApply={handleApplyFilter}
+                  onClear={handleClearFilter}
+                  open={isFilterOpen}
+                  onOpenChange={setIsFilterOpen}
+                />
 
                 <RefreshButton onClick={fetchStaff} isLoading={isStaffLoading} />
               </div>
@@ -811,6 +909,8 @@ export default function Staff() {
                             onView={() => handleView(r.id)}
                             onEdit={() => handleEdit(r.id, r.roleType)}
                             onDelete={() => handleDeleteClick(r.id)}
+                            onRestore={() => handleRestoreClick(r.id)}
+                            deactivated={showDeactivated}
                           />
                         </div>
                       </div>
@@ -831,34 +931,13 @@ export default function Staff() {
         </main>
       </div>
 
-      {/* Fixed to the viewport (not the scrolling page content) so Filters
-          stays reachable no matter how far down a long staff list is
-          scrolled -- same FilterPopover/FilterPanel UI as before, just
-          repositioned out of the toolbar. Offset left of QuickAddFab
-          (AppLayout.tsx, fixed bottom-6 right-6 z-50 on every page) -- same
-          bottom-right corner would otherwise stack the two buttons directly
-          on top of each other, with the FAB's higher z-index winning and
-          hiding/eating clicks for this one entirely. */}
-      <div className="fixed bottom-6 right-24 z-40">
-        <FilterPopover
-          title="Filters"
-          fields={staffFilterFields}
-          values={filterValues}
-          onChange={handleFilterChange}
-          onApply={handleApplyFilter}
-          onClear={handleClearFilter}
-          open={isFilterOpen}
-          onOpenChange={setIsFilterOpen}
-        />
-      </div>
-
       <ConfirmationDialog
         open={!!deleteTarget}
         type="danger"
         title="Deactivate Employee?"
         description={
           deleteTarget
-            ? `${deleteTarget.first_name} ${deleteTarget.last_name} (${deleteTarget.employee_id}) will be deactivated. They will be hidden from all lists, blocked from login, their branch assignments removed, and their future appointments flagged "Reschedule Required" for reassignment. Historical records are kept. This cannot be undone from the app.`
+            ? `${deleteTarget.first_name} ${deleteTarget.last_name} (${deleteTarget.employee_id}) will be deactivated. They will be hidden from all lists and blocked from login, and their future appointments flagged "Reschedule Required" for reassignment. Their branch assignment is kept so activating them again restores it. Historical records are kept.`
             : ""
         }
         confirmText="Deactivate"
@@ -866,6 +945,22 @@ export default function Staff() {
         loading={isDeleting}
         onConfirm={handleConfirmDelete}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      <ConfirmationDialog
+        open={!!restoreTarget}
+        type="LockOpen"
+        title="Activate Employee?"
+        description={
+          restoreTarget
+            ? `${restoreTarget.first_name} ${restoreTarget.last_name} (${restoreTarget.employee_id}) will be restored. They will become visible in all lists, be able to log in again, and regain their previous branch assignment.`
+            : ""
+        }
+        confirmText="Activate"
+        cancelText="Cancel"
+        loading={isRestoring}
+        onConfirm={handleConfirmRestore}
+        onCancel={() => setRestoreTarget(null)}
       />
     </div>
   );
