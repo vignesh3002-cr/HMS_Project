@@ -11,9 +11,12 @@ import {
 type AppointmentStatus = "Check Out" | "Check In" | "Cancelled";
 
 interface Appointment {
+  patientId: string;
   patient: string;
   image: string;
   dateTime: string;
+  appointmentDate: string;
+  appointmentTime: string;
   phone: string;
   status: AppointmentStatus;
 }
@@ -285,6 +288,7 @@ export default function DoctorDashboard() {
 
         const mappedAppointments = appointmentsResponse.data.data.appointments.map(
           (item: DashboardAppointment): Appointment => ({
+            patientId: item.patient_bio_data?.patient_id || "",
             patient: [
               item.patient_bio_data?.patient_first_name,
               item.patient_bio_data?.patient_middle_name,
@@ -297,6 +301,8 @@ export default function DoctorDashboard() {
             dateTime: `${formatDate(item.appointment_date)} - ${formatTime(
               item.appointment_time
             )}`,
+            appointmentDate: item.appointment_date,
+            appointmentTime: item.appointment_time,
             phone: item.patient_bio_data?.patient_primary_mobile || "-",
             status: mapAppointmentStatus(item.status),
           })
@@ -606,7 +612,14 @@ export default function DoctorDashboard() {
                     <tr
                       key={`${appointment.patient}-${appointment.dateTime}`}
                       onClick={() =>
-                        navigate("/doctor/patient-consultation")
+                        navigate("/doctor/patient-consultation", {
+                          state: {
+                            patientId: appointment.patientId,
+                            appointmentDate: appointment.appointmentDate,
+                            appointmentTime: appointment.appointmentTime,
+                            consultedBy: doctorName,
+                          },
+                        })
                       }
                       className="cursor-pointer transition hover:bg-slate-50"
                     >

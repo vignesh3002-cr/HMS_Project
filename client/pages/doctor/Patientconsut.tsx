@@ -1,4 +1,9 @@
 import React, { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
+import {
+  patientApi,
+  type PatientRecord,
+} from "../../api/patient.api";
 
 type ToastMessage = string;
 
@@ -8,6 +13,13 @@ interface Medication {
   frequency: string;
   duration: string;
   instructions: string;
+}
+
+interface ConsultationState {
+  patientId?: string;
+  appointmentDate?: string;
+  appointmentTime?: string;
+  consultedBy?: string;
 }
 
 const StepCheckLogo = ({ active = false }: { active?: boolean }) => (
@@ -68,6 +80,106 @@ vomiting. Appetite normal.`
   const [selectedInvestigations, setSelectedInvestigations] = useState<
     string[]
   >(["CBC"]);
+
+  const [showLabReview, setShowLabReview] = useState(false);
+  const [activeStep, setActiveStep] = useState("CONSULTATION");
+
+  /* ============================================================
+     PATIENT DATA (from dashboard appointment click)
+  ============================================================ */
+
+  const location = useLocation();
+  const consultationState = location.state as ConsultationState | null;
+
+  const [patient, setPatient] = useState<PatientRecord | null>(null);
+  const [patientError, setPatientError] = useState("");
+
+  const formatDateDMY = (value?: string | null) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    const day = String(date.getDate()).padStart(2, "0");
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    return `${day}-${month}-${date.getFullYear()}`;
+  };
+
+  const formatTimeAMPM = (value?: string | null) => {
+    if (!value) return "";
+    const timeMatch = value.match(
+      /(?:T|\s)?(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?/
+    );
+    if (timeMatch) {
+      let hour = Number(timeMatch[1]);
+      const minute = timeMatch[2];
+      const suffix = hour >= 12 ? "PM" : "AM";
+      hour = hour % 12 || 12;
+      return `${String(hour).padStart(2, "0")}:${minute} ${suffix}`;
+    }
+    return value;
+  };
+
+  useEffect(() => {
+    const patientId = consultationState?.patientId;
+    if (!patientId) return;
+    let cancelled = false;
+    setPatientError("");
+    patientApi
+      .getById(patientId)
+      .then((response) => {
+        if (cancelled) return;
+        setPatient(response.data.data);
+      })
+      .catch((error) => {
+        console.error("Failed to load patient:", error);
+        if (!cancelled) {
+          const message =
+            error?.response?.data?.message ||
+            error?.message ||
+            "Failed to load patient data.";
+          setPatientError(message);
+          showToast(message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [consultationState?.patientId]);
+
+  const patientName = patient
+    ? [
+        patient.patient_first_name,
+        patient.patient_middle_name,
+        patient.patient_last_name,
+      ]
+        .filter(Boolean)
+        .join(" ") || "Unknown Patient"
+    : "Vijaya Nallusamy";
+
+  const patientPhoto =
+    patient?.patient_photo_url ||
+    "https://www.figma.com/api/mcp/asset/7a4da335-abae-4dd7-af87-b102c3079771.png";
+
+  const patientAgeSex = patient
+    ? `${patient.patient_age ?? "—"} Y / ${patient.patient_gender ?? ""}`
+    : "51 Y / Female";
+
+  const patientDisplayId = patient?.patient_id || "ONC-2026-10025";
+
+  const patientPhone = patient?.patient_primary_mobile || "+91 98765 43210";
+
+  const patientEmail = patient?.patient_email || "vijaya.n@example.com";
+
+  const registeredOn = patient
+    ? formatDateDMY(patient.user_table?.created_at) || "01-06-2026"
+    : "01-06-2026";
+
+  const visitDate =
+    formatDateDMY(consultationState?.appointmentDate) || "02-06-2026";
+
+  const visitTime =
+    formatTimeAMPM(consultationState?.appointmentTime) || "10:30 AM";
+
+  const consultedBy = consultationState?.consultedBy || "Dr. Rajesh Kumar";
 
   /* ============================================================
      TOAST
@@ -213,8 +325,8 @@ vomiting. Appetite normal.`
 
   const saveDraft = () => {
     const data = {
-      patient: "Vijaya Nallusamy",
-      patientId: "ONC-2026-10025",
+      patient: patientName,
+      patientId: patientDisplayId,
       consultationNotes,
       symptoms,
       comorbidities,
@@ -257,6 +369,14 @@ vomiting. Appetite normal.`
   ============================================================ */
 
   const selectStep = (name: string) => {
+    setActiveStep(name);
+
+    if (name === "LAB REPORT REVIEW") {
+      setShowLabReview(true);
+      return;
+    }
+
+    setShowLabReview(false);
     showToast(name);
   };
 
@@ -288,47 +408,47 @@ vomiting. Appetite normal.`
   const steps = [
     {
       name: "CONSULTATION",
-      active: true,
+      active: activeStep === "CONSULTATION",
       icon: <StepCheckLogo />,
     },
     {
       name: "LAB REPORT REVIEW",
-      active: false,
+      active: activeStep === "LAB REPORT REVIEW",
       icon:<StepCheckLogo />,
     },
     {
       name: "DIAGNOSIS",
-      active: false,
+      active: activeStep === "DIAGNOSIS",
       icon: <StepCheckLogo />,
         
     },
     {
       name: "TREATMENT PLAN",
-      active: false,
+      active: activeStep === "TREATMENT PLAN",
       icon: <StepCheckLogo />,
        
     },
     {
       name: "CHEMOTHERAPY ORDER",
-      active: false,
+      active: activeStep === "CHEMOTHERAPY ORDER",
        icon: <StepCheckLogo />,
     },
    
     {
       name: "DISCHARGE MEDICATION",
-      active: false,
+      active: activeStep === "DISCHARGE MEDICATION",
       icon: <StepCheckLogo />,
     },
     {
       name: "FOLLOW UP",
-      active: false,
+      active: activeStep === "FOLLOW UP",
       icon: <StepCheckLogo />,
     },
     {
       name: "SUMMARY",
-      active: false,
-      icon:
-        "https://www.figma.com/api/mcp/asset/96c7b2fd-4979-4178-b725-7de4685d2a55.svg",
+      active: activeStep === "SUMMARY",
+       icon: <StepCheckLogo />,
+      
     },
   ];
 
@@ -360,23 +480,23 @@ vomiting. Appetite normal.`
               <div className="h-24 w-24 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
 
                 <img
-                  src="https://www.figma.com/api/mcp/asset/7a4da335-abae-4dd7-af87-b102c3079771.png"
-                  alt="Vijaya Nallusamy"
+                  src={patientPhoto}
+                  alt={patientName}
                   className="h-full w-full object-cover"
                 />
 
               </div>
 
               <div className="w-full pt-4 text-center text-xl font-bold leading-7 text-slate-800">
-                Vijaya Nallusamy
+                {patientName}
               </div>
 
               <div className="w-full pb-2 text-center text-sm leading-5 text-slate-500">
-                51 Y / Female
+                {patientAgeSex}
               </div>
 
               <div className="h-6 rounded bg-slate-100 px-3 py-1 text-xs font-semibold leading-4 text-slate-600">
-                ONC-2026-10025
+                {patientDisplayId}
               </div>
 
               <div className="w-full pt-4 text-center text-sm font-bold leading-5 tracking-[-0.35px] text-blue-700">
@@ -414,7 +534,7 @@ vomiting. Appetite normal.`
                   </div>
 
                   <div className="whitespace-nowrap text-sm font-medium leading-5 text-slate-700">
-                    +91 98765 43210
+                    {patientPhone}
                   </div>
 
                 </div>
@@ -454,7 +574,7 @@ vomiting. Appetite normal.`
                   </div>
 
                   <div className="whitespace-nowrap text-sm font-medium leading-5 text-slate-700">
-                    vijaya.n@example.com
+                    {patientEmail}
                   </div>
 
                 </div>
@@ -517,7 +637,7 @@ vomiting. Appetite normal.`
             {/* FOOTER */}
 
             <div className="absolute bottom-0 left-0 right-0 flex h-[50px] items-center justify-center border-t border-slate-100 text-xs leading-4 text-slate-400">
-              Registered on 01-06-2026
+              Registered on {registeredOn}
             </div>
 
           </aside>
@@ -609,7 +729,7 @@ vomiting. Appetite normal.`
 
             <div className="absolute left-0 top-16 z-20 h-[88px] w-[1000px] overflow-hidden bg-white">
 
-              <div className="ml-0 flex h-[88.5px] w-[896px] overflow-hidden">
+              <div className="hide-scrollbar ml-0 flex h-[88.5px] w-[896px] overflow-x-auto">
 
                 {steps.map((step, index) => (
 
@@ -669,7 +789,11 @@ vomiting. Appetite normal.`
 
               <div className="flex w-[942px] flex-col gap-6">
 
-                {/* =================================================
+                {showLabReview ? (
+                  <LabReview embedded />
+                ) : (
+                  <>
+                    {/* =================================================
                     CONSULTATION SUMMARY
                 ================================================= */}
 
@@ -697,7 +821,7 @@ vomiting. Appetite normal.`
 
                           <input
                             className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] pl-[33px] text-[9px] leading-5 text-slate-700 outline-none"
-                            value="02-06-2026"
+                            value={visitDate}
                             readOnly
                           />
 
@@ -726,7 +850,7 @@ vomiting. Appetite normal.`
 
                           <input
                             className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] pl-[33px] text-[11px] leading-5 text-slate-700 outline-none"
-                            value="10:30 AM"
+                            value={visitTime}
                             readOnly
                           />
 
@@ -777,7 +901,17 @@ vomiting. Appetite normal.`
 
                       <div className="relative h-[38px]">
 
-                        <select className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none">
+                        <select
+                          defaultValue={consultedBy}
+                          className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none"
+                        >
+
+                          {consultedBy !== "Dr. Rajesh Kumar" &&
+                            consultedBy !== "Dr. Priya Sharma" && (
+                              <option>
+                                {consultedBy}
+                              </option>
+                            )}
 
                           <option>
                             Dr. Rajesh Kumar
@@ -1437,6 +1571,9 @@ vomiting. Appetite normal.`
 
                 </div>
 
+                  </>
+                )}
+
               </div>
 
             </section>
@@ -1486,3 +1623,370 @@ vomiting. Appetite normal.`
 };
 
 export default Consultation;
+
+/* ============================================================
+   LAB REVIEW COMPONENT
+   (combined from client/pages/doctor/labreview.tsx —
+    renamed App → LabReview, duplicate React/useState import
+    removed so it can live in this file)
+============================================================ */
+
+interface Investigation {
+  name: string;
+  orderedDate: string;
+  status: "Completed";
+}
+
+const investigations: Investigation[] = [
+  {
+    name: "Complete Blood Count (CBC)",
+    orderedDate: "01-06-2026",
+    status: "Completed",
+  },
+  {
+    name: "Liver Function Test (LFT)",
+    orderedDate: "01-06-2026",
+    status: "Completed",
+  },
+  {
+    name: "CT Scan Abdomen & Pelvis",
+    orderedDate: "02-06-2026",
+    status: "Completed",
+  },
+  {
+    name: "Chest X-Ray",
+    orderedDate: "02-06-2026",
+    status: "Completed",
+  },
+];
+
+const CheckIcon = ({ className = "h-5 w-5" }: { className?: string }) => (
+  <svg
+    className={className}
+    fill="currentColor"
+    viewBox="0 0 20 20"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+    />
+  </svg>
+);
+
+const BackIcon = () => (
+  <svg
+    className="h-6 w-6"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    viewBox="0 0 24 24"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M10 19l-7-7m0 0l7-7m-7 7h18"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const NotificationIcon = () => (
+  <svg
+    className="h-6 w-6"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    viewBox="0 0 24 24"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const ArrowRightIcon = () => (
+  <svg
+    className="h-5 w-5"
+    fill="currentColor"
+    viewBox="0 0 20 20"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M12.293 5.293a1 1 0 011.414 0l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-2.293-2.293a1 1 0 010-1.414z"
+    />
+  </svg>
+);
+
+const LabReview: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
+  const [observations, setObservations] = useState("");
+  const [notifications, setNotifications] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const handleCancel = () => {
+    setObservations("");
+    setSaved(false);
+  };
+
+  const handleSaveDraft = () => {
+    setSaved(true);
+  };
+
+  const handleProceed = () => {
+    alert("Proceeding to Treatment Plan");
+  };
+
+  const handleViewReport = (name: string) => {
+    alert(`Viewing report: ${name}`);
+  };
+
+  const content = (
+    <div className="space-y-6">
+      {/* Laboratory Investigations */}
+      <section className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)]">
+        {/* Card Header */}
+        <div className="flex items-center justify-between border-b border-gray-100 px-8 py-6">
+          <h2 className="text-2xl font-bold text-gray-900">
+            Laboratory Investigations
+          </h2>
+
+          <span className="text-sm font-medium text-gray-500">
+            {investigations.length} Reports Found
+          </span>
+        </div>
+
+        {/* Table */}
+        <div className="w-full overflow-x-auto">
+          <table className="w-full border-collapse text-left">
+            <thead>
+              <tr className="border-b border-gray-100 bg-white">
+                <th className="w-2/5 px-8 py-4 text-xs font-bold uppercase tracking-wider text-gray-500">
+                  Investigation Name
+                </th>
+
+                <th className="w-1/5 px-8 py-4 text-xs font-bold uppercase tracking-wider text-gray-500">
+                  Ordered Date
+                </th>
+
+                <th className="w-1/5 px-8 py-4 text-xs font-bold uppercase tracking-wider text-gray-500">
+                  Status
+                </th>
+
+                <th className="w-1/5 px-8 py-4 text-right text-xs font-bold uppercase tracking-wider text-gray-500">
+                  Action
+                </th>
+              </tr>
+            </thead>
+
+            <tbody className="bg-white text-gray-700">
+              {investigations.map((investigation) => (
+                <tr
+                  key={investigation.name}
+                  className="border-b border-[#F3F4F6] transition-colors last:border-b-0 hover:bg-gray-50"
+                >
+                  <td className="px-8 py-5 text-[15px] font-semibold">
+                    {investigation.name}
+                  </td>
+
+                  <td className="px-8 py-5 text-gray-600">
+                    {investigation.orderedDate}
+                  </td>
+
+                  <td className="px-8 py-5">
+                    <span className="inline-flex items-center rounded-full bg-[#DCFCE7] px-3 py-1 text-sm font-semibold text-[#166534]">
+                      {investigation.status}
+                    </span>
+                  </td>
+
+                  <td className="px-8 py-5 text-right">
+                    <button
+                      type="button"
+                      onClick={() => handleViewReport(investigation.name)}
+                      className="inline-flex items-center justify-center rounded-lg bg-[#F0F5FF] px-4 py-2 text-sm font-semibold text-[#2563EB] transition-colors hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                    >
+                      View Report
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Clinical Remarks */}
+      <section className="rounded-xl border border-gray-100 bg-white p-8 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)]">
+        <h2 className="mb-6 text-2xl font-bold text-gray-900">
+          Clinical Remarks
+        </h2>
+
+        <div className="space-y-3">
+          <label
+            htmlFor="observations"
+            className="block text-[13px] font-bold uppercase tracking-widest text-[#9CA3AF]"
+          >
+            Observations & Notes
+          </label>
+
+          <textarea
+            id="observations"
+            name="observations"
+            value={observations}
+            onChange={(event) => setObservations(event.target.value)}
+            placeholder="Enter clinical observations based on the laboratory reports..."
+            rows={6}
+            className="block w-full resize-y rounded-xl border-[#E5E7EB] bg-[#F8FAFC] p-4 text-[15px] text-gray-700 shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500"
+          />
+        </div>
+
+        {saved && (
+          <p className="mt-3 text-sm font-medium text-green-600">
+            Draft saved successfully.
+          </p>
+        )}
+      </section>
+    </div>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col bg-[#F8F9FB] text-[#1F2937]">
+      {/* Header */}
+      <header className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            aria-label="Go back"
+            onClick={() => window.history.back()}
+            className="text-gray-600 transition-colors hover:text-gray-900 focus:outline-none"
+          >
+            <BackIcon />
+          </button>
+
+          <h1 className="text-xl font-bold tracking-tight text-gray-900">
+            Patients
+          </h1>
+        </div>
+
+        <div className="flex items-center gap-6">
+          <button
+            type="button"
+            aria-label="Notifications"
+            onClick={() => setNotifications((prev) => !prev)}
+            className="relative text-gray-500 transition-colors hover:text-gray-700 focus:outline-none"
+          >
+            <NotificationIcon />
+
+            <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
+
+            {notifications && (
+              <div className="absolute right-0 top-8 w-52 rounded-lg border border-gray-200 bg-white p-3 text-left text-sm text-gray-600 shadow-lg">
+                No new notifications
+              </div>
+            )}
+          </button>
+
+          <div className="flex items-center gap-3">
+            <span className="font-semibold text-gray-700">HMS</span>
+
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1E3A8A] font-bold text-white shadow-sm">
+              DR
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Workflow Stepper */}
+      <section className="relative bg-[#F8F9FB] pb-0 pt-8">
+        <div className="mx-auto max-w-5xl px-6">
+          <div className="relative flex items-end justify-between">
+            {/* Consultation */}
+            <div className="relative z-10 flex flex-1 flex-col items-center pb-6">
+              <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-full bg-gray-400 text-white">
+                <CheckIcon />
+              </div>
+
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-800">
+                Consultation
+              </span>
+
+              <div className="absolute bottom-0 left-0 right-[-50%] h-1 rounded bg-white" />
+            </div>
+
+            {/* Lab Report Review */}
+            <div className="relative z-10 flex flex-1 flex-col items-center pb-6">
+              <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-full bg-green-500 text-white ring-4 ring-green-100">
+                <CheckIcon />
+              </div>
+
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-800">
+                Lab Report Review
+              </span>
+
+              <div className="absolute bottom-0 left-0 right-0 mx-auto h-1 w-[95%] rounded bg-green-500" />
+            </div>
+
+            {/* Diagnosis */}
+            <div className="relative z-10 flex flex-1 flex-col items-center pb-6">
+              <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-full bg-gray-400 text-white">
+                <CheckIcon />
+              </div>
+
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-800">
+                Diagnosis
+              </span>
+
+              <div className="absolute bottom-0 left-[-50%] right-0 h-1 rounded bg-white" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Main Content */}
+      <main className="flex-grow px-6 py-8">
+        <div className="mx-auto max-w-5xl space-y-6">
+          {content}
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer className="sticky bottom-0 z-20 border-t border-gray-200 bg-white px-6 py-6">
+        <div className="mx-auto flex max-w-5xl justify-center gap-4">
+          <button
+            type="button"
+            onClick={handleCancel}
+            className="rounded-xl border border-gray-300 px-8 py-3 text-[15px] font-bold text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-200"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSaveDraft}
+            className="rounded-xl border border-blue-600 px-8 py-3 text-[15px] font-bold text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            Save as Draft
+          </button>
+
+          <button
+            type="button"
+            onClick={handleProceed}
+            className="flex items-center gap-2 rounded-xl bg-[#2563EB] px-8 py-3 text-[15px] font-bold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          >
+            Proceed to Treatment Plan
+            <ArrowRightIcon />
+          </button>
+        </div>
+      </footer>
+    </div>
+  );
+};

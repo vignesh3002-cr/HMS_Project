@@ -136,10 +136,6 @@ const doctorRoutes = [
     path: "/doctor/reviews",
     element: <DoctorReviews />,
   },
-  {
-    path: "/doctor/patient-consultation",
-    element: <Consultation />,
-  },
 ];
 
 // ============================================================
@@ -511,6 +507,22 @@ const App = () => (
               )}
 
             </Route>
+
+            {/* ==================================================
+                DOCTOR PORTAL - PATIENT CONSULTATION
+
+                Full-screen page WITHOUT the DoctorSidebar
+                nav (renders edge to edge, no nav bar).
+            ================================================== */}
+
+            <Route
+              path="/doctor/patient-consultation"
+              element={
+                <ProtectedRoute>
+                  <Consultation />
+                </ProtectedRoute>
+              }
+            />
 
             {/* ==================================================
                 MAIN HMS / ADMIN PORTAL
