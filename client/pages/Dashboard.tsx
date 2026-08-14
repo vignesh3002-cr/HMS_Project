@@ -11,6 +11,7 @@ import { applySearchAndFilter } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
+import { encounterApi, type EncounterRecord, type EncounterStatus, type EncounterType } from "@/api/encounter.api";
 import { patientApi } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { getEffectiveAppointmentStatus } from "@/lib/appointmentStatus";
