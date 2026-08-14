@@ -14,6 +14,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
+import { downloadExportPdf } from "@/lib/exportPdf";
+import { formatPatientName, formatDoctorName, formatAppointmentDate, formatAppointmentTime } from "@/lib/appointmentFormat";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { employeeApi } from "@/api/employee.api";
 import { FilterPopover, useFilterPanel, useScheduleFilters } from "@/components/Filter";
@@ -336,6 +338,26 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   // ---- EXPORT ----
   const handleExport = async (exportFormat: string) => {
+    if (exportFormat === "pdf") {
+      downloadExportPdf({
+        title: "Appointment Schedule - Week",
+        subtitle: `${format(weekStart, "dd MMM yyyy")} to ${format(addDays(weekStart, 6), "dd MMM yyyy")} - ${weekAppointments.length} appointment${weekAppointments.length === 1 ? "" : "s"}`,
+        filename: `appointments-week-${format(weekStart, "yyyy-MM-dd")}.pdf`,
+        columns: [
+          { header: "Appointment No", cell: (r: AppointmentRecord) => r.appointment_id },
+          { header: "Token", cell: (r: AppointmentRecord) => (r.token_number != null ? String(r.token_number) : "—") },
+          { header: "Patient", cell: (r: AppointmentRecord) => formatPatientName(r.patient_bio_data) },
+          { header: "Branch", cell: (r: AppointmentRecord) => r.branch?.branch_name ?? "—" },
+          { header: "Doctor", cell: (r: AppointmentRecord) => formatDoctorName(r.employees) },
+          { header: "Date", cell: (r: AppointmentRecord) => formatAppointmentDate(r.appointment_date) },
+          { header: "Time", cell: (r: AppointmentRecord) => formatAppointmentTime(r.appointment_time) },
+          { header: "Status", cell: (r: AppointmentRecord) => r.status ?? "—" },
+        ],
+        rows: weekAppointments,
+      });
+      toast({ title: "Export complete", description: "The PDF file has been downloaded." });
+      return;
+    }
     if (exportFormat !== "csv") return;
     try {
       await downloadExportCsv("appointments", {

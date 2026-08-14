@@ -18,6 +18,7 @@ import { FilterPopover, useFilterPanel, useDoctorFilters } from "@/components/Fi
 import { filterDataByValues } from "@/components/Filter/utils";
 import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
+import { downloadExportPdf } from "@/lib/exportPdf";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { appointmentApi } from "@/api/appointment.api";
@@ -472,6 +473,25 @@ export default function Doctor() {
  
   // ---- EXPORT ----
   const handleExport = async (exportFormat: string) => {
+    if (exportFormat === "pdf") {
+      downloadExportPdf({
+        title: "Doctor Management",
+        subtitle: `${displayData.length} doctor${displayData.length === 1 ? "" : "s"} - exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `doctors-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        columns: [
+          { header: "Doctor ID", cell: (r: any) => r.id },
+          { header: "Name", cell: (r: any) => r.name },
+          { header: "Department", cell: (r: any) => r.dept },
+          { header: "Qualification", cell: (r: any) => r.qualification },
+          { header: "Mobile", cell: (r: any) => r.mobile },
+          { header: "Branch", cell: (r: any) => (Array.isArray(r.branch) ? r.branch.join(", ") : r.branch) },
+          { header: "Status", cell: (r: any) => r.status },
+        ],
+        rows: displayData,
+      });
+      toast({ title: "Export complete", description: "The PDF file has been downloaded." });
+      return;
+    }
     if (exportFormat !== "csv") return;
     try {
       await downloadExportCsv("employees", {

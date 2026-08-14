@@ -8,6 +8,7 @@ import HmsTable from "@/components/hms/HmsTable";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
+import { downloadExportPdf } from "@/lib/exportPdf";
 
 import { FilterPopover, useFilterPanel, useStaffFilters } from "@/components/Filter";
 import { filterDataByValues } from "@/components/Filter/utils";
@@ -573,6 +574,26 @@ export default function Staff() {
 
   // ---- EXPORT ----
   const handleExport = async (exportFormat: string) => {
+    if (exportFormat === "pdf") {
+      downloadExportPdf({
+        title: "Staff Management",
+        subtitle: `${sortedData.length} staff member${sortedData.length === 1 ? "" : "s"} - exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `staff-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        columns: [
+          { header: "Staff ID", cell: (r: any) => r.id },
+          { header: "Name", cell: (r: any) => r.name },
+          { header: "Role", cell: (r: any) => r.roleType ?? "—" },
+          { header: "Department", cell: (r: any) => r.dept },
+          { header: "Designation", cell: (r: any) => r.designation ?? r.dept },
+          { header: "Branch", cell: (r: any) => (Array.isArray(r.branch) ? r.branch.join(", ") : r.branch) },
+          { header: "Phone", cell: (r: any) => r.phone ?? "—" },
+          { header: "Status", cell: (r: any) => (r.status === "active" ? "Active" : r.status === "inactive" ? "Inactive" : String(r.status ?? "—")) },
+        ],
+        rows: sortedData,
+      });
+      toast({ title: "Export complete", description: "The PDF file has been downloaded." });
+      return;
+    }
     if (exportFormat !== "csv") return;
     try {
       await downloadExportCsv("employees", {
