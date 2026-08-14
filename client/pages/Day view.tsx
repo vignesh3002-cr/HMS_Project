@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Loader2 } from "lucide-react";
-import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { format, isToday, isTomorrow, isYesterday, addDays, subDays, startOfDay, endOfDay } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
@@ -691,15 +691,27 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       }
     }
 
-    const appointmentsAt = (doc: DayDoctorColumn, time: string): AppointmentRecord[] =>
-      dayAppointments.filter((appt) => {
+const appointmentsAt = (doc: DayDoctorColumn, time: string): AppointmentRecord[] => {
+      const now = new Date();
+      const todayStart = startOfDay(now).getTime();
+      const todayEnd = endOfDay(now).getTime();
+      const selectedDateStart = startOfDay(selectedDate).getTime();
+      const isSelectedDateToday = selectedDateStart >= todayStart && selectedDateStart <= todayEnd;
+
+      return dayAppointments.filter((appt) => {
         if (appt.employees?.employee_id !== doc.employeeId) return false;
-        if (appt.status && NON_BLOCKING_STATUSES.has(appt.status)) return false;
+
+        const isCancelled = appt.status && NON_BLOCKING_STATUSES.has(appt.status);
+        if (isCancelled) {
+          if (isSelectedDateToday) return false;
+        }
+
         const t = new Date(appt.appointment_time);
         if (isNaN(t.getTime())) return false;
         const apptTime = `${String(t.getUTCHours()).padStart(2, "0")}:${String(t.getUTCMinutes()).padStart(2, "0")}`;
         return apptTime === time;
       });
+    };
 
     const patientNameOf = (appt: AppointmentRecord): string => {
       const bio = appt.patient_bio_data;
