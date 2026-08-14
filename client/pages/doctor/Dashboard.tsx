@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { getActiveBranchId } from "../../api/axios";
 import {
   doctorDashboardApi,
@@ -203,6 +204,8 @@ function mapAppointmentStatus(status: string): AppointmentStatus {
 }
 
 export default function DoctorDashboard() {
+  const navigate = useNavigate();
+
   const [periodOpen, setPeriodOpen] = useState(false);
   const [hospitalOpen, setHospitalOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
@@ -602,6 +605,10 @@ export default function DoctorDashboard() {
                   {dashboardAppointments.map((appointment) => (
                     <tr
                       key={`${appointment.patient}-${appointment.dateTime}`}
+                      onClick={() =>
+                        navigate("/doctor/patient-consultation")
+                      }
+                      className="cursor-pointer transition hover:bg-slate-50"
                     >
                       <td className="h-[50px] overflow-hidden border-b border-slate-100 px-5 py-2 text-xs text-slate-600">
                         <div className="flex items-center gap-3">
