@@ -214,10 +214,12 @@ export default function DoctorDashboard() {
   const [cancelledAppointments, setCancelledAppointments] = useState(0);
   const [loading, setLoading] = useState(true);
   const [branchLoading, setBranchLoading] = useState(false);
+  const [checkInLoading, setCheckInLoading] = useState<string | null>(null);
   const [dashboardError, setDashboardError] = useState("");
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
 
   const handleCheckIn = async (appointmentId: string) => {
+    setCheckInLoading(appointmentId);
     try {
       await appointmentApi.updateStatus(appointmentId, "CHECKED_IN");
       await encounterApi.create({ appointment_id: appointmentId });
@@ -226,7 +228,9 @@ export default function DoctorDashboard() {
       toast({ title: "Patient checked in", description: "Encounter created successfully." });
     } catch (error: any) {
       toast({ title: "Check-in failed", description: error.response?.data?.message || "Failed to check in patient", variant: "destructive" });
-    }
+    } finally {
+    setCheckInLoading(null);
+  }
   };
 
   const handleCheckOut = async (appointmentId: string) => {
@@ -778,9 +782,20 @@ export default function DoctorDashboard() {
                           <button
                             type="button"
                             onClick={() => handleCheckIn(appointment.appointmentId)}
-                            className="inline-flex items-center justify-center px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition-colors"
-                          >
-                            Check In
+                           disabled={checkInLoading === appointment.appointmentId}
+    className="inline-flex items-center justify-center px-2 py-1 text-xs font-medium text-white bg-green-600 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700"
+  >
+                         {checkInLoading === appointment.appointmentId ? (
+      <>
+        <svg className="animate-spin -ml-1 mr-1 h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+        Checking...
+      </>
+    ) : (
+      "Check In"
+    )}
                           </button>
                         )}
                         {(appointment.originalStatus === "CHECKED_IN" || appointment.originalStatus === "IN_CONSULTATION") && (
