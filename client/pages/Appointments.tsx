@@ -31,6 +31,7 @@ import DayView from "./Day view";
 import WeekView from "./Week view";
 import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
+import { downloadExportPdf } from "@/lib/exportPdf";
 
 
 interface Appointment {
@@ -413,6 +414,28 @@ const AppointmentSchedule: React.FC = () => {
 
   // ---- EXPORT ----
   const handleExport = async (exportFormat: string) => {
+    if (exportFormat === "pdf") {
+      downloadExportPdf({
+        title: "Appointment Schedule",
+        subtitle: `${sortedData.length} appointment${sortedData.length === 1 ? "" : "s"} — exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `appointments-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        columns: [
+          { header: "Appointment No", cell: (r: Appointment) => r.id },
+          { header: "Token", cell: (r: Appointment) => r.tokenId },
+          { header: "Patient", cell: (r: Appointment) => r.patient },
+          { header: "Patient ID", cell: (r: Appointment) => r.patientId },
+          { header: "Branch", cell: (r: Appointment) => r.branch },
+          { header: "Doctor", cell: (r: Appointment) => r.doctor },
+          { header: "Doctor ID", cell: (r: Appointment) => r.doctorId },
+          { header: "Date", cell: (r: Appointment) => r.date },
+          { header: "Time", cell: (r: Appointment) => r.time },
+          { header: "Status", cell: (r: Appointment) => r.status },
+        ],
+        rows: sortedData,
+      });
+      toast({ title: "Export complete", description: "The PDF file has been downloaded." });
+      return;
+    }
     if (exportFormat !== "csv") return;
     try {
       await downloadExportCsv("appointments", {

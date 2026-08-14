@@ -6,6 +6,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
+import { downloadExportPdf } from "@/lib/exportPdf";
+import { formatPatientName, formatDoctorName, formatAppointmentDate, formatAppointmentTime } from "@/lib/appointmentFormat";
 import { useToast } from "@/hooks/use-toast";
 import { appointmentApi, type AppointmentRecord, type AvailableSlot } from "@/api/appointment.api";
 import { employeeApi, type EmployeeRecord, type DoctorScheduleRecord, type DayOfWeek } from "@/api/employee.api";
@@ -881,6 +883,26 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   // ---- EXPORT ----
   const handleExport = async (exportFormat: string) => {
+    if (exportFormat === "pdf") {
+      downloadExportPdf({
+        title: "Appointment Schedule - Day",
+        subtitle: `${format(selectedDate, "dd MMM yyyy")} - ${dayAppointments.length} appointment${dayAppointments.length === 1 ? "" : "s"}`,
+        filename: `appointments-${format(selectedDate, "yyyy-MM-dd")}.pdf`,
+        columns: [
+          { header: "Appointment No", cell: (r: AppointmentRecord) => r.appointment_id },
+          { header: "Token", cell: (r: AppointmentRecord) => (r.token_number != null ? String(r.token_number) : "—") },
+          { header: "Patient", cell: (r: AppointmentRecord) => formatPatientName(r.patient_bio_data) },
+          { header: "Branch", cell: (r: AppointmentRecord) => r.branch?.branch_name ?? "—" },
+          { header: "Doctor", cell: (r: AppointmentRecord) => formatDoctorName(r.employees) },
+          { header: "Date", cell: (r: AppointmentRecord) => formatAppointmentDate(r.appointment_date) },
+          { header: "Time", cell: (r: AppointmentRecord) => formatAppointmentTime(r.appointment_time) },
+          { header: "Status", cell: (r: AppointmentRecord) => r.status ?? "—" },
+        ],
+        rows: dayAppointments,
+      });
+      toast({ title: "Export complete", description: "The PDF file has been downloaded." });
+      return;
+    }
     if (exportFormat !== "csv") return;
     try {
       const day = format(selectedDate, "yyyy-MM-dd");
