@@ -17,6 +17,7 @@ import {
   type AppointmentResponse,
 } from "@/api/appointment.api";
 import { validateRequiredFields, type RequiredField } from "@/lib/validation";
+import { activeBranches } from "@/lib/utils";
 
 interface AppointmentFormData {
   patientId: string;
@@ -661,13 +662,12 @@ export default function AddAppointment() {
     employeeApi
       .getOne(val)
       .then((res) => {
-        const mappedBranches = res.data?.data?.branches || [];
+        const mappedBranches = activeBranches(res.data?.data?.branches || []);
         setDoctorBranches(mappedBranches);
         setDoctorSchedules(res.data?.data?.doctorSchedules || []);
         const nextBranchId =
           mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
-          mappedBranches[0]?.branch_id ||
-          selectedDoctor?.branch_id;
+          mappedBranches[0]?.branch_id;
 
         setFormData((prev) => ({
           ...prev,
@@ -712,7 +712,7 @@ export default function AddAppointment() {
     if (!preselectedSlot) return;
     employeeApi
       .getOne(preselectedSlot.doctorId)
-      .then((res) => setDoctorBranches(res.data?.data?.branches || []))
+      .then((res) => setDoctorBranches(activeBranches(res.data?.data?.branches || [])))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preselectedSlot]);
@@ -957,12 +957,14 @@ export default function AddAppointment() {
                         maxDate={addDays(new Date(), 14)}
                         isDateDisabled={isDateDisabled}
                         onSelect={(date) => {
-                          setFormData((prev) => ({
-                            ...prev,
-                            selectDate: format(date, "yyyy-MM-dd"),
-                            timeSlot: "",
-                          }));
-                          setIsCalendarOpen(false);
+                          if (date instanceof Date) {
+                            setFormData((prev) => ({
+                              ...prev,
+                              selectDate: format(date, "yyyy-MM-dd"),
+                              timeSlot: "",
+                            }));
+                            setIsCalendarOpen(false);
+                          }
                         }}
                       />
                     </div>

@@ -797,8 +797,10 @@ export default function Staff() {
                         selected={selectedDate}
                         hideThemePicker
                         onSelect={(date) => {
-                          setSelectedDate(date);
-                          setIsCalendarOpen(false);
+                          if (date instanceof Date) {
+                            setSelectedDate(date);
+                            setIsCalendarOpen(false);
+                          }
                         }}
                       />
                     </PopoverContent>

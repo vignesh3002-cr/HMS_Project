@@ -17,6 +17,7 @@ import {
   User,
 } from "lucide-react";
 import { employeeApi, type EmployeeDetailResponse } from "@/api/employee.api";
+import { DoctorBranchDisplay } from "@/components/hms/DoctorBranchDisplay";
 
 // Role-based extra fields, mirroring Addemployee.tsx's ROLE_CONFIG /
 // isMedical logic exactly: only Doctor/Nurse/Pharmacist/Lab Technician are
@@ -123,21 +124,10 @@ const InfoItem = ({
   </div>
 );
 
-const BranchesSection = ({ branches }: { branches: { branch_id: string; branch_name: string }[] }) => (
+const BranchesSection = ({ branches }: { branches: { branch_id: string; branch_name: string | null; branch_area?: string | null; has_schedule?: boolean }[] }) => (
   <div className="col-span-2 md:col-span-4">
     <strong className="hms-department-text text-[#191C1E] block mb-2">Branches</strong>
-    {branches.length > 0 ? (
-      <div className="flex flex-wrap gap-2">
-        {branches.map((b) => (
-          <span key={b.branch_id} className="inline-flex items-center gap-1 px-2 py-0.5 hms-department-text text-[#475C7F] bg-[#E6E8EA] rounded-lg">
-            <Building2 className="w-3.5 h-3.5" />
-            {b.branch_name}
-          </span>
-        ))}
-      </div>
-    ) : (
-      <span className="hms-content-text text-[#8C8D8F]">—</span>
-    )}
+    <DoctorBranchDisplay branches={branches} showScheduleIndicator />
   </div>
 );
 

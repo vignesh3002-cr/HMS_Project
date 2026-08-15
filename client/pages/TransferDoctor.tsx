@@ -37,6 +37,7 @@ import {
   InitiateTransferPayload,
   InitiateTransferResult,
   TransferAppointmentSummary,
+  TransferMode,
   ConfirmTransferPayload,
   ConfirmTransferResult,
 } from "@/api/doctorTransfer.api";
@@ -112,6 +113,7 @@ export default function TransferDoctor() {
   });
 
   // Sequential single-transfer state
+  const [opMode, setOpMode] = useState<TransferMode>("TRANSFER");
   const [fromBranchId, setFromBranchId] = useState<string>(""); // Doctor's current branch (from employee.branches)
   const [toBranchId, setToBranchId] = useState<string>("");     // Target branch for transfer
   const [details, setDetails] = useState<BranchTransferDetails>(defaultBranchDetails());
@@ -199,19 +201,17 @@ export default function TransferDoctor() {
   }, [employee]);
 
   // Doctor's currently assigned branches (from user_branch_mapping, active
-  // status 1 only) — for the From Branch dropdown. "None" means the doctor
-  // is not leaving any branch: picking a To Branch then assigns them to a
-  // new branch instead of transferring between two existing ones.
+  // status 1 only) — for the From Branch dropdown. Transfer requires a real
+  // source branch: "None" is not an option (that's the separate Add Branch
+  // operation), so the list has no empty-value entry.
   const fromBranchOptions = useMemo(
-    () => [
-      { label: "None (new assignment)", value: "" },
-      ...(employee?.branches ?? [])
+    () =>
+      (employee?.branches ?? [])
         .filter((b) => b.status === 1)
         .map((b) => ({
           label: `${b.branch_name || b.branch_id}`,
           value: b.branch_id,
         })),
-    ],
     [employee],
   );
 
@@ -289,8 +289,13 @@ export default function TransferDoctor() {
 
   const handleInitiate = async () => {
     if (!id) return;
-    // From Branch is optional: "None" means this is a new branch assignment
-    // (no branch is being left). To Branch is always required.
+    // A transfer must always name the branch the doctor is leaving — the
+    // From dropdown has no "None" option here. Adding a branch without
+    // leaving one is the separate Add Branch operation (opMode).
+    if (opMode === "TRANSFER" && !fromBranchId) {
+      toast({ title: "From branch is required for a transfer", variant: "destructive" });
+      return;
+    }
     if (!toBranchId) {
       toast({ title: "Select To Branch", variant: "destructive" });
       return;
@@ -329,6 +334,8 @@ export default function TransferDoctor() {
     }
 
     const payload: InitiateTransferPayload = {
+      mode: opMode,
+      ...(opMode === "TRANSFER" ? { old_branch_id: fromBranchId } : {}),
       new_branch_id: toBranchId,
       new_department_id: details.departmentId || undefined,
       effective_date: details.effectiveDate,
@@ -360,10 +367,11 @@ export default function TransferDoctor() {
 
       const allCompleted = newTransfer.result.status === "COMPLETED";
       toast({
-        title: allCompleted ? "Transfer completed" : "Transfer request created",
-        description: fromBranchId
-          ? `Transfer initiated for ${branchLabelOf(fromBranchId)} → ${branchLabelOf(toBranchId)}.`
-          : `Doctor assigned to ${branchLabelOf(toBranchId)}.`,
+        title: allCompleted ? (opMode === "TRANSFER" ? "Transfer completed" : "Branch added") : "Transfer request created",
+        description:
+          opMode === "TRANSFER"
+            ? `Transfer initiated for ${branchLabelOf(fromBranchId)} → ${branchLabelOf(toBranchId)}.`
+            : `Doctor assigned to ${branchLabelOf(toBranchId)} — existing branches kept.`,
       });
     } catch (err: any) {
       toast({
@@ -420,7 +428,7 @@ export default function TransferDoctor() {
         bestCount = count;
       }
     }
-    return best ?? viewingTransfer?.fromBranchId ?? employee?.employee.branch_id ?? "";
+    return best ?? viewingTransfer?.fromBranchId ?? employee?.branches?.[0]?.branch_id ?? "";
   }, [branchAppointmentCounts, viewingTransfer, employee]);
 
   const branchEligibility = useMemo(() => {
@@ -632,23 +640,67 @@ export default function TransferDoctor() {
       <div className="bg-white rounded-xl border border-[#E5E7EB] p-5 space-y-5">
         <h2 className="font-bold text-sm text-[#191C1E]">1. New Transfer</h2>
 
+        {/* Operation type — Transfer vs Add Branch are distinct operations */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setOpMode("TRANSFER");
+              setFromBranchId("");
+              setToBranchId("");
+              setSchedules([]);
+            }}
+            className={`text-left rounded-xl border p-4 transition-colors ${
+              opMode === "TRANSFER"
+                ? "border-[#00488D] bg-[#EAF2FF] ring-1 ring-[#00488D]/30"
+                : "border-[#E5E7EB] bg-white hover:border-[#B8CCE8]"
+            }`}
+          >
+            <div className="text-sm font-bold text-[#191C1E]">Transfer Branch</div>
+            <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
+              Doctor leaves the From branch — that assignment is deactivated. From and To branches are both required.
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOpMode("ADD_BRANCH");
+              setFromBranchId("");
+              setToBranchId("");
+              setSchedules([]);
+            }}
+            className={`text-left rounded-xl border p-4 transition-colors ${
+              opMode === "ADD_BRANCH"
+                ? "border-[#00488D] bg-[#EAF2FF] ring-1 ring-[#00488D]/30"
+                : "border-[#E5E7EB] bg-white hover:border-[#B8CCE8]"
+            }`}
+          >
+            <div className="text-sm font-bold text-[#191C1E]">Add Branch</div>
+            <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
+              Doctor keeps every current branch assignment and gains another active one. No branch is deactivated.
+            </p>
+          </button>
+        </div>
+
         {/* From Branch / To Branch */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className={labelCls}>From branch</label>
-            <FormDropdown
-              name="from-branch"
-              className={inputCls}
-              options={fromBranchOptions}
-              value={fromBranchId}
-              onValueChange={handleFromBranchChange}
-              placeholder="Select from branch"
-              emptyMessage="No branches assigned to this doctor"
-            />
-            <p className="text-[11px] text-[#94A3B8] mt-1">
-              None = assign the doctor to a new branch. Picking a branch = transfer from that branch.
-            </p>
-          </div>
+          {opMode === "TRANSFER" && (
+            <div>
+              <label className={labelCls}>From branch</label>
+              <FormDropdown
+                name="from-branch"
+                className={inputCls}
+                options={fromBranchOptions}
+                value={fromBranchId}
+                onValueChange={handleFromBranchChange}
+                placeholder="Select from branch"
+                emptyMessage="No branches assigned to this doctor"
+              />
+              <p className="text-[11px] text-[#94A3B8] mt-1">
+                Required — the branch the doctor is leaving.
+              </p>
+            </div>
+          )}
           <div>
             <label className={labelCls}>To branch</label>
             <FormDropdown
@@ -1026,6 +1078,9 @@ export default function TransferDoctor() {
           }
           doConfirm({
             action: "TRANSFER",
+            // The source branch travels with the confirm so the backend can
+            // close that branch's mapping/schedules on the pending path too.
+            old_branch_id: viewingTransfer.fromBranchId || undefined,
             replacement_employee_id: replacementEmployeeId,
             replacement_branch_id: replacementBranchId || undefined,
           });

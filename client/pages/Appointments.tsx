@@ -238,6 +238,7 @@ const AppointmentSchedule: React.FC = () => {
       const res = await appointmentApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
         date: format(selectedDate, "yyyy-MM-dd"),
+        limit: 100,
       });
       const records = res.data?.data?.appointments || [];
       setAppointments(records.map(mapAppointmentRecord));
@@ -584,8 +585,10 @@ const AppointmentSchedule: React.FC = () => {
                         selected={selectedDate}
                         hideThemePicker
                         onSelect={(date) => {
-                          setSelectedDate(date);
-                          setIsCalendarOpen(false);
+                          if (date instanceof Date) {
+                            setSelectedDate(date);
+                            setIsCalendarOpen(false);
+                          }
                         }}
                       />
                     </PopoverContent>

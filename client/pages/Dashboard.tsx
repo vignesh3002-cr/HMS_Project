@@ -18,6 +18,7 @@ import { branchApi } from "@/api/branch.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { DepartmentPill, DepartmentAvatarText } from "@/components/hms/DepartmentBadge";
+import { DoctorBranchDisplay } from "@/components/hms/DoctorBranchDisplay";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
 
@@ -127,7 +128,6 @@ function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${doc.first_name} ${doc.middle_name ? doc.middle_name + " " : ""}${doc.last_name}`;
   const role = doc.user_table?.role_type || "STAFF";
-  const branchName = formatBranch(doc.branch);
   const isActive = doc.emp_status === true || doc.user_table?.user_status === 0;
   return {
     avatar: getInitials(fullName),
@@ -138,7 +138,8 @@ function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
     dept: doc.department_master?.department_name || doc.specialization || "Unassigned",
     deptBg: "#E6E8EA",
     deptColor: "#475C7F",
-    branch: branchName,
+    branch: formatBranch(doc.branch),
+    branches: doc.branches ?? [],
     status: isActive ? "Active" : "Inactive",
     role,
   };
@@ -327,12 +328,20 @@ export default function Dashboard() {
   const [realStaff, setRealStaff] = useState<Record<string, unknown>[] | null>(null);
   const [isEmployeesLoading, setIsEmployeesLoading] = useState(true);
   const [patientCount, setPatientCount] = useState<number>(0);
+  const [patientLoading, setPatientLoading] = useState(false);
 
   // Real appointments fetched from the backend. No dummy fallback — an
   // empty/failed fetch just leaves this null and the tab shows no rows.
   const [realAppointments, setRealAppointments] = useState<Record<string, unknown>[] | null>(null);
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
   const [appointmentCount, setAppointmentCount] = useState<number>(0);
+
+  // Track previous counts to compute "newly added" deltas
+  const prevDoctorsRef = useRef<number>(0);
+  const prevPatientsRef = useRef<number>(0);
+  const prevStaffRef = useRef<number>(0);
+  const prevAppointmentsRef = useRef<number>(0);
+  const isInitialLoadRef = useRef(true);
 
   // Date selection state -- declared early since fetchAppointments below
   // depends on it to scope the Appointments tab to the selected day.
@@ -357,6 +366,10 @@ export default function Dashboard() {
       const allEmployees = res.data?.data?.employees || [];
       const doctors = allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR");
       const staff = allEmployees.filter((e) => e.user_table?.role_type !== "DOCTOR");
+
+      // Store previous counts before updating
+      prevDoctorsRef.current = realDoctors?.length ?? 0;
+      prevStaffRef.current = realStaff?.length ?? 0;
 
       setRealDoctors(doctors.map(mapEmployeeRecord));
       setRealStaff(staff.map(mapEmployeeRecord));
@@ -458,6 +471,10 @@ export default function Dashboard() {
         date: format(selectedDate, "yyyy-MM-dd"),
       });
       const rows = res.data?.data?.appointments || [];
+
+      // Store previous count before updating
+      prevAppointmentsRef.current = appointmentCount;
+
       setRealAppointments(rows.map(mapAppointmentRecord));
       setAppointmentCount(res.data?.data?.total ?? rows.length);
       fetchBranchPerformance();
@@ -480,73 +497,97 @@ export default function Dashboard() {
   useEffect(() => {
     if (!permissions.includes("patient.read")) {
       setPatientCount(0);
+      setPatientLoading(false);
       return;
     }
+    setPatientLoading(true);
+    // Store previous count before updating
+    prevPatientsRef.current = patientCount;
+    const dateStr = format(selectedDate, "yyyy-MM-dd");
     patientApi
-      .getAll({ limit: 1, branchId: isAllBranches ? undefined : selectedBranchId })
+      .getAll({ limit: 1, branchId: isAllBranches ? undefined : selectedBranchId, dateFrom: dateStr, dateTo: dateStr })
       .then((res) => {
         setPatientCount(res.data?.data?.total ?? 0);
       })
       .catch(() => {
         setPatientCount(0);
+      })
+      .finally(() => {
+        setPatientLoading(false);
       });
-  }, [selectedBranchId, isAllBranches, permissions]);
+  }, [selectedBranchId, isAllBranches, permissions, selectedDate]);
 
   useEffect(() => {
     fetchEmployees();
   }, [fetchEmployees]);
 
-  const liveStats = useMemo(() => [
-    {
-      label: "Doctors",
-      permission: "doctor.read",
-      loading: isEmployeesLoading,
-      value: (realDoctors?.length ?? 0).toLocaleString(),
-      change: "",
-      changeType: "positive",
-      bg: "#D6E3FF",
-      border: "#00488D",
-      valueColor: "#00488D",
-      icon: <Stethoscope className="h-4 w-4" color="#00488D" />,
-      iconBg: "rgba(255,255,255,0.20)",
-    },
-    {
-      label: "Patients",
-      permission: "patient.read",
-      value: patientCount.toLocaleString(),
-      change: "",
-      changeType: "positive",
-      bg: "rgba(0,200,150,0.12)",
-      border: "#00C896",
-      valueColor: "#00C896",
-      icon: <UserRound className="h-4 w-4" color="#00C896" />,
-      iconBg: "rgba(255,255,255,0.20)",
-    },
-    {
-      label: "Staff",
-      permission: "employee.read",
-      loading: isEmployeesLoading,
-      value: (realStaff?.length ?? 0).toLocaleString(),
-      change: "",
-      changeType: "neutral",
-      bg: "rgba(255,107,53,0.12)",
-      border: "rgba(123,50,0,0.40)",
-      valueColor: "#7B3200",
-      icon: <Users className="h-4 w-4" color="#7B3200" />,
-      iconBg: "#FFDBCB",
-    },
-    {
-      label: "Appointments",
-      permission: "appointment.read",
-      loading: isAppointmentsLoading,
-      value: appointmentCount.toLocaleString(),
-      change: "",
-      changeType: "positive",
-      bg: "rgba(255,255,255,0.80)",
-      border: "#C2C6D4",
-      valueColor: "#00488D",
-      icon: <CalendarIcon className="h-4 w-4" color="#00488D" />,
-      iconBg: "rgba(168,200,255,0.20)",
+  const liveStats = useMemo(() => {
+    const currentDoctors = realDoctors?.length ?? 0;
+    const currentStaff = realStaff?.length ?? 0;
+    const currentPatients = patientCount;
+    const currentAppointments = appointmentCount;
+
+    const doctorDelta = currentDoctors - prevDoctorsRef.current;
+    const staffDelta = currentStaff - prevStaffRef.current;
+    const patientDelta = currentPatients - prevPatientsRef.current;
+    const appointmentDelta = currentAppointments - prevAppointmentsRef.current;
+
+    // Only show delta after initial load
+    const showDelta = !isInitialLoadRef.current;
+    isInitialLoadRef.current = false;
+
+    return [
+      {
+        label: "Doctors",
+        permission: "doctor.read",
+        loading: isEmployeesLoading,
+        value: currentDoctors.toLocaleString(),
+        change: showDelta && doctorDelta > 0 ? `+${doctorDelta}` : "",
+        changeType: doctorDelta >= 0 ? "positive" : "negative",
+        bg: "#D6E3FF",
+        border: "#00488D",
+        valueColor: "#00488D",
+        icon: <Stethoscope className="h-4 w-4" color="#00488D" />,
+        iconBg: "rgba(255,255,255,0.20)",
+      },
+      {
+        label: "Patients",
+        permission: "patient.read",
+        loading: patientLoading,
+        value: currentPatients.toLocaleString(),
+        change: showDelta && patientDelta > 0 ? `+${patientDelta}` : "",
+        changeType: patientDelta >= 0 ? "positive" : "negative",
+        bg: "rgba(0,200,150,0.12)",
+        border: "#00C896",
+        valueColor: "#00C896",
+        icon: <UserRound className="h-4 w-4" color="#00C896" />,
+        iconBg: "rgba(255,255,255,0.20)",
+      },
+      {
+        label: "Staff",
+        permission: "employee.read",
+        loading: isEmployeesLoading,
+        value: currentStaff.toLocaleString(),
+        change: showDelta && staffDelta > 0 ? `+${staffDelta}` : "",
+        changeType: staffDelta >= 0 ? "positive" : "negative",
+        bg: "rgba(255,107,53,0.12)",
+        border: "rgba(123,50,0,0.40)",
+        valueColor: "#7B3200",
+        icon: <Users className="h-4 w-4" color="#7B3200" />,
+        iconBg: "#FFDBCB",
+      },
+      {
+        label: "Appointments",
+        permission: "appointment.read",
+        loading: isAppointmentsLoading,
+        value: currentAppointments.toLocaleString(),
+        change: showDelta && appointmentDelta > 0 ? `+${appointmentDelta}` : "",
+        changeType: appointmentDelta >= 0 ? "positive" : "negative",
+        bg: "rgba(255,255,255,0.80)",
+        border: "#C2C6D4",
+        valueColor: "#00488D",
+        icon: <CalendarIcon className="h-4 w-4" color="#00488D" />,
+        iconBg: "rgba(168,200,255,0.20)",
     },
     {
       label: "Prescription Generated",
@@ -572,7 +613,8 @@ export default function Dashboard() {
       icon: <Receipt className="h-4 w-4" color="#00488D" />,
       iconBg: "rgba(255,255,255,0.20)",
     },
-  ], [realDoctors, realStaff, patientCount, appointmentCount, isEmployeesLoading, isAppointmentsLoading]);
+    ];
+}, [realDoctors, realStaff, patientCount, appointmentCount, isEmployeesLoading, isAppointmentsLoading]);
 
   const visibleStats = liveStats.filter((stat) => !stat.permission || can(stat.permission));
 
@@ -951,8 +993,10 @@ export default function Dashboard() {
                         selected={selectedDate}
                         hideThemePicker
                         onSelect={(date) => {
-                          setSelectedDate(date);
-                          setIsCalendarOpen(false);
+                          if (date instanceof Date) {
+                            setSelectedDate(date);
+                            setIsCalendarOpen(false);
+                          }
                         }}
                       />
                     </PopoverContent>
@@ -1035,7 +1079,11 @@ export default function Dashboard() {
                   { key: "dept", label: "Department", render: (r: any) => (
                     <DepartmentPill department={r.dept}>{r.dept}</DepartmentPill>
                   )},
-                  { key: "branch", label: "Branch", render: (r: any) => <span className="text-[#191C1E] hms-content-text leading-4">{r.branch}</span> },
+                  { key: "branch", label: "Branch", render: (r: any) => (
+                    activeTab === "doctors" && r.branches?.length
+                      ? <DoctorBranchDisplay branches={r.branches} />
+                      : <span className="text-[#191C1E] hms-content-text leading-4">{r.branch}</span>
+                  )},
                   { key: "status", label: "Status", render: (r: any) => (
                     <StatusBadge status={String(r.status)} />
                   )},

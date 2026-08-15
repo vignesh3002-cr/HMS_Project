@@ -25,6 +25,7 @@ import { appointmentApi } from "@/api/appointment.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { DepartmentPill, DepartmentAvatarText } from "@/components/hms/DepartmentBadge";
+import { DoctorBranchDisplay } from "@/components/hms/DoctorBranchDisplay";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
@@ -155,11 +156,6 @@ function getInitials(name: string): string {
   return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 }
  
-function formatBranch(branch: EmployeeRecord["branch"]): string {
-  if (!branch?.branch_name) return "\u2014";
-  return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
-}
-
 function formatAssignedBranch(branch: NonNullable<EmployeeRecord["branches"]>[number]): string {
   if (!branch?.branch_name) return "\u2014";
   return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
@@ -170,12 +166,10 @@ function formatAssignedBranch(branch: NonNullable<EmployeeRecord["branches"]>[nu
 // search field and the Filter panel's branch multiselect — which both
 // match with includes() — keep working across all assignments at once.
 // The per-branch list is carried separately in `branches` for the grid.
-function formatAllBranches(
-  branches: EmployeeRecord["branches"],
-  fallback: EmployeeRecord["branch"],
-): string {
+// No fallback to employees.branch_id — mappings are the only source.
+function formatAllBranches(branches: EmployeeRecord["branches"]): string {
   const list = branches ?? [];
-  if (list.length === 0) return formatBranch(fallback);
+  if (list.length === 0) return "\u2014";
   return list.map(formatAssignedBranch).join(", ");
 }
 
@@ -192,7 +186,7 @@ function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
 
     deptBg: "#E6E8EA",
     deptColor: "#475C7F",
-    branch: formatAllBranches(emp.branches, emp.branch),
+    branch: formatAllBranches(emp.branches),
     branches: (emp.branches ?? []).map((b) => ({
       branch_id: b.branch_id,
       branch_name: b.branch_name ?? "",
@@ -598,7 +592,7 @@ export default function Doctor() {
                   onChange={setShowDeactivated}
                 />
 
-                {/* View Mode Toggle */}
+{/* View Mode Toggle */}
                 <div className="flex border border-[#E5E7EB] rounded-md overflow-hidden bg-[#F2F4F6] p-0.5">
                   <button
                     onClick={() => handleViewToggle("list")}
@@ -613,7 +607,22 @@ export default function Doctor() {
                     <LayoutGrid className="w-4 h-4" />
                   </button>
                 </div>
- 
+
+                {/* Search */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search doctors..."
+                    value={searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[180px] sm:w-[220px] rounded-md transition-all duration-200 focus:w-[220px] sm:focus:w-[280px]"
+                  />
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
+                </div>
+
                 {/* Date nav */}
                 <div className="flex items-center">
                   <button
@@ -641,8 +650,10 @@ export default function Doctor() {
                         selected={selectedDate}
                         hideThemePicker
                         onSelect={(date) => {
-                          setSelectedDate(date);
-                          setIsCalendarOpen(false);
+                          if (date instanceof Date) {
+                            setSelectedDate(date);
+                            setIsCalendarOpen(false);
+                          }
                         }}
                       />
                     </PopoverContent>
@@ -691,6 +702,9 @@ export default function Doctor() {
                   )},
                   { key: "dept", label: "Department", render: (r: any) => (
                     <DepartmentPill department={r.dept}>{String(r.dept)}</DepartmentPill>
+                  )},
+                  { key: "branch", label: "Branch", sortable: true, render: (r: any) => (
+                    <DoctorBranchDisplay branches={r.branches} />
                   )},
                   { key: "slots", label: "Slots", sortable: true, render: (r: any) => {
                     const summary = slotSummaries[String(r.id)];
@@ -787,22 +801,8 @@ export default function Doctor() {
                             <span className="font-semibold">Status</span>{" : "}
                             <span className={doctor.status === "Active" ? "font-bold text-[#16A34A]" : "font-bold text-[#F97316]"}>{doctor.status}</span>
                           </p>
-                          {doctor.branches?.length ? (
-                            <div className="mt-1.5 flex flex-wrap gap-1.5">
-                              {doctor.branches.map((b: { branch_id: string; branch_name: string; branch_area?: string | null; has_schedule: boolean }) => (
-                                <span
-                                  key={b.branch_id}
-                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium"
-                                  style={{ backgroundColor: "#F0F4FA", color: "#00488D" }}
-                                  title={b.has_schedule ? "Schedule configured" : "No schedule"}
-                                >
-                                  {b.branch_name || "\u2014"}
-                                  <span className={b.has_schedule ? "text-[#16A34A]" : "text-[#F97316]"}>
-                                    · {b.has_schedule ? "Schedule configured" : "No schedule"}
-                                  </span>
-                                </span>
-                              ))}
-                            </div>
+{doctor.branches?.length ? (
+                            <DoctorBranchDisplay branches={doctor.branches} showScheduleIndicator />
                           ) : (
                             <p className="hms-content-text text-[#191C1E] mt-1 truncate">{doctor.branch}</p>
                           )}

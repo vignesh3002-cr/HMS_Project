@@ -102,7 +102,11 @@ export function FilterField({ field, value, onChange }: FilterFieldProps) {
                 mode="single"
                 selected={selectedDate}
                 onSelect={(date) => {
-                  onChange(id, date ? format(date, "yyyy-MM-dd") : "");
+                  if (date instanceof Date) {
+                    onChange(id, format(date, "yyyy-MM-dd"));
+                  } else {
+                    onChange(id, "");
+                  }
                   setOpenDatePicker(false);
                 }}
                 initialFocus
