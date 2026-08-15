@@ -201,7 +201,7 @@ function formatScheduleRange(start?: string | null, end?: string | null) {
 
 export default function DoctorDashboard() {
   const navigate = useNavigate();
-  const toast = useToast();
+  const { toast } = useToast();
 
   const [periodOpen, setPeriodOpen] = useState(false);
   const [hospitalOpen, setHospitalOpen] = useState(false);
