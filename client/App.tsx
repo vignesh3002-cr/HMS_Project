@@ -83,6 +83,7 @@ import DoctorAppointments from "./pages/doctor/AppointmentPage";
 import DoctorLeave from "./pages/doctor/LeavePage";
 import DoctorSchedule from "./pages/doctor/MySchedulePage";
 import DoctorReviews from "./pages/doctor/ReviewPage";
+import Consultation from "./pages/doctor/Patientconsut";
 
 // ============================================================
 // HOOKS / AUTH
@@ -506,6 +507,22 @@ const App = () => (
               )}
 
             </Route>
+
+            {/* ==================================================
+                DOCTOR PORTAL - PATIENT CONSULTATION
+
+                Full-screen page WITHOUT the DoctorSidebar
+                nav (renders edge to edge, no nav bar).
+            ================================================== */}
+
+            <Route
+              path="/doctor/patient-consultation"
+              element={
+                <ProtectedRoute>
+                  <Consultation />
+                </ProtectedRoute>
+              }
+            />
 
             {/* ==================================================
                 MAIN HMS / ADMIN PORTAL

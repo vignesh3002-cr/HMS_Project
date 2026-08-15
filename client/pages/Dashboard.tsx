@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2, MoreVertical } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import HmsTable from "@/components/hms/HmsTable";
-import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { format, isToday, isTomorrow, isYesterday, addDays, subDays, startOfDay, endOfDay } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import { useFilterPanel, useDashboardFilters } from "@/components/Filter";
@@ -11,6 +11,7 @@ import { applySearchAndFilter } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
+import { encounterApi, type EncounterRecord, type EncounterStatus, type EncounterType } from "@/api/encounter.api";
 import { patientApi } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { getEffectiveAppointmentStatus } from "@/lib/appointmentStatus";
@@ -241,11 +242,15 @@ function AppointmentActionMenu({
   onView,
   onEdit,
   onCancel,
+  onCheckIn,
+  onCheckOut,
 }: {
   status: string;
   onView: () => void;
   onEdit: () => void;
   onCancel: () => void;
+  onCheckIn: () => void;
+  onCheckOut: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -264,6 +269,8 @@ function AppointmentActionMenu({
   if (!can("appointment.read") && !can("appointment.update") && !can("appointment.cancel")) return null;
 
   const isCancelled = status.toLowerCase() === "cancelled";
+  const isScheduled = status.toLowerCase() === "scheduled";
+  const isCheckIn = status.toLowerCase() === "check in" || status.toLowerCase() === "in consultation";
 
   return (
     <div className="relative inline-block text-left" ref={wrapperRef}>
@@ -296,6 +303,24 @@ function AppointmentActionMenu({
             className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
           >
             Edit Appointment
+          </button>
+        )}
+        {can("appointment.update") && isScheduled && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onCheckIn(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-green-600 hover:bg-green-50"
+          >
+            Check In
+          </button>
+        )}
+        {can("appointment.update") && isCheckIn && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onCheckOut(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-blue-600 hover:bg-blue-50"
+          >
+            Check Out
           </button>
         )}
         {can("appointment.cancel") && !isCancelled && (
@@ -730,10 +755,45 @@ export default function Dashboard() {
   // applySearchAndFilter() -- same search-then-filter sequence as before,
   // now a single reusable call instead of Dashboard orchestrating both
   // steps itself.
-  const filteredData = useMemo(
-    () => applySearchAndFilter(activeData, searchQuery, searchableFields, appliedValues, activeFilterFields),
-    [searchQuery, activeTab, appliedValues, activeFilterFields, realDoctors, realStaff, realAppointments],
-  );
+  const filteredData = useMemo(() => {
+    let result: Record<string, unknown>[] = [...activeData];
+
+    // Hide cancelled appointments for today (but show yesterday's cancelled)
+    if (activeTab === "appointments") {
+      const now = new Date();
+      const todayStart = startOfDay(now).getTime();
+      const todayEnd = endOfDay(now).getTime();
+
+      result = result.filter((item) => {
+        const isCancelled = String(item.status ?? "").toLowerCase() === "cancelled";
+        if (!isCancelled) return true;
+
+        // Parse date (dd-MM-yyyy) and time (hh:mm AM/PM) to timestamp
+        const dateStr = String(item.date ?? "");
+        const timeStr = String(item.time ?? "");
+        const [day, month, year] = dateStr.split("-").map(Number);
+        let hours = 0;
+        let minutes = 0;
+        if (timeStr) {
+          const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+          if (timeMatch) {
+            hours = parseInt(timeMatch[1], 10);
+            minutes = parseInt(timeMatch[2], 10);
+            const period = timeMatch[3].toUpperCase();
+            if (period === "PM" && hours !== 12) hours += 12;
+            if (period === "AM" && hours === 12) hours = 0;
+          }
+        }
+        const apptDate = new Date(year, month - 1, day, hours, minutes);
+        const apptTime = apptDate.getTime();
+
+        const isTodayAppt = apptTime >= todayStart && apptTime <= todayEnd;
+        return !isTodayAppt;
+      });
+    }
+
+    return applySearchAndFilter(result, searchQuery, searchableFields, appliedValues, activeFilterFields);
+  }, [searchQuery, activeTab, appliedValues, activeFilterFields, realDoctors, realStaff, realAppointments]);
 
   const currentSortField = sortField[activeTab];
   const currentSortDirection = sortDirection[activeTab];
@@ -838,6 +898,38 @@ export default function Dashboard() {
     });
     setCancelTarget(null);
     setCancelReason("");
+  };
+
+  const handleCheckIn = async (appointment: Record<string, unknown>) => {
+    const appointmentId = appointment.id as string;
+    try {
+      // First update appointment status to CHECKED_IN
+      await appointmentApi.updateStatus(appointmentId, "CHECKED_IN");
+      // Then create encounter
+      await encounterApi.create({ appointment_id: appointmentId });
+      // Refresh appointments
+      await fetchAppointments();
+      toast({ title: "Patient checked in", description: "Encounter created successfully." });
+    } catch (error: any) {
+      toast({ title: "Check-in failed", description: error.response?.data?.message || "Failed to check in patient", variant: "destructive" });
+    }
+  };
+
+  const handleCheckOut = async (appointment: Record<string, unknown>) => {
+    const appointmentId = appointment.id as string;
+    try {
+      // First find the encounter for this appointment
+      const encounters = await encounterApi.getAll({ appointmentId });
+      const encounter = encounters.data?.data?.encounters?.[0];
+      if (encounter) {
+        await encounterApi.close(encounter.encounter_no, "DOCTOR");
+      }
+      // Refresh appointments
+      await fetchAppointments();
+      toast({ title: "Patient checked out", description: "Encounter closed successfully." });
+    } catch (error: any) {
+      toast({ title: "Check-out failed", description: error.response?.data?.message || "Failed to check out patient", variant: "destructive" });
+    }
   };
 
   // Only the very first load (waiting on permissions) shows the full-page
@@ -1067,6 +1159,8 @@ export default function Dashboard() {
                       onView={() => navigate(`/appointments/view/${r.id}`)}
                       onEdit={() => handleEdit(r.id)}
                       onCancel={() => handleCancelAppointment(r)}
+                      onCheckIn={() => handleCheckIn(r)}
+                      onCheckOut={() => handleCheckOut(r)}
                     />
                   )},
                 ] : [
