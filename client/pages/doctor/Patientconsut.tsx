@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import React, { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import API from "../../api/axios";
 import {
   patientApi,
   type PatientRecord,
@@ -44,42 +45,19 @@ const Consultation: React.FC = () => {
   ============================================================ */
 
   const [toast, setToast] = useState<ToastMessage>("");
-  const [symptoms, setSymptoms] = useState<string[]>([
-    "Headache",
-    "Fatigue",
-  ]);
+  const [symptoms, setSymptoms] = useState<string[]>([]);
 
-  const [comorbidities, setComorbidities] = useState<string[]>([
-    "Hypertension",
-  ]);
+  const [symptomInput, setSymptomInput] = useState("");
 
-  const [consultationNotes, setConsultationNotes] = useState(
-    `Patient came for follow up.
-Complains of mild headache
-and fatigue. No nausea or
-vomiting. Appetite normal.`
-  );
+  const [comorbidities, setComorbidities] = useState<string[]>([]);
 
-  const [medications, setMedications] = useState<Medication[]>([
-    {
-      medication: "Pemetrexed",
-      dose: "",
-      frequency: "",
-      duration: "",
-      instructions: "After Food",
-    },
-    {
-      medication: "Folic Acid",
-      dose: "",
-      frequency: "",
-      duration: "",
-      instructions: "Before Food",
-    },
-  ]);
+  const [consultationNotes, setConsultationNotes] = useState("");
+
+  const [medications, setMedications] = useState<Medication[]>([]);
 
   const [selectedInvestigations, setSelectedInvestigations] = useState<
     string[]
-  >(["CBC"]);
+  >([]);
 
   const [showLabReview, setShowLabReview] = useState(false);
   const [activeStep, setActiveStep] = useState("CONSULTATION");
@@ -89,6 +67,7 @@ vomiting. Appetite normal.`
   ============================================================ */
 
   const location = useLocation();
+  const navigate = useNavigate();
   const consultationState = location.state as ConsultationState | null;
 
   const [patient, setPatient] = useState<PatientRecord | null>(null);
@@ -152,34 +131,30 @@ vomiting. Appetite normal.`
         patient.patient_last_name,
       ]
         .filter(Boolean)
-        .join(" ") || "Unknown Patient"
-    : "Vijaya Nallusamy";
+        .join(" ")
+    : "";
 
-  const patientPhoto =
-    patient?.patient_photo_url ||
-    "https://www.figma.com/api/mcp/asset/7a4da335-abae-4dd7-af87-b102c3079771.png";
+  const patientPhoto = patient?.patient_photo_url || "";
 
   const patientAgeSex = patient
     ? `${patient.patient_age ?? "—"} Y / ${patient.patient_gender ?? ""}`
-    : "51 Y / Female";
+    : "";
 
-  const patientDisplayId = patient?.patient_id || "ONC-2026-10025";
+  const patientDisplayId = patient?.patient_id || "";
 
-  const patientPhone = patient?.patient_primary_mobile || "+91 98765 43210";
+  const patientPhone = patient?.patient_primary_mobile || "";
 
-  const patientEmail = patient?.patient_email || "vijaya.n@example.com";
+  const patientEmail = patient?.patient_email || "";
 
   const registeredOn = patient
-    ? formatDateDMY(patient.user_table?.created_at) || "01-06-2026"
-    : "01-06-2026";
+    ? formatDateDMY(patient.user_table?.created_at)
+    : "";
 
-  const visitDate =
-    formatDateDMY(consultationState?.appointmentDate) || "02-06-2026";
+  const visitDate = formatDateDMY(consultationState?.appointmentDate);
 
-  const visitTime =
-    formatTimeAMPM(consultationState?.appointmentTime) || "10:30 AM";
+  const visitTime = formatTimeAMPM(consultationState?.appointmentTime);
 
-  const consultedBy = consultationState?.consultedBy || "Dr. Rajesh Kumar";
+  const consultedBy = consultationState?.consultedBy || "";
 
   /* ============================================================
      TOAST
@@ -230,7 +205,7 @@ vomiting. Appetite normal.`
   ============================================================ */
 
   const goBack = () => {
-    showToast("Back to Patients");
+    navigate("/doctor-dashboard");
   };
 
   /* ============================================================
@@ -248,6 +223,20 @@ vomiting. Appetite normal.`
   const removeSymptom = (symptom: string) => {
     setSymptoms((prev) => prev.filter((item) => item !== symptom));
     showToast(`${symptom} removed`);
+  };
+
+  /* ============================================================
+     ADD SYMPTOM
+  ============================================================ */
+
+  const addSymptom = () => {
+    const value = symptomInput.trim();
+    if (!value) return;
+    setSymptoms((prev) =>
+      prev.includes(value) ? prev : [...prev, value]
+    );
+    setSymptomInput("");
+    showToast(`${value} added`);
   };
 
   /* ============================================================
@@ -500,7 +489,7 @@ vomiting. Appetite normal.`
               </div>
 
               <div className="w-full pt-4 text-center text-sm font-bold leading-5 tracking-[-0.35px] text-blue-700">
-                DUCTAL CARCINOMA STAGE II
+                {""}
               </div>
 
             </div>
@@ -590,7 +579,7 @@ vomiting. Appetite normal.`
                     HEIGHT
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
-                    154 cm
+                    {""}
                   </div>
                 </div>
 
@@ -599,7 +588,7 @@ vomiting. Appetite normal.`
                     WEIGHT
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
-                    52 kg
+                    {""}
                   </div>
                 </div>
 
@@ -608,7 +597,7 @@ vomiting. Appetite normal.`
                     BSA
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
-                    1.49 m²
+                    {""}
                   </div>
                 </div>
 
@@ -617,7 +606,7 @@ vomiting. Appetite normal.`
                     BMI
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
-                    21.93
+                    {""}
                   </div>
                 </div>
 
@@ -792,11 +781,14 @@ vomiting. Appetite normal.`
                 {showLabReview ? (
                   <LabReview embedded />
                 ) : activeStep === "DIAGNOSIS" ? (
-                  <Diagnosis embedded />
+                  <Diagnosis embedded patientId={patientDisplayId} />
                 ) : activeStep === "TREATMENT PLAN" ? (
                   <TreatmentPlan embedded />
                 ) : activeStep === "CHEMOTHERAPY ORDER" ? (
-                  <ChemotherapyOrder embedded />
+                  <ChemotherapyOrder
+                    embedded
+                    patientId={patientDisplayId}
+                  />
                 ) : activeStep === "DISCHARGE MEDICATION" ? (
                   <DischargeMedication embedded />
                 ) : activeStep === "FOLLOW UP" ? (
@@ -897,7 +889,7 @@ vomiting. Appetite normal.`
 
                       <input
                         className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none"
-                        value="01-06-2026"
+                        value={registeredOn}
                         readOnly
                       />
 
@@ -918,20 +910,11 @@ vomiting. Appetite normal.`
                           className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none"
                         >
 
-                          {consultedBy !== "Dr. Rajesh Kumar" &&
-                            consultedBy !== "Dr. Priya Sharma" && (
-                              <option>
-                                {consultedBy}
-                              </option>
-                            )}
-
-                          <option>
-                            Dr. Rajesh Kumar
-                          </option>
-
-                          <option>
-                            Dr. Priya Sharma
-                          </option>
+                          {consultedBy && (
+                            <option value={consultedBy}>
+                              {consultedBy}
+                            </option>
+                          )}
 
                         </select>
 
@@ -960,6 +943,10 @@ vomiting. Appetite normal.`
                       <div className="relative h-[38px]">
 
                         <select className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none">
+
+                          <option value="">
+                            Select Visit Type
+                          </option>
 
                           <option>
                             Follow Up
@@ -1029,6 +1016,10 @@ vomiting. Appetite normal.`
 
                           <select className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none">
 
+                            <option value="">
+                              Select ECOG Status
+                            </option>
+
                             <option>
                               1 - Restricted in physically strenuous activity
                             </option>
@@ -1087,6 +1078,22 @@ vomiting. Appetite normal.`
 
                           ))}
 
+                          <input
+                            type="text"
+                            value={symptomInput}
+                            onChange={(e) =>
+                              setSymptomInput(e.target.value)
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                addSymptom();
+                              }
+                            }}
+                            placeholder="Type a symptom and press Enter"
+                            className="min-w-[200px] flex-1 border-0 bg-transparent text-sm leading-5 text-slate-700 outline-none placeholder:text-slate-400"
+                          />
+
                         </div>
 
                       </div>
@@ -1102,6 +1109,10 @@ vomiting. Appetite normal.`
                         <div className="relative h-[38px]">
 
                           <select className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-slate-50 px-[13px] pr-10 text-sm leading-5 text-slate-400 outline-none">
+
+                            <option value="">
+                              Select Allergy
+                            </option>
 
                             <option>
                               None
@@ -1317,14 +1328,6 @@ vomiting. Appetite normal.`
 
                             <option value="">
                               Select medication
-                            </option>
-
-                            <option value="Pemetrexed">
-                              Pemetrexed
-                            </option>
-
-                            <option value="Folic Acid">
-                              Folic Acid
                             </option>
 
                           </select>
@@ -1649,28 +1652,7 @@ interface Investigation {
   status: "Completed";
 }
 
-const investigations: Investigation[] = [
-  {
-    name: "Complete Blood Count (CBC)",
-    orderedDate: "01-06-2026",
-    status: "Completed",
-  },
-  {
-    name: "Liver Function Test (LFT)",
-    orderedDate: "01-06-2026",
-    status: "Completed",
-  },
-  {
-    name: "CT Scan Abdomen & Pelvis",
-    orderedDate: "02-06-2026",
-    status: "Completed",
-  },
-  {
-    name: "Chest X-Ray",
-    orderedDate: "02-06-2026",
-    status: "Completed",
-  },
-];
+const investigations: Investigation[] = [];
 
 const CheckIcon = ({ className = "h-5 w-5" }: { className?: string }) => (
   <svg
@@ -2012,12 +1994,40 @@ const LabReview: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
 
 type FormData = {
   type: string;
+  subType: string;
   histomorphology: string;
   cancerStage: string;
   grade: string;
   tnmStage: string;
   icdCode: string;
   notes: string;
+};
+
+type CancerTypeItem = {
+  cancer_type_id: string;
+  cancer_type: string;
+  icd10: string | null;
+  staging_system: string | null;
+};
+
+type CancerSubtypeItem = {
+  subtype_id: string;
+  subtype_name: string;
+  icd10_subtype: string | null;
+};
+
+type StagingReferenceItem = {
+  stage_ref_id: string;
+  cancer_type_id: string;
+  subtype_label: string | null;
+  staging_system: string | null;
+  stage_label: string | null;
+  tnm_criteria: string | null;
+  risk_system: string | null;
+  risk_category: string | null;
+  risk_criteria: string | null;
+  os_5yr_approx: string | null;
+  guideline_source: string | null;
 };
 
 const ChevronDownIcon = () => (
@@ -2057,20 +2067,223 @@ const DoubleArrowIcon = () => (
   </svg>
 );
 
-const Diagnosis: React.FC<{ embedded?: boolean }> = ({
+const Diagnosis: React.FC<{ embedded?: boolean; patientId?: string }> = ({
   embedded = false,
+  patientId,
 }) => {
+  const location = useLocation();
+  const statePatientId =
+    (location.state as ConsultationState | null)?.patientId ?? "";
+  const resolvedPatientId = patientId || statePatientId;
+
   const [formData, setFormData] = useState<FormData>({
-    type: "Colon Cancer",
-    histomorphology: "Adenocarcinoma",
-    cancerStage: "Stage II",
-    grade: "Moderately Differentiated",
-    tnmStage: "T3N0M0",
-    icdCode: "C18.7 Malignant neoplasm of sigmoid colon",
-    notes: "Patient and family informed.",
+    type: "",
+    subType: "",
+    histomorphology: "",
+    cancerStage: "",
+    grade: "",
+    tnmStage: "",
+    icdCode: "",
+    notes: "",
   });
 
+  const [cancerTypes, setCancerTypes] = useState<CancerTypeItem[]>([]);
+  const [subtypes, setSubtypes] = useState<CancerSubtypeItem[]>([]);
+  const [stageLabels, setStageLabels] = useState<string[]>([]);
+  const [tnmStages, setTnmStages] = useState<string[]>([]);
+  const [grades, setGrades] = useState<string[]>([]);
+  const [diagnosisLoading, setDiagnosisLoading] = useState(false);
+  const [diagnosisError, setDiagnosisError] = useState("");
+  const [savingDiagnosis, setSavingDiagnosis] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
+
+  const diagnosisRequestRef = useRef(0);
+  const stagingRequestRef = useRef(0);
+  const diagnosisCatalogRef = useRef<
+    { diagnosis_id: string; icd_code: string }[]
+  >([]);
+
+  const loadSubtypesForCancerType = (cancerTypeId: string) => {
+    if (!cancerTypeId) return;
+    const requestId = ++diagnosisRequestRef.current;
+    setDiagnosisLoading(true);
+    setDiagnosisError("");
+
+    API.get<{ success: boolean; data: CancerSubtypeItem[] }>(
+      `/oncology/reference/cancer-types/${cancerTypeId}/subtypes`
+    )
+      .then((response) => {
+        if (requestId !== diagnosisRequestRef.current) return;
+        const items = response.data.data;
+        setSubtypes(items);
+        const first = items[0];
+        if (first) {
+          setFormData((previous) => ({
+            ...previous,
+            icdCode: first.icd10_subtype ?? "",
+          }));
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load cancer subtypes:", error);
+        if (requestId === diagnosisRequestRef.current) {
+          setDiagnosisError(
+            error?.response?.data?.message || "Failed to load cancer subtypes."
+          );
+        }
+      })
+      .finally(() => {
+        if (requestId === diagnosisRequestRef.current) {
+          setDiagnosisLoading(false);
+        }
+      });
+  };
+
+  const loadStagesForCancerType = (cancerTypeId: string) => {
+    if (!cancerTypeId) return;
+    const requestId = ++stagingRequestRef.current;
+    setDiagnosisLoading(true);
+    setDiagnosisError("");
+
+    API.get<{ success: boolean; data: StagingReferenceItem[] }>(
+      "/oncology/reference/staging",
+      { params: { cancer_type_id: cancerTypeId } }
+    )
+      .then((response) => {
+        if (requestId !== stagingRequestRef.current) return;
+        const items = response.data.data;
+        setStageLabels(
+          items
+            .map((item) => item.stage_label)
+            .filter((label): label is string => Boolean(label))
+        );
+        setFormData((previous) => ({
+          ...previous,
+          cancerStage: "",
+        }));
+      })
+      .catch((error) => {
+        console.error("Failed to load cancer stages:", error);
+        if (requestId === stagingRequestRef.current) {
+          setDiagnosisError(
+            error?.response?.data?.message || "Failed to load cancer stages."
+          );
+        }
+      })
+      .finally(() => {
+        if (requestId === stagingRequestRef.current) {
+          setDiagnosisLoading(false);
+        }
+      });
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    API.get<{ success: boolean; data: CancerTypeItem[] }>(
+      "/oncology/reference/cancer-types"
+    )
+      .then((response) => {
+        if (cancelled) return;
+        const fetched = response.data.data;
+        setCancerTypes(fetched);
+
+        const initial = fetched[0];
+
+        if (initial) {
+          setFormData((previous) => ({
+            ...previous,
+            type: initial.cancer_type,
+            icdCode: initial.icd10 ?? "",
+          }));
+          loadSubtypesForCancerType(initial.cancer_type_id);
+          loadStagesForCancerType(initial.cancer_type_id);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load cancer types:", error);
+        if (!cancelled) {
+          setDiagnosisError(
+            error?.response?.data?.message || "Failed to load cancer types."
+          );
+        }
+      });
+
+    API.get<{ success: boolean; data: string[] }>(
+      "/oncology/reference/tnm-stages"
+    )
+      .then((response) => {
+        if (cancelled) return;
+        setTnmStages(response.data.data);
+      })
+      .catch((error) => {
+        console.error("Failed to load TNM stages:", error);
+        if (!cancelled) {
+          setDiagnosisError(
+            error?.response?.data?.message || "Failed to load TNM stages."
+          );
+        }
+      });
+
+    API.get<{ success: boolean; data: string[] }>(
+      "/oncology/reference/grades"
+    )
+      .then((response) => {
+        if (cancelled) return;
+        setGrades(response.data.data);
+      })
+      .catch((error) => {
+        console.error("Failed to load grades:", error);
+        if (!cancelled) {
+          setDiagnosisError(
+            error?.response?.data?.message || "Failed to load grades."
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    API.get<{
+      success: boolean;
+      data: { categories: { diagnosis_catogory_id: string }[] };
+    }>("/diagnosis/categories")
+      .then((categoriesResponse) => {
+        const categories = categoriesResponse.data.data.categories.filter(
+          (category) => category.diagnosis_catogory_id.trim() !== ""
+        );
+        return Promise.allSettled(
+          categories.map((category) =>
+            API.get<{
+              success: boolean;
+              data: {
+                diagnoses: { diagnosis_id: string; icd_code: string }[];
+              };
+            }>(`/diagnosis/categories/${category.diagnosis_catogory_id}/diagnoses`)
+          )
+        );
+      })
+      .then((results) => {
+        if (cancelled) return;
+        diagnosisCatalogRef.current = results.flatMap((result) =>
+          result.status === "fulfilled"
+            ? result.value.data.data.diagnoses
+            : []
+        );
+      })
+      .catch((error) => {
+        console.error("Failed to load diagnosis catalog:", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleChange = (
     event: React.ChangeEvent<
@@ -2085,9 +2298,111 @@ const Diagnosis: React.FC<{ embedded?: boolean }> = ({
     }));
   };
 
-  const handleNext = () => {
-    console.log("Diagnosis Data:", formData);
-    alert("Diagnosis saved. Proceeding to the next step.");
+  const handleTypeChange = (value: string) => {
+    setFormData((previous) => ({
+      ...previous,
+      type: value,
+      subType: "",
+      icdCode: "",
+    }));
+
+    const cancerType = cancerTypes.find(
+      (item) => item.cancer_type === value
+    );
+
+    if (cancerType) {
+      loadSubtypesForCancerType(cancerType.cancer_type_id);
+      loadStagesForCancerType(cancerType.cancer_type_id);
+    }
+  };
+
+  const handleNext = async () => {
+    if (!resolvedPatientId) {
+      setDiagnosisError(
+        "Patient is not selected. Open this page from a patient consultation to continue."
+      );
+      return;
+    }
+
+    if (!formData.type || !formData.subType) {
+      setDiagnosisError(
+        "Please select a cancer type and sub type before continuing."
+      );
+      return;
+    }
+
+    if (!formData.cancerStage) {
+      setDiagnosisError("Please select a cancer stage before continuing.");
+      return;
+    }
+
+    const cancerType = cancerTypes.find(
+      (item) => item.cancer_type === formData.type
+    );
+    const subtype = subtypes.find(
+      (item) => item.subtype_name === formData.subType
+    );
+
+    if (!cancerType || !subtype) {
+      setDiagnosisError(
+        "Selected cancer type or sub type is invalid. Please re-select."
+      );
+      return;
+    }
+
+    let tStage: string | null = null;
+    let nStage: string | null = null;
+    let mStage: string | null = null;
+
+    if (/^T/i.test(formData.tnmStage)) {
+      const [t, n, m] = formData.tnmStage.trim().split(/\s+/);
+      tStage = t ?? null;
+      nStage = n ?? null;
+      mStage = m ?? null;
+    } else if (formData.tnmStage) {
+      const m = formData.tnmStage.trim().split(/\s+/).pop() ?? null;
+      mStage = m && /^M/i.test(m) ? m : null;
+    }
+
+    const normalizedIcd = formData.icdCode.trim().toUpperCase();
+    const catalog = diagnosisCatalogRef.current;
+    const matched = catalog.find(
+      (entry) => (entry.icd_code ?? "").toUpperCase() === normalizedIcd
+    );
+    const diagnosisId = matched?.diagnosis_id ?? catalog[0]?.diagnosis_id ?? "";
+
+    if (!diagnosisId) {
+      setDiagnosisError(
+        "Could not resolve a diagnosis entry for this patient. Please try again."
+      );
+      return;
+    }
+
+    setSavingDiagnosis(true);
+    setDiagnosisError("");
+
+    try {
+      await API.post("/oncology/staging-details", {
+        patient_id: resolvedPatientId,
+        diagnosis_id: diagnosisId,
+        cancer_type_id: cancerType.cancer_type_id,
+        cancer_subtype_id: subtype.subtype_id,
+        clinical_stage: formData.cancerStage,
+        t_stage: tStage,
+        n_stage: nStage,
+        m_stage: mStage,
+      });
+
+      alert("Diagnosis saved. Proceeding to the next step.");
+    } catch (error: any) {
+      console.error("Failed to save staging details:", error);
+      setDiagnosisError(
+        error?.response?.data?.message ||
+          "Failed to save staging details. Please try again."
+      );
+    } finally {
+      setSavingDiagnosis(false);
+    }
   };
 
   const handleBack = () => {
@@ -2109,13 +2424,13 @@ const Diagnosis: React.FC<{ embedded?: boolean }> = ({
       >
         {/* Two Column Fields */}
         <div className="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-2">
-          {/* Type */}
+          {/* Cancer Type */}
           <div>
             <label
               htmlFor="type"
               className="mb-2 block text-sm font-semibold text-gray-600"
             >
-              Type
+              Cancer Type
             </label>
 
             <div className="relative">
@@ -2123,11 +2438,57 @@ const Diagnosis: React.FC<{ embedded?: boolean }> = ({
                 id="type"
                 name="type"
                 value={formData.type}
+                onChange={(event) =>
+                  handleTypeChange(event.target.value)
+                }
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                {cancerTypes.length > 0 &&
+                  cancerTypes.map((cancerType) => (
+                    <option
+                      key={cancerType.cancer_type_id}
+                      value={cancerType.cancer_type}
+                    >
+                      {cancerType.cancer_type}
+                    </option>
+                  ))}
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Sub Type */}
+          <div>
+            <label
+              htmlFor="subType"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Sub Type
+            </label>
+
+            <div className="relative">
+              <select
+                id="subType"
+                name="subType"
+                value={formData.subType}
                 onChange={handleChange}
                 className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
               >
-                <option>Colon Cancer</option>
-                <option>Other</option>
+                <option value="">
+                  {diagnosisLoading ? "Loading…" : "Select Sub Type"}
+                </option>
+
+                {subtypes.map((subtype) => (
+                  <option
+                    key={subtype.subtype_id}
+                    value={subtype.subtype_name}
+                  >
+                    {subtype.subtype_name}
+                  </option>
+                ))}
               </select>
 
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
@@ -2153,8 +2514,6 @@ const Diagnosis: React.FC<{ embedded?: boolean }> = ({
                 onChange={handleChange}
                 className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
               >
-                <option>Adenocarcinoma</option>
-                <option>Other</option>
               </select>
 
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
@@ -2178,10 +2537,19 @@ const Diagnosis: React.FC<{ embedded?: boolean }> = ({
                 name="cancerStage"
                 value={formData.cancerStage}
                 onChange={handleChange}
-                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
               >
-                <option>Stage II</option>
-                <option>Stage III</option>
+                <option value="">
+                  {diagnosisLoading
+                    ? "Loading…"
+                    : "Select Cancer Stage"}
+                </option>
+
+                {stageLabels.map((label) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
               </select>
 
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
@@ -2207,8 +2575,17 @@ const Diagnosis: React.FC<{ embedded?: boolean }> = ({
                 onChange={handleChange}
                 className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
               >
-                <option>Moderately Differentiated</option>
-                <option>Poorly Differentiated</option>
+                <option value="">
+                  {diagnosisLoading
+                    ? "Loading…"
+                    : "Select Grade"}
+                </option>
+
+                {grades.map((grade) => (
+                  <option key={grade} value={grade}>
+                    {grade}
+                  </option>
+                ))}
               </select>
 
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
@@ -2234,8 +2611,17 @@ const Diagnosis: React.FC<{ embedded?: boolean }> = ({
                 onChange={handleChange}
                 className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
               >
-                <option>T3N0M0</option>
-                <option>Other</option>
+                <option value="">
+                  {diagnosisLoading
+                    ? "Loading…"
+                    : "Select TNM Stage"}
+                </option>
+
+                {tnmStages.map((stage) => (
+                  <option key={stage} value={stage}>
+                    {stage}
+                  </option>
+                ))}
               </select>
 
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
@@ -2259,10 +2645,22 @@ const Diagnosis: React.FC<{ embedded?: boolean }> = ({
               type="text"
               value={formData.icdCode}
               onChange={handleChange}
+              placeholder={
+                diagnosisLoading
+                  ? "Loading diagnosis…"
+                  : "Enter ICD code"
+              }
               className="block w-full rounded-md border-gray-300 px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:ring-[#1d4ed8]"
             />
           </div>
         </div>
+
+        {/* Diagnosis API Error */}
+        {diagnosisError && (
+          <div className="text-sm font-medium text-red-600">
+            {diagnosisError}
+          </div>
+        )}
 
         {/* Notes */}
         <div className="pt-2">
@@ -2287,10 +2685,13 @@ const Diagnosis: React.FC<{ embedded?: boolean }> = ({
         <div className="mt-12 flex justify-end">
           <button
             type="submit"
-            className="inline-flex items-center justify-center rounded-md border border-transparent bg-[#1d4ed8] px-6 py-3 text-base font-medium text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            disabled={savingDiagnosis}
+            className="inline-flex items-center justify-center rounded-md border border-transparent bg-[#1d4ed8] px-6 py-3 text-base font-medium text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <DoubleArrowIcon />
-            <span className="ml-2">Next</span>
+            <span className="ml-2">
+              {savingDiagnosis ? "Saving…" : "Next"}
+            </span>
           </button>
         </div>
       </form>
@@ -2502,51 +2903,20 @@ const MailIcon = () => (
 const DischargeMedication: React.FC<{ embedded?: boolean }> = ({
   embedded = false,
 }) => {
-  const [medications, setMedications] = useState<DischargeMedicationItem[]>([
-    {
-      id: 1,
-      drugName: "Capecitabine",
-      dosage: "500 mg",
-      frequency: "2-0-2",
-      instruction: "After Food",
-      duration: "14 Days",
-    },
-    {
-      id: 2,
-      drugName: "Domstal",
-      dosage: "10 mg",
-      frequency: "1-1-1",
-      instruction: "Before Food",
-      duration: "14 Days",
-    },
-    {
-      id: 3,
-      drugName: "Loperamide",
-      dosage: "2 mg",
-      frequency: "SOS",
-      instruction: "After Loose Motion",
-      duration: "5 Days",
-    },
-    {
-      id: 4,
-      drugName: "Pantoprazole",
-      dosage: "40 mg",
-      frequency: "1-0-1",
-      instruction: "Before Food",
-      duration: "14 Days",
-    },
-  ]);
+  const [medications, setMedications] = useState<DischargeMedicationItem[]>(
+    []
+  );
 
   const [activeStep, setActiveStep] = useState(1);
 
   const handleAddDrug = () => {
     const newMedication: DischargeMedicationItem = {
       id: Date.now(),
-      drugName: "New Drug",
-      dosage: "0 mg",
-      frequency: "1-0-1",
-      instruction: "After Food",
-      duration: "7 Days",
+      drugName: "",
+      dosage: "",
+      frequency: "",
+      instruction: "",
+      duration: "",
     };
 
     setMedications((current) => [...current, newMedication]);
@@ -2665,26 +3035,26 @@ if (embedded) {
         <div className="flex flex-col items-center border-b border-gray-200 p-8">
           <div className="relative mb-6 h-32 w-32 overflow-hidden rounded-full ring-4 ring-[#eab308] shadow-sm">
             <img
-              src="https://lh3.googleusercontent.com/aida-public/AB6AXuCnsdAYC4K7vv6d8dEOYDc2tUF4lEiQxVv5rMG9UTzBJQv4yIcMv_4mbdll__QCclcJuf6NeqfLMuP3yVcRd73LeRuA6aV50wx-yzVKgsWW3A30ft0JHXjZG7oKynjg4uxep0YUPqWnJlJBowieFaiClZsF236pjJKmz6f-0Va0Nf2gPPr6Lk4IzQzNeU3O8f_59fTnrcnNhSKrpy-WRQ5R0HRanbu6B0Pi--KmCbyeTDK48fnhrtGA"
-              alt="Vijaya Nallusamy"
+              src=""
+              alt=""
               className="h-full w-full object-cover"
             />
           </div>
 
           <h2 className="mb-2 text-[22px] font-bold text-gray-900">
-            Vijaya Nallusamy
+            {""}
           </h2>
 
           <p className="mb-4 text-[15px] text-gray-500">
-            51 Y / Female
+            {""}
           </p>
 
           <span className="mb-6 rounded-full bg-gray-100 px-4 py-1.5 text-xs font-semibold text-gray-600">
-            ONC-2026-10025
+            {""}
           </span>
 
           <p className="text-center text-sm font-bold tracking-wide text-blue-700">
-            DUCTAL CARCINOMA STAGE II
+            {""}
           </p>
         </div>
 
@@ -2699,7 +3069,7 @@ if (embedded) {
               </p>
 
               <p className="text-[15px] font-medium text-gray-700">
-                +91 98765 43210
+                {""}
               </p>
             </div>
           </div>
@@ -2713,7 +3083,7 @@ if (embedded) {
               </p>
 
               <p className="text-[15px] font-medium text-gray-700">
-                vijaya.n@example.com
+                {""}
               </p>
             </div>
           </div>
@@ -2728,7 +3098,7 @@ if (embedded) {
               </p>
 
               <p className="text-[15px] font-bold text-gray-900">
-                154 cm
+                {""}
               </p>
             </div>
 
@@ -2738,7 +3108,7 @@ if (embedded) {
               </p>
 
               <p className="text-[15px] font-bold text-gray-900">
-                52 kg
+                {""}
               </p>
             </div>
 
@@ -2748,7 +3118,7 @@ if (embedded) {
               </p>
 
               <p className="text-[15px] font-bold text-gray-900">
-                1.49 m²
+                {""}
               </p>
             </div>
 
@@ -2758,7 +3128,7 @@ if (embedded) {
               </p>
 
               <p className="text-[15px] font-bold text-gray-900">
-                21.93
+                {""}
               </p>
             </div>
           </div>
@@ -2932,39 +3302,54 @@ type Drug = {
   volume: string;
 };
 
-const ChemotherapyOrder: React.FC<{ embedded?: boolean }> = ({
-  embedded = false,
-}) => {
-  const [cycleDay, setCycleDay] = useState("Cycle 1 / Day 1");
-  const [startDate, setStartDate] = useState("20-06-2026");
-  const [activeTab, setActiveTab] = useState("Chemotherapy Orders");
+type ChemotherapyPlanItem = {
+  chemotherapy_plan_item_id: string;
+  dosage: number | null;
+  dosage_unit: string | null;
+  formulation: string | null;
+  dilution_volume: number | null;
+  medicine_master: {
+    medicine_name: string;
+    generic_name: string | null;
+    dosage_form: string | null;
+    unit: string | null;
+  } | null;
+};
 
-  const [drugs, setDrugs] = useState<Drug[]>([
-    {
-      id: 1,
-      name: "Oxaliplatin",
-      form: "Injection",
-      dose: "85",
-      unit: "mg/m2",
-      volume: "250 ml",
-    },
-    {
-      id: 2,
-      name: "Leucovorin",
-      form: "Injection",
-      dose: "200",
-      unit: "mg/m2",
-      volume: "250 ml",
-    },
-    {
-      id: 3,
-      name: "5 Fluorouracil",
-      form: "Injection",
-      dose: "2400",
-      unit: "mg/m2",
-      volume: "CIV",
-    },
-  ]);
+type ChemotherapyPlan = {
+  chemotherapy_plan_id: string;
+  protocol_name: string | null;
+  regimen_name: string | null;
+  regimen_code: string | null;
+  treatment_start_date: string | null;
+  planned_cycles: number | null;
+  completed_cycles: number | null;
+  treatment_status: string | null;
+  chemotherapy_cycle: {
+    cycle_number: number;
+    cycle_day: number | null;
+  }[] | null;
+  chemotherapy_plan_items: ChemotherapyPlanItem[] | null;
+};
+
+const ChemotherapyOrder: React.FC<{
+  embedded?: boolean;
+  patientId?: string;
+}> = ({ embedded = false, patientId }) => {
+  const location = useLocation();
+  const statePatientId = (
+    (location.state as ConsultationState | null)?.patientId ?? ""
+  );
+  const resolvedPatientId = patientId || statePatientId;
+
+  const [cycleDay, setCycleDay] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [activeTab, setActiveTab] = useState("Chemotherapy Orders");
+  const [protocolName, setProtocolName] = useState("");
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState("");
+
+  const [drugs, setDrugs] = useState<Drug[]>([]);
 
   const tabs = [
     "Chemotherapy Orders",
@@ -2975,21 +3360,101 @@ const ChemotherapyOrder: React.FC<{ embedded?: boolean }> = ({
 
   const handleSave = () => {
     console.log("Saved chemotherapy order:", {
-      protocol: "FOLFOX (2 Weekly)",
       cycleDay,
       startDate,
       drugs,
     });
   };
 
+  const formatDateDMY = (value?: string | null) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    const day = String(date.getDate()).padStart(2, "0");
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    return `${day}-${month}-${date.getFullYear()}`;
+  };
+
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    let cancelled = false;
+    setPlanLoading(true);
+    setPlanError("");
+
+    API.get<{ success: boolean; data: ChemotherapyPlan[] }>(
+      "/chemotherapy/plans",
+      { params: { patient_id: resolvedPatientId } }
+    )
+      .then((response) => {
+        if (cancelled) return;
+        const plans = response.data.data;
+        const plan = plans[0];
+        if (!plan) return;
+
+        setProtocolName(
+          plan.protocol_name || plan.regimen_name || ""
+        );
+        setStartDate(formatDateDMY(plan.treatment_start_date));
+
+        const cycles = plan.chemotherapy_cycle ?? [];
+        const latestCycle = cycles[cycles.length - 1];
+        setCycleDay(
+          latestCycle
+            ? `Cycle ${latestCycle.cycle_number} / Day ${
+                latestCycle.cycle_day ?? "—"
+              }`
+            : ""
+        );
+
+        setDrugs(
+          (plan.chemotherapy_plan_items ?? []).map((item, index) => ({
+            id: index,
+            name:
+              item.medicine_master?.medicine_name ||
+              item.medicine_master?.generic_name ||
+              "",
+            form:
+              item.formulation ||
+              item.medicine_master?.dosage_form ||
+              "",
+            dose: item.dosage != null ? String(item.dosage) : "",
+            unit:
+              item.dosage_unit ||
+              item.medicine_master?.unit ||
+              "",
+            volume:
+              item.dilution_volume != null
+                ? `${item.dilution_volume}`
+                : "",
+          }))
+        );
+      })
+      .catch((error) => {
+        console.error("Failed to load chemotherapy plans:", error);
+        if (!cancelled) {
+          setPlanError(
+            error?.response?.data?.message ||
+              "Failed to load chemotherapy orders."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPlanLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId]);
+
   const handleAddDrug = () => {
     const newDrug: Drug = {
       id: Date.now(),
-      name: "New Drug",
-      form: "Injection",
-      dose: "0",
-      unit: "mg/m2",
-      volume: "250 ml",
+      name: "",
+      form: "",
+      dose: "",
+      unit: "",
+      volume: "",
     };
 
     setDrugs((current) => [...current, newDrug]);
@@ -3155,7 +3620,7 @@ const ChemotherapyOrder: React.FC<{ embedded?: boolean }> = ({
             <input
               id="protocol"
               type="text"
-              value="FOLFOX (2 Weekly)"
+              value={protocolName}
               readOnly
               className="mt-1 block w-full rounded-md border border-gray-300 px-4 py-3 text-base text-gray-900 shadow-sm outline-none"
             />
@@ -3289,6 +3754,39 @@ const ChemotherapyOrder: React.FC<{ embedded?: boolean }> = ({
                 </thead>
 
                 <tbody className="divide-y divide-gray-200 bg-white">
+                  {planLoading && (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="px-6 py-8 text-center text-sm text-gray-500"
+                      >
+                        Loading chemotherapy orders…
+                      </td>
+                    </tr>
+                  )}
+
+                  {!planLoading && !planError && drugs.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="px-6 py-8 text-center text-sm text-gray-500"
+                      >
+                        No chemotherapy orders found for this patient.
+                      </td>
+                    </tr>
+                  )}
+
+                  {planError && (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="px-6 py-8 text-center text-sm text-red-500"
+                      >
+                        {planError}
+                      </td>
+                    </tr>
+                  )}
+
                   {drugs.map((drug) => (
                     <tr
                       key={drug.id}
@@ -3517,13 +4015,11 @@ type FollowUpStep = 1 | 2 | 3;
 const FollowUp: React.FC<{ embedded?: boolean }> = ({
   embedded = false,
 }) => {
-  const [activeStep, setActiveStep] = useState<FollowUpStep>(2);
-  const [nextVisitDate, setNextVisitDate] = useState("04-07-2026");
-  const [nextCycle, setNextCycle] = useState("Cycle 2 / Day 2");
-  const [plan, setPlan] = useState("Continue Treatment");
-  const [notes, setNotes] = useState(
-    "Review after 2 weeks with CBC."
-  );
+  const [activeStep, setActiveStep] = useState<FollowUpStep>(1);
+  const [nextVisitDate, setNextVisitDate] = useState("");
+  const [nextCycle, setNextCycle] = useState("");
+  const [plan, setPlan] = useState("");
+  const [notes, setNotes] = useState("");
 
   const handleBack = () => {
     window.history.back();
@@ -3751,10 +4247,6 @@ const FollowUp: React.FC<{ embedded?: boolean }> = ({
                   }
                   className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 >
-                  <option>Cycle 2 / Day 2</option>
-                  <option>Cycle 2 / Day 8</option>
-                  <option>Cycle 3 / Day 1</option>
-                  <option>Cycle 3 / Day 2</option>
                 </select>
 
                 <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
@@ -3847,25 +4339,25 @@ const FollowUp: React.FC<{ embedded?: boolean }> = ({
         <div className="flex flex-col items-center border-b border-gray-100 p-6">
 
           <img
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuBrnfR3fCX6sbv0UhV_OdJK1zeptYSdZvOp_xvwkIxkJBZ_xTgXwflZS8imkZtvlyP1cxvapPPk25VBx24iGZEt6ggDNasPQEOF6ycThAjSfwCaOWP124jgSG7y9m0mWNZX-guLWnGqVaeVnguo4WKNWusknjFNvAetqst5wwUVh9K0kiSQZ6nWNAlFaBovJVLKG5c88pfogGkdDHwwbByjWemnWuaDPGsgSaJfa0pLDHg3jj9tyAcpF1YYs6OoVVSKVA"
+            src=""
             alt="Patient Photo"
             className="mb-4 h-[110px] w-[110px] rounded-full object-cover shadow-sm"
           />
 
           <h2 className="mb-1 text-xl font-bold text-gray-900">
-            Vijaya Nallusamy
+            {""}
           </h2>
 
           <p className="mb-3 text-sm text-gray-500">
-            51 Y / Female
+            {""}
           </p>
 
           <span className="mb-4 rounded-md bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700">
-            ONC-2026-10025
+            {""}
           </span>
 
           <h3 className="text-center text-sm font-bold uppercase tracking-wide text-blue-600">
-            Ductal Carcinoma Stage II
+            {""}
           </h3>
         </div>
 
@@ -3881,7 +4373,7 @@ const FollowUp: React.FC<{ embedded?: boolean }> = ({
               </p>
 
               <p className="text-sm font-medium text-gray-800">
-                +91 98765 43210
+                {""}
               </p>
             </div>
           </div>
@@ -3895,7 +4387,7 @@ const FollowUp: React.FC<{ embedded?: boolean }> = ({
               </p>
 
               <p className="text-sm font-medium text-gray-800">
-                vijaya.n@example.com
+                {""}
               </p>
             </div>
           </div>
@@ -3910,7 +4402,7 @@ const FollowUp: React.FC<{ embedded?: boolean }> = ({
               Height
             </p>
             <p className="text-sm font-bold text-gray-900">
-              154 cm
+              {""}
             </p>
           </div>
 
@@ -3919,7 +4411,7 @@ const FollowUp: React.FC<{ embedded?: boolean }> = ({
               Weight
             </p>
             <p className="text-sm font-bold text-gray-900">
-              52 kg
+              {""}
             </p>
           </div>
 
@@ -3928,7 +4420,7 @@ const FollowUp: React.FC<{ embedded?: boolean }> = ({
               BSA
             </p>
             <p className="text-sm font-bold text-gray-900">
-              1.49 m²
+              {""}
             </p>
           </div>
 
@@ -3937,7 +4429,7 @@ const FollowUp: React.FC<{ embedded?: boolean }> = ({
               BMI
             </p>
             <p className="text-sm font-bold text-gray-900">
-              21.93
+              {""}
             </p>
           </div>
 
@@ -4148,24 +4640,22 @@ const TreatmentPlan: React.FC<{ embedded?: boolean }> = ({
   embedded = false,
 }) => {
   const [treatmentIntent, setTreatmentIntent] =
-    useState("Curative");
+    useState("");
 
   const [treatmentTypes, setTreatmentTypes] = useState<
     TreatmentType[]
-  >(["Chemotherapy"]);
+  >([]);
 
   const [lineOfTherapy, setLineOfTherapy] =
-    useState("First Line");
+    useState("");
 
   const [plannedStartDate, setPlannedStartDate] =
-    useState("20-06-2026");
+    useState("");
 
   const [protocol, setProtocol] =
-    useState("FOLFOX (2 Weekly)");
+    useState("");
 
-  const [remarks, setRemarks] = useState(
-    "Plan for 12 cycles followed by surgery."
-  );
+  const [remarks, setRemarks] = useState("");
 
   const [activeStep, setActiveStep] = useState(2);
 
@@ -4571,17 +5061,6 @@ const TreatmentPlan: React.FC<{ embedded?: boolean }> = ({
               }
               className="block w-full appearance-none rounded-lg border border-slate-300 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             >
-              <option value="FOLFOX (2 Weekly)">
-                FOLFOX (2 Weekly)
-              </option>
-
-              <option value="FOLFIRI (2 Weekly)">
-                FOLFIRI (2 Weekly)
-              </option>
-
-              <option value="CAPOX (3 Weekly)">
-                CAPOX (3 Weekly)
-              </option>
             </select>
 
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
@@ -4658,25 +5137,25 @@ const TreatmentPlan: React.FC<{ embedded?: boolean }> = ({
         <div className="flex flex-col items-center border-b border-slate-200 p-8">
 
           <img
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuCdW6D5nlMmKfJtScuPrdJ-78e0bB5mfUyxq282S5UaLdcBAkmQ7fweUAQfxOph1gHVmEGAp8yBjGeAtFjZ9D9VYsTday9niX72xw_4av3YtIMLe46ozNXl2gERyusKWKYkzvet6CvSZkL9GYf1W56P9H7z3Xg1UzauThU_5KTyV-QRVG0CVCLCOtlbENMP56SmG_K7WwjVFs0ZPWYC0mro5ljV5968TCZ_x3H2G8jiv42saEDoTvxv2ZjtfdMW1edz7w"
+            src=""
             alt="Patient Photo"
             className="mb-4 h-32 w-32 rounded-full border border-slate-100 object-cover object-[50%_10%] shadow-sm"
           />
 
           <h2 className="mb-1 text-xl font-bold text-slate-900">
-            Vijaya Nallusamy
+            {""}
           </h2>
 
           <p className="mb-3 text-sm text-slate-500">
-            51 Y / Female
+            {""}
           </p>
 
           <div className="mb-4 rounded-md bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">
-            ONC-2026-10025
+            {""}
           </div>
 
           <p className="text-center text-sm font-bold tracking-wide text-blue-700">
-            DUCTAL CARCINOMA STAGE II
+            {""}
           </p>
         </div>
 
@@ -4691,7 +5170,7 @@ const TreatmentPlan: React.FC<{ embedded?: boolean }> = ({
             </div>
 
             <p className="text-slate-900">
-              +91 98765 43210
+              {""}
             </p>
           </div>
 
@@ -4703,7 +5182,7 @@ const TreatmentPlan: React.FC<{ embedded?: boolean }> = ({
             </div>
 
             <p className="text-slate-900">
-              vijaya.n@example.com
+              {""}
             </p>
           </div>
 
@@ -4715,7 +5194,7 @@ const TreatmentPlan: React.FC<{ embedded?: boolean }> = ({
                 HEIGHT
               </div>
               <p className="font-semibold text-slate-900">
-                154 cm
+                {""}
               </p>
             </div>
 
@@ -4724,7 +5203,7 @@ const TreatmentPlan: React.FC<{ embedded?: boolean }> = ({
                 WEIGHT
               </div>
               <p className="font-semibold text-slate-900">
-                52 kg
+                {""}
               </p>
             </div>
 
@@ -4733,7 +5212,7 @@ const TreatmentPlan: React.FC<{ embedded?: boolean }> = ({
                 BSA
               </div>
               <p className="font-semibold text-slate-900">
-                1.49 m²
+                {""}
               </p>
             </div>
 
@@ -4742,7 +5221,7 @@ const TreatmentPlan: React.FC<{ embedded?: boolean }> = ({
                 BMI
               </div>
               <p className="font-semibold text-slate-900">
-                21.93
+                {""}
               </p>
             </div>
 
@@ -4940,81 +5419,11 @@ const TreatmentPlan: React.FC<{ embedded?: boolean }> = ({
 const Summary: React.FC<{ embedded?: boolean }> = ({
   embedded = false,
 }) => {
-  const chemotherapyOrders = [
-    {
-      drug: "Oxaliplatin",
-      form: "Injection",
-      dose: "85",
-      unit: "Mg/M2",
-      volume: "250 Ml",
-    },
-    {
-      drug: "Leucovorin",
-      form: "Injection",
-      dose: "200",
-      unit: "Mg/M2",
-      volume: "250 Ml",
-    },
-    {
-      drug: "5 Fluorouracil",
-      form: "Injection",
-      dose: "240",
-      unit: "Mg/M2",
-      volume: "CIV",
-    },
-  ];
+  const chemotherapyOrders = [];
 
-  const premedications = [
-    {
-      drug: "Ondansetron",
-      dose: "8 mg",
-      route: "IV",
-      time: "30 mins before chemo",
-    },
-    {
-      drug: "Dexamethasone",
-      dose: "8 mg",
-      route: "IV",
-      time: "30 mins before chemo",
-    },
-    {
-      drug: "Ranitidine",
-      dose: "50 mg",
-      route: "IV",
-      time: "30 mins before chemo",
-    },
-  ];
+  const premedications = [];
 
-  const dischargeMedications = [
-    {
-      drug: "Capecitabine",
-      dose: "500 mg",
-      frequency: "2-0-2",
-      instruction: "After Food",
-      duration: "14 Days",
-    },
-    {
-      drug: "Domstal",
-      dose: "10 mg",
-      frequency: "1-1-1",
-      instruction: "Before Food",
-      duration: "10 Days",
-    },
-    {
-      drug: "Loperamide",
-      dose: "2 mg",
-      frequency: "1-0-0",
-      instruction: "After Food",
-      duration: "5 Days",
-    },
-    {
-      drug: "Pantoprazole",
-      dose: "40 mg",
-      frequency: "1-0-1",
-      instruction: "Before Food",
-      duration: "15 Days",
-    },
-  ];
+  const dischargeMedications = [];
 
   const Step = ({
     label,
@@ -5074,7 +5483,7 @@ const Summary: React.FC<{ embedded?: boolean }> = ({
                   Cancer Type
                 </p>
                 <p className="text-sm text-slate-500">
-                  Colon Cancer
+                  {""}
                 </p>
               </div>
 
@@ -5084,7 +5493,7 @@ const Summary: React.FC<{ embedded?: boolean }> = ({
                 </p>
 
                 <p className="flex items-center gap-2 text-sm text-slate-500">
-                  Stage II (T3N0M0)
+                  {""}
                   <span className="text-slate-400">◷</span>
                 </p>
               </div>
@@ -5094,7 +5503,7 @@ const Summary: React.FC<{ embedded?: boolean }> = ({
                   Context
                 </p>
 
-                <p className="text-sm text-slate-500">Curative</p>
+                <p className="text-sm text-slate-500">{""}</p>
               </div>
 
               <div />
@@ -5105,7 +5514,7 @@ const Summary: React.FC<{ embedded?: boolean }> = ({
                 </p>
 
                 <p className="flex items-center gap-2 text-sm text-slate-500">
-                  FOLFOX (2 Weekly)
+                  {""}
                   <span className="text-slate-400">◷</span>
                 </p>
               </div>
@@ -5116,7 +5525,7 @@ const Summary: React.FC<{ embedded?: boolean }> = ({
                 </p>
 
                 <p className="text-sm text-slate-500">
-                  12 Cycles
+                  {""}
                 </p>
               </div>
 
@@ -5126,8 +5535,7 @@ const Summary: React.FC<{ embedded?: boolean }> = ({
                 </p>
 
                 <p className="text-sm text-slate-500">
-                  Day 1
-                  <span className="ml-4">20-06-2026</span>
+                  {""}
                 </p>
               </div>
             </div>
@@ -5288,7 +5696,7 @@ const Summary: React.FC<{ embedded?: boolean }> = ({
                 Next Visit Date
               </p>
 
-              <p className="text-slate-600">04-07-2026</p>
+              <p className="text-slate-600">{""}</p>
             </div>
 
             <div className="sm:pl-8">
@@ -5297,7 +5705,7 @@ const Summary: React.FC<{ embedded?: boolean }> = ({
               </p>
 
               <p className="flex items-center gap-2 text-slate-600">
-                Cycle 2 / Day 1
+                {""}
                 <span className="text-slate-400">◷</span>
               </p>
             </div>
@@ -5339,23 +5747,23 @@ const Summary: React.FC<{ embedded?: boolean }> = ({
         {/* Patient Profile */}
         <div className="flex flex-col items-center border-b border-slate-100 p-8">
           <img
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuALJiAbRuWXhNDLo3GQYHiqj16204Ep5hRrCI4UBcdw8TvdrPcM4ZuO18hxvBFPvlQn7KxzuaUry244h6sEa-VxJy_8uUoXwDmN_S2_Si68ZHQl-S3bbey-UNtzaIZsTSnrMNMheaqusgLznpVaO76fbp2SQSy8ZWKrqz0dkh2IOa1xzkffUQIzMPeroYMp72bTxyTtcHadZmyGu7HjlwSTdwupK9f7Fg7ScDl4J1jSQvI_wG6TirJNydXFqQSnMU-mpQ"
+            src=""
             alt="Patient Avatar"
             className="mb-4 h-24 w-24 rounded-full border-2 border-white object-cover shadow-sm"
           />
 
           <h2 className="mb-1 text-xl font-bold text-slate-900">
-            Vijaya Nallusamy
+            {""}
           </h2>
 
-          <p className="mb-4 text-sm text-slate-500">51 Y / Female</p>
+          <p className="mb-4 text-sm text-slate-500">{""}</p>
 
           <span className="mb-6 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-            ONC-2026-10025
+            {""}
           </span>
 
           <p className="text-center text-sm font-semibold tracking-wide text-blue-600">
-            DUCTAL CARCINOMA STAGE II
+            {""}
           </p>
         </div>
 
@@ -5373,7 +5781,7 @@ const Summary: React.FC<{ embedded?: boolean }> = ({
               </p>
 
               <p className="text-sm font-medium text-slate-800">
-                +91 98765 43210
+                {""}
               </p>
             </div>
           </div>
@@ -5390,7 +5798,7 @@ const Summary: React.FC<{ embedded?: boolean }> = ({
               </p>
 
               <p className="text-sm font-medium text-slate-700">
-                vijaya.n@example.com
+                {""}
               </p>
             </div>
           </div>
@@ -5402,28 +5810,28 @@ const Summary: React.FC<{ embedded?: boolean }> = ({
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               Height
             </p>
-            <p className="font-semibold text-slate-800">154 cm</p>
+            <p className="font-semibold text-slate-800">{""}</p>
           </div>
 
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               Weight
             </p>
-            <p className="font-semibold text-slate-800">52 kg</p>
+            <p className="font-semibold text-slate-800">{""}</p>
           </div>
 
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               BSA
             </p>
-            <p className="font-semibold text-slate-800">1.49 m²</p>
+            <p className="font-semibold text-slate-800">{""}</p>
           </div>
 
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               BMI
             </p>
-            <p className="font-semibold text-slate-800">21.93</p>
+            <p className="font-semibold text-slate-800">{""}</p>
           </div>
         </div>
 
