@@ -4,6 +4,13 @@ import {
   patientApi,
   type PatientRecord,
 } from "../../api/patient.api";
+import {
+  encounterApi,
+  type EncounterRecord,
+} from "../../api/encounter.api";
+import { getActiveBranchId } from "../../api/axios";
+import { getUser } from "../../utils/token";
+import { ClinicalDetailsSection } from "../../components/hms/ClinicalDetailsSection";
 
 type ToastMessage = string;
 
@@ -44,14 +51,6 @@ const Consultation: React.FC = () => {
   ============================================================ */
 
   const [toast, setToast] = useState<ToastMessage>("");
-  const [symptoms, setSymptoms] = useState<string[]>([
-    "Headache",
-    "Fatigue",
-  ]);
-
-  const [comorbidities, setComorbidities] = useState<string[]>([
-    "Hypertension",
-  ]);
 
   const [consultationNotes, setConsultationNotes] = useState(
     `Patient came for follow up.
@@ -93,6 +92,9 @@ vomiting. Appetite normal.`
 
   const [patient, setPatient] = useState<PatientRecord | null>(null);
   const [patientError, setPatientError] = useState("");
+
+  const [encounter, setEncounter] = useState<EncounterRecord | null>(null);
+  const [encounterError, setEncounterError] = useState("");
 
   const formatDateDMY = (value?: string | null) => {
     if (!value) return "";
@@ -138,6 +140,54 @@ vomiting. Appetite normal.`
             "Failed to load patient data.";
           setPatientError(message);
           showToast(message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [consultationState?.patientId]);
+
+  /* ============================================================
+     LOAD ACTIVE ENCOUNTER
+     Resolve the current open encounter for the consulted patient so
+     the Clinical Details section can read/save encounter-specific
+     (ECOG, symptoms) and patient-level (allergies, comorbidities)
+     data. Only encounters belonging to the opened patient are used.
+  ============================================================ */
+
+  useEffect(() => {
+    const patientId = consultationState?.patientId;
+    if (!patientId) return;
+    let cancelled = false;
+    setEncounterError("");
+    // GET /encounters is branch-scoped (branchScope middleware 403s
+    // "Please select a branch first." when no branch is sent and the
+    // user maps to more than one branch).
+    const branchId = getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+    encounterApi
+      .getAll({ branchId, patientId, status: "OPEN", page: 1, limit: 5 })
+      .then((response) => {
+        if (cancelled) return;
+        const encounters = response.data.data?.encounters ?? [];
+        const current =
+          encounters.find((item) => item.patient_id === patientId) ??
+          encounters[0] ??
+          null;
+        setEncounter(current);
+        if (!current) {
+          setEncounterError(
+            "No active encounter found for this patient. Clinical details cannot be loaded.",
+          );
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load encounter:", error);
+        if (!cancelled) {
+          const message =
+            error?.response?.data?.message ||
+            error?.message ||
+            "Failed to load encounter data.";
+          setEncounterError(message);
         }
       });
     return () => {
@@ -212,14 +262,6 @@ vomiting. Appetite normal.`
       if (data.medications) {
         setMedications(data.medications);
       }
-
-      if (data.symptoms) {
-        setSymptoms(data.symptoms);
-      }
-
-      if (data.comorbidities) {
-        setComorbidities(data.comorbidities);
-      }
     } catch (error) {
       console.error("Draft loading failed", error);
     }
@@ -239,24 +281,6 @@ vomiting. Appetite normal.`
 
   const viewProfile = () => {
     showToast("Opening patient profile");
-  };
-
-  /* ============================================================
-     REMOVE SYMPTOM
-  ============================================================ */
-
-  const removeSymptom = (symptom: string) => {
-    setSymptoms((prev) => prev.filter((item) => item !== symptom));
-    showToast(`${symptom} removed`);
-  };
-
-  /* ============================================================
-     REMOVE COMORBIDITY
-  ============================================================ */
-
-  const removeComorbidity = (item: string) => {
-    setComorbidities((prev) => prev.filter((value) => value !== item));
-    showToast(`${item} removed`);
   };
 
   /* ============================================================
@@ -328,8 +352,6 @@ vomiting. Appetite normal.`
       patient: patientName,
       patientId: patientDisplayId,
       consultationNotes,
-      symptoms,
-      comorbidities,
       medications,
       investigations: selectedInvestigations,
     };
@@ -799,7 +821,7 @@ vomiting. Appetite normal.`
                     CONSULTATION SUMMARY
                 ================================================= */}
 
-                <section className="flex h-[500px] w-full flex-col gap-6 rounded-xl border border-slate-200 bg-white p-[25px]">
+                <section className="flex h-full w-full flex-col gap-6 rounded-xl border border-slate-200 bg-white p-[25px]">
 
                   <div className="text-lg font-bold leading-7 text-slate-800">
                     Consultation Summary
@@ -1003,178 +1025,30 @@ vomiting. Appetite normal.`
 
                     <div className="flex flex-col gap-4">
 
-                      {/* PERFORMANCE */}
+                      {/* PERFORMANCE STATUS / SYMPTOMS / ALLERGIES /
+                          COMORBIDITIES — backed by the Clinical Details
+                          API (see components/hms/ClinicalDetailsSection.tsx) */}
 
-                      <div className="flex flex-col gap-1">
-
-                        <div className="text-xs font-bold leading-4 text-slate-700">
-                          Clinical Details
+                      {encounterError && (
+                        <div className="flex w-full flex-col gap-2 rounded-md border border-red-200 bg-red-50 p-3">
+                          <div className="text-xs font-medium leading-4 text-red-700">
+                            {encounterError}
+                          </div>
                         </div>
+                      )}
 
-                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                          PERFORMANCE STATUS (ECOG)
-                        </div>
-
-                        <div className="relative h-[38px]">
-
-                          <select className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none">
-
-                            <option>
-                              1 - Restricted in physically strenuous activity
-                            </option>
-
-                            <option>
-                              0 - Fully active
-                            </option>
-
-                          </select>
-
-                          <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="#94a3b8"
-                            strokeWidth="1.8"
-                            className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
-                          >
-                            <path d="m6 9 6 6 6-6" />
-                          </svg>
-
-                        </div>
-
-                      </div>
-
-                      {/* SYMPTOMS */}
-
-                      <div className="flex flex-col gap-1">
-
-                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                          SYMPTOMS
-                        </div>
-
-                        <div className="flex h-[60px] w-full items-start gap-1.5 rounded-md border border-slate-200 bg-white p-1.5">
-
-                          {symptoms.map((symptom) => (
-
-                            <div
-                              key={symptom}
-                              className="flex h-[26px] items-center gap-1 rounded border border-blue-100 bg-blue-50 px-[9px] py-[3px] text-xs leading-4 text-blue-700"
-                            >
-
-                              <span>
-                                {symptom}
-                              </span>
-
-                              <button
-                                onClick={() =>
-                                  removeSymptom(symptom)
-                                }
-                                className="border-0 bg-transparent p-0 text-xs leading-4 text-blue-700"
-                              >
-                                ×
-                              </button>
-
-                            </div>
-
-                          ))}
-
-                        </div>
-
-                      </div>
-
-                      {/* ALLERGIES */}
-
-                      <div className="flex flex-col gap-1">
-
-                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                          ALLERGIES
-                        </div>
-
-                        <div className="relative h-[38px]">
-
-                          <select className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-slate-50 px-[13px] pr-10 text-sm leading-5 text-slate-400 outline-none">
-
-                            <option>
-                              None
-                            </option>
-
-                            <option>
-                              Penicillin
-                            </option>
-
-                            <option>
-                              Aspirin
-                            </option>
-
-                          </select>
-
-                          <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="#94a3b8"
-                            strokeWidth="1.8"
-                            className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
-                          >
-                            <path d="m6 9 6 6 6-6" />
-                          </svg>
-
-                        </div>
-
-                      </div>
-
-                      {/* COMORBIDITIES */}
-
-                      <div className="flex flex-col gap-1">
-
-                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                          COMORBIDITIES
-                        </div>
-
-                        <div className="flex min-h-[38px] w-full items-start gap-2 rounded-md border border-slate-200 p-[7px]">
-
-                          {comorbidities.map((item) => (
-
-                            <div
-                              key={item}
-                              className="flex h-[26px] items-center gap-1 rounded border border-blue-100 bg-blue-50 px-[9px] py-[3px] text-xs leading-4 text-blue-700"
-                            >
-
-                              {item}
-
-                              <button
-                                onClick={() =>
-                                  removeComorbidity(item)
-                                }
-                                className="bg-transparent p-0 text-blue-700"
-                              >
-                                ×
-                              </button>
-
-                            </div>
-
-                          ))}
-
-                          <button
-                            onClick={() =>
-                              showToast("Comorbidity selector opened")
-                            }
-                            className="ml-auto h-4 w-4"
-                          >
-
-                            <svg
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="#94a3b8"
-                              strokeWidth="1.8"
-                              className="h-4 w-4"
-                            >
-                              <path d="m6 9 6 6 6-6" />
-                            </svg>
-
-                          </button>
-
-                        </div>
-
-                      </div>
+                      {encounter ? (
+                        <ClinicalDetailsSection
+                          patientId={consultationState?.patientId}
+                          encounterNo={encounter.encounter_no}
+                        />
+                      ) : (
+                        !encounterError && (
+                          <div className="flex items-center gap-2 text-xs leading-4 text-slate-500">
+                            Loading clinical details...
+                          </div>
+                        )
+                      )}
 
                     </div>
 
@@ -1240,7 +1114,7 @@ vomiting. Appetite normal.`
 
                 {/* =================================================
                     PRESCRIPTION
-                ================================================= */}
+                ================================================= 
 
                 <section className="h-[300px] w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-[25px] shadow-sm">
 
@@ -1254,7 +1128,7 @@ vomiting. Appetite normal.`
 
                   <div className="w-full">
 
-                    {/* HEADER */}
+                    {/* HEADER 
 
                     <div className="grid h-[35px] w-full grid-cols-[2.1fr_1fr_1.5fr_1.15fr_4.2fr] justify-between border-b border-slate-100 bg-slate-50">
 
@@ -1280,7 +1154,7 @@ vomiting. Appetite normal.`
 
                     </div>
 
-                    {/* MEDICATION ROWS */}
+                    {/* MEDICATION ROWS 
 
                     {medications.map((medication, index) => (
 
@@ -1289,8 +1163,7 @@ vomiting. Appetite normal.`
                         className="grid h-[59px] w-full grid-cols-[2.1fr_1fr_1.5fr_1.15fr_4.2fr] justify-between border-b border-slate-100 py-[10.5px]"
                       >
 
-                        {/* MEDICATION */}
-
+                        {/* MEDICATION 
                         <div className="relative h-[30px] w-full overflow-hidden rounded-md border border-slate-200 bg-white">
 
                           <select
@@ -1331,7 +1204,7 @@ vomiting. Appetite normal.`
 
                         </div>
 
-                        {/* DOSE */}
+                        {/* DOSE 
 
                         <div className="relative h-[30px] rounded-md border border-slate-200 bg-white">
 
@@ -1365,8 +1238,7 @@ vomiting. Appetite normal.`
 
                         </div>
 
-                        {/* FREQUENCY */}
-
+                        {/* FREQUENCY 
                         <div className="relative h-[30px] rounded-md border border-slate-200 bg-white">
 
                           <select
@@ -1400,7 +1272,7 @@ vomiting. Appetite normal.`
 
                         </div>
 
-                        {/* DURATION */}
+                        {/* DURATION 
 
                         <div className="relative h-[30px] rounded-md border border-slate-200 bg-white">
 
@@ -1439,7 +1311,7 @@ vomiting. Appetite normal.`
 
                         </div>
 
-                        {/* INSTRUCTIONS */}
+                        {/* INSTRUCTIONS 
 
                         <input
                           value={medication.instructions}
@@ -1459,7 +1331,7 @@ vomiting. Appetite normal.`
 
                   </div>
 
-                  {/* ADD MEDICATION */}
+                  {/* ADD MEDICATION
 
                   <button
                     onClick={addMedication}
@@ -1476,7 +1348,7 @@ vomiting. Appetite normal.`
 
                   </button>
 
-                </section>
+                </section>*/}
 
                 {/* =================================================
                     ACTION BUTTONS
@@ -1962,7 +1834,7 @@ const LabReview: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
 
       {/* Footer */}
       <footer className="sticky bottom-0 z-20 border-t border-gray-200 bg-white px-6 py-6">
-        <div className="mx-auto flex max-w-5xl justify-center gap-4">
+        <div className="mx-auto flex max-w-8xl justify-center gap-4">
           <button
             type="button"
             onClick={handleCancel}
@@ -1976,7 +1848,7 @@ const LabReview: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
             onClick={handleSaveDraft}
             className="rounded-xl border border-blue-600 px-8 py-3 text-[15px] font-bold text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            Save as Draft
+            Save As Draft
           </button>
 
           <button
