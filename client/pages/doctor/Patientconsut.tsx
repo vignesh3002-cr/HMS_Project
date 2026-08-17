@@ -1060,7 +1060,7 @@ vomiting. Appetite normal.`
                     INVESTIGATIONS
                 ================================================= */}
 
-                <section className="flex h-[297px] w-full flex-col gap-4 rounded-xl border border-slate-200 bg-white p-[25px]">
+                <section className="flex h-full w-full flex-col gap-4 rounded-xl border border-slate-200 bg-white p-[25px]">
 
                   <div className="text-lg font-bold leading-7 text-slate-800">
                     Investigations / Scans
@@ -1402,7 +1402,7 @@ vomiting. Appetite normal.`
 
                     <button
                       onClick={cancelConsultation}
-                      className="flex h-9 w-[88px] items-center justify-center rounded-lg border border-slate-300 bg-white px-[25px] py-[9px] text-sm font-bold leading-5 text-slate-600"
+                      className="flex h-9 w-fit items-center justify-center rounded-lg border border-slate-300 bg-white px-[25px] py-[9px] text-sm font-bold leading-5 text-slate-600"
                     >
                       Cancel
                     </button>
@@ -1411,7 +1411,7 @@ vomiting. Appetite normal.`
 
                     <button
                       onClick={saveDraft}
-                      className="flex h-9 w-[128px] items-center justify-center rounded-lg border border-blue-200 bg-white px-[25px] py-[9px] text-sm font-bold leading-5 text-blue-600"
+                      className="flex h-9 w-fit items-center justify-center rounded-lg border border-blue-200 bg-white px-[25px] py-[9px] text-sm font-bold leading-5 text-blue-600"
                     >
                       Save as Draft
                     </button>
