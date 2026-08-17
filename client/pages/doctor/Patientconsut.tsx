@@ -73,6 +73,9 @@ const Consultation: React.FC = () => {
   const [patient, setPatient] = useState<PatientRecord | null>(null);
   const [patientError, setPatientError] = useState("");
 
+  const [encounter, setEncounter] = useState<EncounterRecord | null>(null);
+  const [encounterError, setEncounterError] = useState("");
+
   const formatDateDMY = (value?: string | null) => {
     if (!value) return "";
     const date = new Date(value);
@@ -2254,10 +2257,8 @@ const Diagnosis: React.FC<{ embedded?: boolean; patientId?: string }> = ({
       data: { categories: { diagnosis_catogory_id: string }[] };
     }>("/diagnosis/categories")
       .then((categoriesResponse) => {
-        const categories = categoriesResponse.data.data.categories.filter(
-          (category) => category.diagnosis_catogory_id.trim() !== ""
-        );
-        return Promise.allSettled(
+        const categories = categoriesResponse.data.data.categories;
+        return Promise.all(
           categories.map((category) =>
             API.get<{
               success: boolean;
@@ -2268,12 +2269,10 @@ const Diagnosis: React.FC<{ embedded?: boolean; patientId?: string }> = ({
           )
         );
       })
-      .then((results) => {
+      .then((responses) => {
         if (cancelled) return;
-        diagnosisCatalogRef.current = results.flatMap((result) =>
-          result.status === "fulfilled"
-            ? result.value.data.data.diagnoses
-            : []
+        diagnosisCatalogRef.current = responses.flatMap(
+          (response) => response.data.data.diagnoses
         );
       })
       .catch((error) => {
@@ -2685,13 +2684,10 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
         <div className="mt-12 flex justify-end">
           <button
             type="submit"
-            disabled={savingDiagnosis}
-            className="inline-flex items-center justify-center rounded-md border border-transparent bg-[#1d4ed8] px-6 py-3 text-base font-medium text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center justify-center rounded-md border border-transparent bg-[#1d4ed8] px-6 py-3 text-base font-medium text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
           >
             <DoubleArrowIcon />
-            <span className="ml-2">
-              {savingDiagnosis ? "Saving…" : "Next"}
-            </span>
+            <span className="ml-2">Next</span>
           </button>
         </div>
       </form>

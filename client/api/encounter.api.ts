@@ -1,3 +1,4 @@
+import type { AxiosRequestConfig } from "axios";
 import API from "./axios";
 
 export interface CreateEncounterPayload {
@@ -97,8 +98,8 @@ export const encounterApi = {
       };
     }>("/encounters", { params }),
 
-  getByNumber: (encounterNo: string) =>
-    API.get<{ success: boolean; data: EncounterRecord }>(`/encounters/${encounterNo}`),
+  getByNumber: (encounterNo: string, config?: AxiosRequestConfig) =>
+    API.get<{ success: boolean; data: EncounterRecord }>(`/encounters/${encounterNo}`, config),
 
   update: (encounterNo: string, data: Partial<EncounterRecord>) =>
     API.put<{ success: boolean; message: string; data: EncounterRecord }>(
