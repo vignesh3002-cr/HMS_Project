@@ -131,7 +131,6 @@ export interface EmployeeDetailResponse {
     branch_id: string;
     branch_name: string;
     status?: number;
-    is_primary_branch?: boolean;
     has_schedule?: boolean;
     assigned_date?: string | null;
   }[];

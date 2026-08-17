@@ -16,6 +16,7 @@ import { doctorLeaveApi } from "@/api/doctorLeave.api";
 import { getUser } from "@/utils/token";
 import { DepartmentPill } from "@/components/hms/DepartmentBadge";
 import { StatusBadge } from "@/components/hms/StatusBadge";
+import { activeBranches as getActiveBranches } from "@/lib/utils";
 
 function formatDoctorFullName(e: EmployeeDetailResponse["employee"] | null): string {
   if (!e) return "Doctor";
@@ -1051,8 +1052,10 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                           selected={fromDate}
                           hideThemePicker
                           onSelect={(date) => {
-                            setFromDate(date);
-                            setIsFromCalendarOpen(false);
+                            if (date instanceof Date) {
+                              setFromDate(date);
+                              setIsFromCalendarOpen(false);
+                            }
                           }}
                         />
                       </PopoverContent>
@@ -1078,8 +1081,10 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                           selected={toDate}
                           hideThemePicker
                           onSelect={(date) => {
-                            setToDate(date);
-                            setIsToCalendarOpen(false);
+                            if (date instanceof Date) {
+                              setToDate(date);
+                              setIsToCalendarOpen(false);
+                            }
                           }}
                         />
                       </PopoverContent>
@@ -1349,7 +1354,7 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
 
       <ScheduleSlotModal
         ref={slotModalRef}
-        branches={doctorDetail?.branches ?? []}
+        branches={getActiveBranches(doctorDetail?.branches)}
         onAddSlot={handleAddSlot}
         onUpdateSlot={handleUpdateSlot}
         onCancelSlot={handleCancelSlot}

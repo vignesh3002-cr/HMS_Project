@@ -632,11 +632,9 @@ export default function AddEmployee() {
           (payload?.branches as { branch_id: string; status: number }[] | undefined)
             ?.filter((b) => b.status === 1)
             .map((b) => b.branch_id) ?? [];
-        const branchIds = activeBranchIds.length
-          ? activeBranchIds
-          : employee.branch_id
-          ? [employee.branch_id]
-          : [];
+        // user_branch_mapping is the only branch source of truth -- no
+        // employees.branch_id fallback for users without mappings.
+        const branchIds = activeBranchIds;
 
         const loadedFormData: EmployeeFormData = {
           username: user?.username || "",

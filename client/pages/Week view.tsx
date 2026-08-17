@@ -606,16 +606,16 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           >
 
             {isLoadingWeek ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
+              <div className="w-full min-h-[500px] flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
                 <Loader2 size={24} className="animate-spin text-[#00488D]" />
                 Loading schedule...
               </div>
             ) : doctors.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-[#6B7280] text-sm">
+              <div className="w-full min-h-[500px] flex items-center justify-center py-16 text-[#6B7280] text-sm">
                 No appointments found for this week.
               </div>
             ) : visibleDoctors.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-[#6B7280] text-sm">
+              <div className="w-full min-h-[500px] flex items-center justify-center py-16 text-[#6B7280] text-sm">
                 No doctors match your search or filters.
               </div>
             ) : (
