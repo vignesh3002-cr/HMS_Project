@@ -793,6 +793,16 @@ vomiting. Appetite normal.`
                   <LabReview embedded />
                 ) : activeStep === "DIAGNOSIS" ? (
                   <Diagnosis embedded />
+                ) : activeStep === "TREATMENT PLAN" ? (
+                  <TreatmentPlan embedded />
+                ) : activeStep === "CHEMOTHERAPY ORDER" ? (
+                  <ChemotherapyOrder embedded />
+                ) : activeStep === "DISCHARGE MEDICATION" ? (
+                  <DischargeMedication embedded />
+                ) : activeStep === "FOLLOW UP" ? (
+                  <FollowUp embedded />
+                ) : activeStep === "SUMMARY" ? (
+                  <Summary embedded />
                 ) : (
                   <>
                     {/* =================================================
@@ -2394,6 +2404,3113 @@ const Diagnosis: React.FC<{ embedded?: boolean }> = ({
           {content}
         </main>
       </div>
+    </div>
+  );
+};
+
+/* ============================================================
+   DISCHARGE MEDICATION COMPONENT
+   (combined from client/pages/doctor/discharge.tsx —
+    renamed PatientDischargeMedication → DischargeMedication,
+    Medication type renamed to DischargeMedicationItem to avoid
+    clashing with the Medication interface above, duplicate
+    React import and icon definitions removed,
+    CheckIcon / DoubleArrowIcon reused from above,
+    embedded prop added so it can live in this file)
+============================================================ */
+
+type DischargeMedicationItem = {
+  id: number;
+  drugName: string;
+  dosage: string;
+  frequency: string;
+  instruction: string;
+  duration: string;
+};
+
+const ArrowLeftIcon = () => (
+  <svg
+    className="h-6 w-6"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+  >
+    <path
+      d="M19 12H5M12 19l-7-7 7-7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const BellIcon = () => (
+  <svg
+    className="h-6 w-6"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+  >
+    <path
+      d="M18 8a6 6 0 00-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const PhoneIcon = () => (
+  <svg
+    className="h-5 w-5"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+  >
+    <path
+      d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.12.9.33 1.78.62 2.63a2 2 0 01-.45 2.11L8 9.73a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.85.29 1.73.5 2.63.62A2 2 0 0122 16.92z"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const MailIcon = () => (
+  <svg
+    className="h-5 w-5"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+  >
+    <rect
+      x="3"
+      y="5"
+      width="18"
+      height="14"
+      rx="2"
+    />
+    <path
+      d="M3 7l9 6 9-6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const DischargeMedication: React.FC<{ embedded?: boolean }> = ({
+  embedded = false,
+}) => {
+  const [medications, setMedications] = useState<DischargeMedicationItem[]>([
+    {
+      id: 1,
+      drugName: "Capecitabine",
+      dosage: "500 mg",
+      frequency: "2-0-2",
+      instruction: "After Food",
+      duration: "14 Days",
+    },
+    {
+      id: 2,
+      drugName: "Domstal",
+      dosage: "10 mg",
+      frequency: "1-1-1",
+      instruction: "Before Food",
+      duration: "14 Days",
+    },
+    {
+      id: 3,
+      drugName: "Loperamide",
+      dosage: "2 mg",
+      frequency: "SOS",
+      instruction: "After Loose Motion",
+      duration: "5 Days",
+    },
+    {
+      id: 4,
+      drugName: "Pantoprazole",
+      dosage: "40 mg",
+      frequency: "1-0-1",
+      instruction: "Before Food",
+      duration: "14 Days",
+    },
+  ]);
+
+  const [activeStep, setActiveStep] = useState(1);
+
+  const handleAddDrug = () => {
+    const newMedication: DischargeMedicationItem = {
+      id: Date.now(),
+      drugName: "New Drug",
+      dosage: "0 mg",
+      frequency: "1-0-1",
+      instruction: "After Food",
+      duration: "7 Days",
+    };
+
+    setMedications((current) => [...current, newMedication]);
+  };
+
+  const handleNext = () => {
+    if (activeStep < 3) {
+      setActiveStep((current) => current + 1);
+    }
+  };
+
+  const handleBack = () => {
+    window.history.back();
+  };
+
+  const handleViewProfile = () => {
+    console.log("View Full Profile");
+  };
+
+if (embedded) {
+
+  return (
+    <div className="w-full">
+      {/* MEDICATION CARD */}
+      <div className="mb-8 w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+        {/* Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[850px] border-collapse text-left">
+            <thead>
+              <tr className="border-b border-gray-200">
+                <th className="w-1/4 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+                  Drug Name
+                </th>
+
+                <th className="w-1/6 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+                  Dosage
+                </th>
+
+                <th className="w-1/6 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+                  Frequency
+                </th>
+
+                <th className="w-1/4 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+                  Instruction
+                </th>
+
+                <th className="w-1/6 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+                  Duration
+                </th>
+              </tr>
+            </thead>
+
+            <tbody className="text-sm text-gray-500">
+              {medications.map((medication) => (
+                <tr
+                  key={medication.id}
+                  className="border-b border-gray-100 transition-colors hover:bg-gray-50 last:border-gray-200"
+                >
+                  <td className="px-8 py-6 text-gray-800">
+                    {medication.drugName}
+                  </td>
+
+                  <td className="px-8 py-6">
+                    {medication.dosage}
+                  </td>
+
+                  <td className="px-8 py-6">
+                    {medication.frequency}
+                  </td>
+
+                  <td className="px-8 py-6">
+                    {medication.instruction}
+                  </td>
+
+                  <td className="px-8 py-6">
+                    {medication.duration}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Add Drug */}
+        <div className="flex justify-end p-6">
+          <button
+            type="button"
+            onClick={handleAddDrug}
+            className="rounded border border-blue-600 px-6 py-2 text-sm font-semibold text-blue-600 transition-colors duration-200 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          >
+            Add Drug
+          </button>
+        </div>
+      </div>
+
+      {/* FOOTER ACTION */}
+      <div className="mb-8 flex w-full justify-end">
+        <button
+          type="button"
+          onClick={handleNext}
+          className="flex items-center gap-2 rounded-md bg-[#1d4ed8] px-8 py-3 font-bold text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+        >
+          <DoubleArrowIcon />
+          Next
+        </button>
+      </div>
+    </div>
+  );
+  }
+
+  return (
+    <div className="flex min-h-screen bg-gray-50 font-sans text-gray-800 antialiased">
+      {/* SIDEBAR */}
+      <aside className="relative z-20 flex min-h-screen w-80 shrink-0 flex-col border-r border-gray-200 bg-white">
+        {/* Profile Summary */}
+        <div className="flex flex-col items-center border-b border-gray-200 p-8">
+          <div className="relative mb-6 h-32 w-32 overflow-hidden rounded-full ring-4 ring-[#eab308] shadow-sm">
+            <img
+              src="https://lh3.googleusercontent.com/aida-public/AB6AXuCnsdAYC4K7vv6d8dEOYDc2tUF4lEiQxVv5rMG9UTzBJQv4yIcMv_4mbdll__QCclcJuf6NeqfLMuP3yVcRd73LeRuA6aV50wx-yzVKgsWW3A30ft0JHXjZG7oKynjg4uxep0YUPqWnJlJBowieFaiClZsF236pjJKmz6f-0Va0Nf2gPPr6Lk4IzQzNeU3O8f_59fTnrcnNhSKrpy-WRQ5R0HRanbu6B0Pi--KmCbyeTDK48fnhrtGA"
+              alt="Vijaya Nallusamy"
+              className="h-full w-full object-cover"
+            />
+          </div>
+
+          <h2 className="mb-2 text-[22px] font-bold text-gray-900">
+            Vijaya Nallusamy
+          </h2>
+
+          <p className="mb-4 text-[15px] text-gray-500">
+            51 Y / Female
+          </p>
+
+          <span className="mb-6 rounded-full bg-gray-100 px-4 py-1.5 text-xs font-semibold text-gray-600">
+            ONC-2026-10025
+          </span>
+
+          <p className="text-center text-sm font-bold tracking-wide text-blue-700">
+            DUCTAL CARCINOMA STAGE II
+          </p>
+        </div>
+
+        {/* Contact */}
+        <div className="space-y-6 border-b border-gray-200 p-8">
+          <div className="flex items-start gap-4">
+            <PhoneIcon />
+
+            <div>
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                Phone
+              </p>
+
+              <p className="text-[15px] font-medium text-gray-700">
+                +91 98765 43210
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-4">
+            <MailIcon />
+
+            <div>
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                Email
+              </p>
+
+              <p className="text-[15px] font-medium text-gray-700">
+                vijaya.n@example.com
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Vitals */}
+        <div className="flex-grow space-y-8 p-8">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-6">
+            <div>
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                Height
+              </p>
+
+              <p className="text-[15px] font-bold text-gray-900">
+                154 cm
+              </p>
+            </div>
+
+            <div>
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                Weight
+              </p>
+
+              <p className="text-[15px] font-bold text-gray-900">
+                52 kg
+              </p>
+            </div>
+
+            <div>
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                BSA
+              </p>
+
+              <p className="text-[15px] font-bold text-gray-900">
+                1.49 m²
+              </p>
+            </div>
+
+            <div>
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                BMI
+              </p>
+
+              <p className="text-[15px] font-bold text-gray-900">
+                21.93
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleViewProfile}
+            className="mt-8 w-full rounded-md border border-blue-600 px-4 py-2.5 font-semibold text-blue-600 transition-colors duration-200 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          >
+            View Full Profile
+          </button>
+        </div>
+      </aside>
+
+      {/* MAIN CONTENT */}
+      <main className="relative z-10 flex min-w-0 flex-1 flex-col bg-gray-50">
+        {/* TOP HEADER */}
+        <header className="relative z-20 flex h-20 shrink-0 items-center justify-between bg-white px-8">
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={handleBack}
+              aria-label="Back"
+              className="-ml-2 rounded-full p-2 text-gray-600 transition-colors hover:bg-gray-100"
+            >
+              <ArrowLeftIcon />
+            </button>
+
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+              Patients
+            </h1>
+          </div>
+
+          <div className="flex items-center gap-6">
+            {/* Notification */}
+            <button
+              type="button"
+              aria-label="Notifications"
+              className="relative rounded-full p-2 text-gray-500 transition-colors hover:bg-gray-100"
+            >
+              <BellIcon />
+
+              <span className="absolute right-2 top-2 h-2 w-2 rounded-full border-2 border-white bg-red-500" />
+            </button>
+
+            {/* User */}
+            <div className="flex items-center gap-4 border-l border-gray-200 pl-6">
+              <span className="text-sm font-bold tracking-wide text-gray-700">
+                HMS
+              </span>
+
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-900 text-sm font-bold text-white">
+                DR
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Background under stepper */}
+        <div className="absolute left-0 right-0 top-20 z-0 h-40 border-b border-gray-200 bg-white" />
+
+        {/* CONTENT */}
+        <div className="relative z-10 flex-1 overflow-y-auto p-8 pt-0">
+          <div className="mx-auto max-w-[1200px]">
+            {/* MEDICATION CARD */}
+            <div className="mx-auto mb-8 max-w-[1200px] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+              {/* Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[850px] border-collapse text-left">
+                  <thead>
+                    <tr className="border-b border-gray-200">
+                      <th className="w-1/4 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+                        Drug Name
+                      </th>
+
+                      <th className="w-1/6 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+                        Dosage
+                      </th>
+
+                      <th className="w-1/6 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+                        Frequency
+                      </th>
+
+                      <th className="w-1/4 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+                        Instruction
+                      </th>
+
+                      <th className="w-1/6 px-8 py-5 text-[11px] font-bold uppercase tracking-wider text-gray-600">
+                        Duration
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="text-sm text-gray-500">
+                    {medications.map((medication) => (
+                      <tr
+                        key={medication.id}
+                        className="border-b border-gray-100 transition-colors hover:bg-gray-50 last:border-gray-200"
+                      >
+                        <td className="px-8 py-6 text-gray-800">
+                          {medication.drugName}
+                        </td>
+
+                        <td className="px-8 py-6">
+                          {medication.dosage}
+                        </td>
+
+                        <td className="px-8 py-6">
+                          {medication.frequency}
+                        </td>
+
+                        <td className="px-8 py-6">
+                          {medication.instruction}
+                        </td>
+
+                        <td className="px-8 py-6">
+                          {medication.duration}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Add Drug */}
+              <div className="flex justify-end p-6">
+                <button
+                  type="button"
+                  onClick={handleAddDrug}
+                  className="rounded border border-blue-600 px-6 py-2 text-sm font-semibold text-blue-600 transition-colors duration-200 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                >
+                  Add Drug
+                </button>
+              </div>
+            </div>
+
+            {/* FOOTER ACTION */}
+            <div className="mx-auto mb-8 flex max-w-[1200px] justify-end">
+              <button
+                type="button"
+                onClick={handleNext}
+                className="flex items-center gap-2 rounded-md bg-[#1d4ed8] px-8 py-3 font-bold text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              >
+                <DoubleArrowIcon />
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+/* ============================================================
+   CHEMOTHERAPY ORDER COMPONENT
+   (combined from client/pages/doctor/chemo.tsx —
+    renamed App-style component ChemotherapyOrder to the same
+    embedded pattern as LabReview / Diagnosis / DischargeMedication,
+    icons moved inside the component to avoid colliding with the
+    module-level CheckIcon / BackIcon, original chemo.tsx file
+    left untouched)
+============================================================ */
+
+type Drug = {
+  id: number;
+  name: string;
+  form: string;
+  dose: string;
+  unit: string;
+  volume: string;
+};
+
+const ChemotherapyOrder: React.FC<{ embedded?: boolean }> = ({
+  embedded = false,
+}) => {
+  const [cycleDay, setCycleDay] = useState("Cycle 1 / Day 1");
+  const [startDate, setStartDate] = useState("20-06-2026");
+  const [activeTab, setActiveTab] = useState("Chemotherapy Orders");
+
+  const [drugs, setDrugs] = useState<Drug[]>([
+    {
+      id: 1,
+      name: "Oxaliplatin",
+      form: "Injection",
+      dose: "85",
+      unit: "mg/m2",
+      volume: "250 ml",
+    },
+    {
+      id: 2,
+      name: "Leucovorin",
+      form: "Injection",
+      dose: "200",
+      unit: "mg/m2",
+      volume: "250 ml",
+    },
+    {
+      id: 3,
+      name: "5 Fluorouracil",
+      form: "Injection",
+      dose: "2400",
+      unit: "mg/m2",
+      volume: "CIV",
+    },
+  ]);
+
+  const tabs = [
+    "Chemotherapy Orders",
+    "Premedication",
+    "Hydration",
+    "Admin Instructions",
+  ];
+
+  const handleSave = () => {
+    console.log("Saved chemotherapy order:", {
+      protocol: "FOLFOX (2 Weekly)",
+      cycleDay,
+      startDate,
+      drugs,
+    });
+  };
+
+  const handleAddDrug = () => {
+    const newDrug: Drug = {
+      id: Date.now(),
+      name: "New Drug",
+      form: "Injection",
+      dose: "0",
+      unit: "mg/m2",
+      volume: "250 ml",
+    };
+
+    setDrugs((current) => [...current, newDrug]);
+  };
+
+  const handleDelete = (id: number) => {
+    setDrugs((current) =>
+      current.filter((drug) => drug.id !== id)
+    );
+  };
+
+  const handleEdit = (id: number) => {
+    const drug = drugs.find((item) => item.id === id);
+
+    if (drug) {
+      console.log("Edit drug:", drug);
+    }
+  };
+
+  /* Icons (scoped inside the component) */
+
+  const BackIcon = () => (
+    <svg
+      className="h-6 w-6"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="M10 19l-7-7m0 0l7-7m-7 7h18"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const BellIcon = () => (
+    <svg
+      className="h-6 w-6"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const CheckIcon = () => (
+    <svg
+      className="h-5 w-5"
+      fill="currentColor"
+      viewBox="0 0 20 20"
+    >
+      <path
+        fillRule="evenodd"
+        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+
+  const RefreshIcon = () => (
+    <svg
+      className="h-5 w-5 text-gray-400"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+      />
+    </svg>
+  );
+
+  const CalendarIcon = () => (
+    <svg
+      className="h-5 w-5 text-gray-400"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+      />
+    </svg>
+  );
+
+  const SaveIcon = () => (
+    <svg
+      className="-ml-1 mr-2 h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const EditIcon = () => (
+    <svg
+      className="h-6 w-6"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const DeleteIcon = () => (
+    <svg
+      className="h-6 w-6"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const content = (
+    <div className="w-full max-w-6xl space-y-8">
+      {/* ================= ORDER CONTAINER ================= */}
+      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+        {/* ================= FORM HEADER ================= */}
+        <div className="grid grid-cols-1 gap-8 p-8 pb-6 md:grid-cols-3">
+          {/* Protocol */}
+          <div className="space-y-2">
+            <label
+              htmlFor="protocol"
+              className="block text-sm font-semibold uppercase tracking-wide text-gray-500"
+            >
+              Protocol
+            </label>
+
+            <input
+              id="protocol"
+              type="text"
+              value="FOLFOX (2 Weekly)"
+              readOnly
+              className="mt-1 block w-full rounded-md border border-gray-300 px-4 py-3 text-base text-gray-900 shadow-sm outline-none"
+            />
+          </div>
+
+          {/* Cycle / Day */}
+          <div className="relative space-y-2">
+            <label
+              htmlFor="cycle-day"
+              className="block text-sm font-semibold uppercase tracking-wide text-gray-500"
+            >
+              Cycle / Day
+            </label>
+
+            <div className="relative mt-1 rounded-md shadow-sm">
+              <input
+                id="cycle-day"
+                type="text"
+                value={cycleDay}
+                onChange={(e) =>
+                  setCycleDay(e.target.value)
+                }
+                className="block w-full rounded-md border border-gray-300 py-3 pl-4 pr-10 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              />
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                <RefreshIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Start Date */}
+          <div className="relative space-y-2">
+            <label
+              htmlFor="start-date"
+              className="block text-sm font-semibold uppercase tracking-wide text-gray-500"
+            >
+              Start Date
+            </label>
+
+            <div className="relative mt-1 rounded-md shadow-sm">
+              <input
+                id="start-date"
+                type="text"
+                value={startDate}
+                onChange={(e) =>
+                  setStartDate(e.target.value)
+                }
+                className="block w-full rounded-md border border-gray-300 py-3 pl-4 pr-10 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              />
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                <CalendarIcon />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ================= TABS ================= */}
+        <div className="border-b border-gray-200 px-8">
+          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+            <nav
+              aria-label="Tabs"
+              className="-mb-px flex gap-6 overflow-x-auto"
+            >
+              {tabs.map((tab) => {
+                const isActive = activeTab === tab;
+
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setActiveTab(tab)}
+                    className={`whitespace-nowrap border-b-2 px-1 py-4 text-base font-medium transition-colors ${
+                      isActive
+                        ? "border-blue-600 text-blue-600"
+                        : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    }`}
+                  >
+                    {tab}
+                  </button>
+                );
+              })}
+            </nav>
+
+            {/* Save */}
+            <div className="pb-3">
+              <button
+                type="button"
+                onClick={handleSave}
+                className="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              >
+                <SaveIcon />
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ================= ORDER TABLE ================= */}
+        {activeTab === "Chemotherapy Orders" ? (
+          <div className="p-8">
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="py-4 pl-6 pr-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Drug Name
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Form
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Dose
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Unit
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Volume
+                    </th>
+
+                    <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-gray-200 bg-white">
+                  {drugs.map((drug) => (
+                    <tr
+                      key={drug.id}
+                      className="transition-colors hover:bg-gray-50"
+                    >
+                      <td className="whitespace-nowrap py-5 pl-6 pr-3 text-base font-medium text-gray-900">
+                        {drug.name}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-500">
+                        {drug.form}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-900">
+                        {drug.dose}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
+                        {drug.unit}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-500">
+                        {drug.volume}
+                      </td>
+
+                      <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
+                        <div className="flex items-center justify-end gap-3 text-gray-500">
+                          <button
+                            type="button"
+                            aria-label={`Edit ${drug.name}`}
+                            onClick={() =>
+                              handleEdit(drug.id)
+                            }
+                            className="transition-colors hover:text-gray-900 focus:outline-none"
+                          >
+                            <EditIcon />
+                          </button>
+
+                          <button
+                            type="button"
+                            aria-label={`Delete ${drug.name}`}
+                            onClick={() =>
+                              handleDelete(drug.id)
+                            }
+                            className="transition-colors hover:text-red-600 focus:outline-none"
+                          >
+                            <DeleteIcon />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Add Drug */}
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={handleAddDrug}
+                className="inline-flex items-center justify-center rounded-md border border-blue-200 bg-blue-50 px-6 py-2.5 text-sm font-semibold text-blue-600 shadow-sm transition-colors hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              >
+                Add Drug
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* Other Tabs */
+          <div className="flex min-h-[300px] items-center justify-center p-8">
+            <div className="text-center">
+              <p className="text-lg font-semibold text-gray-700">
+                {activeTab}
+              </p>
+
+              <p className="mt-2 text-sm text-gray-500">
+                No items available.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <div className="min-h-screen bg-[#fafbfc] font-sans text-gray-800 antialiased">
+      {/* ================= HEADER ================= */}
+      <header className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            aria-label="Go back"
+            className="rounded-full p-1 text-gray-600 transition-colors hover:text-gray-900 focus:outline-none"
+            onClick={() => window.history.back()}
+          >
+            <BackIcon />
+          </button>
+
+          <h1 className="text-2xl font-semibold tracking-tight text-gray-900">
+            Patients
+          </h1>
+        </div>
+
+        <div className="flex items-center gap-6">
+          {/* Notification */}
+          <button
+            type="button"
+            aria-label="Notifications"
+            className="relative text-gray-500 transition-colors hover:text-gray-700 focus:outline-none"
+          >
+            <BellIcon />
+
+            <span className="absolute right-0 top-0 block h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
+          </button>
+
+          {/* User */}
+          <div className="flex items-center gap-3">
+            <span className="text-base font-medium text-gray-700">
+              HMS
+            </span>
+
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-900 text-sm font-semibold text-white shadow-sm">
+              DR
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* ================= MAIN ================= */}
+      <main className="flex min-h-[calc(100vh-73px)] flex-grow justify-center p-8">
+        <div className="w-full max-w-6xl space-y-8">
+          {/* ================= STEPPER ================= */}
+          <nav
+            aria-label="Progress"
+            className="relative"
+          >
+            <ol className="relative z-0 flex w-full items-center">
+              {/* Step 1 */}
+              <li className="relative flex-1 text-center">
+                <div className="flex flex-col items-center">
+                  <span className="relative z-10 mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-gray-400 text-white shadow-sm">
+                    <CheckIcon />
+                  </span>
+
+                  <span className="text-xs font-bold uppercase tracking-wider text-gray-900">
+                    Diagnosis
+                  </span>
+                </div>
+
+                <div className="absolute left-1/2 top-4 -z-10 h-0.5 w-full bg-gray-200" />
+              </li>
+
+              {/* Step 2 */}
+              <li className="relative flex-1 text-center">
+                <div className="flex flex-col items-center">
+                  <span className="relative z-10 mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-gray-400 text-white shadow-sm">
+                    <CheckIcon />
+                  </span>
+
+                  <span className="text-xs font-bold uppercase tracking-wider text-gray-900">
+                    Treatment Plan
+                  </span>
+                </div>
+
+                <div className="absolute right-1/2 top-4 -z-10 h-0.5 w-full bg-gray-200" />
+                <div className="absolute left-1/2 top-4 -z-10 h-0.5 w-full bg-gray-200" />
+              </li>
+
+              {/* Step 3 */}
+              <li className="relative flex-1 text-center">
+                <div className="flex flex-col items-center">
+                  <span className="relative z-10 mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-green-500 text-white shadow-md ring-4 ring-white">
+                    <CheckIcon />
+                  </span>
+
+                  <span className="text-xs font-bold uppercase tracking-wider text-gray-900">
+                    Chemotherapy Order
+                  </span>
+
+                  <div className="mx-auto mt-3 h-1.5 w-full max-w-[200px] rounded-t-md bg-green-500" />
+                </div>
+
+                <div className="absolute right-1/2 top-4 -z-10 h-0.5 w-full bg-gray-200" />
+                <div className="absolute left-1/2 top-4 -z-10 h-0.5 w-full bg-gray-200" />
+              </li>
+
+              {/* Step 4 */}
+              <li className="relative flex-1 text-center">
+                <div className="flex flex-col items-center opacity-50">
+                  <span className="relative z-10 mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-gray-400 text-white shadow-sm" />
+
+                  <span className="text-xs font-bold uppercase tracking-wider text-gray-500">
+                    Discharge Plan
+                  </span>
+                </div>
+
+                <div className="absolute right-1/2 top-4 -z-10 h-0.5 w-full bg-gray-200" />
+              </li>
+            </ol>
+          </nav>
+
+          {content}
+        </div>
+      </main>
+    </div>
+  );
+};
+
+/* ============================================================
+   FOLLOW UP COMPONENT
+   (combined from client/pages/doctor/Follow.tsx —
+    renamed FollowUpScreen → FollowUp, duplicate React import
+    removed, icons scoped inside the component to avoid
+    colliding with the module-level icons above, embedded prop
+    added so it can live in this file, original Follow.tsx file
+    left untouched)
+============================================================ */
+
+type FollowUpStep = 1 | 2 | 3;
+
+const FollowUp: React.FC<{ embedded?: boolean }> = ({
+  embedded = false,
+}) => {
+  const [activeStep, setActiveStep] = useState<FollowUpStep>(2);
+  const [nextVisitDate, setNextVisitDate] = useState("04-07-2026");
+  const [nextCycle, setNextCycle] = useState("Cycle 2 / Day 2");
+  const [plan, setPlan] = useState("Continue Treatment");
+  const [notes, setNotes] = useState(
+    "Review after 2 weeks with CBC."
+  );
+
+  const handleBack = () => {
+    window.history.back();
+  };
+
+  const handleSubmit = () => {
+    const followUpData = {
+      nextVisitDate,
+      nextCycle,
+      plan,
+      notes,
+    };
+
+    console.log("Follow Up Submitted:", followUpData);
+
+    alert("Follow-up submitted successfully.");
+  };
+
+  const handleViewProfile = () => {
+    console.log("View Full Profile clicked");
+  };
+
+  /* Icons (scoped inside the component to avoid colliding
+     with the module-level icons defined above) */
+
+  const ArrowLeftIcon = () => (
+    <svg
+      className="h-5 w-5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path
+        d="M19 12H5M12 19l-7-7 7-7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const BellIcon = () => (
+    <svg
+      className="h-5 w-5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path
+        d="M18 8a6 6 0 00-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const PhoneIcon = () => (
+    <svg
+      className="mt-1 h-4 w-4 shrink-0 text-gray-400"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
+      <path
+        d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.12.9.33 1.78.62 2.63a2 2 0 01-.45 2.11L8 9.73a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.85.29 1.73.5 2.63.62A2 2 0 0122 16.92z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const EmailIcon = () => (
+    <svg
+      className="mt-1 h-4 w-4 shrink-0 text-gray-400"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
+      <rect
+        x="3"
+        y="5"
+        width="18"
+        height="14"
+        rx="2"
+      />
+      <path
+        d="M3 7l9 6 9-6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const CalendarIcon = () => (
+    <svg
+      className="h-5 w-5 text-gray-400"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <rect
+        x="3"
+        y="4"
+        width="18"
+        height="17"
+        rx="2"
+      />
+      <path
+        d="M16 2v4M8 2v4M3 10h18"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+
+  const ChevronDownIcon = () => (
+    <svg
+      className="h-4 w-4 text-gray-400"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path
+        d="M6 9l6 6 6-6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const CheckIcon = () => (
+    <svg
+      className="h-3.5 w-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+    >
+      <path
+        d="M5 12l4 4L19 6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const DoubleArrowIcon = () => (
+    <svg
+      className="mr-2 h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+    >
+      <path
+        d="M6 7l5 5-5 5M13 7l5 5-5 5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  /* =========================================================
+     CONTENT (FOLLOW UP FORM + ACTION)
+  ========================================================= */
+
+  const content = (
+    <>
+      {/* FOLLOW UP FORM */}
+      <div className="mb-6 flex-grow rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            handleSubmit();
+          }}
+          className="space-y-8"
+        >
+          {/* Row 1 */}
+          <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+            {/* Next Visit Date */}
+            <div>
+              <label
+                htmlFor="nextVisitDate"
+                className="mb-2 block text-sm font-semibold text-gray-800"
+              >
+                Next Visit Date
+              </label>
+
+              <div className="relative">
+                <input
+                  id="nextVisitDate"
+                  type="text"
+                  value={nextVisitDate}
+                  onChange={(event) =>
+                    setNextVisitDate(event.target.value)
+                  }
+                  className="block w-full rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
+                  <CalendarIcon />
+                </div>
+              </div>
+            </div>
+
+            {/* Next Cycle */}
+            <div>
+              <label
+                htmlFor="nextCycle"
+                className="mb-2 block text-sm font-semibold text-gray-800"
+              >
+                Next Cycle
+              </label>
+
+              <div className="relative">
+                <select
+                  id="nextCycle"
+                  value={nextCycle}
+                  onChange={(event) =>
+                    setNextCycle(event.target.value)
+                  }
+                  className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                >
+                  <option>Cycle 2 / Day 2</option>
+                  <option>Cycle 2 / Day 8</option>
+                  <option>Cycle 3 / Day 1</option>
+                  <option>Cycle 3 / Day 2</option>
+                </select>
+
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
+                  <ChevronDownIcon />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Plan */}
+          <div className="w-full md:w-1/2 md:pr-4">
+            <label
+              htmlFor="plan"
+              className="mb-2 block text-sm font-semibold text-gray-800"
+            >
+              Plan
+            </label>
+
+            <div className="relative">
+              <select
+                id="plan"
+                value={plan}
+                onChange={(event) =>
+                  setPlan(event.target.value)
+                }
+                className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              >
+                <option>Continue Treatment</option>
+                <option>Complete Treatment</option>
+                <option>Hold Treatment</option>
+                <option>Refer for Review</option>
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label
+              htmlFor="notes"
+              className="mb-2 block text-sm font-semibold text-gray-800"
+            >
+              Notes
+            </label>
+
+            <textarea
+              id="notes"
+              rows={4}
+              value={notes}
+              onChange={(event) =>
+                setNotes(event.target.value)
+              }
+              className="block w-full resize-none rounded-lg border border-gray-300 bg-white p-4 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            />
+          </div>
+        </form>
+      </div>
+
+      {/* FORM ACTION */}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={handleSubmit}
+          className="inline-flex items-center justify-center rounded-lg border border-transparent bg-[#2557D6] px-8 py-3 text-base font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+        >
+          <DoubleArrowIcon />
+          Submit
+        </button>
+      </div>
+    </>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-slate-50 font-sans text-gray-800 antialiased">
+
+      {/* =========================================================
+          LEFT SIDEBAR - PATIENT PROFILE
+      ========================================================= */}
+
+      <aside className="flex h-full w-[300px] shrink-0 flex-col overflow-y-auto border-r border-gray-200 bg-white">
+
+        {/* Profile Header */}
+        <div className="flex flex-col items-center border-b border-gray-100 p-6">
+
+          <img
+            src="https://lh3.googleusercontent.com/aida-public/AB6AXuBrnfR3fCX6sbv0UhV_OdJK1zeptYSdZvOp_xvwkIxkJBZ_xTgXwflZS8imkZtvlyP1cxvapPPk25VBx24iGZEt6ggDNasPQEOF6ycThAjSfwCaOWP124jgSG7y9m0mWNZX-guLWnGqVaeVnguo4WKNWusknjFNvAetqst5wwUVh9K0kiSQZ6nWNAlFaBovJVLKG5c88pfogGkdDHwwbByjWemnWuaDPGsgSaJfa0pLDHg3jj9tyAcpF1YYs6OoVVSKVA"
+            alt="Patient Photo"
+            className="mb-4 h-[110px] w-[110px] rounded-full object-cover shadow-sm"
+          />
+
+          <h2 className="mb-1 text-xl font-bold text-gray-900">
+            Vijaya Nallusamy
+          </h2>
+
+          <p className="mb-3 text-sm text-gray-500">
+            51 Y / Female
+          </p>
+
+          <span className="mb-4 rounded-md bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700">
+            ONC-2026-10025
+          </span>
+
+          <h3 className="text-center text-sm font-bold uppercase tracking-wide text-blue-600">
+            Ductal Carcinoma Stage II
+          </h3>
+        </div>
+
+        {/* Contact Info */}
+        <div className="space-y-5 border-b border-gray-100 p-6">
+
+          <div className="flex items-start">
+            <PhoneIcon />
+
+            <div className="ml-4">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
+                Phone
+              </p>
+
+              <p className="text-sm font-medium text-gray-800">
+                +91 98765 43210
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start">
+            <EmailIcon />
+
+            <div className="ml-4">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
+                Email
+              </p>
+
+              <p className="text-sm font-medium text-gray-800">
+                vijaya.n@example.com
+              </p>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Vitals */}
+        <div className="grid grid-cols-2 gap-y-6 border-b border-gray-100 p-6">
+
+          <div>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
+              Height
+            </p>
+            <p className="text-sm font-bold text-gray-900">
+              154 cm
+            </p>
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
+              Weight
+            </p>
+            <p className="text-sm font-bold text-gray-900">
+              52 kg
+            </p>
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
+              BSA
+            </p>
+            <p className="text-sm font-bold text-gray-900">
+              1.49 m²
+            </p>
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
+              BMI
+            </p>
+            <p className="text-sm font-bold text-gray-900">
+              21.93
+            </p>
+          </div>
+
+        </div>
+
+        {/* Profile Button */}
+        <div className="mt-auto p-6">
+          <button
+            type="button"
+            onClick={handleViewProfile}
+            className="w-full rounded-lg border border-blue-500 px-4 py-2.5 text-sm font-semibold text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          >
+            View Full Profile
+          </button>
+        </div>
+      </aside>
+
+      {/* =========================================================
+          MAIN CONTENT
+      ========================================================= */}
+
+      <main className="flex min-w-0 flex-1 flex-col">
+
+        {/* =======================================================
+            TOP HEADER
+        ======================================================== */}
+
+        <header className="z-10 flex h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6 shadow-sm">
+
+          {/* Left */}
+          <div className="flex items-center">
+
+            <button
+              type="button"
+              onClick={handleBack}
+              className="mr-4 text-gray-500 transition-colors hover:text-gray-700 focus:outline-none"
+              aria-label="Go back"
+            >
+              <ArrowLeftIcon />
+            </button>
+
+            <h1 className="text-xl font-bold text-gray-900">
+              Patients
+            </h1>
+
+          </div>
+
+          {/* Right */}
+          <div className="flex items-center space-x-6">
+
+            {/* Notification */}
+            <button
+              type="button"
+              className="relative text-gray-400 transition-colors hover:text-gray-600"
+              aria-label="Notifications"
+            >
+              <BellIcon />
+
+              <span className="absolute right-0 top-0 h-2 w-2 rounded-full border border-white bg-red-500" />
+            </button>
+
+            {/* User */}
+            <div className="flex items-center space-x-3">
+
+              <span className="text-sm font-bold text-gray-800">
+                HMS
+              </span>
+
+              <button
+                type="button"
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-800 text-sm font-bold text-white shadow-sm transition-colors hover:bg-blue-900"
+              >
+                DR
+              </button>
+
+            </div>
+          </div>
+        </header>
+
+        {/* =======================================================
+            SCROLLABLE CONTENT
+        ======================================================== */}
+
+        <div className="flex-1 overflow-y-auto bg-slate-50 p-6">
+
+          <div className="mx-auto flex h-full max-w-5xl flex-col">
+
+            {/* ===================================================
+                PROGRESS STEPPER
+            ==================================================== */}
+
+            <div className="mb-8 px-4">
+
+              <div className="relative flex items-center justify-between">
+
+                {/* Step 1 */}
+                <button
+                  type="button"
+                  onClick={() => setActiveStep(1)}
+                  className="group relative z-10 flex flex-1 cursor-pointer flex-col items-center text-center"
+                >
+                  <div
+                    className={`z-10 mb-3 flex h-8 w-8 items-center justify-center rounded-full text-white shadow-sm ${
+                      activeStep >= 1
+                        ? "bg-green-500"
+                        : "bg-gray-400"
+                    }`}
+                  >
+                    <CheckIcon />
+                  </div>
+
+                  <span className="text-xs font-bold uppercase tracking-wider text-gray-800">
+                    Discharge Medication
+                  </span>
+                </button>
+
+                {/* Connecting Line 1 */}
+                <div
+                  className={`pointer-events-none absolute left-[16%] right-[50%] top-4 z-0 h-[3px] rounded-full ${
+                    activeStep >= 2
+                      ? "bg-green-500"
+                      : "bg-gray-200"
+                  }`}
+                />
+
+                {/* Step 2 */}
+                <button
+                  type="button"
+                  onClick={() => setActiveStep(2)}
+                  className="group relative z-10 flex flex-1 cursor-pointer flex-col items-center text-center"
+                >
+                  <div
+                    className={`z-10 mb-3 flex h-8 w-8 items-center justify-center rounded-full text-white shadow-sm ${
+                      activeStep === 2
+                        ? "bg-green-500 ring-4 ring-green-100"
+                        : activeStep > 2
+                        ? "bg-green-500"
+                        : "bg-gray-400"
+                    }`}
+                  >
+                    <CheckIcon />
+                  </div>
+
+                  <span className="text-xs font-bold uppercase tracking-wider text-gray-800">
+                    Follow Up
+                  </span>
+                </button>
+
+                {/* Connecting Line 2 */}
+                <div
+                  className={`pointer-events-none absolute left-[50%] right-[16%] top-4 z-0 h-[3px] rounded-full ${
+                    activeStep >= 3
+                      ? "bg-green-500"
+                      : "bg-gray-200"
+                  }`}
+                />
+
+                {/* Step 3 */}
+                <button
+                  type="button"
+                  onClick={() => setActiveStep(3)}
+                  className="group relative z-10 flex flex-1 cursor-pointer flex-col items-center text-center"
+                >
+                  <div
+                    className={`z-10 mb-3 flex h-8 w-8 items-center justify-center rounded-full text-white shadow-sm ${
+                      activeStep >= 3
+                        ? "bg-green-500"
+                        : "bg-gray-400"
+                    }`}
+                  >
+                    <CheckIcon />
+                  </div>
+
+                  <span className="text-xs font-bold uppercase tracking-wider text-gray-800">
+                    Summary
+                  </span>
+                </button>
+
+              </div>
+            </div>
+
+            {content}
+
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+/* ============================================================
+   TREATMENT PLAN COMPONENT
+   (combined from client/pages/doctor/Treatement.tsx —
+    TreatmentPlan given the same embedded pattern as
+    LabReview / Diagnosis / ChemotherapyOrder,
+    icons kept scoped inside the component to avoid colliding
+    with the module-level icons defined above,
+    original Treatement.tsx file left untouched)
+============================================================ */
+
+type TreatmentType =
+  | "Chemotherapy"
+  | "Surgery"
+  | "Radiation"
+  | "Targeted Therapy";
+
+const TreatmentPlan: React.FC<{ embedded?: boolean }> = ({
+  embedded = false,
+}) => {
+  const [treatmentIntent, setTreatmentIntent] =
+    useState("Curative");
+
+  const [treatmentTypes, setTreatmentTypes] = useState<
+    TreatmentType[]
+  >(["Chemotherapy"]);
+
+  const [lineOfTherapy, setLineOfTherapy] =
+    useState("First Line");
+
+  const [plannedStartDate, setPlannedStartDate] =
+    useState("20-06-2026");
+
+  const [protocol, setProtocol] =
+    useState("FOLFOX (2 Weekly)");
+
+  const [remarks, setRemarks] = useState(
+    "Plan for 12 cycles followed by surgery."
+  );
+
+  const [activeStep, setActiveStep] = useState(2);
+
+  const treatmentOptions: TreatmentType[] = [
+    "Chemotherapy",
+    "Surgery",
+    "Radiation",
+    "Targeted Therapy",
+  ];
+
+  const toggleTreatmentType = (
+    type: TreatmentType
+  ) => {
+    setTreatmentTypes((current) =>
+      current.includes(type)
+        ? current.filter((item) => item !== type)
+        : [...current, type]
+    );
+  };
+
+  const handleNext = () => {
+    const treatmentPlan = {
+      treatmentIntent,
+      treatmentTypes,
+      lineOfTherapy,
+      plannedStartDate,
+      protocol,
+      remarks,
+    };
+
+    console.log("Treatment Plan:", treatmentPlan);
+
+    alert("Treatment plan saved successfully.");
+
+    setActiveStep(3);
+  };
+
+  const handleBack = () => {
+    window.history.back();
+  };
+
+  const handleViewProfile = () => {
+    console.log("View Full Profile clicked");
+  };
+
+  /* =========================================================
+     ICONS (scoped inside the component to avoid colliding
+     with the module-level icons defined above)
+  ========================================================= */
+
+  const ArrowLeftIcon = () => (
+    <svg
+      className="h-5 w-5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path
+        d="M19 12H5M12 19l-7-7 7-7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const BellIcon = () => (
+    <svg
+      className="h-5 w-5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path
+        d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 21h4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+
+  const PhoneIcon = () => (
+    <svg
+      className="mr-2 h-3.5 w-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path
+        d="M22 16.92v3a2 2 0 0 1-2.18 2
+        19.79 19.79 0 0 1-8.63-3.07
+        19.5 19.5 0 0 1-6-6
+        A19.79 19.79 0 0 1 2.12 4.18
+        2 2 0 0 1 4.11 2h3
+        a2 2 0 0 1 2 1.72
+        c.12.9.33 1.78.62 2.63
+        a2 2 0 0 1-.45 2.11L8 9.73
+        a16 16 0 0 0 6 6l1.27-1.27
+        a2 2 0 0 1 2.11-.45
+        c.85.29 1.73.5 2.63.62
+        A2 2 0 0 1 22 16.92z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const EnvelopeIcon = () => (
+    <svg
+      className="mr-2 h-3.5 w-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <rect
+        x="3"
+        y="5"
+        width="18"
+        height="14"
+        rx="2"
+      />
+      <path
+        d="m3 7 9 6 9-6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const CalendarIcon = () => (
+    <svg
+      className="h-5 w-5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
+      <rect
+        x="3"
+        y="4"
+        width="18"
+        height="17"
+        rx="2"
+      />
+      <path
+        d="M16 2v4M8 2v4M3 10h18"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+
+  const ChevronDownIcon = () => (
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path
+        d="m6 9 6 6 6-6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const CheckIcon = () => (
+    <svg
+      className="h-3 w-3"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+    >
+      <path
+        d="m5 12 4 4L19 6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const DoubleArrowIcon = () => (
+    <svg
+      className="mr-2 h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+    >
+      <path
+        d="m6 7 5 5-5 5M13 7l5 5-5 5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  /* =========================================================
+     CONTENT (TREATMENT PLAN FORM + ACTION)
+  ========================================================= */
+
+  const content = (
+    <div className="mb-8 rounded-xl border border-slate-200 bg-white shadow-sm">
+
+      <div className="space-y-8 p-8">
+
+        {/* ============================================
+            TREATMENT INTENT
+        ============================================= */}
+
+        <div>
+
+          <label
+            htmlFor="treatmentIntent"
+            className="mb-2 block text-sm font-semibold text-slate-700"
+          >
+            Treatment Intent
+          </label>
+
+          <div className="relative w-full max-w-md">
+
+            <select
+              id="treatmentIntent"
+              value={treatmentIntent}
+              onChange={(event) =>
+                setTreatmentIntent(event.target.value)
+              }
+              className="block w-full appearance-none rounded-lg border border-slate-300 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            >
+              <option value="Curative">
+                Curative
+              </option>
+
+              <option value="Palliative">
+                Palliative
+              </option>
+            </select>
+
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
+              <ChevronDownIcon />
+            </div>
+
+          </div>
+        </div>
+
+        {/* ============================================
+            TREATMENT TYPE
+        ============================================= */}
+
+        <div>
+
+          <label className="mb-3 block text-sm font-semibold text-slate-700">
+            Treatment Type
+          </label>
+
+          <div className="flex flex-wrap gap-6">
+
+            {treatmentOptions.map((type) => {
+              const checked =
+                treatmentTypes.includes(type);
+
+              return (
+                <label
+                  key={type}
+                  className="flex cursor-pointer items-center"
+                >
+
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() =>
+                      toggleTreatmentType(type)
+                    }
+                    className="h-5 w-5 cursor-pointer rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
+                  />
+
+                  <span className="ml-2 text-slate-700">
+                    {type}
+                  </span>
+
+                </label>
+              );
+            })}
+
+          </div>
+        </div>
+
+        {/* ============================================
+            LINE + START DATE
+        ============================================= */}
+
+        <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+
+          {/* Line of Therapy */}
+          <div>
+
+            <label
+              htmlFor="lineOfTherapy"
+              className="mb-2 block text-sm font-semibold text-slate-700"
+            >
+              Line of Therapy
+            </label>
+
+            <div className="relative">
+
+              <select
+                id="lineOfTherapy"
+                value={lineOfTherapy}
+                onChange={(event) =>
+                  setLineOfTherapy(event.target.value)
+                }
+                className="block w-full appearance-none rounded-lg border border-slate-300 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              >
+                <option value="First Line">
+                  First Line
+                </option>
+
+                <option value="Second Line">
+                  Second Line
+                </option>
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
+                <ChevronDownIcon />
+              </div>
+
+            </div>
+          </div>
+
+          {/* Planned Start Date */}
+          <div>
+
+            <label
+              htmlFor="plannedStartDate"
+              className="mb-2 block text-sm font-semibold text-slate-700"
+            >
+              Planned Start Date
+            </label>
+
+            <div className="relative">
+
+              <input
+                id="plannedStartDate"
+                type="text"
+                value={plannedStartDate}
+                onChange={(event) =>
+                  setPlannedStartDate(event.target.value)
+                }
+                className="block w-full rounded-lg border border-slate-300 bg-white p-3 pr-12 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              />
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4 text-slate-400">
+                <CalendarIcon />
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        {/* ============================================
+            PROTOCOL
+        ============================================= */}
+
+        <div>
+
+          <div className="mb-2 flex items-center justify-between">
+
+            <label
+              htmlFor="protocol"
+              className="block text-sm font-semibold text-slate-700"
+            >
+              Protocol
+            </label>
+
+            <button
+              type="button"
+              onClick={() =>
+                console.log("View Protocol clicked")
+              }
+              className="text-sm font-semibold text-blue-700 hover:underline"
+            >
+              View Protocol
+            </button>
+
+          </div>
+
+          <div className="relative">
+
+            <select
+              id="protocol"
+              value={protocol}
+              onChange={(event) =>
+                setProtocol(event.target.value)
+              }
+              className="block w-full appearance-none rounded-lg border border-slate-300 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            >
+              <option value="FOLFOX (2 Weekly)">
+                FOLFOX (2 Weekly)
+              </option>
+
+              <option value="FOLFIRI (2 Weekly)">
+                FOLFIRI (2 Weekly)
+              </option>
+
+              <option value="CAPOX (3 Weekly)">
+                CAPOX (3 Weekly)
+              </option>
+            </select>
+
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
+              <ChevronDownIcon />
+            </div>
+
+          </div>
+        </div>
+
+        {/* ============================================
+            REMARKS
+        ============================================= */}
+
+        <div>
+
+          <label
+            htmlFor="remarks"
+            className="mb-2 block text-sm font-semibold text-slate-700"
+          >
+            Remarks
+          </label>
+
+          <textarea
+            id="remarks"
+            rows={3}
+            value={remarks}
+            onChange={(event) =>
+              setRemarks(event.target.value)
+            }
+            className="block w-full resize-none rounded-lg border border-slate-300 bg-white p-4 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+          />
+
+        </div>
+
+      </div>
+
+      {/* ================================================
+          FORM FOOTER
+      ================================================= */}
+
+      <div className="flex justify-end rounded-b-xl border-t border-slate-200 bg-slate-50 p-6">
+
+        <button
+          type="button"
+          onClick={handleNext}
+          className="flex items-center rounded-lg bg-[#1d4ed8] px-6 py-2.5 font-semibold text-white transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+        >
+          <DoubleArrowIcon />
+          Next
+        </button>
+
+      </div>
+    </div>
+  );
+
+  if (embedded) {
+    return (
+      <div className="w-full">
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-screen bg-white text-slate-800 antialiased">
+
+      {/* =======================================================
+          LEFT SIDEBAR
+      ======================================================== */}
+
+      <aside className="flex w-[320px] shrink-0 flex-col border-r border-slate-200 bg-white">
+
+        {/* Patient Profile */}
+        <div className="flex flex-col items-center border-b border-slate-200 p-8">
+
+          <img
+            src="https://lh3.googleusercontent.com/aida-public/AB6AXuCdW6D5nlMmKfJtScuPrdJ-78e0bB5mfUyxq282S5UaLdcBAkmQ7fweUAQfxOph1gHVmEGAp8yBjGeAtFjZ9D9VYsTday9niX72xw_4av3YtIMLe46ozNXl2gERyusKWKYkzvet6CvSZkL9GYf1W56P9H7z3Xg1UzauThU_5KTyV-QRVG0CVCLCOtlbENMP56SmG_K7WwjVFs0ZPWYC0mro5ljV5968TCZ_x3H2G8jiv42saEDoTvxv2ZjtfdMW1edz7w"
+            alt="Patient Photo"
+            className="mb-4 h-32 w-32 rounded-full border border-slate-100 object-cover object-[50%_10%] shadow-sm"
+          />
+
+          <h2 className="mb-1 text-xl font-bold text-slate-900">
+            Vijaya Nallusamy
+          </h2>
+
+          <p className="mb-3 text-sm text-slate-500">
+            51 Y / Female
+          </p>
+
+          <div className="mb-4 rounded-md bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">
+            ONC-2026-10025
+          </div>
+
+          <p className="text-center text-sm font-bold tracking-wide text-blue-700">
+            DUCTAL CARCINOMA STAGE II
+          </p>
+        </div>
+
+        {/* Patient Information */}
+        <div className="flex-1 space-y-6 overflow-y-auto p-8">
+
+          {/* Phone */}
+          <div>
+            <div className="mb-1 flex items-center text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <PhoneIcon />
+              PHONE
+            </div>
+
+            <p className="text-slate-900">
+              +91 98765 43210
+            </p>
+          </div>
+
+          {/* Email */}
+          <div>
+            <div className="mb-1 flex items-center text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <EnvelopeIcon />
+              EMAIL
+            </div>
+
+            <p className="text-slate-900">
+              vijaya.n@example.com
+            </p>
+          </div>
+
+          {/* Vitals */}
+          <div className="grid grid-cols-2 gap-y-6 pt-2">
+
+            <div>
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                HEIGHT
+              </div>
+              <p className="font-semibold text-slate-900">
+                154 cm
+              </p>
+            </div>
+
+            <div>
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                WEIGHT
+              </div>
+              <p className="font-semibold text-slate-900">
+                52 kg
+              </p>
+            </div>
+
+            <div>
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                BSA
+              </div>
+              <p className="font-semibold text-slate-900">
+                1.49 m²
+              </p>
+            </div>
+
+            <div>
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                BMI
+              </div>
+              <p className="font-semibold text-slate-900">
+                21.93
+              </p>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Profile Button */}
+        <div className="p-6">
+
+          <button
+            type="button"
+            onClick={handleViewProfile}
+            className="w-full rounded-lg border-2 border-blue-600 py-2.5 font-semibold text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          >
+            View Full Profile
+          </button>
+
+        </div>
+      </aside>
+
+      {/* =======================================================
+          MAIN CONTENT
+      ======================================================== */}
+
+      <main className="flex min-w-0 flex-1 flex-col bg-[#fafafa]">
+
+        {/* =====================================================
+            TOP NAVIGATION
+        ====================================================== */}
+
+        <header className="flex h-[72px] shrink-0 items-center justify-between border-b border-slate-200 bg-white px-8">
+
+          {/* Left */}
+          <div className="flex items-center">
+
+            <button
+              type="button"
+              onClick={handleBack}
+              className="mr-4 text-slate-500 transition-colors hover:text-slate-700 focus:outline-none"
+              aria-label="Go back"
+            >
+              <ArrowLeftIcon />
+            </button>
+
+            <h1 className="text-2xl font-bold text-slate-900">
+              Patients
+            </h1>
+
+          </div>
+
+          {/* Right */}
+          <div className="flex items-center space-x-6">
+
+            <button
+              type="button"
+              className="relative text-slate-400 transition-colors hover:text-slate-600"
+              aria-label="Notifications"
+            >
+              <BellIcon />
+
+              <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500" />
+            </button>
+
+            <div className="flex items-center space-x-3 border-l border-slate-200 pl-6">
+
+              <span className="font-bold text-slate-800">
+                HMS
+              </span>
+
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-800 text-xs font-bold text-white">
+                DR
+              </div>
+
+            </div>
+          </div>
+        </header>
+
+        {/* =====================================================
+            SCROLLABLE MAIN AREA
+        ====================================================== */}
+
+        <div className="flex-1 overflow-y-auto">
+
+          <div className="mx-auto max-w-[1200px] p-8">
+
+            {/* =================================================
+                STEPPER
+            ================================================== */}
+
+            <div className="mb-8 rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
+
+              <div className="relative mx-auto flex max-w-4xl items-start justify-between">
+
+                {/* Connecting Line */}
+                <div className="absolute left-[16.66%] right-[16.66%] top-3 hidden h-0.5 bg-slate-200 md:block" />
+
+                {/* Step 1 */}
+                <button
+                  type="button"
+                  onClick={() => setActiveStep(1)}
+                  className="relative z-10 flex w-1/3 flex-col items-center"
+                >
+
+                  <div
+                    className={`mb-3 flex h-6 w-6 items-center justify-center rounded-full text-white ${
+                      activeStep >= 1
+                        ? "bg-green-500"
+                        : "bg-slate-400"
+                    }`}
+                  >
+                    <CheckIcon />
+                  </div>
+
+                  <span className="text-xs font-bold tracking-wider text-slate-900">
+                    DIAGNOSIS
+                  </span>
+
+                </button>
+
+                {/* Step 2 */}
+                <button
+                  type="button"
+                  onClick={() => setActiveStep(2)}
+                  className="relative z-10 flex w-1/3 flex-col items-center"
+                >
+
+                  <div
+                    className={`mb-3 flex h-6 w-6 items-center justify-center rounded-full text-white shadow-md ring-4 ring-white ${
+                      activeStep >= 2
+                        ? "bg-green-500"
+                        : "bg-slate-400"
+                    }`}
+                  >
+                    <CheckIcon />
+                  </div>
+
+                  <span className="mb-2 text-xs font-bold tracking-wider text-slate-900">
+                    TREATMENT PLAN
+                  </span>
+
+                  {activeStep === 2 && (
+                    <div className="h-1.5 w-48 max-w-full rounded-full bg-green-500" />
+                  )}
+
+                </button>
+
+                {/* Step 3 */}
+                <button
+                  type="button"
+                  onClick={() => setActiveStep(3)}
+                  className="relative z-10 flex w-1/3 flex-col items-center"
+                >
+
+                  <div
+                    className={`mb-3 flex h-6 w-6 items-center justify-center rounded-full text-white ${
+                      activeStep >= 3
+                        ? "bg-green-500"
+                        : "bg-slate-400"
+                    }`}
+                  >
+                    <CheckIcon />
+                  </div>
+
+                  <span className="text-center text-xs font-bold tracking-wider text-slate-900">
+                    CHEMOTHERAPY ORDER
+                  </span>
+
+                </button>
+
+              </div>
+            </div>
+
+            {/* =================================================
+                FORM AREA
+            ================================================== */}
+
+            {content}
+
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+/* ============================================================
+   SUMMARY COMPONENT
+   (combined from client/pages/doctor/summary.tsx —
+    renamed PatientSummary → Summary, Step helper moved inside
+    the component to avoid colliding with other names in this
+    file, embedded prop added so it can live in this file,
+    original summary.tsx file left untouched)
+============================================================ */
+
+const Summary: React.FC<{ embedded?: boolean }> = ({
+  embedded = false,
+}) => {
+  const chemotherapyOrders = [
+    {
+      drug: "Oxaliplatin",
+      form: "Injection",
+      dose: "85",
+      unit: "Mg/M2",
+      volume: "250 Ml",
+    },
+    {
+      drug: "Leucovorin",
+      form: "Injection",
+      dose: "200",
+      unit: "Mg/M2",
+      volume: "250 Ml",
+    },
+    {
+      drug: "5 Fluorouracil",
+      form: "Injection",
+      dose: "240",
+      unit: "Mg/M2",
+      volume: "CIV",
+    },
+  ];
+
+  const premedications = [
+    {
+      drug: "Ondansetron",
+      dose: "8 mg",
+      route: "IV",
+      time: "30 mins before chemo",
+    },
+    {
+      drug: "Dexamethasone",
+      dose: "8 mg",
+      route: "IV",
+      time: "30 mins before chemo",
+    },
+    {
+      drug: "Ranitidine",
+      dose: "50 mg",
+      route: "IV",
+      time: "30 mins before chemo",
+    },
+  ];
+
+  const dischargeMedications = [
+    {
+      drug: "Capecitabine",
+      dose: "500 mg",
+      frequency: "2-0-2",
+      instruction: "After Food",
+      duration: "14 Days",
+    },
+    {
+      drug: "Domstal",
+      dose: "10 mg",
+      frequency: "1-1-1",
+      instruction: "Before Food",
+      duration: "10 Days",
+    },
+    {
+      drug: "Loperamide",
+      dose: "2 mg",
+      frequency: "1-0-0",
+      instruction: "After Food",
+      duration: "5 Days",
+    },
+    {
+      drug: "Pantoprazole",
+      dose: "40 mg",
+      frequency: "1-0-1",
+      instruction: "Before Food",
+      duration: "15 Days",
+    },
+  ];
+
+  const Step = ({
+    label,
+    active = false,
+  }: {
+    label: string;
+    active?: boolean;
+  }) => (
+    <div className="relative z-10 flex w-48 flex-col items-center gap-3">
+      <div
+        className={`flex h-6 w-6 items-center justify-center rounded-full text-xs text-white ${
+          active ? "bg-green-500" : "bg-slate-400"
+        }`}
+      >
+        ✓
+      </div>
+
+      <span
+        className={`text-center text-xs font-bold uppercase tracking-wider ${
+          active ? "text-slate-800" : "text-slate-600"
+        }`}
+      >
+        {label}
+      </span>
+
+      {active && (
+        <div className="absolute -bottom-6 h-1 w-full rounded-t-sm bg-green-500" />
+      )}
+    </div>
+  );
+
+  /* =========================================================
+     CONTENT (SUMMARY CARD + ACTION BUTTONS)
+  ========================================================= */
+
+  const content = (
+    <>
+      {/* ===================================================
+          SUMMARY CARD
+      ==================================================== */}
+      <div className="mb-6 flex flex-1 flex-col rounded-b-xl border border-slate-200 bg-white shadow-sm">
+        {/* Summary Heading */}
+        <div className="flex justify-center border-b border-slate-100 p-4">
+          <h2 className="text-xl font-semibold text-blue-700">
+            Summary
+          </h2>
+        </div>
+
+        <div className="flex flex-1 flex-col gap-10 p-8">
+          {/* =================================================
+              PATIENT INFORMATION
+          ================================================== */}
+          <section>
+            <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <p className="mb-2 font-medium text-slate-900">
+                  Cancer Type
+                </p>
+                <p className="text-sm text-slate-500">
+                  Colon Cancer
+                </p>
+              </div>
+
+              <div>
+                <p className="mb-2 font-medium text-slate-900">
+                  Stage
+                </p>
+
+                <p className="flex items-center gap-2 text-sm text-slate-500">
+                  Stage II (T3N0M0)
+                  <span className="text-slate-400">◷</span>
+                </p>
+              </div>
+
+              <div>
+                <p className="mb-2 font-medium text-slate-900">
+                  Context
+                </p>
+
+                <p className="text-sm text-slate-500">Curative</p>
+              </div>
+
+              <div />
+
+              <div>
+                <p className="mb-2 font-medium text-slate-900">
+                  Protocol
+                </p>
+
+                <p className="flex items-center gap-2 text-sm text-slate-500">
+                  FOLFOX (2 Weekly)
+                  <span className="text-slate-400">◷</span>
+                </p>
+              </div>
+
+              <div>
+                <p className="mb-2 font-medium text-slate-900">
+                  Duration
+                </p>
+
+                <p className="text-sm text-slate-500">
+                  12 Cycles
+                </p>
+              </div>
+
+              <div>
+                <p className="mb-2 font-medium text-slate-900">
+                  Current
+                </p>
+
+                <p className="text-sm text-slate-500">
+                  Day 1
+                  <span className="ml-4">20-06-2026</span>
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* =================================================
+              CHEMOTHERAPY ORDERS
+          ================================================== */}
+          <section>
+            <h3 className="mb-4 text-lg font-medium text-indigo-900">
+              Chemotherapy Orders
+            </h3>
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[650px] text-left text-sm">
+                <thead>
+                  <tr>
+                    <th className="w-1/4 pb-3 font-medium text-slate-900">
+                      Drug Name
+                    </th>
+
+                    <th className="w-1/5 pb-3 font-medium text-slate-900">
+                      Form
+                    </th>
+
+                    <th className="w-1/5 pb-3 font-medium text-slate-900">
+                      Dose
+                    </th>
+
+                    <th className="w-1/5 pb-3 font-medium text-slate-900">
+                      Unit
+                    </th>
+
+                    <th className="pb-3 font-medium text-slate-900">
+                      Volume
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="text-slate-500">
+                  {chemotherapyOrders.map((item) => (
+                    <tr key={item.drug}>
+                      <td className="py-3">{item.drug}</td>
+                      <td className="py-3">{item.form}</td>
+                      <td className="py-3">{item.dose}</td>
+                      <td className="py-3 text-xs uppercase">
+                        {item.unit}
+                      </td>
+                      <td className="py-3 text-xs uppercase">
+                        {item.volume}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* =================================================
+              PREMEDICATION
+          ================================================== */}
+          <section>
+            <h3 className="mb-4 text-lg font-medium text-indigo-900">
+              Premedication
+            </h3>
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[600px] text-left text-sm">
+                <thead>
+                  <tr>
+                    <th className="w-1/4 pb-3 font-medium text-slate-900">
+                      Drug Name
+                    </th>
+
+                    <th className="w-1/5 pb-3 font-medium text-slate-900">
+                      Dose
+                    </th>
+
+                    <th className="w-1/5 pb-3 font-medium text-slate-900">
+                      Route
+                    </th>
+
+                    <th className="pb-3 font-medium text-slate-900">
+                      Time
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="text-slate-800">
+                  {premedications.map((item) => (
+                    <tr key={item.drug}>
+                      <td className="py-3">{item.drug}</td>
+                      <td className="py-3">{item.dose}</td>
+                      <td className="py-3">{item.route}</td>
+                      <td className="py-3">{item.time}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* =================================================
+              DISCHARGE MEDICATION
+          ================================================== */}
+          <section>
+            <h3 className="mb-4 text-lg font-medium text-indigo-900">
+              Discharge Medication
+            </h3>
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[700px] text-left text-sm">
+                <thead>
+                  <tr>
+                    <th className="w-1/5 pb-3 font-medium text-slate-900">
+                      Drug Name
+                    </th>
+
+                    <th className="w-1/6 pb-3 font-medium text-slate-900">
+                      Dose
+                    </th>
+
+                    <th className="w-1/6 pb-3 font-medium text-slate-900">
+                      Frequency
+                    </th>
+
+                    <th className="w-1/4 pb-3 font-medium text-slate-900">
+                      Instruction
+                    </th>
+
+                    <th className="pb-3 font-medium text-slate-900">
+                      Duration
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="text-slate-800">
+                  {dischargeMedications.map((item) => (
+                    <tr key={item.drug}>
+                      <td className="py-3">{item.drug}</td>
+                      <td className="py-3">{item.dose}</td>
+                      <td className="py-3">{item.frequency}</td>
+                      <td className="py-3">{item.instruction}</td>
+                      <td className="py-3">{item.duration}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* =================================================
+              FOOTER DATES
+          ================================================== */}
+          <section className="grid grid-cols-1 gap-6 border-t border-slate-100 pt-6 sm:grid-cols-2">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-900">
+                Next Visit Date
+              </p>
+
+              <p className="text-slate-600">04-07-2026</p>
+            </div>
+
+            <div className="sm:pl-8">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-900">
+                Next Cycle
+              </p>
+
+              <p className="flex items-center gap-2 text-slate-600">
+                Cycle 2 / Day 1
+                <span className="text-slate-400">◷</span>
+              </p>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      {/* ===================================================
+          ACTION BUTTONS
+      ==================================================== */}
+      <div className="mb-8 flex flex-wrap justify-end gap-4">
+        <button
+          type="button"
+          className="rounded-md bg-[#5624D0] px-8 py-3 font-medium text-white shadow-sm transition-colors hover:bg-[#4a1fb5]"
+        >
+          Submit
+        </button>
+
+        <button
+          type="button"
+          className="rounded-md bg-[#5624D0] px-8 py-3 font-medium text-white shadow-sm transition-colors hover:bg-[#4a1fb5]"
+        >
+          Print / Download Summary
+        </button>
+      </div>
+    </>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-slate-50 font-sans text-slate-800">
+      {/* =========================================================
+          LEFT SIDEBAR
+      ========================================================== */}
+      <aside className="z-10 flex h-full w-[320px] shrink-0 flex-col overflow-y-auto border-r border-slate-200 bg-white">
+        {/* Patient Profile */}
+        <div className="flex flex-col items-center border-b border-slate-100 p-8">
+          <img
+            src="https://lh3.googleusercontent.com/aida-public/AB6AXuALJiAbRuWXhNDLo3GQYHiqj16204Ep5hRrCI4UBcdw8TvdrPcM4ZuO18hxvBFPvlQn7KxzuaUry244h6sEa-VxJy_8uUoXwDmN_S2_Si68ZHQl-S3bbey-UNtzaIZsTSnrMNMheaqusgLznpVaO76fbp2SQSy8ZWKrqz0dkh2IOa1xzkffUQIzMPeroYMp72bTxyTtcHadZmyGu7HjlwSTdwupK9f7Fg7ScDl4J1jSQvI_wG6TirJNydXFqQSnMU-mpQ"
+            alt="Patient Avatar"
+            className="mb-4 h-24 w-24 rounded-full border-2 border-white object-cover shadow-sm"
+          />
+
+          <h2 className="mb-1 text-xl font-bold text-slate-900">
+            Vijaya Nallusamy
+          </h2>
+
+          <p className="mb-4 text-sm text-slate-500">51 Y / Female</p>
+
+          <span className="mb-6 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+            ONC-2026-10025
+          </span>
+
+          <p className="text-center text-sm font-semibold tracking-wide text-blue-600">
+            DUCTAL CARCINOMA STAGE II
+          </p>
+        </div>
+
+        {/* Contact Information */}
+        <div className="flex flex-col gap-6 border-b border-slate-100 p-6">
+          {/* Phone */}
+          <div className="flex items-center gap-4">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-400">
+              <span className="text-sm">☎</span>
+            </div>
+
+            <div>
+              <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
+                Phone
+              </p>
+
+              <p className="text-sm font-medium text-slate-800">
+                +91 98765 43210
+              </p>
+            </div>
+          </div>
+
+          {/* Email */}
+          <div className="flex items-center gap-4">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-400">
+              <span className="text-sm">✉</span>
+            </div>
+
+            <div>
+              <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
+                Email
+              </p>
+
+              <p className="text-sm font-medium text-slate-700">
+                vijaya.n@example.com
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Vitals */}
+        <div className="mb-6 grid grid-cols-2 gap-x-4 gap-y-6 p-6">
+          <div>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
+              Height
+            </p>
+            <p className="font-semibold text-slate-800">154 cm</p>
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
+              Weight
+            </p>
+            <p className="font-semibold text-slate-800">52 kg</p>
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
+              BSA
+            </p>
+            <p className="font-semibold text-slate-800">1.49 m²</p>
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
+              BMI
+            </p>
+            <p className="font-semibold text-slate-800">21.93</p>
+          </div>
+        </div>
+
+        {/* Profile Button */}
+        <div className="px-6 pb-6">
+          <button
+            type="button"
+            className="w-full rounded-md border border-blue-600 px-4 py-2.5 font-medium text-blue-600 transition-colors hover:bg-blue-50"
+          >
+            View Full Profile
+          </button>
+        </div>
+      </aside>
+
+      {/* =========================================================
+          MAIN CONTENT
+      ========================================================== */}
+      <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-slate-50">
+        {/* =======================================================
+            TOP NAVIGATION
+        ======================================================== */}
+        <header className="z-10 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6">
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              className="text-slate-500 transition-colors hover:text-slate-700"
+              aria-label="Back"
+            >
+              <span className="text-lg">←</span>
+            </button>
+
+            <h1 className="text-xl font-semibold text-slate-800">
+              Patients
+            </h1>
+          </div>
+
+          <div className="flex items-center gap-6">
+            {/* Notification */}
+            <button
+              type="button"
+              className="relative text-slate-500 transition-colors hover:text-slate-700"
+              aria-label="Notifications"
+            >
+              <span className="text-xl">♧</span>
+
+              <span className="absolute right-0 top-0 h-2 w-2 rounded-full border border-white bg-red-500" />
+            </button>
+
+            {/* User */}
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-slate-600">
+                HMS
+              </span>
+
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1E3A8A] text-xs font-semibold text-white">
+                DR
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* =======================================================
+            SCROLLABLE CONTENT
+        ======================================================== */}
+        <div className="flex-1 overflow-y-auto p-8">
+          <div className="mx-auto flex w-full max-w-[1000px] flex-col">
+            {/* ===================================================
+                PROGRESS STEPPER
+            ==================================================== */}
+            <div className="relative mb-px flex justify-between rounded-t-xl border border-slate-200 bg-white p-6">
+              {/* Background connector */}
+              <div className="absolute left-24 right-24 top-9 h-[2px] bg-slate-100" />
+
+              {/* Green progress */}
+              <div className="absolute left-24 top-9 h-[2px] w-1/2 bg-green-500" />
+
+              <Step label="Discharge Medication" />
+
+              <Step label="Follow Up" />
+
+              <Step label="Summary" active />
+            </div>
+
+            {content}
+          </div>
+        </div>
+      </main>
     </div>
   );
 };
