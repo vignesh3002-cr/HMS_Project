@@ -5,6 +5,7 @@ import {
   patientApi,
   type PatientRecord,
 } from "../../api/patient.api";
+import type { EncounterRecord } from "../../api/encounter.api";
 
 type ToastMessage = string;
 
