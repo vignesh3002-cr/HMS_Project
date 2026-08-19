@@ -1141,233 +1141,7 @@ const Consultation: React.FC = () => {
                     PRESCRIPTION
                 ================================================= */}
 
-                <section className="w-full rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-
-                  <div className="w-full pb-4">
-
-                    <h2 className="text-xl font-bold leading-7 text-slate-800">
-                      Prescription
-                    </h2>
-
-                  </div>
-
-                  <div className="w-full">
-
-                    {/* HEADER */}
-
-                    <div className="grid w-full grid-cols-[2.1fr_1fr_1.5fr_1.15fr_4.2fr] border-b border-slate-100 bg-slate-50">
-
-                      <div className="px-3 py-[9px] text-[10.4px] font-bold uppercase tracking-[0.52px] text-slate-400">
-                        MEDICATION
-                      </div>
-
-                      <div className="px-3 py-[9px] text-[10.4px] font-bold uppercase tracking-[0.52px] text-slate-400">
-                        DOSE
-                      </div>
-
-                      <div className="px-3 py-[9px] text-[10.4px] font-bold uppercase tracking-[0.52px] text-slate-400">
-                        FREQUENCY
-                      </div>
-
-                      <div className="px-3 py-[9px] text-[10.4px] font-bold uppercase tracking-[0.52px] text-slate-400">
-                        DURATION
-                      </div>
-
-                      <div className="pl-6 pr-3 py-[9px] text-[10.4px] font-bold uppercase tracking-[0.52px] text-slate-400">
-                        INSTRUCTIONS
-                      </div>
-
-                    </div>
-
-                    {/* MEDICATION ROWS */}
-
-                    {medications.map((medication, index) => (
-
-                      <div
-                        key={index}
-                        className="grid w-full grid-cols-[2.1fr_1fr_1.5fr_1.15fr_4.2fr] border-b border-slate-100 py-[10.5px]"
-                      >
-
-                        {/* MEDICATION */}
-
-                        <div className="relative h-[30px] w-full overflow-hidden rounded-md border border-slate-200 bg-white">
-
-                          <select
-                            value={medication.medication}
-                            onChange={(e) =>
-                              updateMedication(
-                                index,
-                                "medication",
-                                e.target.value
-                              )
-                            }
-                            className="h-[30px] w-full appearance-none border-0 bg-transparent px-3 py-1 text-sm text-slate-600 outline-none"
-                          >
-
-                            <option value="">
-                              Select medication
-                            </option>
-
-                          </select>
-
-                          <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="#94a3b8"
-                            strokeWidth="1.8"
-                            className="pointer-events-none absolute right-1.5 top-1.5 h-[17.5px] w-[17.5px]"
-                          >
-                            <path d="m6 9 6 6 6-6" />
-                          </svg>
-
-                        </div>
-
-                        {/* DOSE */}
-
-                        <div className="relative h-[30px] rounded-md border border-slate-200 bg-white">
-
-                          <select
-                            value={medication.dose}
-                            onChange={(e) =>
-                              updateMedication(
-                                index,
-                                "dose",
-                                e.target.value
-                              )
-                            }
-                            className="h-[30px] w-full appearance-none bg-transparent px-3 py-1 pr-6 text-sm outline-none"
-                          >
-
-                            <option value=""></option>
-                            <option value="1">1</option>
-                            <option value="2">2</option>
-
-                          </select>
-
-                          <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="#94a3b8"
-                            strokeWidth="1.8"
-                            className="pointer-events-none absolute right-1 top-1.5 h-[17px] w-[17px]"
-                          >
-                            <path d="m6 9 6 6 6-6" />
-                          </svg>
-
-                        </div>
-
-                        {/* FREQUENCY */}
-
-                        <div className="relative h-[30px] rounded-md border border-slate-200 bg-white">
-
-                          <select
-                            value={medication.frequency}
-                            onChange={(e) =>
-                              updateMedication(
-                                index,
-                                "frequency",
-                                e.target.value
-                              )
-                            }
-                            className="h-[30px] w-full appearance-none bg-transparent px-3 py-1 pr-6 text-sm outline-none"
-                          >
-
-                            <option value=""></option>
-                            <option value="OD">OD</option>
-                            <option value="BD">BD</option>
-                            <option value="TDS">TDS</option>
-
-                          </select>
-
-                          <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="#94a3b8"
-                            strokeWidth="1.8"
-                            className="pointer-events-none absolute right-1 top-1.5 h-[17px] w-[17px]"
-                          >
-                            <path d="m6 9 6 6 6-6" />
-                          </svg>
-
-                        </div>
-
-                        {/* DURATION */}
-
-                        <div className="relative h-[30px] rounded-md border border-slate-200 bg-white">
-
-                          <select
-                            value={medication.duration}
-                            onChange={(e) =>
-                              updateMedication(
-                                index,
-                                "duration",
-                                e.target.value
-                              )
-                            }
-                            className="h-[30px] w-full appearance-none bg-transparent px-3 py-1 pr-6 text-sm outline-none"
-                          >
-
-                            <option value=""></option>
-                            <option value="5 Days">
-                              5 Days
-                            </option>
-
-                            <option value="7 Days">
-                              7 Days
-                            </option>
-
-                          </select>
-
-                          <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="#94a3b8"
-                            strokeWidth="1.8"
-                            className="pointer-events-none absolute right-1 top-1.5 h-[17px] w-[17px]"
-                          >
-                            <path d="m6 9 6 6 6-6" />
-                          </svg>
-
-                        </div>
-
-                        {/* INSTRUCTIONS */}
-
-                        <input
-                          value={medication.instructions}
-                          onChange={(e) =>
-                            updateMedication(
-                              index,
-                              "instructions",
-                              e.target.value
-                            )
-                          }
-                          className="h-[30px] w-full rounded-md border border-slate-200 bg-white px-[13px] py-[7px] text-sm leading-5 text-slate-600 outline-none"
-                        />
-
-                      </div>
-
-                    ))}
-
-                  </div>
-
-                  {/* ADD MEDICATION */}
-
-                  <button
-                    onClick={addMedication}
-                    className="flex h-9 items-center gap-1.5 border-0 bg-transparent pt-4 text-sm font-bold leading-5 text-blue-600"
-                  >
-
-                    <span className="text-lg leading-[18px]">
-                      +
-                    </span>
-
-                    <span>
-                      Add Medication
-                    </span>
-
-                  </button>
-
-                </section>
+                
 
                 {/* =================================================
                     ACTION BUTTONS
@@ -1421,7 +1195,7 @@ const Consultation: React.FC = () => {
 
                     <button
                       onClick={cancelConsultation}
-                      className="flex h-9 w-[88px] items-center justify-center rounded-lg border border-slate-300 bg-white px-[25px] py-[9px] text-sm font-bold leading-5 text-slate-600"
+                      className="flex h-9 w-fit items-center justify-center rounded-lg border border-slate-300 bg-white px-[25px] py-[9px] text-sm font-bold leading-5 text-slate-600"
                     >
                       Cancel
                     </button>
@@ -1430,7 +1204,7 @@ const Consultation: React.FC = () => {
 
                     <button
                       onClick={saveDraft}
-                      className="flex h-9 w-[128px] items-center justify-center rounded-lg border border-blue-200 bg-white px-[25px] py-[9px] text-sm font-bold leading-5 text-blue-600"
+                      className="flex h-9 w-fit items-center justify-center rounded-lg border border-blue-200 bg-white px-[25px] py-[9px] text-sm font-bold leading-5 text-blue-600 "
                     >
                       Save as Draft
                     </button>
@@ -3230,8 +3004,8 @@ type Drug = {
 type ChemotherapyPlanItem = {
   chemotherapy_plan_item_id: string;
   drug_role: string | null;
-  dosage: number | null;
-  dosage_unit: string | null;
+  protocol_dose: number | null;
+  protocol_dose_unit: string | null;
   formulation: string | null;
   dilution_volume: number | null;
   medicine_master: {
@@ -3556,9 +3330,9 @@ const ChemotherapyOrder: React.FC<{
                 item.formulation ||
                 item.medicine_master?.dosage_form ||
                 "",
-              dose: item.dosage != null ? String(item.dosage) : "",
+              dose: item.protocol_dose != null ? String(item.protocol_dose) : "",
               unit:
-                item.dosage_unit ||
+                item.protocol_dose_unit ||
                 item.medicine_master?.unit ||
                 "",
               volume:
