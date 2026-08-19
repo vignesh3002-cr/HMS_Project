@@ -1814,13 +1814,14 @@ const Diagnosis: React.FC<{ embedded?: boolean; patientId?: string }> = ({
     );
   };
 
-  const loadSubtypesForCancerType = () => {
+  const loadSubtypesForCancerType = (cancerTypeId: string) => {
+    if (!cancerTypeId) return;
     const requestId = ++diagnosisRequestRef.current;
     setDiagnosisLoading(true);
     setDiagnosisError("");
 
     API.get<{ success: boolean; data: CancerSubtypeItem[] }>(
-      "/oncology/reference/cancer-types/CT002/subtypes"
+      `/oncology/reference/cancer-types/${cancerTypeId}/subtypes`
     )
       .then((response) => {
         if (requestId !== diagnosisRequestRef.current) return;
@@ -1906,7 +1907,7 @@ const Diagnosis: React.FC<{ embedded?: boolean; patientId?: string }> = ({
             type: initial.cancer_type,
             icdCode: initial.icd10 ?? "",
           }));
-          loadSubtypesForCancerType();
+          loadSubtypesForCancerType(initial.cancer_type_id);
           loadStagesForCancerType(initial.cancer_type_id);
         }
       })
@@ -1999,7 +2000,7 @@ const Diagnosis: React.FC<{ embedded?: boolean; patientId?: string }> = ({
     );
 
     if (cancerType) {
-      loadSubtypesForCancerType();
+      loadSubtypesForCancerType(cancerType.cancer_type_id);
       loadStagesForCancerType(cancerType.cancer_type_id);
     }
   };
@@ -6037,6 +6038,77 @@ const TreatmentPlan: React.FC<{
     original summary.tsx file left untouched)
 ============================================================ */
 
+type SummaryPlanItem = {
+  chemotherapy_plan_item_id: string;
+  drug_role: string | null;
+  protocol_dose: number | null;
+  protocol_dose_unit: string | null;
+  formulation: string | null;
+  dilution_volume: string | null;
+  administration_route: string | null;
+  frequency: string | null;
+  remarks: string | null;
+  medicine_master: {
+    medicine_name: string;
+    generic_name: string | null;
+    dosage_form: string | null;
+    unit: string | null;
+  } | null;
+};
+
+type SummaryPlan = {
+  chemotherapy_plan_id: string;
+  patient_id: string;
+  cancer_type: string | null;
+  cancer_subtype: string | null;
+  cancer_stage: string | null;
+  protocol_name: string | null;
+  regimen_name: string | null;
+  regimen_code: string | null;
+  treatment_intent: string | null;
+  treatment_goal: string | null;
+  treatment_status: string | null;
+  planned_cycles: number;
+  completed_cycles: number | null;
+  cycle_interval_days: number | null;
+  treatment_start_date: string | null;
+  expected_end_date: string | null;
+  chemotherapy_cycle: {
+    cycle_number: number;
+    cycle_day: number | null;
+  }[] | null;
+  chemotherapy_plan_items: SummaryPlanItem[] | null;
+  oncology_staging_detail: {
+    clinical_stage: string | null;
+    cancer_types: { cancer_type: string } | null;
+    cancer_subtypes: { subtype_name: string } | null;
+    derived_fields: { ajcc_stage: string | null } | null;
+  } | null;
+};
+
+type ChemoOrderRow = {
+  drug: string;
+  form: string;
+  dose: string;
+  unit: string;
+  volume: string;
+};
+
+type PremedRow = {
+  drug: string;
+  dose: string;
+  route: string;
+  time: string;
+};
+
+type DischargeRow = {
+  drug: string;
+  dose: string;
+  frequency: string;
+  instruction: string;
+  duration: string;
+};
+
 const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
   embedded = false,
   patientId,
@@ -6062,11 +6134,138 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
       : ""
   );
 
-  const chemotherapyOrders = [];
+  const [plan, setPlan] = useState<SummaryPlan | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState("");
 
-  const premedications = [];
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    let cancelled = false;
+    setPlanLoading(true);
+    setPlanError("");
+    const branchId =
+      getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+    API.get<{ success: boolean; data: SummaryPlan[] }>(
+      "/chemotherapy/plans",
+      {
+        params: { patient_id: resolvedPatientId, branchId, page: 1, limit: 1 },
+      }
+    )
+      .then((response) => {
+        if (cancelled) return;
+        const planId = response.data.data?.[0]?.chemotherapy_plan_id;
+        if (!planId) return;
+        return API.get<{ success: boolean; data: SummaryPlan }>(
+          `/chemotherapy/plans/${planId}`
+        ).then((detail) => {
+          if (!cancelled) setPlan(detail.data.data);
+        });
+      })
+      .catch((error) => {
+        console.error("Failed to load chemotherapy plan:", error);
+        if (!cancelled) {
+          setPlanError(
+            error?.response?.data?.message ||
+              "Failed to load the chemotherapy plan."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPlanLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId]);
 
-  const dischargeMedications = [];
+  const planItems = plan?.chemotherapy_plan_items ?? [];
+
+  const chemotherapyOrders: ChemoOrderRow[] = planItems
+    .filter((item) => item.drug_role === "PRIMARY")
+    .map((item) => ({
+      drug:
+        item.medicine_master?.medicine_name ||
+        item.medicine_master?.generic_name ||
+        "",
+      form:
+        item.formulation || item.medicine_master?.dosage_form || "",
+      dose: item.protocol_dose != null ? String(item.protocol_dose) : "",
+      unit:
+        item.protocol_dose_unit || item.medicine_master?.unit || "",
+      volume:
+        item.dilution_volume != null ? String(item.dilution_volume) : "",
+    }));
+
+  const premedications: PremedRow[] = planItems
+    .filter((item) => item.drug_role === "PREMEDICATION")
+    .map((item) => ({
+      drug:
+        item.medicine_master?.medicine_name ||
+        item.medicine_master?.generic_name ||
+        "",
+      dose: item.protocol_dose != null ? String(item.protocol_dose) : "",
+      route: item.administration_route || "",
+      time: item.frequency || "",
+    }));
+
+  const dischargeMedications: DischargeRow[] = planItems
+    .filter(
+      (item) =>
+        item.drug_role === "SUPPORTIVE" ||
+        item.drug_role === "POSTMEDICATION"
+    )
+    .map((item) => ({
+      drug:
+        item.medicine_master?.medicine_name ||
+        item.medicine_master?.generic_name ||
+        "",
+      dose: item.protocol_dose != null ? String(item.protocol_dose) : "",
+      frequency: item.frequency || "",
+      instruction: item.remarks || "",
+      duration: item.administration_route
+        ? `via ${item.administration_route}`
+        : "",
+    }));
+
+  const cancerType =
+    plan?.oncology_staging_detail?.cancer_types?.cancer_type ||
+    plan?.cancer_type ||
+    "";
+
+  const stage =
+    plan?.cancer_stage ||
+    plan?.oncology_staging_detail?.clinical_stage ||
+    plan?.oncology_staging_detail?.derived_fields?.ajcc_stage ||
+    "";
+
+  const context = plan?.treatment_intent || plan?.treatment_goal || "";
+
+  const protocol =
+    plan?.protocol_name ||
+    (plan?.regimen_code
+      ? `${plan.regimen_code} - ${plan.regimen_name}`
+      : plan?.regimen_name) ||
+    "";
+
+  const duration = plan?.planned_cycles
+    ? `${plan.planned_cycles} cycle${plan.planned_cycles > 1 ? "s" : ""}${
+        plan.cycle_interval_days
+          ? ` (every ${plan.cycle_interval_days} days)`
+          : ""
+      }`
+    : "";
+
+  const current = (() => {
+    const cycles = plan?.chemotherapy_cycle ?? [];
+    const latest = cycles[cycles.length - 1];
+    const cycleLabel = latest
+      ? `Cycle ${latest.cycle_number} / Day ${latest.cycle_day ?? "—"}`
+      : "";
+    const status = plan?.treatment_status
+      ? ` (${plan.treatment_status})`
+      : "";
+    return `${cycleLabel}${status}`;
+  })();
 
   const Step = ({
     label,
@@ -6120,13 +6319,28 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
               PATIENT INFORMATION
           ================================================== */}
           <section>
+            {planLoading && (
+              <div className="mb-4 text-sm text-slate-500">
+                Loading chemotherapy plan...
+              </div>
+            )}
+            {planError && (
+              <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {planError}
+              </div>
+            )}
+            {!planLoading && !planError && !plan && (
+              <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                No chemotherapy plan found for this patient yet.
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
               <div>
                 <p className="mb-2 font-medium text-slate-900">
                   Cancer Type
                 </p>
                 <p className="text-sm text-slate-500">
-                  {""}
+                  {cancerType}
                 </p>
               </div>
 
@@ -6136,7 +6350,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
                 </p>
 
                 <p className="flex items-center gap-2 text-sm text-slate-500">
-                  {""}
+                  {stage}
                   <span className="text-slate-400">◷</span>
                 </p>
               </div>
@@ -6146,7 +6360,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
                   Context
                 </p>
 
-                <p className="text-sm text-slate-500">{""}</p>
+                <p className="text-sm text-slate-500">{context}</p>
               </div>
 
               <div />
@@ -6157,7 +6371,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
                 </p>
 
                 <p className="flex items-center gap-2 text-sm text-slate-500">
-                  {""}
+                  {protocol}
                   <span className="text-slate-400">◷</span>
                 </p>
               </div>
@@ -6168,7 +6382,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
                 </p>
 
                 <p className="text-sm text-slate-500">
-                  {""}
+                  {duration}
                 </p>
               </div>
 
@@ -6178,7 +6392,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
                 </p>
 
                 <p className="text-sm text-slate-500">
-                  {""}
+                  {current}
                 </p>
               </div>
             </div>
