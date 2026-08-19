@@ -1855,6 +1855,8 @@ const Diagnosis: React.FC<{ embedded?: boolean; patientId?: string }> = ({
     const requestId = ++stagingRequestRef.current;
     setDiagnosisLoading(true);
     setDiagnosisError("");
+    setTnmStages([]);
+    setGrades([]);
 
     API.get<{ success: boolean; data: StagingReferenceItem[] }>(
       "/oncology/reference/staging",
@@ -1868,6 +1870,37 @@ const Diagnosis: React.FC<{ embedded?: boolean; patientId?: string }> = ({
             .map((item) => item.stage_label)
             .filter((label): label is string => Boolean(label))
         );
+        const tnmOptions: string[] = [];
+        const gradeOptions: string[] = [];
+        for (const item of items) {
+          const criteria = (item.tnm_criteria ?? "")
+            .replace(/\([^)]*\)/g, " ")
+            .replace(/\s+/g, " ")
+            .replace(/\s*[-–]\s*$/g, "")
+            .trim();
+          if (criteria && /(\b[TNM]\d|\bAny\s+[TNM])/i.test(criteria)) {
+            if (!tnmOptions.includes(criteria)) tnmOptions.push(criteria);
+          }
+          const gradeSource = [
+            item.stage_label,
+            item.staging_system,
+            item.subtype_label,
+            item.tnm_criteria,
+            item.risk_criteria,
+          ]
+            .filter((value): value is string => Boolean(value))
+            .join(" ");
+          for (const match of gradeSource.matchAll(
+            /grade\s+group\s*[\d\-–]+|grade\s+[\d\-–]+/gi
+          )) {
+            const grade = match[0]
+              .replace(/\s+/g, " ")
+              .replace(/\b\w/g, (c) => c.toUpperCase());
+            if (!gradeOptions.includes(grade)) gradeOptions.push(grade);
+          }
+        }
+        setTnmStages(tnmOptions.sort());
+        setGrades(gradeOptions.sort());
         setFormData((previous) => ({
           ...previous,
           cancerStage: "",
@@ -1916,38 +1949,6 @@ const Diagnosis: React.FC<{ embedded?: boolean; patientId?: string }> = ({
         if (!cancelled) {
           setDiagnosisError(
             error?.response?.data?.message || "Failed to load cancer types."
-          );
-        }
-      });
-
-    API.get<{ success: boolean; data: string[] }>(
-      "/oncology/reference/tnm-stages"
-    )
-      .then((response) => {
-        if (cancelled) return;
-        setTnmStages(response.data.data);
-      })
-      .catch((error) => {
-        console.error("Failed to load TNM stages:", error);
-        if (!cancelled) {
-          setDiagnosisError(
-            error?.response?.data?.message || "Failed to load TNM stages."
-          );
-        }
-      });
-
-    API.get<{ success: boolean; data: string[] }>(
-      "/oncology/reference/grades"
-    )
-      .then((response) => {
-        if (cancelled) return;
-        setGrades(response.data.data);
-      })
-      .catch((error) => {
-        console.error("Failed to load grades:", error);
-        if (!cancelled) {
-          setDiagnosisError(
-            error?.response?.data?.message || "Failed to load grades."
           );
         }
       });
