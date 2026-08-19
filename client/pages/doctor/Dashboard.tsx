@@ -37,7 +37,6 @@ const chartData = [
 
 const periods = ["Last 7 Days", "Last 30 Days", "This Month", "This Year"];
 
-const fallbackHospital = "Central Hospital (Egmore)";
 
 function Icon({
   name,
@@ -205,7 +204,7 @@ export default function DoctorDashboard() {
   const [hospitalOpen, setHospitalOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [period, setPeriod] = useState("Last 7 Days");
-  const [hospital, setHospital] = useState(fallbackHospital);
+  const [hospital, setHospital] = useState("");
   const [doctor, setDoctor] = useState<DashboardDoctorResponse["data"] | null>(null);
   const [dashboardAppointments, setDashboardAppointments] = useState<Appointment[]>([]);
   const [dashboardSchedules, setDashboardSchedules] = useState<DashboardSchedule[]>([]);
@@ -415,8 +414,8 @@ export default function DoctorDashboard() {
     selectedBranchId
       ? doctor?.branches?.find((b) => b.branch_id === selectedBranchId)?.branch_name ??
         hospital ??
-        fallbackHospital
-      : hospital || fallbackHospital;
+        ""
+      : hospital || "";
 
   const todayDate = new Date().toLocaleDateString("en-US", {
     month: "short",
