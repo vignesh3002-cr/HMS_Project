@@ -1092,32 +1092,39 @@ const appointmentsAt = (doc: DayDoctorColumn, time: string): AppointmentRecord[]
         {/* Schedule grid */}
         <section
           aria-label="Doctor appointment schedule grid"
-          className="max-w-full overflow-x-auto rounded-xl border border-[#E5E7EB] bg-white shadow-sm"
+          className="w-full h-full overflow-x-auto rounded-xl border border-[#E5E7EB] bg-white shadow-sm"
         >
-          {isLoadingDay || isLoadingDoctors || isLoadingScheduleDays ? (
-            <div className="flex min-w-[400px] flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
-              <Loader2 size={24} className="animate-spin text-[#00488D]" />
-              Loading schedule...
-            </div>
+        {isLoadingDay || isLoadingDoctors || isLoadingScheduleDays ? (
+          <div className="flex min-h-[420px] w-full flex-col items-center justify-center gap-3 text-sm text-[#6B7280]">
+            <Loader2
+              size={28}
+              className="animate-spin text-[#00488D]"
+            />
+            <span>Loading Schedule...</span>
+          </div>
           ) : doctorColumns.length === 0 ? (
-            <div className="flex min-w-[400px] items-center justify-center py-16 text-[#6B7280] text-sm">
+            <div className="flex items-center justify-center py-16 text-[#6B7280] text-sm">
               No doctors found.
             </div>
           ) : visibleDoctorColumns.length === 0 ? (
-            <div className="flex min-w-[400px] items-center justify-center py-16 text-[#6B7280] text-sm">
+            <div className="flex items-center justify-center py-16 text-[#6B7280] text-sm">
               No doctors match your search or filters.
             </div>
           ) : (
-          <div
-            role="table"
-            style={{ width: `${70 + visibleDoctorColumns.length * 90}px` }}
-          >
+            <div
+              role="table"
+              style={{
+                width: `${70 + visibleDoctorColumns.length * 120}px`,
+              }}
+            >
             {/* Header row */}
             <div className="border-b border-[#c3c6d7] bg-white">
               <div
                 role="row"
                 className="grid min-h-[39px]"
-                style={{ gridTemplateColumns: `70px repeat(${visibleDoctorColumns.length}, 90px)` }}
+                style={{
+                gridTemplateColumns: `70px repeat(${visibleDoctorColumns.length}, 120px)`,
+              }}
               >
                 <div
                   role="columnheader"
@@ -1133,9 +1140,7 @@ const appointmentsAt = (doc: DayDoctorColumn, time: string): AppointmentRecord[]
                     key={doc.employeeId}
                     role="columnheader"
                     title={`${doc.name} - ${doc.spec}`}
-                    className={`flex w-full flex-col items-center justify-center gap-0.5 overflow-hidden pb-1.5 pl-1.5 pr-[7px] pt-1.5 text-center ${
-                      i !== visibleDoctorColumns.length - 1 ? "border-r border-[#c3c6d7]" : ""
-                    }`}
+                    className="flex w-full flex-col items-center justify-center gap-0.5 overflow-hidden border-r border-[#c3c6d7] pb-1.5 pl-1.5 pr-[7px] pt-1.5 text-center"
                   >
                     <span className="line-clamp-2 w-full break-words font-['Manrope',sans-serif] text-[10px] font-bold leading-[13px] text-[#004ac6]">
                       {doc.name}
@@ -1158,7 +1163,7 @@ const appointmentsAt = (doc: DayDoctorColumn, time: string): AppointmentRecord[]
                 <div
                   role="row"
                   className="grid"
-                  style={{ gridTemplateColumns: `70px repeat(${visibleDoctorColumns.length}, 90px)` }}
+                  style={{ gridTemplateColumns: `70px repeat(${visibleDoctorColumns.length}, 120px)` }}
                 >
                   <div
                     role="rowheader"
@@ -1173,9 +1178,7 @@ const appointmentsAt = (doc: DayDoctorColumn, time: string): AppointmentRecord[]
                     <div
                       key={i}
                       role="cell"
-                      className={`flex h-full min-h-[60px] flex-col gap-1 p-1 ${
-                        i !== row.perDoctor.length - 1 ? "border-r border-[#c3c6d7]" : ""
-                      }`}
+                      className="flex h-full min-h-[60px] flex-col gap-1 border-r border-[#c3c6d7] p-1"
                     >
                       {cells.length === 0 ? (
                         <EmptySlot

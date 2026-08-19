@@ -8,7 +8,12 @@ export interface TransferWorkingHour {
   end_time: string;
 }
 
+export type TransferMode = "TRANSFER" | "ADD_BRANCH";
+
 export interface InitiateTransferPayload {
+  mode: TransferMode;
+  // Required when mode === "TRANSFER" — the branch the doctor is leaving.
+  old_branch_id?: string;
   new_branch_id: string;
   new_department_id?: string;
   effective_date: string;
@@ -45,6 +50,9 @@ export type TransferAction = "TRANSFER" | "RESCHEDULE" | "CANCEL";
 export interface ConfirmTransferPayload {
   transfer_id: string;
   action: TransferAction;
+  // Source branch of the transfer, carried from the initiate step so the
+  // backend can close that branch's mapping/schedules on confirmation.
+  old_branch_id?: string;
   replacement_employee_id?: string;
   replacement_branch_id?: string;
   confirm?: boolean;

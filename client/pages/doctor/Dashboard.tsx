@@ -7,9 +7,11 @@ import {
   type DashboardDoctorResponse,
   type DashboardSchedule,
 } from "../../api/doctorDashboard.api";
+import { activeBranches } from "../../lib/utils";
 import { appointmentApi } from "../../api/appointment.api";
 import { encounterApi } from "../../api/encounter.api";
 import { useToast } from "@/hooks/use-toast";
+
 
 type AppointmentStatus = "Check Out" | "Check In" | "Cancelled";
 
@@ -198,7 +200,7 @@ function formatScheduleRange(start?: string | null, end?: string | null) {
 
 export default function DoctorDashboard() {
   const navigate = useNavigate();
-  const toast = useToast();
+  const { toast } = useToast();
 
   const [periodOpen, setPeriodOpen] = useState(false);
   const [hospitalOpen, setHospitalOpen] = useState(false);
@@ -955,13 +957,16 @@ export default function DoctorDashboard() {
 
                   {hospitalOpen && (
                     <div className="absolute right-0 top-[55px] z-30 w-[180px] overflow-hidden rounded border border-slate-200 bg-white shadow-[0_5px_15px_rgba(0,0,0,0.12)]">
-                      {(doctor?.branches?.length ? doctor.branches : []).map((branch) => (
+                      {(activeBranches(doctor?.branches).length
+                        ? activeBranches(doctor?.branches)
+                        : [{ branch_id: "", branch_name: fallbackHospital }]
+                      ).map((branch) => (
                         <button
                           type="button"
-                          key={branch.branch_id}
+                          key={branch.branch_id || branch.branch_name}
                           onClick={() => {
                             setHospital(branch.branch_name);
-                            setSelectedBranchId(branch.branch_id);
+                            setSelectedBranchId(branch.branch_id || null);
                             setHospitalOpen(false);
                             // Load dashboard for new branch with loading indicator
                             loadDashboard(false, true);

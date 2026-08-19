@@ -242,7 +242,11 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
     if (!assignBranchId) return [];
     const deptMap = new Map<string, string>();
     doctors
-      .filter((d) => d.emp_status !== false && d.branch_id === assignBranchId)
+      .filter(
+        (d) =>
+          d.emp_status !== false &&
+          (d.branches?.some((b) => b.branch_id === assignBranchId) ?? false),
+      )
       .forEach((d) => {
         if (d.department_id && !deptMap.has(d.department_id)) {
           const deptName = d.department_master?.department_name || d.department_id;
@@ -307,7 +311,9 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
     // Base filter: always apply branch + department when selected
     let eligible = active;
     if (assignBranchId) {
-      eligible = eligible.filter((d) => d.branch_id === assignBranchId);
+      eligible = eligible.filter(
+        (d) => d.branches?.some((b) => b.branch_id === assignBranchId) ?? false,
+      );
     }
     if (assignDepartmentId) {
       eligible = eligible.filter((d) => d.department_id === assignDepartmentId);

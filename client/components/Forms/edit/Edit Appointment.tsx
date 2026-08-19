@@ -11,6 +11,7 @@ import { departmentApi, Department } from "@/api/department.api";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { appointmentApi, type AvailableSlot } from "@/api/appointment.api";
 import { validateRequiredFields, type RequiredField } from "@/lib/validation";
+import { activeBranches } from "@/lib/utils";
 
 interface AppointmentFormData {
   patientId: string;
@@ -251,7 +252,7 @@ export default function EditAppointment() {
         if (record.employee_id) {
           employeeApi
             .getOne(record.employee_id)
-            .then((res) => setDoctorBranches(res.data?.data?.branches || []))
+            .then((res) => setDoctorBranches(activeBranches(res.data?.data?.branches || [])))
             .catch(() => {});
         }
       })
@@ -597,12 +598,11 @@ export default function EditAppointment() {
                     employeeApi
                       .getOne(val)
                       .then((res) => {
-                        const mappedBranches = res.data?.data?.branches || [];
+                        const mappedBranches = activeBranches(res.data?.data?.branches || []);
                         setDoctorBranches(mappedBranches);
                         const nextBranchId =
                           mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
                           mappedBranches[0]?.branch_id ||
-                          selectedDoctor?.branch_id ||
                           formData.branchId;
 
                         if (!nextBranchId) return null;
