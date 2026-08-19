@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { getActiveBranchId } from "../../api/axios";
 import {
   doctorDashboardApi,
@@ -164,11 +165,9 @@ function formatDate(value: string) {
 function formatTime(value: string) {
   if (!value) return "";
 
-  // Backend schedule/appointment times can arrive as:
-  // 11:00, 11:00:00, or 1970-01-01T11:00:00.000Z.
-  // For schedule values we must not let the browser convert the
-  // UTC placeholder date into the user's local timezone.
-  const timeMatch = value.match(/(?:T|\s)?(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?/);
+  const timeMatch = value.match(
+    /(?:T|\s)?(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?/
+  );
 
   if (timeMatch) {
     let hour = Number(timeMatch[1]);
@@ -209,14 +208,21 @@ function mapAppointmentStatus(status: string): AppointmentStatus {
 }
 
 export default function DoctorDashboard() {
+  const navigate = useNavigate();
+
   const [periodOpen, setPeriodOpen] = useState(false);
   const [hospitalOpen, setHospitalOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [period, setPeriod] = useState("Last 7 Days");
   const [hospital, setHospital] = useState(fallbackHospital);
-  const [doctor, setDoctor] = useState<DashboardDoctorResponse["data"] | null>(null);
-  const [dashboardAppointments, setDashboardAppointments] = useState<Appointment[]>([]);
-  const [dashboardSchedules, setDashboardSchedules] = useState<DashboardSchedule[]>([]);
+  const [doctor, setDoctor] =
+    useState<DashboardDoctorResponse["data"] | null>(null);
+  const [dashboardAppointments, setDashboardAppointments] = useState<
+    Appointment[]
+  >([]);
+  const [dashboardSchedules, setDashboardSchedules] = useState<
+    DashboardSchedule[]
+  >([]);
   const [totalAppointments, setTotalAppointments] = useState(0);
   const [cancelledAppointments, setCancelledAppointments] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -242,7 +248,8 @@ export default function DoctorDashboard() {
         }
 
         const today = new Date().toISOString().slice(0, 10);
-        const employeeResponse = await doctorDashboardApi.getDoctor(employeeId);
+        const employeeResponse =
+          await doctorDashboardApi.getDoctor(employeeId);
         const employeeData = employeeResponse.data.data;
 
         if (cancelled) return;
@@ -251,63 +258,80 @@ export default function DoctorDashboard() {
         setDashboardSchedules(employeeData.doctorSchedules ?? []);
 
         const firstActiveBranch = employeeData.branches?.find(
-          (branch) => branch.status === undefined || branch.status === 1
+          (branch) =>
+            branch.status === undefined || branch.status === 1
         );
 
-        // Prefer the branch selected by the existing HMS branch selector.
-        // If none is selected, fall back to the doctor's active branch.
         const selectedBranchId = getActiveBranchId();
-        const branchId = selectedBranchId || firstActiveBranch?.branch_id;
+        const branchId =
+          selectedBranchId || firstActiveBranch?.branch_id;
 
         if (firstActiveBranch?.branch_name) {
           setHospital(firstActiveBranch.branch_name);
         }
 
-        const [appointmentsResponse, cancelledResponse] = await Promise.all([
-          doctorDashboardApi.getAppointments({
-            employeeId,
-            branchId,
-            date: today,
-            page: 1,
-            limit: 100,
-          }),
-          doctorDashboardApi.getAppointments({
-            employeeId,
-            branchId,
-            date: today,
-            status: "CANCELLED",
-            page: 1,
-            limit: 1,
-          }),
-        ]);
+        const [appointmentsResponse, cancelledResponse] =
+          await Promise.all([
+            doctorDashboardApi.getAppointments({
+              employeeId,
+              branchId,
+              date: today,
+              page: 1,
+              limit: 100,
+            }),
+            doctorDashboardApi.getAppointments({
+              employeeId,
+              branchId,
+              date: today,
+              status: "CANCELLED",
+              page: 1,
+              limit: 1,
+            }),
+          ]);
 
         if (cancelled) return;
 
-        setTotalAppointments(appointmentsResponse.data.data.total);
-        setCancelledAppointments(cancelledResponse.data.data.total);
-
-        const mappedAppointments = appointmentsResponse.data.data.appointments.map(
-          (item: DashboardAppointment): Appointment => ({
-            patient: [
-              item.patient_bio_data?.patient_first_name,
-              item.patient_bio_data?.patient_middle_name,
-              item.patient_bio_data?.patient_last_name,
-            ]
-              .filter(Boolean)
-              .join(" ") || "Unknown Patient",
-            image:
-              "https://www.figma.com/api/mcp/asset/0174143d-d6a1-4d40-96d6-22a8b499a788.png",
-            dateTime: `${formatDate(item.appointment_date)} - ${formatTime(
-              item.appointment_time
-            )}`,
-            phone: item.patient_bio_data?.patient_primary_mobile || "-",
-            status: mapAppointmentStatus(item.status),
-          })
+        setTotalAppointments(
+          appointmentsResponse.data.data.total
         );
+
+        setCancelledAppointments(
+          cancelledResponse.data.data.total
+        );
+
+        const mappedAppointments =
+          appointmentsResponse.data.data.appointments.map(
+            (item: DashboardAppointment): Appointment => ({
+              patient: [
+                item.patient_bio_data?.patient_first_name,
+                item.patient_bio_data?.patient_middle_name,
+                item.patient_bio_data?.patient_last_name,
+              ]
+                .filter(Boolean)
+                .join(" ") || "Unknown Patient",
+
+              image:
+                "https://www.figma.com/api/mcp/asset/0174143d-d6a1-4d40-96d6-22a8b499a788.png",
+
+              dateTime: `${formatDate(
+                item.appointment_date
+              )} - ${formatTime(item.appointment_time)}`,
+
+              phone:
+                item.patient_bio_data?.patient_primary_mobile ||
+                "-",
+
+              status: mapAppointmentStatus(item.status),
+            })
+          );
 
         setDashboardAppointments(mappedAppointments);
       } catch (error: any) {
-        console.error("Failed to load doctor dashboard:", error);
+        console.error(
+          "Failed to load doctor dashboard:",
+          error
+        );
+
         if (!cancelled) {
           setDashboardError(
             error?.response?.data?.message ||
@@ -320,12 +344,8 @@ export default function DoctorDashboard() {
       }
     };
 
-    // Initial load.
     void loadDashboard(true);
 
-    // Keep today's appointments/counts synchronized with the backend.
-    // The existing appointment API is REST-based, so polling is used instead
-    // of pretending the endpoint is WebSocket real-time.
     const intervalId = window.setInterval(() => {
       void loadDashboard(false);
     }, 5000);
@@ -340,8 +360,14 @@ export default function DoctorDashboard() {
     const handleClick = (event: MouseEvent) => {
       const target = event.target as Node;
 
-      if (!periodRef.current?.contains(target)) setPeriodOpen(false);
-      if (!hospitalRef.current?.contains(target)) setHospitalOpen(false);
+      if (!periodRef.current?.contains(target)) {
+        setPeriodOpen(false);
+      }
+
+      if (!hospitalRef.current?.contains(target)) {
+        setHospitalOpen(false);
+      }
+
       if (!notificationRef.current?.contains(target)) {
         setNotificationOpen(false);
       }
@@ -378,7 +404,6 @@ export default function DoctorDashboard() {
 
   const doctorId = doctor?.employee?.employee_id || "-";
 
-
   const availability = [
     "MONDAY",
     "TUESDAY",
@@ -389,14 +414,23 @@ export default function DoctorDashboard() {
     "SUNDAY",
   ].map((day) => {
     const schedule = dashboardSchedules.find(
-      (item) => item.day_of_week?.toUpperCase() === day && item.is_active !== false
+      (item) =>
+        item.day_of_week?.toUpperCase() === day &&
+        item.is_active !== false
     );
 
     return {
-      day: day.slice(0, 3).charAt(0) + day.slice(1, 3).toLowerCase(),
+      day:
+        day.slice(0, 3).charAt(0) +
+        day.slice(1, 3).toLowerCase(),
+
       time: schedule
-        ? formatScheduleRange(schedule.start_time, schedule.end_time)
+        ? formatScheduleRange(
+            schedule.start_time,
+            schedule.end_time
+          )
         : undefined,
+
       leave: !schedule,
     };
   });
@@ -404,6 +438,7 @@ export default function DoctorDashboard() {
   return (
     <main className="min-h-screen w-full bg-white font-['Inter',sans-serif] text-[#181c1e]">
       <div className="mx-auto w-full max-w-[1120px] px-8 py-8 max-[1100px]:max-w-full max-[1100px]:px-6 max-[700px]:px-4 max-[700px]:py-5">
+
         {/* Header */}
         <header className="mb-8 flex items-center justify-between max-[700px]:items-start">
           <div className="flex flex-col gap-2">
@@ -416,6 +451,7 @@ export default function DoctorDashboard() {
                 <span className="font-['Manrope',sans-serif] text-xs font-bold uppercase leading-4 tracking-[0.6px] text-[#434654]">
                   {todayDate}
                 </span>
+
                 <span className="rounded bg-[#dae2ff] px-2 py-0.5 font-['Manrope',sans-serif] text-sm font-bold leading-5 tracking-[-0.14px] text-[#003d9b]">
                   {doctorId}
                 </span>
@@ -425,7 +461,11 @@ export default function DoctorDashboard() {
                 <span className="text-[17px] leading-none text-yellow-500">
                   ★
                 </span>
-                <span className="text-xs font-bold text-[#191c1e]">4.9</span>
+
+                <span className="text-xs font-bold text-[#191c1e]">
+                  4.9
+                </span>
+
                 <span className="text-[11px] font-medium text-[#434654]">
                   (128 reviews)
                 </span>
@@ -438,7 +478,9 @@ export default function DoctorDashboard() {
               <button
                 type="button"
                 aria-label="Notifications"
-                onClick={() => setNotificationOpen((value) => !value)}
+                onClick={() =>
+                  setNotificationOpen((value) => !value)
+                }
                 className="flex h-12 w-12 items-center justify-center rounded-xl text-[#434654] transition hover:bg-slate-100"
               >
                 <Icon name="bell" />
@@ -471,16 +513,23 @@ export default function DoctorDashboard() {
               <span className="font-['Manrope',sans-serif] text-xs font-bold tracking-[0.6px] text-[#434654]">
                 March 24, 2026
               </span>
-              <Icon name="calendar" className="h-5 w-5 text-[#434654]" />
+
+              <Icon
+                name="calendar"
+                className="h-5 w-5 text-[#434654]"
+              />
             </div>
           </div>
         </header>
 
         <div className="grid grid-cols-[minmax(0,1fr)_336px] items-start gap-6 max-[900px]:grid-cols-1">
+
           {/* Left column */}
           <section className="min-w-0">
+
             {/* Metrics */}
             <div className="mb-[34px] grid h-[142px] grid-cols-3 gap-6 max-[700px]:h-auto max-[700px]:grid-cols-1">
+
               <article className="flex min-w-0 flex-col justify-between rounded-xl border border-[#c3c6d6] bg-white p-[21px] shadow-[0_4px_6px_rgba(0,0,0,0.05)] max-[700px]:min-h-[142px]">
                 <div className="flex items-start justify-between gap-2.5">
                   <div className="flex flex-col gap-1">
@@ -572,7 +621,9 @@ export default function DoctorDashboard() {
 
                 <button
                   type="button"
-                  onClick={() => alert("Opening all appointments...")}
+                  onClick={() =>
+                    alert("Opening all appointments...")
+                  }
                   className="font-['Manrope',sans-serif] text-xs font-bold uppercase tracking-[0.6px] text-[#003d9b]"
                 >
                   View All
@@ -628,12 +679,16 @@ export default function DoctorDashboard() {
                       </td>
 
                       <td className="h-[50px] overflow-hidden text-ellipsis whitespace-nowrap border-b border-slate-100 px-5 py-2 text-center font-['Manrope',sans-serif] text-xs text-slate-600">
-                        {appointment.dateTime.split(" - ").map((part, index) => (
-                          <React.Fragment key={`${appointment.patient}-${index}`}>
-                            {index > 0 && <br />}
-                            {part}
-                          </React.Fragment>
-                        ))}
+                        {appointment.dateTime
+                          .split(" - ")
+                          .map((part, index) => (
+                            <React.Fragment
+                              key={`${appointment.patient}-${index}`}
+                            >
+                              {index > 0 && <br />}
+                              {part}
+                            </React.Fragment>
+                          ))}
                       </td>
 
                       <td className="h-[50px] overflow-hidden text-ellipsis whitespace-nowrap border-b border-slate-100 px-5 py-2 text-center font-['Manrope',sans-serif] text-xs text-slate-600">
@@ -752,6 +807,7 @@ export default function DoctorDashboard() {
 
           {/* Right column */}
           <aside className="min-w-0 max-[900px]:grid max-[900px]:grid-cols-2 max-[900px]:gap-6 max-[700px]:grid-cols-1">
+
             {/* Availability */}
             <section className="mb-6 overflow-hidden rounded border border-slate-200 bg-white shadow-[0_1px_1.5px_rgba(0,0,0,0.1),0_1px_1px_rgba(0,0,0,0.06)] max-[900px]:mb-0">
               <div className="flex items-center justify-between gap-4 border-b border-slate-100 p-5">
@@ -778,7 +834,12 @@ export default function DoctorDashboard() {
 
                   {hospitalOpen && (
                     <div className="absolute right-0 top-[55px] z-30 w-[180px] overflow-hidden rounded border border-slate-200 bg-white shadow-[0_5px_15px_rgba(0,0,0,0.12)]">
-                      {(doctor?.branches?.length ? doctor.branches.map((branch) => branch.branch_name) : [fallbackHospital]).map((item) => (
+                      {(doctor?.branches?.length
+                        ? doctor.branches.map(
+                            (branch) => branch.branch_name
+                          )
+                        : [fallbackHospital]
+                      ).map((item) => (
                         <button
                           type="button"
                           key={item}
@@ -813,7 +874,11 @@ export default function DoctorDashboard() {
                     ) : (
                       <span className="flex flex-1 items-center justify-end gap-2 whitespace-nowrap text-sm leading-5 text-slate-500">
                         {item.time}
-                        <Icon name="clock" className="h-4 w-4 shrink-0" />
+
+                        <Icon
+                          name="clock"
+                          className="h-4 w-4 shrink-0"
+                        />
                       </span>
                     )}
                   </div>
@@ -823,7 +888,7 @@ export default function DoctorDashboard() {
               <div className="p-5">
                 <button
                   type="button"
-                  onClick={() => alert("Opening availability editor...")}
+                  onClick={() => navigate("/doctor/schedule")}
                   className="h-9 w-full rounded bg-slate-100 text-sm font-bold leading-5 text-[#0047ab] transition hover:bg-slate-200"
                 >
                   Edit Availability
@@ -850,8 +915,7 @@ export default function DoctorDashboard() {
                   </div>
 
                   <p className="text-xs italic leading-[18px] text-[#434654]">
-                    "Dr. Smith was incredibly thorough and took the time to
-                    explain my results clearly."
+                    "Dr. Smith was incredibly thorough and took the time to explain my results clearly."
                   </p>
                 </article>
 
@@ -867,15 +931,16 @@ export default function DoctorDashboard() {
                   </div>
 
                   <p className="text-xs italic leading-[18px] text-[#434654]">
-                    "Quick consultation, very professional staff. Highly
-                    recommend for cardio checkups."
+                    "Quick consultation, very professional staff. Highly recommend for cardio checkups."
                   </p>
                 </article>
 
                 <div className="border-t border-[#c3c6d6] pb-2 pt-[9px] text-center">
                   <button
                     type="button"
-                    onClick={() => alert("Opening all patient reviews...")}
+                    onClick={() =>
+                      alert("Opening all patient reviews...")
+                    }
                     className="text-xs font-medium leading-4 text-[#003d9b]"
                   >
                     Read All Reviews
