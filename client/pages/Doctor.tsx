@@ -177,6 +177,19 @@ function formatAllBranches(branches: EmployeeRecord["branches"]): string {
 function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
+  const isActive = emp.emp_status === true || emp.user_table?.user_status === 0;
+  // Daily status comes straight from the backend (GET /employees with
+  // `date` computes doctor_status server-side: Active/Leave/Inactive).
+  // Doctors without a daily record fall back to account-level state.
+  const status = emp.doctor_status
+    ? emp.doctor_status === "LEAVE"
+      ? "Leave"
+      : emp.doctor_status === "INACTIVE"
+        ? "Inactive"
+        : "Active"
+    : isActive
+      ? "Active"
+      : "Inactive";
   return {
     id: emp.employee_id,
     name: fullName,
@@ -194,7 +207,9 @@ function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
       branch_area: b.branch_area ?? null,
       has_schedule: b.has_schedule,
     })),
-    status: (emp.emp_status === true || emp.user_table?.user_status === 0) ? "Active" : "Leave",
+    status,
+    totalSlots: emp.total_slots ?? 0,
+    bookedSlots: emp.booked_count ?? 0,
     qualification: emp.qualification || "—",
     mobile: emp.mobile_no || "—",
     photo: emp.employee_photo_URL || "",
@@ -242,7 +257,36 @@ export default function Doctor() {
     handleClearFilter();
   };
  
-  // Filters
+  // Real doctors fetched from the backend
+  const [realDoctors, setRealDoctors] = useState<EmployeeRecord[] | null>(null);
+  const [isDoctorsLoading, setIsDoctorsLoading] = useState(true);
+  const [showDeactivated, setShowDeactivated] = useState(false);
+
+  // Per-doctor slot booking summary for the selected date (list view progress bar)
+  const [slotSummaries, setSlotSummaries] = useState<Record<string, { total: number; booked: number }>>({});
+
+  // Mapped doctor rows -- shared by the filter field options below and the
+  // search/filter step, so both work off the exact same real data.
+  const doctorRows = useMemo(
+    () => (realDoctors ? realDoctors.map((emp, index) => mapEmployeeToDoctorData(emp, index)) : []),
+    [realDoctors],
+  );
+
+  const { doctorFilterFields } = useDoctorFilters({ doctorRows, branches });
+
+  // Only doctors with an Active status that day have real slot availability
+  // to fetch -- Leave/Inactive doctors have no working-hours on the selected
+  // date, so their slot summary is always zero. Skipping them cuts every
+  // slot-summary request (initial, poll, focus-refetch) down to just the
+  // doctors that can actually book.
+  const activeDoctorIds = useMemo(
+    () => new Set(doctorRows.filter((r) => r.status === "Active").map((r) => String(r.id))),
+    [doctorRows],
+  );
+
+  // Filters -- seeded with the fields so fields carrying a `defaultValue`
+  // (e.g. Status defaulting to ["Active"]) start applied and are restored
+  // when the user clears the filter.
   const {
     values: filterValues,
     appliedValues,
@@ -251,15 +295,7 @@ export default function Doctor() {
     handleChange: handleFilterChange,
     handleApply: handleApplyFilter,
     handleClear: handleClearFilter,
-  } = useFilterPanel();
- 
-  // Real doctors fetched from the backend
-  const [realDoctors, setRealDoctors] = useState<EmployeeRecord[] | null>(null);
-  const [isDoctorsLoading, setIsDoctorsLoading] = useState(true);
-  const [showDeactivated, setShowDeactivated] = useState(false);
-
-  // Per-doctor slot booking summary for the selected date (list view progress bar)
-  const [slotSummaries, setSlotSummaries] = useState<Record<string, { total: number; booked: number }>>({});
+  } = useFilterPanel(doctorFilterFields);
 
   const fetchDoctors = useCallback(async () => {
     setIsDoctorsLoading(true);
@@ -269,6 +305,9 @@ export default function Doctor() {
         branchId: isAllBranches ? undefined : selectedBranchId,
         limit: 1000,
         includeDeleted: showDeactivated,
+        // Pass the selected date so the backend computes doctor_status
+        // (Active/Leave/Inactive) and the day's total_slots/booked_count.
+        date: format(selectedDate, "yyyy-MM-dd"),
       });
       console.log("[Doctor Page] Response:", res.data);
       const allEmployees = res.data?.data?.employees || [];
@@ -301,12 +340,12 @@ export default function Doctor() {
     } finally {
       setIsDoctorsLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches, showDeactivated]);
+  }, [toast, selectedBranchId, isAllBranches, showDeactivated, selectedDate]);
  
-  useEffect(() => {
+useEffect(() => {
     fetchDoctors();
   }, [fetchDoctors]);
- 
+
   // Fetch each doctor's booked/total slot counts for the selected single day
   // (list view only). Total slots = the doctor's real working-hours
   // availability that day sliced into fixed 20-minute slots (backend-computed).
@@ -348,44 +387,41 @@ export default function Doctor() {
     },
     [],
   );
- 
+
   useEffect(() => {
     if (!realDoctors || realDoctors.length === 0 || viewMode !== "list") return;
     const signal = { cancelled: false };
+
+    // Only Active doctors have slots that day -- fetching summaries for
+    // Leave/Inactive doctors would be wasted requests returning zeros.
+    const activeDoctors = realDoctors.filter((d) => activeDoctorIds.has(d.employee_id));
 
     // Reset so every row shows its loading state again for the newly
     // selected date/doctor set, instead of briefly showing the previous
     // date's stale counts while the fresh fetch is in flight.
     setSlotSummaries({});
-    fetchSlotSummaries(realDoctors, selectedDate, signal);
+
+    if (activeDoctors.length === 0) return () => { signal.cancelled = true; };
+    fetchSlotSummaries(activeDoctors, selectedDate, signal);
 
     // Keep the booked/total counts live: poll periodically, and refetch as
     // soon as the tab regains focus (e.g. after booking an appointment on
     // another page/tab), instead of only updating on next full page load.
     const intervalId = window.setInterval(() => {
-      fetchSlotSummaries(realDoctors, selectedDate, signal);
+      fetchSlotSummaries(activeDoctors, selectedDate, signal);
     }, 15000);
- 
-    const handleFocus = () => fetchSlotSummaries(realDoctors, selectedDate, signal);
+
+    const handleFocus = () => fetchSlotSummaries(activeDoctors, selectedDate, signal);
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleFocus);
- 
+
     return () => {
       signal.cancelled = true;
       window.clearInterval(intervalId);
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleFocus);
     };
-  }, [realDoctors, selectedDate, viewMode, fetchSlotSummaries]);
- 
-  // Mapped doctor rows -- shared by the filter field options below and the
-  // search/filter step, so both work off the exact same real data.
-  const doctorRows = useMemo(
-    () => (realDoctors ? realDoctors.map((emp, index) => mapEmployeeToDoctorData(emp, index)) : []),
-    [realDoctors],
-  );
-
-  const { doctorFilterFields } = useDoctorFilters({ doctorRows, branches });
+  }, [realDoctors, selectedDate, viewMode, activeDoctorIds, fetchSlotSummaries]);
 
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
@@ -727,11 +763,14 @@ export default function Doctor() {
                     <DoctorBranchDisplay branches={r.branches} />
                   )},
                   { key: "slots", label: "Slots", sortable: true, render: (r: any) => {
+                    if (r.status !== "Active") {
+                      return <SlotProgress booked={0} total={0} />;
+                    }
                     const summary = slotSummaries[String(r.id)];
                     return <SlotProgress booked={summary?.booked ?? 0} total={summary?.total ?? 0} loading={!summary} />;
                   }},
-                  { key: "mobile", label: "Mobile No", render: (r: any) => (
-                    <span className="text-[#191C1E] hms-content-text leading-4">{String(r.mobile)}</span>
+                  { key: "status", label: "Status", sortable: true, render: (r: any) => (
+                    <StatusBadge status={String(r.status)} />
                   )},
                   { key: "actions", label: "Actions", sortable: false, className: "w-px", headerClassName: "w-px", render: (r: any) => (
                     <div className="flex items-center gap-1">

@@ -134,10 +134,10 @@ export default function Login() {
       // ==================================================
       if (roleType === "DOCTOR") {
         console.log(
-          "DOCTOR detected -> redirecting to /doctor-dashboard"
+          "DOCTOR detected -> redirecting to /dashboard"
         );
 
-        navigate("/doctor-dashboard", {
+        navigate("/dashboard", {
           replace: true,
         });
 

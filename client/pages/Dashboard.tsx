@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2, MoreVertical } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import HmsTable from "@/components/hms/HmsTable";
-import { format, isToday, isTomorrow, isYesterday, addDays, subDays, startOfDay, endOfDay } from "date-fns";
+import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import { useFilterPanel, useDashboardFilters } from "@/components/Filter";
@@ -11,7 +11,7 @@ import { applySearchAndFilter } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
-import { encounterApi, type EncounterRecord, type EncounterStatus, type EncounterType } from "@/api/encounter.api";
+import { encounterApi, type EncounterRecord } from "@/api/encounter.api";
 import { patientApi } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { getEffectiveAppointmentStatus } from "@/lib/appointmentStatus";
@@ -130,6 +130,20 @@ function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
   const fullName = `${doc.first_name} ${doc.middle_name ? doc.middle_name + " " : ""}${doc.last_name}`;
   const role = doc.user_table?.role_type || "STAFF";
   const isActive = doc.emp_status === true || doc.user_table?.user_status === 0;
+  // Daily status for doctors comes straight from the backend (GET /employees
+  // with `date` computes doctor_status server-side: Active/Leave/Inactive).
+  // Staff members never receive doctor_status, so they fall back to the
+  // account-level active/inactive state.
+  const status =
+    role === "DOCTOR" && doc.doctor_status
+      ? doc.doctor_status === "LEAVE"
+        ? "Leave"
+        : doc.doctor_status === "INACTIVE"
+          ? "Inactive"
+          : "Active"
+      : isActive
+        ? "Active"
+        : "Inactive";
   return {
     avatar: getInitials(fullName),
     avatarColor: palette.avatarColor,
@@ -141,7 +155,7 @@ function mapEmployeeRecord(doc: EmployeeRecord, index: number) {
     deptColor: "#475C7F",
     branch: formatBranch(doc.branch),
     branches: doc.branches ?? [],
-    status: isActive ? "Active" : "Inactive",
+    status,
     role,
   };
 }
@@ -352,6 +366,7 @@ export default function Dashboard() {
   const [realDoctors, setRealDoctors] = useState<Record<string, unknown>[] | null>(null);
   const [realStaff, setRealStaff] = useState<Record<string, unknown>[] | null>(null);
   const [isEmployeesLoading, setIsEmployeesLoading] = useState(true);
+
   const [patientCount, setPatientCount] = useState<number>(0);
   const [patientLoading, setPatientLoading] = useState(false);
 
@@ -386,6 +401,10 @@ export default function Dashboard() {
       const res = await employeeApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
         limit: 1000,
+        // Pass the selected date so the backend computes doctor_status
+        // (Active/Leave/Inactive) for doctors; no statusType is sent so
+        // staff rows are preserved (the shared fetch feeds the staff tab).
+        date: format(selectedDate, "yyyy-MM-dd"),
       });
       console.log("[Dashboard] Response:", res.data);
       const allEmployees = res.data?.data?.employees || [];
@@ -420,16 +439,20 @@ export default function Dashboard() {
         description: err.response?.data?.message || "Couldn't reach the employees API.",
         variant: "destructive",
       });
+      // Explicitly set to empty arrays on error so the table renders empty state
+      setRealDoctors([]);
+      setRealStaff([]);
     } finally {
       setIsEmployeesLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches, permissions]);
+  }, [toast, selectedBranchId, isAllBranches, permissions, selectedDate]);
 
   // Branch progress bar state — branches come from the real /branch API.
   // Each branch's pct/color is driven purely by its own real total
   // appointment count (not a share of the other branches' totals), bucketed
   // into fixed tiers rather than scaled linearly.
   const [branches, setBranches] = useState<{ id: string; name: string; pct: number; color: string }[]>([]);
+  const [branchPerfLoading, setBranchPerfLoading] = useState(false);
 
   // Appointment count -> progress bar percentage + color tiers:
   //   1-6   booked -> 5%   green   (6 grouped into the 1-5 tier)
@@ -445,6 +468,7 @@ export default function Dashboard() {
   }
 
   const fetchBranchPerformance = useCallback(async () => {
+    setBranchPerfLoading(true);
     try {
       const branchRes = await branchApi.getAll();
       const branchList = branchRes.data?.data || [];
@@ -476,8 +500,23 @@ export default function Dashboard() {
       );
     } catch (err) {
       console.error("[Dashboard] Failed to load branch performance:", err);
+    } finally {
+      setBranchPerfLoading(false);
     }
   }, []);
+
+  // Load branch performance independently of the Appointments tab fetch so
+  // the widget always gets data — previously it only ran as a side effect of
+  // fetchAppointments, so it stayed empty when that fetch was skipped (no
+  // appointment.read permission) or failed.
+  useEffect(() => {
+    if (!permissions.includes("appointment.read")) {
+      setBranches([]);
+      setBranchPerfLoading(false);
+      return;
+    }
+    fetchBranchPerformance();
+  }, [permissions, fetchBranchPerformance]);
 
   const fetchAppointments = useCallback(async () => {
     if (!permissions.includes("appointment.read")) {
@@ -502,7 +541,6 @@ export default function Dashboard() {
 
       setRealAppointments(rows.map(mapAppointmentRecord));
       setAppointmentCount(res.data?.data?.total ?? rows.length);
-      fetchBranchPerformance();
     } catch (err: any) {
       console.error("[Dashboard] Failed to load appointments:", err);
       toast({
@@ -513,7 +551,7 @@ export default function Dashboard() {
     } finally {
       setIsAppointmentsLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches, fetchBranchPerformance, selectedDate]);
+  }, [toast, selectedBranchId, isAllBranches, selectedDate]);
 
   useEffect(() => {
     fetchAppointments();
@@ -658,6 +696,17 @@ export default function Dashboard() {
   const tabsContainerRef = useRef<HTMLDivElement>(null);
   const [underline, setUnderline] = useState({ left: 0, width: 0 });
 
+  const { activeFilterFields } = useDashboardFilters({
+    activeTab,
+    realDoctors: realDoctors,
+    realStaff,
+    realAppointments,
+    branches: branchDirectory,
+  });
+
+  // Filters -- seeded with the fields so fields carrying a `defaultValue`
+  // (e.g. Status defaulting to ["Active"]) start applied and are restored
+  // when the user clears the filter.
   const {
     values: filterValues,
     appliedValues,
@@ -666,27 +715,11 @@ export default function Dashboard() {
     handleChange: handleFilterChange,
     handleApply: handleApplyFilter,
     handleClear: handleClearFilter,
-  } = useFilterPanel();
+  } = useFilterPanel(activeFilterFields);
 
   useEffect(() => {
     handleClearFilter();
   }, [activeTab]);
-
-  // Filter UI, state, and field/option logic all live in Filter/ now --
-  // useFilterPanel() (state, above) and useDashboardFilters() (field
-  // definitions + real-data-derived options) are the single source of
-  // truth; Dashboard just receives activeFilterFields and renders it via
-  // FilterPopover below. Branch/Department/Status/Name options are built
-  // from the same real, already-fetched realDoctors/realStaff/
-  // realAppointments/branchDirectory Dashboard already has -- no new or
-  // duplicate API calls.
-  const { activeFilterFields } = useDashboardFilters({
-    activeTab,
-    realDoctors,
-    realStaff,
-    realAppointments,
-    branches: branchDirectory,
-  });
 
   const availableTabs = useMemo(() => [
     { key: "doctors", label: "Doctors", show: canAny(["doctor.read", "employee.read"]) },
@@ -757,40 +790,6 @@ export default function Dashboard() {
   // steps itself.
   const filteredData = useMemo(() => {
     let result: Record<string, unknown>[] = [...activeData];
-
-    // Hide cancelled appointments for today (but show yesterday's cancelled)
-    if (activeTab === "appointments") {
-      const now = new Date();
-      const todayStart = startOfDay(now).getTime();
-      const todayEnd = endOfDay(now).getTime();
-
-      result = result.filter((item) => {
-        const isCancelled = String(item.status ?? "").toLowerCase() === "cancelled";
-        if (!isCancelled) return true;
-
-        // Parse date (dd-MM-yyyy) and time (hh:mm AM/PM) to timestamp
-        const dateStr = String(item.date ?? "");
-        const timeStr = String(item.time ?? "");
-        const [day, month, year] = dateStr.split("-").map(Number);
-        let hours = 0;
-        let minutes = 0;
-        if (timeStr) {
-          const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-          if (timeMatch) {
-            hours = parseInt(timeMatch[1], 10);
-            minutes = parseInt(timeMatch[2], 10);
-            const period = timeMatch[3].toUpperCase();
-            if (period === "PM" && hours !== 12) hours += 12;
-            if (period === "AM" && hours === 12) hours = 0;
-          }
-        }
-        const apptDate = new Date(year, month - 1, day, hours, minutes);
-        const apptTime = apptDate.getTime();
-
-        const isTodayAppt = apptTime >= todayStart && apptTime <= todayEnd;
-        return !isTodayAppt;
-      });
-    }
 
     return applySearchAndFilter(result, searchQuery, searchableFields, appliedValues, activeFilterFields);
   }, [searchQuery, activeTab, appliedValues, activeFilterFields, realDoctors, realStaff, realAppointments]);
@@ -872,13 +871,14 @@ export default function Dashboard() {
 
   const [cancelTarget, setCancelTarget] = useState<Record<string, unknown> | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const handleCancelAppointment = (target: Record<string, unknown>) => {
     setCancelReason("");
     setCancelTarget(target);
   };
 
-  const handleConfirmCancelAppointment = () => {
+  const handleConfirmCancelAppointment = async () => {
     if (!cancelTarget) return;
 
     if (!cancelReason.trim()) {
@@ -886,18 +886,36 @@ export default function Dashboard() {
       return;
     }
 
-    const targetId = cancelTarget.id;
-    setRealAppointments((prev) =>
-      (prev ?? []).map((appt) =>
-        appt.id === targetId ? { ...appt, status: "Cancelled" } : appt,
-      ),
-    );
-    toast({
-      title: "Appointment cancelled",
-      description: `Appointment ${targetId} has been cancelled.`,
-    });
-    setCancelTarget(null);
-    setCancelReason("");
+    const targetId = cancelTarget.id as string;
+    setIsCancelling(true);
+    try {
+      const res = await appointmentApi.cancel(targetId, cancelReason.trim());
+      const cancelled = res.data?.data;
+      setRealAppointments((prev) =>
+        (prev ?? []).map((appt, index) =>
+          appt.id === targetId
+            ? cancelled
+              ? mapAppointmentRecord(cancelled, index)
+              : { ...appt, status: "Cancelled" }
+            : appt,
+        ),
+      );
+      toast({
+        title: "Appointment cancelled",
+        description: `Appointment ${targetId} has been cancelled.`,
+      });
+      setCancelTarget(null);
+      setCancelReason("");
+    } catch (err: any) {
+      console.error("[Dashboard] Cancel error:", err);
+      toast({
+        title: "Failed to cancel appointment",
+        description: err.response?.data?.message || "Couldn't reach the appointments API.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCancelling(false);
+    }
   };
 
   const handleCheckIn = async (appointment: Record<string, unknown>) => {
@@ -1241,6 +1259,17 @@ export default function Dashboard() {
                 </svg>
               </div>
               <div className="flex flex-col gap-4 max-h-[220px] overflow-y-auto hide-scrollbar pr-1">
+                {branchPerfLoading && branches.length === 0 && (
+                  <div className="flex items-center justify-center gap-2 py-6 text-[#6B7280] text-xs">
+                    <Loader2 size={14} className="animate-spin text-[#00488D]" />
+                    Loading branch data...
+                  </div>
+                )}
+                {!branchPerfLoading && branches.length === 0 && (
+                  <div className="py-6 text-center text-[#6B7280] text-xs">
+                    No branch data available.
+                  </div>
+                )}
                 {branches.map((branch) => (
                   <div key={branch.id} className="flex flex-col gap-1">
                     <div className="flex justify-between">
@@ -1303,6 +1332,7 @@ export default function Dashboard() {
         }
         confirmText="Cancel Appointment"
         cancelText="Keep Appointment"
+        loading={isCancelling}
         onConfirm={handleConfirmCancelAppointment}
         onCancel={() => setCancelTarget(null)}
       >

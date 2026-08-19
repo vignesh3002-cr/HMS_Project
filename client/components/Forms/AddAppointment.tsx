@@ -212,10 +212,6 @@ export default function AddAppointment() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [doctors, setDoctors] = useState<EmployeeRecord[]>([]);
 
-  // Branches the selected doctor is actually mapped to (via user_branch_mapping) --
-  // restricts the Branch dropdown to only that doctor's branches instead of every branch.
-  const [doctorBranches, setDoctorBranches] = useState<{ branch_id: string; branch_name: string }[]>([]);
-
   // Available time slots
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
@@ -236,15 +232,6 @@ export default function AddAppointment() {
   // available at that branch, once a branch is picked.
   const [branchDoctors, setBranchDoctors] = useState<EmployeeRecord[]>([]);
   const [branchDoctorsLoading, setBranchDoctorsLoading] = useState(false);
-
-  // Every doctor's real active branch assignments, keyed by employee_id --
-  // a doctor can be mapped (via user_branch_mapping) to branches other than
-  // their single primary employees.branch_id, so filtering the dropdowns by
-  // that field alone (what GET /employees?branchId= does) wrongly hides a
-  // doctor at every branch except their primary one. status: 1 = active,
-  // 0 = deactivated/historical (see employee.repository.ts), so only active
-  // mappings count here -- matches what actual booking requires.
-  const [doctorBranchMap, setDoctorBranchMap] = useState<Record<string, Set<string>>>({});
 
   // Tracks the three master-data fetches below (branches, departments,
   // doctors) so the form can stay in a loading state until all of them have
@@ -287,24 +274,6 @@ export default function AddAppointment() {
           (e) => e.user_table?.role_type === "DOCTOR" && e.emp_status !== false,
         );
         setDoctors(activeDoctors);
-
-        return Promise.all(
-          activeDoctors.map((doc) =>
-            employeeApi
-              .getOne(doc.employee_id)
-              .then((r) => ({
-                employeeId: doc.employee_id,
-                branchIds: (r.data?.data?.branches ?? [])
-                  .filter((b) => b.status === undefined || b.status === 1)
-                  .map((b) => b.branch_id),
-              }))
-              .catch(() => ({ employeeId: doc.employee_id, branchIds: [] as string[] })),
-          ),
-        ).then((entries) => {
-          setDoctorBranchMap(
-            Object.fromEntries(entries.map((e) => [e.employeeId, new Set(e.branchIds)])),
-          );
-        });
       })
       .catch(() => {})
       .finally(() => setLoadingDoctors(false));
@@ -315,12 +284,11 @@ export default function AddAppointment() {
   // stays behind a loader until all three are ready.
   const isLoadingMasterData = loadingBranches || loadingDepartments || loadingDoctors;
 
-  // Narrow doctors down to the selected branch using each doctor's real
-  // active branch mappings, not just their primary employees.branch_id.
-  // The already-selected doctor is always kept in the list so picking a
-  // doctor first (before any branch) never makes them vanish from the
-  // dropdown when their branch auto-fills -- even if the per-doctor branch
-  // lookup above failed for them.
+  // Fetch the doctors of the selected branch. The backend computes each
+  // doctor's per-branch, per-date status (`doctor_status`) when a date is
+  // passed, and scopes the list to the branch's active user_branch_mapping
+  // entries -- so this list is the source of truth for who can actually
+  // take an appointment at this branch on the selected day.
   useEffect(() => {
     if (!formData.branchId) {
       setBranchDoctors([]);
@@ -329,7 +297,11 @@ export default function AddAppointment() {
     }
     setBranchDoctorsLoading(true);
     employeeApi
-      .getAll({ branchId: formData.branchId, limit: 1000 })
+      .getAll({
+        branchId: formData.branchId,
+        limit: 1000,
+        ...(formData.selectDate ? { date: formData.selectDate } : {}),
+      })
       .then((res) => {
         const allEmployees = res.data?.data?.employees || [];
         setBranchDoctors(allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR"));
@@ -339,16 +311,23 @@ export default function AddAppointment() {
         setBranchDoctors([]);
         setBranchDoctorsLoading(false);
       });
-  }, [formData.branchId]);
+  }, [formData.branchId, formData.selectDate]);
+
+  // The already-selected doctor is always kept in the list, even when the
+  // date-aware fetch above excludes them (e.g. no active schedule on the new
+  // date) -- so picking a doctor first, a preselected slot, or a date change
+  // never makes them vanish from the dropdown. Availability is still guarded
+  // by the slots API, which returns an empty list for such doctors.
   useEffect(() => {
-    setBranchDoctors(
-      doctors.filter(
-        (doc) =>
-          doc.employee_id === formData.doctorId ||
-          doctorBranchMap[doc.employee_id]?.has(formData.branchId),
-      ),
+    if (!formData.branchId || !formData.doctorId) return;
+    const selected = doctors.find((doc) => doc.employee_id === formData.doctorId);
+    if (!selected) return;
+    setBranchDoctors((prev) =>
+      prev.some((doc) => doc.employee_id === formData.doctorId)
+        ? prev
+        : [...prev, selected],
     );
-  }, [formData.branchId, doctors, doctorBranchMap, formData.doctorId]);
+  }, [branchDoctors, doctors, formData.branchId, formData.doctorId]);
 
   // Fetch available slots when branch + doctor + date changes
   useEffect(() => {
@@ -593,8 +572,8 @@ export default function AddAppointment() {
       formData.patientComment
 );
   
-  // Once a branch is selected, only show departments that branch's doctors
-  // actually belong to; otherwise fall back to the full department list.
+  // Once a branch is selected, only show departments that branch's (date-aware)
+  // doctor list actually belongs to; otherwise fall back to the full list.
   const departmentsForDropdown = formData.branchId
     ? departments.filter((d) =>
         branchDoctors.some((doc) => doc.department_id === d.department_id),
@@ -602,9 +581,16 @@ export default function AddAppointment() {
     : departments;
 
   // Once a branch is selected, only show that branch's doctors; either way,
-  // further narrow down to the selected department, if one is chosen.
-  const doctorsForDropdown = (formData.branchId ? branchDoctors : doctors).filter((doc) =>
-    formData.departmentId ? doc.department_id === formData.departmentId : true,
+  // further narrow down to the selected department, if one is chosen. With a
+  // branch AND a date selected, only doctors whose backend-computed status
+  // for that exact branch+date is ACTIVE are offered (plus the currently
+  // selected doctor, who is always kept visible).
+  const doctorsForDropdown = (formData.branchId ? branchDoctors : doctors).filter(
+    (doc) =>
+      (!formData.departmentId || doc.department_id === formData.departmentId) &&
+      (formData.branchId && formData.selectDate
+        ? doc.doctor_status === "ACTIVE" || doc.employee_id === formData.doctorId
+        : true),
   );
 
   const selectedDoctor = doctors.find((doc) => doc.employee_id === formData.doctorId);
@@ -618,9 +604,10 @@ export default function AddAppointment() {
   const maxSelectableDate = format(addDays(new Date(), 14), "yyyy-MM-dd");
 
   // Weekdays (MONDAY..SUNDAY) the selected doctor actually works at the
-  // selected branch, derived from their active schedules. null = we don't
-  // have schedule data yet, in which case the calendar stays fully enabled
-  // so the flow can't dead-end (the slots API still guards the backend).
+  // selected branch, derived from their active schedules. null = no doctor or
+  // branch chosen yet, so the calendar stays fully enabled. An EMPTY set =
+  // the doctor is assigned to the branch but has no schedule for it -- every
+  // date is then disabled, exactly like any other non-working day.
   const workingWeekdays = useMemo(() => {
     if (!formData.doctorId || !formData.branchId) return null;
     const days = new Set(
@@ -633,11 +620,12 @@ export default function AddAppointment() {
         )
         .map((s) => s.day_of_week as string),
     );
-    return days.size > 0 ? days : null;
+    return days;
   }, [doctorSchedules, formData.doctorId, formData.branchId]);
 
   const isDateDisabled = (date: Date) => {
-    if (!workingWeekdays) return false;
+    if (!formData.doctorId || !formData.branchId) return false;
+    if (workingWeekdays.size === 0) return true;
     return !workingWeekdays.has(format(date, "EEEE").toUpperCase());
   };
 
@@ -660,10 +648,7 @@ export default function AddAppointment() {
       timeSlot: "",
     }));
 
-    if (!val) {
-      setDoctorBranches([]);
-      return;
-    }
+    if (!val) return;
 
     setFindingNearestDate(true);
 
@@ -671,7 +656,6 @@ export default function AddAppointment() {
       .getOne(val)
       .then((res) => {
         const mappedBranches = activeBranches(res.data?.data?.branches || []);
-        setDoctorBranches(mappedBranches);
         setDoctorSchedules(res.data?.data?.doctorSchedules || []);
         const nextBranchId =
           mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
@@ -722,14 +706,15 @@ export default function AddAppointment() {
   }, [preselectedDoctorId, doctors]);
 
   // Arrived from a Day View grid slot with doctor/branch/department/date all
-  // already decided -- only the Branch dropdown's option list still needs
-  // this doctor's real mapped branches, without re-running applyDoctorSelection
-  // (which would overwrite the exact branch/date the clicked cell stood for).
+  // already decided -- only the doctor's schedules still need loading so the
+  // calendar disables non-working days the same way the dropdown flow does,
+  // without re-running applyDoctorSelection (which would overwrite the exact
+  // branch/date the clicked cell stood for).
   useEffect(() => {
     if (!preselectedSlot) return;
     employeeApi
       .getOne(preselectedSlot.doctorId)
-      .then((res) => setDoctorBranches(activeBranches(res.data?.data?.branches || [])))
+      .then((res) => setDoctorSchedules(res.data?.data?.doctorSchedules || []))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preselectedSlot]);
@@ -820,22 +805,32 @@ export default function AddAppointment() {
                 <label className={labelClass}>Branch {requiredStar}</label>
                 <FormDropdown
                   className={inputClass}
-                  options={(formData.doctorId && doctorBranches.length > 0 ? doctorBranches : branches).map(
-                    (b) => ({
+                  options={[
+                    { label: "None", value: "" },
+                    ...branches.map((b) => ({
                       label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
                       value: b.branch_id,
                       highlight: currentBranchId ? b.branch_id === currentBranchId : false,
                       badge: currentBranchId && b.branch_id === currentBranchId ? "Your branch" : undefined,
-                    }),
-                  )}
+                    })),
+                  ]}
 
                   value={formData.branchId}
                   onValueChange={(val) => {
-                    // With a doctor already chosen, the Branch dropdown only
-                    // lists branches that doctor is mapped to -- switching
-                    // between them keeps the doctor, department and date
-                    // exactly as they were, and only reloads the slots for
-                    // the new branch (the slots effect below refetches on
+                    if (!val) {
+                      setFormData((prev) => ({
+                        ...prev,
+                        branchId: "",
+                        departmentId: "",
+                        doctorId: "",
+                        timeSlot: "",
+                      }));
+                      return;
+                    }
+                    // With a doctor already chosen, switching to a branch the
+                    // doctor isn't mapped to keeps the doctor, department and
+                    // date exactly as they were, and only reloads the slots
+                    // for the new branch (the slots effect below refetches on
                     // branch change). Only when no doctor is picked yet does
                     // a branch change reset department/doctor, since their
                     // options depend on the branch.
@@ -851,11 +846,9 @@ export default function AddAppointment() {
                     if (!val || !doctorLocked) return;
                   }}
                   placeholder={
-                    formData.doctorId && doctorBranches.length === 0
-                      ? "This doctor has no mapped branches"
-                      : branches.length
-                        ? "Select Branch"
-                        : "Loading branches..."
+                    branches.length
+                      ? "Select Branch"
+                      : "Loading branches..."
                   }
                 />
               </div>
@@ -863,10 +856,13 @@ export default function AddAppointment() {
                 <label className={labelClass}>Department {requiredStar}</label>
                 <FormDropdown
                   className={inputClass}
-                  options={departmentsForDropdown.map((d) => ({
-                    label: d.department_name,
-                    value: d.department_id,
-                  }))}
+                  options={[
+                    { label: "None", value: "" },
+                    ...departmentsForDropdown.map((d) => ({
+                      label: d.department_name,
+                      value: d.department_id,
+                    })),
+                  ]}
                   value={formData.departmentId}
                   onValueChange={(val) =>
                     setFormData((prev) => ({ ...prev, departmentId: val, doctorId: "", timeSlot: "" }))
@@ -886,19 +882,24 @@ export default function AddAppointment() {
                 <label className={labelClass}>Doctor Name {requiredStar}</label>
                 <FormDropdown
                   className={inputClass}
-                  options={doctorsForDropdown.map((doc) => {
-                    const fullName = `Dr. ${doc.first_name}${doc.middle_name ? ` ${doc.middle_name}` : ""} ${doc.last_name}`;
-                    const specialty = doc.specialization || doc.department_master?.department_name;
-                    return {
-                      label: specialty ? `${fullName} (${specialty})` : fullName,
-                      value: doc.employee_id,
-                    };
-                  })}
+                  options={[
+                    { label: "None", value: "" },
+                    ...doctorsForDropdown.map((doc) => {
+                      const fullName = `Dr. ${doc.first_name}${doc.middle_name ? ` ${doc.middle_name}` : ""} ${doc.last_name}`;
+                      const specialty = doc.specialization || doc.department_master?.department_name;
+                      return {
+                        label: specialty ? `${fullName} (${specialty})` : fullName,
+                        value: doc.employee_id,
+                      };
+                    }),
+                  ]}
                   value={formData.doctorId}
                   onValueChange={applyDoctorSelection}
                   placeholder={
                     formData.branchId && doctorsForDropdown.length === 0
-                      ? "No doctors match this branch/department"
+                      ? formData.selectDate
+                        ? "No doctors active on this date for this branch/department"
+                        : "No doctors match this branch/department"
                       : doctors.length
                         ? "Select Doctor"
                         : "Loading doctors..."

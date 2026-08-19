@@ -43,10 +43,13 @@ export function useDashboardFilters({
     () => toSortedOptions((realDoctors ?? []).map((d: any) => d.dept)),
     [realDoctors],
   );
-  const doctorStatusOptions = useMemo(
-    () => toSortedOptions((realDoctors ?? []).map((d: any) => d.status)),
-    [realDoctors],
-  );
+  // Status options are always the full fixed set, even when no row currently
+  // has that status -- so "Leave"/"Inactive" stay selectable on a quiet day.
+  const doctorStatusOptions: SelectOption[] = [
+    { label: "Active", value: "Active" },
+    { label: "Leave", value: "Leave" },
+    { label: "Inactive", value: "Inactive" },
+  ];
   const doctorNameOptions = useMemo<SelectOption[]>(
     () => toNameIdOptions((realDoctors ?? []) as { id: string; name?: string | null }[]),
     [realDoctors],
@@ -56,10 +59,10 @@ export function useDashboardFilters({
     () => toSortedOptions((realStaff ?? []).map((s: any) => s.dept)),
     [realStaff],
   );
-  const staffStatusOptions = useMemo(
-    () => toSortedOptions((realStaff ?? []).map((s: any) => s.status)),
-    [realStaff],
-  );
+  const staffStatusOptions: SelectOption[] = [
+    { label: "Active", value: "Active" },
+    { label: "Inactive", value: "Inactive" },
+  ];
   const staffNameOptions = useMemo<SelectOption[]>(
     () => toNameIdOptions((realStaff ?? []) as { id: string; name?: string | null }[]),
     [realStaff],
@@ -84,7 +87,9 @@ export function useDashboardFilters({
     },
     { id: "dept", label: "Department", type: "multiselect", options: doctorDeptOptions },
     { id: "branch", label: "Branch", type: "multiselect", options: branchFilterOptions, compact: true },
-    { id: "status", label: "Status", type: "multiselect", options: doctorStatusOptions },
+    // Defaults to "Active" only -- "Leave"/"Inactive" doctors stay hidden
+    // until the user explicitly selects them in the filter.
+    { id: "status", label: "Status", type: "multiselect", options: doctorStatusOptions, defaultValue: ["Active"] },
   ];
 
   const staffFilterFields: FilterField[] = [
@@ -98,7 +103,9 @@ export function useDashboardFilters({
     },
     { id: "dept", label: "Department", type: "multiselect", options: staffDeptOptions },
     { id: "branch", label: "Branch", type: "multiselect", options: branchFilterOptions, compact: true },
-    { id: "status", label: "Status", type: "multiselect", options: staffStatusOptions },
+    // Defaults to "Active" only -- "Inactive" staff stay hidden until the
+    // user explicitly selects them in the filter.
+    { id: "status", label: "Status", type: "multiselect", options: staffStatusOptions, defaultValue: ["Active"] },
   ];
 
   const appointmentFilterFields: FilterField[] = [

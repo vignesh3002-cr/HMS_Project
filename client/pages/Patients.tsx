@@ -87,7 +87,7 @@ function mapToGridPatient(p: PatientRecord) {
 // still upcoming/current — never for one that's cancelled, a no-show, or
 // already completed. Once it's over, the patient goes back to Unassigned
 // rather than continuing to show whoever last treated them.
-const NON_ASSIGNING_APPOINTMENT_STATUSES = new Set(["CANCELLED", "NO_SHOW", "COMPLETED"]);
+const NON_ASSIGNING_APPOINTMENT_STATUSES = new Set(["CANCELLED", "NO_SHOW", "NOT_CHECKED_IN", "COMPLETED"]);
 
 interface AssignedDoctor {
   name: string;
@@ -367,17 +367,6 @@ export default function PatientsManagement() {
     handleClearFilter();
   };
 
-  // Filters
-  const {
-    values: filterValues,
-    appliedValues,
-    isOpen: isFilterOpen,
-    setIsOpen: setIsFilterOpen,
-    handleChange: handleFilterChange,
-    handleApply: handleApplyFilter,
-    handleClear: handleClearFilter,
-  } = useFilterPanel();
-
   // ---- FILTER FIELDS ----
   const patientRows = useMemo(
     () => (realPatients ?? []).map((p) => ({
@@ -388,6 +377,19 @@ export default function PatientsManagement() {
     [realPatients],
   );
   const { patientFilterFields } = usePatientFilters({ viewMode, patientRows });
+
+  // Filters -- seeded with the fields so fields carrying a `defaultValue`
+  // (e.g. Status defaulting to ["Active"]) start applied and are restored
+  // when the user clears the filter.
+  const {
+    values: filterValues,
+    appliedValues,
+    isOpen: isFilterOpen,
+    setIsOpen: setIsFilterOpen,
+    handleChange: handleFilterChange,
+    handleApply: handleApplyFilter,
+    handleClear: handleClearFilter,
+  } = useFilterPanel(patientFilterFields);
 
   // ---- SEARCH & FILTER ----
   const searchableFields = useMemo(

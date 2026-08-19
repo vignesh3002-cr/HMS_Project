@@ -13,6 +13,18 @@ import { branchApi, Branch } from "@/api/branch.api";
 import { patientApi } from "@/api/patient.api";
 import { validateRequiredFields, type RequiredField } from "@/lib/validation";
 
+// Helper function to convert date to HTML input[type="date"] format (YYYY-MM-DD)
+const toDateInputValue = (date: string | Date | undefined | null): string => {
+  if (!date) return "";
+  try {
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return "";
+    return d.toISOString().split("T")[0];
+  } catch {
+    return "";
+  }
+};
+
 // Field names mirror the `patient_bio_data` table columns so every input
 // here has a real column to be saved into once the patients API exists.
 interface FormData {
@@ -227,7 +239,7 @@ export default function PatientRegistrationForm({
             patient_middle_name: patient.patient_middle_name || "",
             patient_last_name: patient.patient_last_name || "",
             patient_gender: patient.patient_gender || "",
-            patient_dob: (patient as any).patient_dob || "",
+            patient_dob: toDateInputValue((patient as any).patient_dob) || "",
             patient_blood_group: patient.patient_blood_group || "",
             patient_type: isKnownType || !patient.patient_type ? (patient.patient_type || "") : OTHER_PATIENT_TYPE_VALUE,
             patient_type_other: isKnownType || !patient.patient_type ? "" : (patient.patient_type || ""),

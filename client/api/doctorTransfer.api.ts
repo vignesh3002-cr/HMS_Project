@@ -14,6 +14,9 @@ export interface InitiateTransferPayload {
   mode: TransferMode;
   // Required when mode === "TRANSFER" — the branch the doctor is leaving.
   old_branch_id?: string;
+  // Slot-level move (schedule grid): close EXACTLY these schedule rows and
+  // nothing else. Mutually exclusive with old_branch_id.
+  close_schedule_ids?: number[];
   new_branch_id: string;
   new_department_id?: string;
   effective_date: string;

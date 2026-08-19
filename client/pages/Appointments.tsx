@@ -12,13 +12,14 @@ import {
   MoreVertical,
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
-import { format, isToday, isTomorrow, isYesterday, addDays, subDays, startOfDay } from "date-fns";
+import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import { useFilterPanel, useAppointmentFilters } from "@/components/Filter";
 import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { encounterApi } from "@/api/encounter.api";
 import { getEffectiveAppointmentStatus } from "@/lib/appointmentStatus";
 import { useToast } from "@/hooks/use-toast";
 import { RefreshButton } from "@/components/hms/RefreshButton";
@@ -66,6 +67,7 @@ const STATUS_LABELS: Record<string, string> = {
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
   NO_SHOW: "No Show",
+  NOT_CHECKED_IN: "Not Checked In",
   RESCHEDULED: "Rescheduled",
   RESCHEDULE_REQUIRED: "Reschedule Required",
   TRANSFER_REVIEW_REQUIRED: "Transfer Review Required",
@@ -163,11 +165,15 @@ function ActionMenu({
   onView,
   onEdit,
   onCancel,
+  onCheckIn,
+  onCheckOut,
 }: {
   status: string;
   onView: () => void;
   onEdit: () => void;
   onCancel: () => void;
+  onCheckIn: () => void;
+  onCheckOut: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -186,6 +192,8 @@ function ActionMenu({
   if (!can("appointment.read") && !can("appointment.update") && !can("appointment.cancel")) return null;
 
   const isCancelled = status.toLowerCase() === "cancelled";
+  const isScheduled = status.toLowerCase() === "scheduled";
+  const isCheckIn = status.toLowerCase() === "checked in" || status.toLowerCase() === "in consultation";
 
   return (
     <div className="relative inline-block text-left" ref={wrapperRef}>
@@ -218,6 +226,24 @@ function ActionMenu({
             className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
           >
             Edit Appointment
+          </button>
+        )}
+        {can("appointment.update") && isScheduled && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onCheckIn(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-green-600 hover:bg-green-50"
+          >
+            Check In
+          </button>
+        )}
+        {can("appointment.update") && isCheckIn && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onCheckOut(); }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-blue-600 hover:bg-blue-50"
+          >
+            Check Out
           </button>
         )}
         {can("appointment.cancel") && !isCancelled && (
@@ -282,13 +308,14 @@ const AppointmentSchedule: React.FC = () => {
 
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const handleCancelAppointment = (target: Appointment) => {
     setCancelReason("");
     setCancelTarget(target);
   };
 
-  const handleConfirmCancelAppointment = () => {
+  const handleConfirmCancelAppointment = async () => {
     if (!cancelTarget) return;
 
     if (!cancelReason.trim()) {
@@ -296,17 +323,76 @@ const AppointmentSchedule: React.FC = () => {
       return;
     }
 
-    setAppointments((prev) =>
-      prev.map((appt) =>
-        appt === cancelTarget ? { ...appt, status: "Cancelled" } : appt,
-      ),
-    );
-    toast({
-      title: "Appointment cancelled",
-      description: `Appointment ${cancelTarget.id} has been cancelled.`,
-    });
-    setCancelTarget(null);
-    setCancelReason("");
+    setIsCancelling(true);
+    try {
+      const res = await appointmentApi.cancel(cancelTarget.id, cancelReason.trim());
+      const cancelled = res.data?.data;
+      setAppointments((prev) =>
+        prev.map((appt) =>
+          appt.id === cancelTarget.id
+            ? cancelled
+              ? mapAppointmentRecord(cancelled, 0)
+              : { ...appt, status: "Cancelled" }
+            : appt,
+        ),
+      );
+      toast({
+        title: "Appointment cancelled",
+        description: `Appointment ${cancelTarget.id} has been cancelled.`,
+      });
+      setCancelTarget(null);
+      setCancelReason("");
+    } catch (err: any) {
+      console.error("[Appointments Page] Cancel error:", err);
+      toast({
+        title: "Failed to cancel appointment",
+        description: err.response?.data?.message || "Couldn't reach the appointments API.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  const handleCheckIn = async (appointment: Appointment) => {
+    try {
+      await appointmentApi.updateStatus(appointment.id, "CHECKED_IN");
+      await encounterApi.create({ appointment_id: appointment.id });
+      await fetchAppointments();
+      toast({
+        title: "Patient checked in",
+        description: `Appointment ${appointment.id} checked in and encounter created.`,
+      });
+    } catch (err: any) {
+      console.error("[Appointments Page] Check-in error:", err);
+      toast({
+        title: "Check-in failed",
+        description: err.response?.data?.message || "Failed to check in patient.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCheckOut = async (appointment: Appointment) => {
+    try {
+      const encounters = await encounterApi.getAll({ appointmentId: appointment.id });
+      const encounter = encounters.data?.data?.encounters?.[0];
+      if (encounter) {
+        await encounterApi.close(encounter.encounter_no, "DOCTOR");
+      }
+      await fetchAppointments();
+      toast({
+        title: "Patient checked out",
+        description: `Appointment ${appointment.id} checked out.`,
+      });
+    } catch (err: any) {
+      console.error("[Appointments Page] Check-out error:", err);
+      toast({
+        title: "Check-out failed",
+        description: err.response?.data?.message || "Failed to check out patient.",
+        variant: "destructive",
+      });
+    }
   };
 
   // Pagination state
@@ -378,17 +464,6 @@ const AppointmentSchedule: React.FC = () => {
         ),
       );
     }
-
-    const now = new Date();
-    const todayStart = startOfDay(now).getTime();
-
-    result = result.filter((item) => {
-      const isCancelled = item.status.toLowerCase() === "cancelled";
-      if (!isCancelled) return true;
-
-      const apptTime = item.sortDate;
-      return apptTime < todayStart;
-    });
 
     result = filterDataByValues(
       result as unknown as Record<string, string | number>[],
@@ -719,6 +794,8 @@ const AppointmentSchedule: React.FC = () => {
                       onView={() => navigate(`/appointments/view/${r.id}`)}
                       onEdit={() => navigate(`/appointments/edit/${r.id}`)}
                       onCancel={() => handleCancelAppointment(r)}
+                      onCheckIn={() => handleCheckIn(r)}
+                      onCheckOut={() => handleCheckOut(r)}
                     />
                   )},
                 ]}
@@ -754,6 +831,7 @@ const AppointmentSchedule: React.FC = () => {
         }
         confirmText="Cancel Appointment"
         cancelText="Keep Appointment"
+        loading={isCancelling}
         onConfirm={handleConfirmCancelAppointment}
         onCancel={() => setCancelTarget(null)}
       >

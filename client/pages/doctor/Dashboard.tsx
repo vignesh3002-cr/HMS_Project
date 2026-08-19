@@ -13,7 +13,7 @@ import { encounterApi } from "../../api/encounter.api";
 import { useToast } from "@/hooks/use-toast";
 
 
-type AppointmentStatus = "Check Out" | "Check In" | "Cancelled";
+type AppointmentStatus = "Check Out" | "Check In" | "Cancelled" | "Not Checked In";
 
 interface Appointment {
   patientId: string;
@@ -334,7 +334,7 @@ export default function DoctorDashboard() {
             appointmentDate: item.appointment_date,
             appointmentTime: item.appointment_time,
             phone: item.patient_bio_data?.patient_primary_mobile || "-",
-            status: item.status as AppointmentStatus,
+            status: (item.status === "NOT_CHECKED_IN" ? "Not Checked In" : item.status) as AppointmentStatus,
             appointmentId: item.appointment_id,
             originalStatus: item.status,
           })
@@ -1068,7 +1068,7 @@ export default function DoctorDashboard() {
                 </div>
               </div>
             </section>
-</aside>
+          </aside>
         </div>
       )}
     </div>

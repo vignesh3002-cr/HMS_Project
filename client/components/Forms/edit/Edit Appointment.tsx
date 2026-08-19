@@ -109,7 +109,7 @@ const requiredStar = <span className="text-red-600 ml-0.5">*</span>;
 // Terminal statuses can't be edited on the backend (see
 // TERMINAL_APPOINTMENT_STATUSES in appointment.constants.ts) -- checked here
 // too so the user gets a clear message instead of a failed submit.
-const TERMINAL_STATUSES = ["COMPLETED", "CANCELLED", "NO_SHOW"];
+const TERMINAL_STATUSES = ["COMPLETED", "CANCELLED", "NO_SHOW", "NOT_CHECKED_IN"];
 
 export default function EditAppointment() {
   const navigate = useNavigate();
