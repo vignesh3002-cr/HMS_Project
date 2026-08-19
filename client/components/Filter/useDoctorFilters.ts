@@ -33,7 +33,6 @@ interface UseDoctorFiltersResult {
 export function useDoctorFilters({ doctorRows, branches }: UseDoctorFiltersParams): UseDoctorFiltersResult {
   const branchFilterOptions = useMemo<SelectOption[]>(() => toBranchOptions(branches), [branches]);
   const deptOptions = useMemo(() => toSortedOptions(doctorRows.map((d) => d.dept)), [doctorRows]);
-  const statusOptions = useMemo(() => toSortedOptions(doctorRows.map((d) => d.status)), [doctorRows]);
   const nameOptions = useMemo<SelectOption[]>(() => toNameIdOptions(doctorRows), [doctorRows]);
 
   const doctorFilterFields: FilterField[] = [
@@ -47,7 +46,17 @@ export function useDoctorFilters({ doctorRows, branches }: UseDoctorFiltersParam
     },
     { id: "dept", label: "Department", type: "multiselect", options: deptOptions },
     { id: "branch", label: "Branch", type: "multiselect", options: branchFilterOptions },
-    { id: "status", label: "Status", type: "multiselect", options: statusOptions },
+    {
+      id: "status",
+      label: "Status",
+      type: "multiselect",
+      options: [
+        { label: "Active", value: "Active" },
+        { label: "Leave", value: "Leave" },
+        { label: "Inactive", value: "Inactive" },
+      ],
+      defaultValue: ["Active"],
+    },
   ];
 
   return { doctorFilterFields };

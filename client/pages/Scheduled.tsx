@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { format, addDays, subDays } from "date-fns";
-import { User, IdCard, Phone, Mail, MapPin, Cake, Droplet, VenusAndMars, Briefcase } from "lucide-react";
+import { format } from "date-fns";
+import { User, IdCard, Phone, Mail, MapPin, Cake, Droplet, VenusAndMars, Briefcase, X, Loader2 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import CalendarPicker from "@/components/hms/Calender";
 import ScheduleSlotModal, {
   type ScheduleSlotModalHandle,
@@ -13,10 +12,15 @@ import ScheduleSlotModal, {
 import { employeeApi, type EmployeeDetailResponse, type DoctorScheduleRecord } from "@/api/employee.api";
 import { appointmentApi, type AvailableSlotsResult } from "@/api/appointment.api";
 import { doctorLeaveApi } from "@/api/doctorLeave.api";
+import { departmentApi, type Department } from "@/api/department.api";
+import {
+  doctorTransferApi,
+  type TransferAppointmentSummary,
+  type TransferAction,
+} from "@/api/doctorTransfer.api";
 import { getUser } from "@/utils/token";
 import { DepartmentPill } from "@/components/hms/DepartmentBadge";
 import { StatusBadge } from "@/components/hms/StatusBadge";
-import { activeBranches as getActiveBranches } from "@/lib/utils";
 
 function formatDoctorFullName(e: EmployeeDetailResponse["employee"] | null): string {
   if (!e) return "Doctor";
@@ -38,27 +42,23 @@ function formatScheduleTime(time: string | null): string {
   return `${String(h12).padStart(2, "0")}:${minutes} ${period}`;
 }
 
-// Inverse of formatScheduleTime -- converts a stored schedule time back to
-// the "HH:MM" value the modal's <input type="time"> expects.
-function scheduleTimeToInput(time: string | null): string {
+function toTimeInputValue(time: string | null | undefined): string {
   if (!time) return "";
   const d = new Date(time);
   if (isNaN(d.getTime())) return "";
-  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
 }
 
-// effective_from/effective_to come back as UTC-anchored datetimes -- return
-// just the "YYYY-MM-DD" day part using UTC getters so no timezone shift.
-function scheduleDateToInput(time: string | null | undefined): string {
-  if (!time) return "";
-  const d = new Date(time);
-  if (isNaN(d.getTime())) return "";
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+function deriveShiftName(startTime: string): string {
+  const hour = Number(startTime.split(":")[0]);
+  return hour < 12 ? "Morning" : "Evening";
 }
 
-// Is this a repeating weekly template row (no effective window)?
-function isWeeklySchedule(s: DoctorScheduleRecord): boolean {
-  return !s.effective_from && !s.effective_to;
+function toMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return (h || 0) * 60 + (m || 0);
 }
 
 const WEEK_DAYS = [
@@ -135,19 +135,14 @@ const MONTH_NAMES = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-const dmyToIso = (dateStr: string) => {
-  const [dd, mm, yy] = dateStr.split("/").map(Number);
-  return `${2000 + yy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
-};
-
 const getMonthYearLabel = (year, month) => `${MONTH_NAMES[month]} ${year}`;
 
 export default function DoctorProfile() {
   const navigate = useNavigate();
   const { id } = useParams();
   const location = useLocation();
-  // Entering via /doctor/day-view/:id opens on the Day tab, /doctor/view/:id/
-  // schedule opens on Week -- both routes render this same merged page, so the
+  // Entering via /doctor/day-view/:id opens on the Day tab, /doctor/view/:id
+  // opens on Week -- both routes render this same merged page now, so the
   // entry URL just decides the initial tab instead of navigating to a
   // separate page.
   const [activeTab, setActiveTab] = useState(() =>
@@ -155,44 +150,43 @@ export default function DoctorProfile() {
   );
   const [toggledDates, setToggledDates] = useState<Set<string>>(new Set());
   const slotModalRef = useRef<ScheduleSlotModalHandle>(null);
-  // The date shown on the Day tab -- weekly template rows are merged with
-  // any date-specific rows whose effective window covers this date.
-  const [dayViewDate, setDayViewDate] = useState(() => new Date());
-  const [isDayCalendarOpen, setIsDayCalendarOpen] = useState(false);
   const [fromDate, setFromDate] = useState(null);
   const [toDate, setToDate] = useState(null);
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
   const [isToCalendarOpen, setIsToCalendarOpen] = useState(false);
-  const [clearScheduleConfirm, setClearScheduleConfirm] = useState(false);
+  const [savingSlot, setSavingSlot] = useState(false);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [pendingTransfer, setPendingTransfer] = useState<{
+    transferId: string;
+    appointments: TransferAppointmentSummary[];
+    message: string;
+  } | null>(null);
+  const [transferAction, setTransferAction] = useState<TransferAction | null>(null);
+  const [replacementDoctorId, setReplacementDoctorId] = useState("");
+  const [isConfirmingTransfer, setIsConfirmingTransfer] = useState(false);
   const [weekDates, setWeekDates] = useState(() => getWeekDates(new Date()));
   const [calendarViewYear, setCalendarViewYear] = useState(() => new Date().getFullYear());
   const [calendarViewMonth, setCalendarViewMonth] = useState(() => new Date().getMonth());
-  const gridWeekDates = weekDates;
 
   const [doctorDetail, setDoctorDetail] = useState<EmployeeDetailResponse | null>(null);
-  const [isLoadingDoctor, setIsLoadingDoctor] = useState(true);
-  const [doctorError, setDoctorError] = useState<string | null>(null);
+
+  useEffect(() => {
+    departmentApi
+      .getAll()
+      .then((res) => setDepartments(res.data?.data ?? []))
+      .catch((err) => console.error("[Doctor Profile] Failed to load departments:", err));
+  }, []);
 
   useEffect(() => {
     if (!id) return;
-    setIsLoadingDoctor(true);
-    setDoctorError(null);
     employeeApi
       .getOne(id)
       .then((res) => {
-        const data = res.data?.data ?? null;
-        console.log("[Doctor Profile] API response:", data);
-        console.log("[Doctor Profile] doctorSchedules:", data?.doctorSchedules);
-        console.log("[Doctor Profile] role_type:", data?.user?.role_type);
-        setDoctorDetail(data);
+        setDoctorDetail(res.data?.data ?? null);
       })
       .catch((err) => {
         console.error("[Doctor Profile] Error:", err);
-        setDoctorError(err?.response?.data?.message || err?.message || "Failed to load doctor");
         setDoctorDetail(null);
-      })
-      .finally(() => {
-        setIsLoadingDoctor(false);
       });
   }, [id]);
 
@@ -205,15 +199,12 @@ export default function DoctorProfile() {
   const doctorName = formatDoctorFullName(doctorEmployee);
   const doctorSpecialization = doctorDetail?.doctorProfile?.specialization || doctorEmployee?.specialization || "—";
   const doctorQualification = doctorDetail?.doctorProfile?.qualification || doctorEmployee?.qualification || "—";
-  // getEmployeeById returns every mapping this doctor ever had (status
-  // included) — only status 1 is a real, current assignment. Closed/historical
-  // mappings (status 0) must not show up here.
-  const activeBranches = (doctorDetail?.branches ?? []).filter((b) => b.status === 1);
-  const doctorBranchNames = activeBranches.length
-    ? activeBranches.map((b) => b.branch_name)
+  const doctorBranchNames = (doctorDetail?.branches?.length
+    ? doctorDetail.branches.map((b) => b.branch_name)
     : doctorEmployee?.branch?.branch_name
       ? [doctorEmployee.branch.branch_name]
-      : [];
+      : []
+  );
   const doctorIsAvailable = doctorEmployee?.emp_status === true || doctorDetail?.user?.user_status === 0;
   // Only a real photo URL from the backend is used -- no stock/fallback
   // image, so the avatar block simply doesn't render when the doctor has
@@ -231,12 +222,7 @@ export default function DoctorProfile() {
   const doctorGender = (doctorEmployee as any)?.gender || "—";
 
   useEffect(() => {
-    // Prefer an active assigned branch that actually has a schedule for
-    // the slots call — branches[0] is just the newest mapping, which may
-    // be a branch with no hours on it. Falls back to the newest mapping.
-    const mappedBranches = doctorDetail?.branches ?? [];
-    const scheduledBranch = mappedBranches.find((b) => b.status === 1 && b.has_schedule === true);
-    const branchId = scheduledBranch?.branch_id ?? mappedBranches[0]?.branch_id;
+    const branchId = doctorDetail?.branches?.[0]?.branch_id;
     if (!id || !branchId) return;
 
     setIsSlotsLoading(true);
@@ -264,71 +250,28 @@ export default function DoctorProfile() {
   // navigating weeks.
   const doctorSchedules: DoctorScheduleRecord[] = doctorDetail?.doctorSchedules ?? [];
 
-  // Week grid shows the repeating weekly template only -- date-specific rows
-  // (effective_from/effective_to set) are handled by the Day tab so they
-  // don't repeat on every single week.
-  const weeklySchedules = doctorSchedules.filter(isWeeklySchedule);
-
   const scheduleByDay = useMemo(() => {
-    const map: Record<string, { time: string; branch: string; scheduleId: string | number }[]> = {};
+    const map: Record<
+      string,
+      { time: string; branch: string; branchId: string; startTime: string; endTime: string; scheduleId: string | number }[]
+    > = {};
     WEEK_DAYS.forEach(([day]) => {
       map[day.toUpperCase()] = [];
     });
-    weeklySchedules.forEach((s) => {
+    doctorSchedules.forEach((s) => {
       const key = (s.day_of_week || "").toUpperCase();
       if (!(key in map)) return;
       map[key].push({
         time: `${formatScheduleTime(s.start_time)} - ${formatScheduleTime(s.end_time)}`,
         branch: s.branch?.branch_name || "",
+        branchId: s.branch_id,
+        startTime: toTimeInputValue(s.start_time),
+        endTime: toTimeInputValue(s.end_time),
         scheduleId: s.schedule_id,
       });
     });
     return map;
-  }, [weeklySchedules]);
-
-  // Day tab: every slot that applies on dayViewDate -- weekly template rows
-  // for that day-of-week, merged with any date-specific rows whose effective
-  // window covers the date.
-  const dayScheduleRows = useMemo(() => {
-    const dayOfWeek = format(dayViewDate, "EEEE").toUpperCase();
-    const dayKey = format(dayViewDate, "yyyy-MM-dd");
-    return doctorSchedules
-      .filter((s) => {
-        if ((s.day_of_week || "").trim().toUpperCase() !== dayOfWeek) return false;
-        if (isWeeklySchedule(s)) return true;
-        const from = scheduleDateToInput(s.effective_from);
-        const to = scheduleDateToInput(s.effective_to);
-        if (from && dayKey < from) return false;
-        if (to && dayKey > to) return false;
-        return true;
-      })
-      .sort((a, b) =>
-        scheduleTimeToInput(a.start_time).localeCompare(scheduleTimeToInput(b.start_time)),
-      );
-  }, [doctorSchedules, dayViewDate]);
-
-  const dayNameOf = (dayOfWeekKey: string | null | undefined): string => {
-    const key = (dayOfWeekKey || "").trim().toUpperCase();
-    const found = WEEK_DAYS.find(([day]) => day.toUpperCase() === key);
-    return found ? found[0] : "";
-  };
-
-  const openEditSlot = (s: DoctorScheduleRecord) => {
-    const dateSpecific = !isWeeklySchedule(s);
-    slotModalRef.current?.openEditSlot({
-      scheduleId: s.schedule_id,
-      day: dayNameOf(s.day_of_week),
-      date: dateSpecific
-        ? scheduleDateToInput(s.effective_from) || format(dayViewDate, "yyyy-MM-dd")
-        : format(dayViewDate, "yyyy-MM-dd"),
-      branchId: s.branch_id,
-      branchName: s.branch?.branch_name || "",
-      startTime: scheduleTimeToInput(s.start_time),
-      endTime: scheduleTimeToInput(s.end_time),
-      timeLabel: `${formatScheduleTime(s.start_time)} - ${formatScheduleTime(s.end_time)}`,
-      mode: dateSpecific ? "date" : "weekly",
-    });
-  };
+  }, [doctorSchedules]);
 
   const maxScheduleRows = Math.max(
     1,
@@ -339,35 +282,17 @@ export default function DoctorProfile() {
     WEEK_DAYS.map(([day]) => {
       const entry = scheduleByDay[day.toUpperCase()]?.[rowIndex];
       return entry
-        ? ([entry.time, "blue", entry.branch, entry.scheduleId] as [string, string, string, string | number])
+        ? ([
+            entry.time,
+            "blue",
+            entry.branch,
+            entry.scheduleId,
+            entry.branchId,
+            entry.startTime,
+            entry.endTime,
+          ] as [string, string, string, string | number, string, string, string])
         : (["+", "empty"] as [string, string]);
     }),
-  );
-
-  // Build gridSchedule with full objects for JSX compatibility
-  const gridSchedule = Array.from({ length: maxScheduleRows }, (_, rowIndex) =>
-    WEEK_DAYS.map(([day], colIndex) => {
-      const entry = scheduleByDay[day.toUpperCase()]?.[rowIndex];
-      if (!entry) return null;
-      // Find original record by time and scheduleId
-      const original = doctorSchedules.find(
-        (s) =>
-          s.schedule_id === entry.scheduleId &&
-          (s.day_of_week || "").toUpperCase() === day.toUpperCase()
-      );
-      if (original) return original;
-      // Synthetic fallback to keep JSX happy if lookup misses
-      return {
-        schedule_id: entry.scheduleId,
-        start_time: "",
-        end_time: "",
-        day_of_week: day,
-        branch_id: null,
-        branch: { branch_name: entry.branch || "" },
-        effective_from: null,
-        effective_to: null,
-      } as DoctorScheduleRecord;
-    })
   );
 
   const refetchDoctor = () => {
@@ -378,91 +303,93 @@ export default function DoctorProfile() {
       .catch((err) => console.error("[Doctor Profile] Failed to refresh schedule:", err));
   };
 
+  const replacementDoctors = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const a of pendingTransfer?.appointments ?? []) {
+      for (const d of a.eligible_replacement_doctors ?? []) {
+        if (!map.has(d.employee_id)) map.set(d.employee_id, d.name);
+      }
+    }
+    return Array.from(map, ([employee_id, name]) => ({ employee_id, name }));
+  }, [pendingTransfer]);
+
   const handleAddSlot = async ({
     day,
-    date,
     branchId,
     branchName,
     startTime,
     endTime,
     timeLabel,
-    mode,
+    effectiveDate,
+    consultationMinutes,
+    transferReason,
+    departmentId,
   }: ScheduleSlotAddPayload) => {
-    if (!id || !day || !branchId) {
-      showAlert("Please select a day and branch for the new slot.");
-      return;
+    if (!id || !day || !branchId || !startTime || !endTime) {
+      showAlert("Please select day, start time, end time and branch location.");
+      return false;
     }
-    // Prevent same exact time schedule for same day
-    const existing = doctorSchedules.find((s) => {
-      const sameDay = (s.day_of_week || "").trim().toUpperCase() === day.toUpperCase();
-      const sameTime = scheduleTimeToInput(s.start_time) === startTime && scheduleTimeToInput(s.end_time) === endTime;
-      const sameBranch = s.branch_id === branchId;
-      return sameDay && sameTime && sameBranch && (mode === "date" ? s.effective_from === date || s.effective_to === date : isWeeklySchedule(s));
-    });
-    if (existing) {
-      showAlert("A schedule with the same time already exists for this day/branch. Please choose a different time.");
-      return;
+    if (!effectiveDate) {
+      showAlert("Effective date is required.");
+      return false;
     }
-    try {
-      // "date" mode creates a day-specific row (effective_from = effective_to
-      // = the chosen date); "weekly" mode creates a repeating template row.
-      const effective =
-        mode === "date" && date
-          ? { effective_from: date, effective_to: date }
-          : { effective_from: null, effective_to: null };
-      await employeeApi.addScheduleSlot(id, {
-        branch_id: branchId,
-        day_of_week: day.toUpperCase() as any,
-        start_time: startTime,
-        end_time: endTime,
-        ...effective,
-      });
-      refetchDoctor();
-      showAlert(
-        mode === "date"
-          ? `Slot added for ${day} ${date}: ${timeLabel} (${branchName})`
-          : `Slot added for ${day}: ${timeLabel} (${branchName})`,
-      );
-    } catch (err: any) {
-      showAlert(err?.response?.data?.message || "Failed to add slot.");
+    if (!transferReason?.trim()) {
+      showAlert("Transfer reason is required.");
+      return false;
     }
-  };
+    if (!departmentId) {
+      showAlert("Please select a department.");
+      return false;
+    }
 
-  const handleUpdateSlot = async ({
-    scheduleId,
-    day,
-    date,
-    branchId,
-    branchName,
-    startTime,
-    endTime,
-    timeLabel,
-    mode,
-  }: ScheduleSlotEditPayload) => {
-    if (!id || scheduleId === null || scheduleId === undefined) {
-      showAlert("Unable to update this slot.");
-      return;
-    }
+    const consultationMinutesValue =
+      Number(consultationMinutes) || (doctorDetail?.doctorProfile?.consultation_minutes ?? 20);
+
+    setSavingSlot(true);
     try {
-      const effective =
-        mode === "date" && date
-          ? { effective_from: date, effective_to: date }
-          : { effective_from: null, effective_to: null };
-      await employeeApi.updateScheduleSlot(id, scheduleId, {
-        branch_id: branchId,
-        day_of_week: day.toUpperCase() as any,
-        start_time: startTime,
-        end_time: endTime,
-        ...effective,
+      const res = await doctorTransferApi.initiateTransfer(id, {
+        mode: "ADD_BRANCH",
+        new_branch_id: branchId,
+        new_department_id: departmentId,
+        effective_date: effectiveDate,
+        transfer_reason: transferReason.trim(),
+        consultation_minutes: consultationMinutesValue,
+        working_hours: [
+          {
+            branch_id: branchId,
+            day_of_week: day.toUpperCase() as any,
+            shift_name: deriveShiftName(startTime),
+            start_time: startTime,
+            end_time: endTime,
+          },
+        ],
       });
+
+      const data = res.data?.data;
+      if (!data) {
+        showAlert(res.data?.message || "Failed to add slot.");
+        return false;
+      }
+
+      if (data.status === "PENDING_CONFIRMATION") {
+        setPendingTransfer({
+          transferId: data.transfer_id,
+          appointments: data.appointments ?? [],
+          message: data.message ?? "",
+        });
+        setTransferAction(null);
+        setReplacementDoctorId("");
+        return true;
+      }
+
       refetchDoctor();
-      showAlert(
-        mode === "date"
-          ? `Slot updated for ${day} ${date}: ${timeLabel} (${branchName})`
-          : `Slot updated for ${day}: ${timeLabel} (${branchName})`,
-      );
+      showAlert(data.message || `Slot added for ${day}: ${timeLabel} (${branchName})`);
+      return true;
     } catch (err: any) {
-      showAlert(err?.response?.data?.message || "Failed to update slot.");
+      showAlert(err?.response?.data?.message || err?.message || "Failed to add slot.");
+      return false;
+    } finally {
+      setSavingSlot(false);
     }
   };
 
@@ -483,6 +410,171 @@ export default function DoctorProfile() {
       showAlert(`Slot cancelled: ${info}`);
     } catch (err: any) {
       showAlert(err?.response?.data?.message || "Failed to cancel slot.");
+    }
+  };
+
+  const handleUpdateSlot = async ({
+    scheduleId,
+    day,
+    branchId,
+    startTime,
+    endTime,
+    effectiveDate,
+    consultationMinutes,
+    transferReason,
+    departmentId,
+  }: ScheduleSlotEditPayload) => {
+    if (!id || scheduleId === null) {
+      showAlert("Unable to update this slot.");
+      return false;
+    }
+    if (!day || !branchId || !startTime || !endTime) {
+      showAlert("Please select day, start time, end time and branch location.");
+      return false;
+    }
+
+    const original = doctorSchedules.find((s) => String(s.schedule_id) === String(scheduleId));
+    if (!original) {
+      showAlert("The original slot was not found.");
+      return false;
+    }
+
+    const consultationMinutesValue =
+      Number(consultationMinutes) || (doctorDetail?.doctorProfile?.consultation_minutes ?? 20);
+
+    const originalBranch = original.branch_id;
+    const originalDay = (original.day_of_week ?? "").toUpperCase();
+    const originalStart = toTimeInputValue(original.start_time);
+    const originalEnd = toTimeInputValue(original.end_time);
+    const newDay = day.toUpperCase();
+
+    const branchChanged = originalBranch !== branchId;
+    const dayChanged = originalDay !== newDay;
+    const timeChanged = originalStart !== startTime || originalEnd !== endTime;
+    const minutesChanged = Number(original.consultation_minutes) !== consultationMinutesValue;
+    const changed = branchChanged || dayChanged || timeChanged || minutesChanged;
+
+    if (!changed) {
+      showAlert("No changes were made to this slot.");
+      return false;
+    }
+
+    // Same branch + same day + overlapping times (only when times actually
+    // changed — a consultation-minutes-only edit shares identical times):
+    // do not create the new slot.
+    if (!branchChanged && !dayChanged && timeChanged) {
+      const oldS = toMinutes(originalStart);
+      const oldE = toMinutes(originalEnd);
+      const newS = toMinutes(startTime);
+      const newE = toMinutes(endTime);
+      if (oldS < newE && newS < oldE) {
+        showAlert(
+          "Cannot change the slot to an overlapping time on the same day and branch. Choose a time that does not overlap the current slot.",
+        );
+        return false;
+      }
+    }
+
+    if (!effectiveDate) {
+      showAlert("Effective date is required.");
+      return false;
+    }
+    if (!transferReason?.trim()) {
+      showAlert("Transfer reason is required.");
+      return false;
+    }
+    if (!departmentId) {
+      showAlert("Please select a department.");
+      return false;
+    }
+
+    setSavingSlot(true);
+    try {
+      const res = await doctorTransferApi.initiateTransfer(id, {
+        // A single-slot branch move must NEVER use TRANSFER mode — that
+        // closes the whole old branch and every other slot there. Instead
+        // the new slot is added (ADD_BRANCH) and only the edited row is
+        // closed via close_schedule_ids. Everything else stays untouched.
+        mode: "ADD_BRANCH",
+        close_schedule_ids: [Number(scheduleId)],
+        new_branch_id: branchId,
+        new_department_id: departmentId,
+        effective_date: effectiveDate,
+        transfer_reason: transferReason.trim(),
+        consultation_minutes: consultationMinutesValue,
+        working_hours: [
+          {
+            branch_id: branchId,
+            day_of_week: newDay as any,
+            shift_name: deriveShiftName(startTime),
+            start_time: startTime,
+            end_time: endTime,
+          },
+        ],
+      });
+
+      const data = res.data?.data;
+      if (!data) {
+        showAlert(res.data?.message || "Failed to update slot.");
+        return false;
+      }
+
+      if (data.status === "PENDING_CONFIRMATION") {
+        setPendingTransfer({
+          transferId: data.transfer_id,
+          appointments: data.appointments ?? [],
+          message: data.message ?? "",
+        });
+        setTransferAction(null);
+        setReplacementDoctorId("");
+        return true;
+      }
+
+      refetchDoctor();
+      showAlert(data.message || "Slot updated.");
+      return true;
+    } catch (err: any) {
+      showAlert(err?.response?.data?.message || err?.message || "Failed to update slot.");
+      return false;
+    } finally {
+      setSavingSlot(false);
+    }
+  };
+
+  const confirmPendingTransfer = async (action: TransferAction) => {
+    if (!pendingTransfer || !id) return;
+    if (action === "TRANSFER" && !replacementDoctorId) {
+      showAlert("Choose a replacement doctor.");
+      return;
+    }
+
+    setIsConfirmingTransfer(true);
+    try {
+      const res = await doctorTransferApi.confirmTransfer(id, {
+        transfer_id: pendingTransfer.transferId,
+        action,
+        ...(action === "TRANSFER" ? { replacement_employee_id: replacementDoctorId } : {}),
+        ...(action === "CANCEL" ? { confirm: true } : {}),
+      });
+
+      const data = res.data?.data;
+      if (data) {
+        const s = data.summary;
+        showAlert(
+          `Transfer processed — total: ${s.total}, transferred: ${s.successful}, queued: ${s.queued}, cancelled: ${s.cancelled}, conflicts: ${s.conflicts}.`,
+        );
+      } else {
+        showAlert(res.data?.message || "Transfer action processed.");
+      }
+
+      setPendingTransfer(null);
+      setTransferAction(null);
+      setReplacementDoctorId("");
+      refetchDoctor();
+    } catch (err: any) {
+      showAlert(err?.response?.data?.message || err?.message || "Failed to process transfer action.");
+    } finally {
+      setIsConfirmingTransfer(false);
     }
   };
 
@@ -554,15 +646,6 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
     );
   }
 };
-  const clearSchedule = () => {
-    setClearScheduleConfirm(true);
-  };
-
-  const handleConfirmClearSchedule = () => {
-    alert("Schedule cleared");
-    setClearScheduleConfirm(false);
-  };
-
   const previousWeek = () => {
     setWeekDates((prev) => prev.map((date) => shiftDate(date, -7)));
   };
@@ -670,18 +753,6 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
           </div>
         </section>
 
-
-        {doctorError && (
-          <section className="bg-white border border-[#ff453a] rounded-[10px] p-4 mb-4 text-[#ff453a] text-sm">
-            Error loading doctor: {doctorError}
-          </section>
-        )}
-
-        {isLoadingDoctor && (
-          <section className="bg-white border border-[#edf0f4] rounded-[10px] p-4 mb-4 text-[#555] text-sm">
-            Loading doctor profile...
-          </section>
-        )}
 
         {/* ABOUT */}
         <section className="bg-white border border-[#edf0f4] rounded-[10px] p-[21px] mb-4">
@@ -791,55 +862,22 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                     <>
                       <button
                         onClick={previousWeek}
-                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer hover:text-[#004a91] transition-colors"
+                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
                       >
                         ‹ Previous week
                       </button>
 
                       <button
                         onClick={nextWeek}
-                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer hover:text-[#004a91] transition-colors"
+                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
                       >
                         Next week ›
                       </button>
                     </>
                   )}
 
-                  {activeTab === "day" && (
-                    <>
-                      <button
-                        onClick={() => setDayViewDate((d) => subDays(d, 1))}
-                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
-                      >
-                        ‹ Previous day
-                      </button>
-
-                      <button
-                        onClick={() => setDayViewDate((d) => addDays(d, 1))}
-                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
-                      >
-                        Next day ›
-                      </button>
-
-                      <button
-                        onClick={() => setDayViewDate(new Date())}
-                        className="border-0 bg-transparent text-[#004a91] text-xs cursor-pointer"
-                      >
-                        Today
-                      </button>
-                    </>
-                  )}
-
                   <button
-                    onClick={() =>
-                      slotModalRef.current?.openAddSlot(
-                        activeTab === "day" ? format(dayViewDate, "EEEE") : "",
-                        null,
-                        null,
-                        activeTab === "day" ? "date" : "weekly",
-                        activeTab === "day" ? format(dayViewDate, "yyyy-MM-dd") : undefined,
-                      )
-                    }
+                    onClick={() => slotModalRef.current?.openAddSlot("")}
                     className="bg-[#004a91] text-white px-[14px] py-2 rounded-md text-xs font-semibold border-0 cursor-pointer"
                   >
                     + Add slot
@@ -854,137 +892,108 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
 
                 <div className="min-w-[610px]">
 
-                  {/* ── UNIFIED GRID for both Day & Week tabs ── */}
                   {/* HEADER */}
                   <div className="grid grid-cols-7 bg-[#f1f3f5] border-b border-[#b9bfcb]">
 
                     {WEEK_DAYS.map(([day], dayIdx) => (
                       <div
                         key={day}
-                        className={`min-h-[43px] p-[7px_3px] border-r border-[#b9bfcb] text-center text-[#003b80] text-[8px] font-bold ${activeTab === "day" ? "cursor-pointer" : ""}`}
-                        onClick={activeTab === "day" ? () => setIsDayCalendarOpen(true) : undefined}
+                        className={`min-h-[43px] p-[7px_3px] border-r border-[#b9bfcb] text-center text-[#003b80] text-[8px] font-bold ${
+                          activeTab === "day" ? "flex items-center justify-center" : ""
+                        }`}
                       >
-                        <div className="flex items-center justify-center gap-1">
-                          {day}
-                          {activeTab === "day" && (
-                            <span className="block mt-[3px] text-[7px]">
-                              {gridWeekDates[dayIdx]}
-                            </span>
-                          )}
-                          {activeTab === "week" && (
-                            <small className="block mt-[3px] text-[7px]">
-                              {weekDates[dayIdx]}
-                            </small>
-                          )}
-                        </div>
-                        {/* Highlight selected day on Day tab */}
-                            {activeTab === "day" && gridWeekDates[dayIdx] === format(dayViewDate, "dd/MM/yy") && (
-                            <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#004a91]" />
-                          )}
+                        {day}
+                        {activeTab === "week" && (
+                          <small className="block mt-[3px] text-[7px]">
+                            {weekDates[dayIdx]}
+                          </small>
+                        )}
                       </div>
                     ))}
 
                   </div>
 
                   {/* ROWS */}
-                  {gridSchedule.map((row, rowIndex) => (
+                  {schedule.map((row, rowIndex) => (
                     <div
                       key={rowIndex}
                       className="grid grid-cols-7 min-h-[64px] border-b border-[#b9bfcb] last:border-b-0"
                     >
-                      {row.map((cell, index) => (
+                      {row.map(([text, type, branch, scheduleId, branchId, startTime, endTime], index) => (
 
                         <div
                           key={index}
                           className="p-1 border-r border-[#b9bfcb] min-w-0"
                         >
 
-                          {cell ? (
-                            activeTab === "day" ? (
-                              /* Day tab: slot with Edit + Cancel buttons */
-                              <div
-                                className={`cursor-pointer h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] ${
-                                  isWeeklySchedule(cell)
-                                    ? "bg-[#f1f6ff] text-[#1e5fc7] border-[#1e5fc7]"
-                                    : "bg-[#fff7ef] text-[#ed741b] border-[#ed741b]"
-                                }`}
-                              >
-                                <strong className="text-[6px] whitespace-nowrap pl-1">
-                                  {formatScheduleTime(cell.start_time)} - {formatScheduleTime(cell.end_time)}
-                                </strong>
+                          {type === "off" && (
+                            <div className="h-[54px] border border-dashed border-[#b9bfcb] rounded flex items-center justify-center text-[#657080] text-[8px]">
+                              Week Off
+                            </div>
+                          )}
 
-                                <small className="text-[6px] leading-[8px]">
-                                  {cell.branch?.branch_name || "Central Hospital"}
-                                  {isWeeklySchedule(cell) ? " · Weekly" : ""}
-                                </small>
+                          {type === "empty" && (
+                            <div
+                              onClick={() => slotModalRef.current?.openAddSlot(WEEK_DAYS[index][0], rowIndex, index)}
+                              className="h-[54px] border border-dashed border-[#b9bfcb] rounded flex items-center justify-center text-[#7d8794] text-lg cursor-pointer hover:border-[#004a91] hover:text-[#004a91]"
+                            >
+                              +
+                            </div>
+                          )}
 
-                                <div className="flex items-center justify-between gap-1 mt-[3px] pt-[2px] border-t border-current/20">
-                                  <button
-                                    onClick={() => openEditSlot(cell)}
-                                    className="flex-1 px-1.5 py-1 rounded-md border border-[#004a91] text-[#004a91] text-[8px] font-semibold bg-white cursor-pointer hover:bg-[#eef4ff]"
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    onClick={() =>
-                                      slotModalRef.current?.openCancelSlot(
-                                        dayNameOf(cell.day_of_week) || "",
-                                        rowIndex,
-                                        index,
-                                        `${formatScheduleTime(cell.start_time)} - ${formatScheduleTime(cell.end_time)}`,
-                                        cell.branch?.branch_name || "",
-                                        cell.schedule_id,
-                                      )
-                                    }
-                                    className="flex-1 px-1.5 py-1 rounded-md border border-[#ff453a] text-[#ff453a] text-[8px] font-semibold bg-white cursor-pointer hover:bg-[#fff1f0]"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              /* Week tab: click slot to cancel */
-                              <div
-                                onClick={() =>
+                          {["green", "blue", "orange"].includes(type) && (
+                            <div
+                              onClick={() =>
+                                slotModalRef.current?.openEditSlot({
+                                  scheduleId: scheduleId ?? 0,
+                                  day: WEEK_DAYS[index][0],
+                                  date: "",
+                                  branchId: branchId || "",
+                                  branchName: branch,
+                                  startTime: startTime || "",
+                                  endTime: endTime || "",
+                                  timeLabel: text,
+                                  mode: "weekly",
+                                  departmentId: doctorEmployee?.department_id || "",
+                                  consultationMinutes:
+                                    doctorSchedules.find((s) => String(s.schedule_id) === String(scheduleId))
+                                      ?.consultation_minutes,
+                                })
+                              }
+                              className={`relative cursor-pointer h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] ${
+                                type === "green"
+                                  ? "bg-[#f0faf6] text-[#087d53] border-[#087d53]"
+                                  : type === "blue"
+                                  ? "bg-[#f1f6ff] text-[#1e5fc7] border-[#1e5fc7]"
+                                  : "bg-[#fff7ef] text-[#ed741b] border-[#ed741b]"
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                title="Delete slot"
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   slotModalRef.current?.openCancelSlot(
                                     WEEK_DAYS[index][0],
                                     rowIndex,
                                     index,
-                                    `${formatScheduleTime(cell.start_time)} - ${formatScheduleTime(cell.end_time)}`,
-                                    cell.branch?.branch_name || "",
-                                    cell.schedule_id,
-                                  )
-                                }
-                                className={`cursor-pointer h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] ${
-                                  isWeeklySchedule(cell)
-                                    ? "bg-[#f1f6ff] text-[#1e5fc7] border-[#1e5fc7]"
-                                    : "bg-[#fff7ef] text-[#ed741b] border-[#ed741b]"
-                                }`}
+                                    text,
+                                    branch,
+                                    scheduleId ?? null,
+                                  );
+                                }}
+                                className="absolute top-[2px] right-[2px] p-[1px] rounded-full text-[#9aa3b0] hover:text-[#ff453a] hover:bg-[#ffebea] transition-colors cursor-pointer"
                               >
-                                <strong className="text-[6px] whitespace-nowrap pl-1">
-                                  {formatScheduleTime(cell.start_time)} - {formatScheduleTime(cell.end_time)}
-                                </strong>
+                                <X className="size-3" />
+                              </button>
 
-                                <small className="text-[6px] leading-[8px]">
-                                  {cell.branch?.branch_name || "Central Hospital"}
-                                </small>
-                              </div>
-                            )
-                          ) : (
-                            /* Empty cell: + to add */
-                            <div
-                              onClick={() =>
-                                slotModalRef.current?.openAddSlot(
-                                  WEEK_DAYS[index][0],
-                                  rowIndex,
-                                  index,
-                                  activeTab === "day" ? "date" : "weekly",
-                                  activeTab === "day" ? dmyToIso(gridWeekDates[index]) : undefined,
-                                )
-                              }
-                              className="h-[54px] border border-dashed border-[#b9bfcb] rounded flex items-center justify-center text-[#7d8794] text-lg cursor-pointer hover:border-[#004a91] hover:text-[#004a91]"
-                            >
-                              +
+                              <strong className="text-[6px] whitespace-nowrap pl-1">
+                                {text}
+                              </strong>
+
+                              <small className="text-[6px] leading-[8px]">
+                                {branch || "Central Hospital"}
+                              </small>
                             </div>
                           )}
 
@@ -997,12 +1006,6 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                 </div>
 
               </div>
-              <button
-                onClick={clearSchedule}
-                className="block ml-auto mt-[9px] border-0 bg-transparent text-[#666d76] text-[11px] cursor-pointer"
-              >
-                Clear
-              </button>
 
             </section>
 
@@ -1052,10 +1055,8 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                           selected={fromDate}
                           hideThemePicker
                           onSelect={(date) => {
-                            if (date instanceof Date) {
-                              setFromDate(date);
-                              setIsFromCalendarOpen(false);
-                            }
+                            setFromDate(date);
+                            setIsFromCalendarOpen(false);
                           }}
                         />
                       </PopoverContent>
@@ -1081,10 +1082,8 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                           selected={toDate}
                           hideThemePicker
                           onSelect={(date) => {
-                            if (date instanceof Date) {
-                              setToDate(date);
-                              setIsToCalendarOpen(false);
-                            }
+                            setToDate(date);
+                            setIsToCalendarOpen(false);
                           }}
                         />
                       </PopoverContent>
@@ -1130,8 +1129,8 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
           {/* RIGHT COLUMN */}
           <aside className="min-w-0 max-[900px]:grid max-[900px]:grid-cols-2 max-[900px]:gap-5 max-[700px]:block">
 
-            {/* CALENDAR (both Day & Week tabs) */}
-            {(activeTab === "week" || activeTab === "day") && (
+            {/* CALENDAR (Week tab only -- the Day tab's simpler layout never had a month calendar) */}
+            {activeTab === "week" && (
             <section className="bg-white border border-[#edf0f4] rounded-[10px] p-[25px] mb-6 max-[900px]:mb-0 max-[700px]:mb-5">
 
               <div className="flex items-center justify-between mb-[22px]">
@@ -1174,47 +1173,21 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                 {calendarDays.map((cell, index) => {
                   const isInActiveWeek =
                     cell.inMonth && weekDates.some((d) => isSameDay(parseDate(d), cell.date));
-                  const isSelectedDay = activeTab === "day" && isSameDay(cell.date, dayViewDate);
                   const key = dateKey(cell.date);
                   const isToggled = toggledDates.has(key);
-                  const isHighlighted = activeTab === "day"
-                    ? (isToggled ? !isSelectedDay : isSelectedDay)
-                    : (isToggled ? !isInActiveWeek : isInActiveWeek);
+                  const isHighlighted = isToggled ? !isInActiveWeek : isInActiveWeek;
 
                   return (
                     <button
                       key={index}
-                      onClick={(e) => {
-                        if (e.shiftKey) {
-                          setToggledDates((prev) => {
-                            const next = new Set(prev);
-                            const key = dateKey(cell.date);
-                            if (next.has(key)) next.delete(key);
-                            else next.add(key);
-                            return next;
-                          });
-                          return;
-                        }
-                        if (activeTab === "day") {
-                          setDayViewDate(cell.date);
-                        } else {
-                          setToggledDates((prev) => {
-                            const next = new Set(prev);
-                            const key = dateKey(cell.date);
-                            if (next.has(key)) next.delete(key);
-                            else next.add(key);
-                            return next;
-                          });
-                        }
-                      }}
-                      onDoubleClick={() => {
+                      onClick={() =>
                         setToggledDates((prev) => {
                           const next = new Set(prev);
-                          const key = dateKey(cell.date);
-                          next.add(key);
+                          if (next.has(key)) next.delete(key);
+                          else next.add(key);
                           return next;
-                        });
-                      }}
+                        })
+                      }
                       className={`w-[31px] h-[31px] flex items-center justify-center rounded-full text-[11px] mx-auto border-0 cursor-pointer ${
                         !cell.inMonth
                           ? "text-[#c8ced7] bg-transparent"
@@ -1229,35 +1202,6 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                 })}
 
               </div>
-
-              {/* Selected dates scroll (max 7 visible, rest scrollable horizontally) */}
-              {toggledDates.size > 0 && (
-                <div className="mt-4 overflow-x-auto">
-                  <div className="flex gap-2 min-w-max">
-                    {Array.from(toggledDates).slice(0, 7).map((key) => (
-                      <span key={key} className="px-2 py-1 rounded bg-[#2167d5] text-white text-[10px] whitespace-nowrap">
-                      {(() => {
-                        const [year, month, day] = key.split("-");
-                        return new Date(
-                          Number(year),
-                          Number(month) - 1,
-                          Number(day)
-                        ).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        });
-                      })()}
-                      </span>
-                    ))}
-                    {toggledDates.size > 7 && (
-                      <span className="px-2 py-1 rounded bg-[#f1f3f5] text-[#555] text-[10px] whitespace-nowrap">
-                        +{toggledDates.size - 7} more
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
 
             </section>
             )}
@@ -1352,22 +1296,157 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
 
       </main>
 
+      {pendingTransfer && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-[10px] p-6 w-[440px] max-h-[90vh] overflow-y-auto shadow-lg">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-[16px] font-semibold text-[#172033]">
+                Affected Appointments
+              </h3>
+
+              <button
+                onClick={() => setPendingTransfer(null)}
+                title="Close (the slot change is not applied)"
+                className="p-1 rounded-full text-[#9aa3b0] hover:text-[#374151] hover:bg-[#f1f3f5] transition-colors cursor-pointer"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <p className="text-[#5f6672] text-[13px] mb-2">{pendingTransfer.message}</p>
+
+            <p className="text-[#5f6672] text-[13px] mb-3">
+              {pendingTransfer.appointments.length} future appointment(s) need handling before the slot change is applied.
+            </p>
+
+            <div className="border border-[#dfe4ea] rounded-[7px] max-h-[180px] overflow-y-auto divide-y divide-[#eef1f4] mb-4">
+              {pendingTransfer.appointments.map((a) => (
+                <div key={a.appointment_id} className="px-3 py-2">
+                  <div className="text-xs font-semibold text-[#172033]">
+                    {a.patient_name || a.patient_id}
+                  </div>
+                  <div className="text-[11px] text-[#5f6672]">
+                    {a.appointment_date} · {a.appointment_time} ·{" "}
+                    {a.branch_id
+                      ? doctorDetail?.branches?.find((b) => b.branch_id === a.branch_id)?.branch_name ?? a.branch_id
+                      : "—"}
+                  </div>
+                </div>
+              ))}
+              {pendingTransfer.appointments.length === 0 && (
+                <div className="px-3 py-3 text-xs text-[#5f6672]">No affected appointments.</div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2 mb-4">
+              <button
+                onClick={() => {
+                  setTransferAction("TRANSFER");
+                  setReplacementDoctorId(replacementDoctors[0]?.employee_id ?? "");
+                }}
+                className={`text-left px-3 py-2 rounded-[7px] border text-xs font-semibold cursor-pointer transition-colors ${
+                  transferAction === "TRANSFER"
+                    ? "border-[#004a91] bg-[#eef4ff] text-[#004a91]"
+                    : "border-[#dfe4ea] bg-white text-[#374151] hover:border-[#b8cce8]"
+                }`}
+              >
+                Transfer to replacement doctor
+              </button>
+
+              <button
+                onClick={() => setTransferAction("RESCHEDULE")}
+                className={`text-left px-3 py-2 rounded-[7px] border text-xs font-semibold cursor-pointer transition-colors ${
+                  transferAction === "RESCHEDULE"
+                    ? "border-[#b45309] bg-[#fff7ed] text-[#b45309]"
+                    : "border-[#dfe4ea] bg-white text-[#374151] hover:border-[#f2c9a0]"
+                }`}
+              >
+                Reschedule queue
+              </button>
+
+              <button
+                onClick={() => setTransferAction("CANCEL")}
+                className={`text-left px-3 py-2 rounded-[7px] border text-xs font-semibold cursor-pointer transition-colors ${
+                  transferAction === "CANCEL"
+                    ? "border-[#ff453a] bg-[#fff1f0] text-[#ff453a]"
+                    : "border-[#dfe4ea] bg-white text-[#374151] hover:border-[#ffc9c5]"
+                }`}
+              >
+                Cancel appointments
+              </button>
+            </div>
+
+            {transferAction === "TRANSFER" && (
+              <div className="mb-4">
+                <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
+                  REPLACEMENT DOCTOR
+                </label>
+
+                <select
+                  value={replacementDoctorId}
+                  onChange={(e) => setReplacementDoctorId(e.target.value)}
+                  className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
+                >
+                  <option value="">Select replacement doctor</option>
+                  {replacementDoctors.map((d) => (
+                    <option key={d.employee_id} value={d.employee_id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+
+                {replacementDoctors.length === 0 && (
+                  <p className="text-[11px] text-[#c2410c] mt-1">
+                    No eligible replacement doctors were found for these appointments.
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setPendingTransfer(null)}
+                disabled={isConfirmingTransfer}
+                className="h-9 px-4 rounded-[7px] text-[13px] font-semibold cursor-pointer bg-white text-[#555e6c] border border-[#dfe4ea] disabled:opacity-70 disabled:cursor-not-allowed"
+              >
+                Back
+              </button>
+
+              <button
+                onClick={() => transferAction && confirmPendingTransfer(transferAction)}
+                disabled={!transferAction || isConfirmingTransfer}
+                className={`h-9 px-4 rounded-[7px] text-[13px] font-semibold cursor-pointer inline-flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed ${
+                  transferAction === "CANCEL" ? "bg-[#ff453a] text-white border-0" : "bg-[#004a91] text-white border-0"
+                }`}
+              >
+                {isConfirmingTransfer ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Processing...
+                  </>
+                ) : transferAction === "TRANSFER" ? (
+                  "Transfer appointments"
+                ) : transferAction === "RESCHEDULE" ? (
+                  "Add to reschedule queue"
+                ) : (
+                  "Confirm cancel"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ScheduleSlotModal
         ref={slotModalRef}
-        branches={getActiveBranches(doctorDetail?.branches)}
+        branches={doctorDetail?.branches?.filter((b) => b.status === 1) ?? []}
+        departments={departments}
+        defaultConsultationMinutes={doctorDetail?.doctorProfile?.consultation_minutes ?? 20}
+        defaultDepartmentId={doctorEmployee?.department_id ?? ""}
         onAddSlot={handleAddSlot}
         onUpdateSlot={handleUpdateSlot}
         onCancelSlot={handleCancelSlot}
-      />
-      <ConfirmationDialog
-        open={clearScheduleConfirm}
-        onConfirm={handleConfirmClearSchedule}
-        onCancel={() => setClearScheduleConfirm(false)}
-        type="warning"
-        title="Clear Schedule?"
-        description="Are you sure you want to clear the schedule? This action cannot be undone."
-        confirmText="Clear"
-        cancelText="Cancel"
+        isSubmitting={savingSlot}
       />
     </div>
   );

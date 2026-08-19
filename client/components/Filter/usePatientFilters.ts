@@ -41,13 +41,17 @@ export function usePatientFilters({ viewMode, patientRows }: UsePatientFiltersPa
     nameField,
     { id: "diagnose", label: "Diagnosis", type: "text", placeholder: "Search diagnosis" },
     { id: "doctor", label: "Assigned Doctor", type: "text", placeholder: "Search doctor" },
-    { id: "status", label: "Status", type: "multiselect", options: statusOptions },
+    // Defaults to "Active" only -- "Inactive" patients stay hidden until
+    // the user explicitly selects them in the filter.
+    { id: "status", label: "Status", type: "multiselect", options: statusOptions, defaultValue: ["Active"] },
   ];
 
   const gridFilterFields: FilterField[] = [
     nameField,
     { id: "bloodGroup", label: "Blood Group", type: "text", placeholder: "Search blood group" },
-    { id: "status", label: "Status", type: "multiselect", options: statusOptions },
+    // Defaults to "Active" only -- "Inactive" patients stay hidden until
+    // the user explicitly selects them in the filter.
+    { id: "status", label: "Status", type: "multiselect", options: statusOptions, defaultValue: ["Active"] },
   ];
 
   return { patientFilterFields: viewMode === "grid" ? gridFilterFields : listFilterFields };

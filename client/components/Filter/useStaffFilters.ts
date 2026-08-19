@@ -59,7 +59,10 @@ export function useStaffFilters({ staffRows, branches }: UseStaffFiltersParams):
     },
     { id: "dept", label: "Department", type: "multiselect", options: departmentOptions },
     { id: "branch", label: "Branch", type: "multiselect", options: branchFilterOptions },
-    { id: "status", label: "Status", type: "multiselect", options: statusOptions },
+    // Defaults to "Active" only -- "Inactive" staff stay hidden until the
+    // user explicitly selects them in the filter (option values are
+    // lowercase on this page, so the default matches that casing).
+    { id: "status", label: "Status", type: "multiselect", options: statusOptions, defaultValue: ["active"] },
     { id: "designation", label: "Designation", type: "multiselect", options: designationOptions },
   ];
 

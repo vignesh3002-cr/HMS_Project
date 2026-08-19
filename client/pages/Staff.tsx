@@ -466,16 +466,6 @@ export default function Staff() {
   const [sortField, setSortField] = useState("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
-  const {
-    values: filterValues,
-    appliedValues,
-    isOpen: isFilterOpen,
-    setIsOpen: setIsFilterOpen,
-    handleChange: handleFilterChange,
-    handleApply: handleApplyFilter,
-    handleClear: handleClearFilter,
-  } = useFilterPanel();
-
   const activeTabName = TABS[activeTab];
   const isMedicalTab = activeTabName === "Medical Staff";
   const isAdminTab = activeTabName === "Admin";
@@ -553,6 +543,19 @@ export default function Staff() {
 
   // ---- FILTER FIELDS -- derived from real data, not static lists ----
   const { staffFilterFields } = useStaffFilters({ staffRows: tabRows, branches });
+
+  // Filters -- seeded with the fields so fields carrying a `defaultValue`
+  // (e.g. Status defaulting to ["Active"]) start applied and are restored
+  // when the user clears the filter.
+  const {
+    values: filterValues,
+    appliedValues,
+    isOpen: isFilterOpen,
+    setIsOpen: setIsFilterOpen,
+    handleChange: handleFilterChange,
+    handleApply: handleApplyFilter,
+    handleClear: handleClearFilter,
+  } = useFilterPanel(staffFilterFields);
 
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
