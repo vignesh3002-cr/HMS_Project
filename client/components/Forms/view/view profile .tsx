@@ -19,7 +19,10 @@ import {
 import { branchApi, type BranchDetail } from "@/api/branch.api";
 import { employeeApi, EmployeeDetailResponse } from "@/api/employee.api";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
+import Security from "@/components/Forms/view/Security";
+import Notifications from "@/components/Forms/view/Notification";
 import { getUser } from "@/utils/token";
+import { addAccountActivity } from "@/utils/accountActivity";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 
 function formatBranchName(branch: BranchDetail | null): string {
@@ -177,6 +180,7 @@ const Profile = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeMenu, setActiveMenu] = useState("Account");
 
   useEffect(() => {
     let isMounted = true;
@@ -192,6 +196,11 @@ const Profile = () => {
         setProfile(data);
         setPhotoUrl(
           data.employee.employee_photo_URL || data.employee.photo || ""
+        );
+        window.dispatchEvent(
+          new CustomEvent("profile-photo-updated", {
+            detail: data.employee.employee_photo_URL || data.employee.photo || "",
+          })
         );
         setForm({
           first_name: data.employee.first_name || "",
@@ -234,6 +243,13 @@ const Profile = () => {
       setError(null);
       await employeeApi.updatePhoto(profile.employee.employee_id, dataUrl);
       setPhotoUrl(dataUrl);
+      addAccountActivity(
+        "Profile photo updated",
+        "Your profile photo was changed successfully."
+      );
+      window.dispatchEvent(
+        new CustomEvent("profile-photo-updated", { detail: dataUrl })
+      );
     } catch (err: any) {
       setError(err?.response?.data?.message || "Failed to update photo.");
     } finally {
@@ -261,13 +277,22 @@ const Profile = () => {
               {settingMenus.map((item) => (
                 <button
                   key={item.title}
+                  onClick={() => {
+                    if (
+                      item.title === "Account" ||
+                      item.title === "Security" ||
+                      item.title === "Notification"
+                    ) {
+                      setActiveMenu(item.title);
+                    }
+                  }}
                   className={`w-full text-left p-6 border-b transition
-                    ${item.active ? "bg-slate-50" : "hover:bg-gray-50"}`}
+                    ${activeMenu === item.title ? "bg-slate-50" : "hover:bg-gray-50"}`}
                 >
                   <div className="flex gap-4">
                     <div
                       className={`mt-1 ${
-                        item.active ? "text-blue-500" : "text-gray-400"
+                        activeMenu === item.title ? "text-blue-500" : "text-gray-400"
                       }`}
                     >
                       {item.icon}
@@ -286,12 +311,18 @@ const Profile = () => {
 
             {/* Right Panel Starts Here */}
             <div className="flex-1 p-8 overflow-auto">
-              <h2 className="hms-heading mb-8">Account</h2>
-
-              {loading ? (
-                <p className="text-sm text-gray-500">Loading profile...</p>
+              {activeMenu === "Security" ? (
+                <Security embedded />
+              ) : activeMenu === "Notification" ? (
+                <Notifications />
               ) : (
-                <form className="space-y-10">
+                <>
+                  <h2 className="hms-heading mb-8">Account</h2>
+
+                  {loading ? (
+                    <p className="text-sm text-gray-500">Loading profile...</p>
+                  ) : (
+                    <form className="space-y-10">
                   {error && (
                     <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
                       {error}
@@ -305,29 +336,21 @@ const Profile = () => {
                           Profile Information
                         </h3>
                         <p className="hms-subheading">
-                          Your profile details are read-only.
-                          {isAdmin ? " Only the profile photo can be changed." : ""}
+                          Your profile details are read-only. Only the profile
+                          photo can be changed.
                         </p>
                       </div>
                     </div>
 
                     {/* Profile Image */}
                     <div className="mb-8 flex items-center gap-6">
-                      {isAdmin ? (
-                        <AvatarUpload
-                          value={photoUrl}
-                          onChange={handlePhotoChange}
-                          label="Profile photo"
-                          hint="Only admins can change their own photo"
-                          size={96}
-                        />
-                      ) : (
-                        <img
-                          src={photoUrl || "https://i.pravatar.cc/150?img=12"}
-                          alt="Profile"
-                          className="h-24 w-24 rounded-full border object-cover"
-                        />
-                      )}
+                      <AvatarUpload
+                        value={photoUrl}
+                        onChange={handlePhotoChange}
+                        label="Profile photo"
+                        hint="Click to change your profile photo"
+                        size={96}
+                      />
 
                       <div>
                         <h4 className="hms-name-text">{fullName}</h4>
@@ -347,9 +370,7 @@ const Profile = () => {
                         <input
                           type="text"
                           value={form.first_name}
-                          onChange={(e) =>
-                            handleChange("first_name", e.target.value)
-                          }
+                          disabled
                           className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 outline-none disabled:cursor-not-allowed"
                         />
                       </div>
@@ -361,9 +382,7 @@ const Profile = () => {
                         <input
                           type="text"
                           value={form.last_name}
-                          onChange={(e) =>
-                            handleChange("last_name", e.target.value)
-                          }
+                          disabled
                           className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 outline-none disabled:cursor-not-allowed"
                         />
                       </div>
@@ -388,9 +407,7 @@ const Profile = () => {
                         <input
                           type="text"
                           value={form.mobile_no}
-                          onChange={(e) =>
-                            handleChange("mobile_no", e.target.value)
-                          }
+                          disabled
                           className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 outline-none disabled:cursor-not-allowed"
                         />
                       </div>
@@ -436,9 +453,7 @@ const Profile = () => {
                         </label>
                         <input
                           value={form.employee_state}
-                          onChange={(e) =>
-                            handleChange("employee_state", e.target.value)
-                          }
+                          disabled
                           className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 disabled:cursor-not-allowed"
                         />
                       </div>
@@ -449,9 +464,7 @@ const Profile = () => {
                         </label>
                         <input
                           value={form.employee_district}
-                          onChange={(e) =>
-                            handleChange("employee_district", e.target.value)
-                          }
+                          disabled
                           className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 disabled:cursor-not-allowed"
                         />
                       </div>
@@ -462,9 +475,7 @@ const Profile = () => {
                         </label>
                         <input
                           value={form.employee_pincode}
-                          onChange={(e) =>
-                            handleChange("employee_pincode", e.target.value)
-                          }
+                          disabled
                           className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 disabled:cursor-not-allowed"
                         />
                       </div>
@@ -475,9 +486,7 @@ const Profile = () => {
                         </label>
                         <input
                           value={form.current_address}
-                          onChange={(e) =>
-                            handleChange("current_address", e.target.value)
-                          }
+                          disabled
                           className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 disabled:cursor-not-allowed"
                         />
                       </div>
@@ -485,6 +494,8 @@ const Profile = () => {
                   </section>
 
                 </form>
+                  )}
+                </>
               )}
             </div>
           </div>

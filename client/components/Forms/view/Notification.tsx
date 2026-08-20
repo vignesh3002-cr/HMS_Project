@@ -16,6 +16,10 @@ import {
 import {
   appointmentApi,
 } from "@/api/appointment.api";
+import {
+  getAccountActivity,
+  type AccountActivity,
+} from "@/utils/accountActivity";
 
 const DISMISSED_NOTIFICATIONS_KEY =
   "hms_dismissed_notifications";
@@ -121,7 +125,8 @@ type NotificationRole =
   | "staff"
   | "admin"
   | "patient"
-  | "appointment";
+  | "appointment"
+  | "account";
 
 type NotificationAction =
   | "CREATE"
@@ -158,6 +163,7 @@ const ROLE_TITLES: Record<
   patient: "New Patient Registered",
   appointment:
     "New Appointment Created",
+  account: "Account Updated",
 };
 
 /* -------------------------------------------------------------------------- */
@@ -434,6 +440,30 @@ const Icon = ({
           />
           <path
             d="M8 14h3M8 17h5"
+            strokeLinecap="round"
+          />
+        </svg>
+      </div>
+    );
+  }
+
+  if (role === "account") {
+    return (
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e9efff]">
+        <svg
+          viewBox="0 0 24 24"
+          className="h-5 w-5 text-[#003ec7]"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+        >
+          <path
+            d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M10.3 21a1.94 1.94 0 0 0 3.4 0"
             strokeLinecap="round"
           />
         </svg>
@@ -792,6 +822,20 @@ function createNotification(
   };
 }
 
+function accountActivityToNotification(
+  activity: AccountActivity
+): NotificationItem {
+  return {
+    id: `account-${activity.id}`,
+    title: activity.title,
+    message: activity.message,
+    time: timeAgo(activity.createdAt),
+    createdAt: activity.createdAt,
+    role: "account",
+    action: "UPDATE",
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /* COMPONENT                                                                  */
 /* -------------------------------------------------------------------------- */
@@ -800,6 +844,13 @@ export default function Notifications() {
   const [
     notifications,
     setNotifications,
+  ] = useState<NotificationItem[]>(
+    []
+  );
+
+  const [
+    accountItems,
+    setAccountItems,
   ] = useState<NotificationItem[]>(
     []
   );
@@ -1579,6 +1630,43 @@ export default function Notifications() {
   }, [fetchNotifications]);
 
   /* ------------------------------------------------------------------------ */
+  /* ACCOUNT ACTIVITY                                                         */
+  /* ------------------------------------------------------------------------ */
+
+  useEffect(() => {
+    const loadAccountActivity = () => {
+      setAccountItems(
+        getAccountActivity().map(
+          accountActivityToNotification
+        )
+      );
+    };
+
+    loadAccountActivity();
+    window.addEventListener(
+      "account-activity-updated",
+      loadAccountActivity
+    );
+    const onStorage = () => {
+      loadAccountActivity();
+    };
+    window.addEventListener(
+      "storage",
+      onStorage
+    );
+    return () => {
+      window.removeEventListener(
+        "account-activity-updated",
+        loadAccountActivity
+      );
+      window.removeEventListener(
+        "storage",
+        onStorage
+      );
+    };
+  }, []);
+
+  /* ------------------------------------------------------------------------ */
   /* MARK ALL READ                                                            */
   /* ------------------------------------------------------------------------ */
 
@@ -1586,13 +1674,13 @@ export default function Notifications() {
     useCallback(() => {
       setReadIds(
         new Set(
-          notifications.map(
+          [...accountItems, ...notifications].map(
             (notification) =>
               notification.id
           )
         )
       );
-    }, [notifications]);
+    }, [accountItems, notifications]);
 
   /* ------------------------------------------------------------------------ */
   /* REMOVE                                                                   */
@@ -1677,7 +1765,16 @@ export default function Notifications() {
     const earlier: NotificationItem[] =
       [];
 
-    notifications.forEach(
+    const allItems = [
+      ...accountItems,
+      ...notifications,
+    ].sort(
+      (a, b) =>
+        b.createdAt -
+        a.createdAt
+    );
+
+    allItems.forEach(
       (item) => {
         const date =
           new Date(
@@ -1712,7 +1809,7 @@ export default function Notifications() {
         yesterdayList,
       earlierItems: earlier,
     };
-  }, [notifications]);
+  }, [accountItems, notifications]);
 
   /* ------------------------------------------------------------------------ */
   /* RENDER                                                                   */
@@ -1766,27 +1863,29 @@ export default function Notifications() {
                     />
                   )}
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      removeNotification(
-                        item.id
-                      )
-                    }
-                    aria-label="Delete notification"
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      className="h-3.5 w-3.5 fill-none stroke-current"
-                      strokeWidth="2"
+                  {item.role !== "account" && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        removeNotification(
+                          item.id
+                        )
+                      }
+                      aria-label="Delete notification"
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
                     >
-                      <path
-                        d="M6 6l12 12M18 6L6 18"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </button>
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-3.5 w-3.5 fill-none stroke-current"
+                        strokeWidth="2"
+                      >
+                        <path
+                          d="M6 6l12 12M18 6L6 18"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  )}
                 </div>
               </div>
 

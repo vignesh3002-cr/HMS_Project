@@ -6,6 +6,8 @@ import { getUser } from "@/utils/token";
 import { cn } from "@/lib/utils";
 import { BranchSelector } from "@/components/hms/BranchSelector";
 import { BranchFilterProvider } from "@/context/BranchFilterContext";
+import { employeeApi } from "@/api/employee.api";
+import { clearAccountActivity } from "@/utils/accountActivity";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
 import { usePermission } from "@/context/PermissionContext";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
@@ -93,6 +95,7 @@ export function AppLayout() {
 
   const logout = () => {
     remove();
+    clearAccountActivity();
     localStorage.removeItem("user_info");
     navigate("/");
   };
@@ -112,6 +115,7 @@ export function AppLayout() {
     branch_area: "",
     branch: "",
   });
+  const [adminPhoto, setAdminPhoto] = useState("");
 
   const { can, loading: permissionsLoading } = usePermission();
   const hasPermission = (perm?: string) => !perm || permissionsLoading || can(perm);
@@ -178,6 +182,36 @@ export function AppLayout() {
     syncUserData();
     window.addEventListener("user-updated", syncUserData);
     return () => window.removeEventListener("user-updated", syncUserData);
+  }, []);
+
+  // Keep the sidebar / header avatar in sync with the logged-in user's
+  // profile photo. It is loaded once on mount and then updated live
+  // whenever the photo changes on the Account page (profile-photo-updated).
+  useEffect(() => {
+    let mounted = true;
+
+    const handlePhotoUpdate = (e: Event) => {
+      const url = (e as CustomEvent<string>).detail;
+      if (url) setAdminPhoto(url);
+    };
+
+    employeeApi
+      .getMe()
+      .then((res) => {
+        if (!mounted) return;
+        const emp = res.data?.data?.employee;
+        const url = emp?.employee_photo_URL || emp?.photo || "";
+        if (url) setAdminPhoto(url);
+      })
+      .catch(() => {
+        /* keep the placeholder avatar */
+      });
+
+    window.addEventListener("profile-photo-updated", handlePhotoUpdate);
+    return () => {
+      mounted = false;
+      window.removeEventListener("profile-photo-updated", handlePhotoUpdate);
+    };
   }, []);
 
   return (
@@ -303,7 +337,7 @@ export function AppLayout() {
           <div className="pt-4">
             <div className="flex items-center gap-2 p-3 rounded-lg bg-[#F2F4F6]">
               <img
-                src="https://i.pravatar.cc/40"
+                src={adminPhoto || "https://i.pravatar.cc/40"}
                 alt="Admin"
                 className="w-8 h-8 rounded-xl object-cover"
               />
@@ -360,6 +394,7 @@ export function AppLayout() {
               <UserProfileDropdown
                 userName={userData.username || "HMS"}
                 userSubtext={userData.user_id || "Admin user"}
+                userAvatar={adminPhoto || undefined}
                 onLogout={() => setLogoutOpen(true)}
               />
             </div>
