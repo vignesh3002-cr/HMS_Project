@@ -256,10 +256,10 @@ export const employeeApi = {
     API.delete<{ success: boolean; message: string }>(`/employees/${employeeId}`),
 
   addScheduleSlot: (employeeId: string, data: AddScheduleSlotPayload) =>
-    API.post<AddScheduleSlotResponse>(`/employees/${employeeId}/schedules`, data),
+    API.post<AddScheduleSlotResponse>(`/doctor-schedule/recurring/slot/${employeeId}`, data),
 
   removeScheduleSlot: (employeeId: string, scheduleId: string | number) =>
     API.delete<{ success: boolean; message: string; data: { schedule_id: string; soft_closed: boolean } }>(
-      `/employees/${employeeId}/schedules/${scheduleId}`,
+      `/doctor-schedule/recurring/slot/${employeeId}/${scheduleId}`,
     ),
 };

@@ -57,6 +57,12 @@ interface ScheduleSlotModalProps {
   branches?: ScheduleSlotBranchOption[];
   onAddSlot: (payload: ScheduleSlotAddPayload) => void;
   onCancelSlot: (payload: ScheduleSlotCancelPayload) => void;
+  // Pre-select a branch every time the modal opens (used by the Day tab,
+  // where the slot always belongs to the currently selected hospital).
+  defaultBranchId?: string;
+  // Hide the DATE (calendar) field -- used by recurring-schedule editors
+  // (e.g. the Day tab) where a slot is tied to a weekday, not a specific date.
+  hideDate?: boolean;
 }
 
 const formatTime12 = (time: string) => {
@@ -69,7 +75,7 @@ const formatTime12 = (time: string) => {
 };
 
 const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalProps>(
-  function ScheduleSlotModal({ branches, onAddSlot, onCancelSlot }, ref) {
+  function ScheduleSlotModal({ branches, onAddSlot, onCancelSlot, defaultBranchId = "", hideDate = false }, ref) {
     const [addSlotOpen, setAddSlotOpen] = useState(false);
     const [addSlotDay, setAddSlotDay] = useState("");
     const [addSlotPos, setAddSlotPos] = useState<{ row: number; col: number } | null>(null);
@@ -87,11 +93,11 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
     useImperativeHandle(ref, () => ({
       openAddSlot: (dayName = "", rowIndex = null, colIndex = null) => {
         setAddSlotDay(dayName);
-        setAddSlotPos(rowIndex === null || colIndex === null ? null : { row: rowIndex, col: colIndex });
+        setAddSlotPos(rowIndex == null || colIndex == null ? null : { row: rowIndex, col: colIndex });
         setSlotDate(toDateInputValue(new Date()));
         setSlotStart("");
         setSlotEnd("");
-        setSlotBranch("");
+        setSlotBranch(defaultBranchId ?? "");
         setAddSlotOpen(true);
       },
       openCancelSlot: (dayName, rowIndex, colIndex, text, branch, scheduleId = null) => {
@@ -107,8 +113,12 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
     };
 
     const confirmAddSlot = () => {
-      if (!addSlotDay || !slotDate || !slotStart || !slotEnd || !slotBranch) {
-        alert("Please select day, date, start time, end time and branch location.");
+      if (!addSlotDay || (!hideDate && !slotDate) || !slotStart || !slotEnd || !slotBranch) {
+        alert(
+          hideDate
+            ? "Please select day, start time, end time and branch location."
+            : "Please select day, date, start time, end time and branch location."
+        );
         return;
       }
 
@@ -117,7 +127,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
 
       onAddSlot({
         day: addSlotDay,
-        date: slotDate,
+        date: hideDate ? "" : slotDate,
         row: addSlotPos?.row ?? null,
         col: addSlotPos?.col ?? null,
         branchId: slotBranch,
@@ -180,18 +190,20 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                    DATE
-                  </label>
+                {!hideDate && (
+                  <div>
+                    <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
+                      DATE
+                    </label>
 
-                  <input
-                    type="date"
-                    value={slotDate}
-                    onChange={(e) => setSlotDate(e.target.value)}
-                    className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
-                  />
-                </div>
+                    <input
+                      type="date"
+                      value={slotDate}
+                      onChange={(e) => setSlotDate(e.target.value)}
+                      className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
+                    />
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
