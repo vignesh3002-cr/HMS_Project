@@ -303,7 +303,7 @@ export const employeeApi = {
     API.post<{ success: boolean; message: string }>(`/employees/${employeeId}/restore`),
 
   addScheduleSlot: (employeeId: string, data: AddScheduleSlotPayload) =>
-    API.post<AddScheduleSlotResponse>(`/employees/${employeeId}/schedules`, data),
+    API.post<AddScheduleSlotResponse>(`/doctor-schedule/recurring/slot/${employeeId}`, data),
 
   updateScheduleSlot: (employeeId: string, scheduleId: string | number, data: UpdateScheduleSlotPayload) =>
     API.put<AddScheduleSlotResponse>(`/employees/${employeeId}/schedules/${scheduleId}`, data),
