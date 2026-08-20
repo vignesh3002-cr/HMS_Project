@@ -4,7 +4,8 @@ import { Activity, BedDouble, Building2, UsersRound } from "lucide-react";
 import { DataPanel } from "@/components/hms/DataPanel";
 import { PageHeader } from "@/components/hms/PageHeader";
 import { StatusBadge } from "@/components/hms/StatusBadge";
-import { FilterPopover, useFilterPanel, useDepartmentFilters } from "@/components/Filter";
+import { useFilterPanel, useDepartmentFilters } from "@/components/Filter";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import ExportReport from "@/components/ui/ExportReport";
 
@@ -95,7 +96,7 @@ export default function Departments() {
         title="Departments Overview"
         description={`${filteredDepartments.length} departments shown`}
         action={
-          <FilterPopover
+          <ToolbarFilter
             fields={departmentFilterFields}
             values={filterValues}
             onChange={handleFilterChange}

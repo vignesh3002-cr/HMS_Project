@@ -6,9 +6,12 @@ import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { branchApi, Branch } from "@/api/branch.api";
+import { getUser } from "@/utils/token";
 import { departmentApi, Department } from "@/api/department.api";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { appointmentApi, type AvailableSlot } from "@/api/appointment.api";
+import { validateRequiredFields, type RequiredField } from "@/lib/validation";
+import { activeBranches } from "@/lib/utils";
 
 interface AppointmentFormData {
   patientId: string;
@@ -106,7 +109,7 @@ const requiredStar = <span className="text-red-600 ml-0.5">*</span>;
 // Terminal statuses can't be edited on the backend (see
 // TERMINAL_APPOINTMENT_STATUSES in appointment.constants.ts) -- checked here
 // too so the user gets a clear message instead of a failed submit.
-const TERMINAL_STATUSES = ["COMPLETED", "CANCELLED", "NO_SHOW"];
+const TERMINAL_STATUSES = ["COMPLETED", "CANCELLED", "NO_SHOW", "NOT_CHECKED_IN"];
 
 export default function EditAppointment() {
   const navigate = useNavigate();
@@ -249,7 +252,7 @@ export default function EditAppointment() {
         if (record.employee_id) {
           employeeApi
             .getOne(record.employee_id)
-            .then((res) => setDoctorBranches(res.data?.data?.branches || []))
+            .then((res) => setDoctorBranches(activeBranches(res.data?.data?.branches || [])))
             .catch(() => {});
         }
       })
@@ -313,11 +316,6 @@ export default function EditAppointment() {
 
     if (!id) return;
 
-    if (!formData.timeSlot) {
-      toast({ title: "Please select a time slot", variant: "destructive" });
-      return;
-    }
-
     if (appointmentStatus === "RESCHEDULE_REQUIRED" && !formData.doctorId) {
       toast({
         title: "Select a doctor to resolve the reschedule",
@@ -326,6 +324,15 @@ export default function EditAppointment() {
       });
       return;
     }
+
+    const required: RequiredField<keyof AppointmentFormData>[] = [
+      { key: "branchId", label: "Branch" },
+      { key: "departmentId", label: "Department" },
+      { key: "doctorId", label: "Doctor Name" },
+      { key: "selectDate", label: "Appointment Date" },
+      { key: "timeSlot", label: "Available Time Slots" },
+    ];
+    if (!validateRequiredFields(required, formData, toast)) return;
 
     setShowConfirm(true);
   };
@@ -591,12 +598,11 @@ export default function EditAppointment() {
                     employeeApi
                       .getOne(val)
                       .then((res) => {
-                        const mappedBranches = res.data?.data?.branches || [];
+                        const mappedBranches = activeBranches(res.data?.data?.branches || []);
                         setDoctorBranches(mappedBranches);
                         const nextBranchId =
                           mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
                           mappedBranches[0]?.branch_id ||
-                          selectedDoctor?.branch_id ||
                           formData.branchId;
 
                         if (!nextBranchId) return null;

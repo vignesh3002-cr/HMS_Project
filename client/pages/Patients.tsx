@@ -16,9 +16,11 @@ import {
 import HmsTable from "@/components/hms/HmsTable";
 import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
+import { downloadExportPdf } from "@/lib/exportPdf";
 
 // Filter system
-import { FilterPopover, useFilterPanel, usePatientFilters } from "@/components/Filter";
+import { useFilterPanel, usePatientFilters } from "@/components/Filter";
+import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
@@ -85,7 +87,7 @@ function mapToGridPatient(p: PatientRecord) {
 // still upcoming/current — never for one that's cancelled, a no-show, or
 // already completed. Once it's over, the patient goes back to Unassigned
 // rather than continuing to show whoever last treated them.
-const NON_ASSIGNING_APPOINTMENT_STATUSES = new Set(["CANCELLED", "NO_SHOW", "COMPLETED"]);
+const NON_ASSIGNING_APPOINTMENT_STATUSES = new Set(["CANCELLED", "NO_SHOW", "NOT_CHECKED_IN", "COMPLETED"]);
 
 interface AssignedDoctor {
   name: string;
@@ -365,17 +367,6 @@ export default function PatientsManagement() {
     handleClearFilter();
   };
 
-  // Filters
-  const {
-    values: filterValues,
-    appliedValues,
-    isOpen: isFilterOpen,
-    setIsOpen: setIsFilterOpen,
-    handleChange: handleFilterChange,
-    handleApply: handleApplyFilter,
-    handleClear: handleClearFilter,
-  } = useFilterPanel();
-
   // ---- FILTER FIELDS ----
   const patientRows = useMemo(
     () => (realPatients ?? []).map((p) => ({
@@ -386,6 +377,19 @@ export default function PatientsManagement() {
     [realPatients],
   );
   const { patientFilterFields } = usePatientFilters({ viewMode, patientRows });
+
+  // Filters -- seeded with the fields so fields carrying a `defaultValue`
+  // (e.g. Status defaulting to ["Active"]) start applied and are restored
+  // when the user clears the filter.
+  const {
+    values: filterValues,
+    appliedValues,
+    isOpen: isFilterOpen,
+    setIsOpen: setIsFilterOpen,
+    handleChange: handleFilterChange,
+    handleApply: handleApplyFilter,
+    handleClear: handleClearFilter,
+  } = useFilterPanel(patientFilterFields);
 
   // ---- SEARCH & FILTER ----
   const searchableFields = useMemo(
@@ -487,6 +491,36 @@ export default function PatientsManagement() {
 
   // ---- EXPORT ----
   const handleExport = async (exportFormat: string) => {
+    if (exportFormat === "pdf") {
+      downloadExportPdf({
+        title: "Patients Management",
+        subtitle: `${sortedData.length} patient${sortedData.length === 1 ? "" : "s"} - exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `patients-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        columns: viewMode === "grid"
+          ? [
+              { header: "Patient ID", cell: (r: any) => r.id },
+              { header: "Name", cell: (r: any) => r.name },
+              { header: "Age", cell: (r: any) => r.age },
+              { header: "Gender", cell: (r: any) => r.gender },
+              { header: "Mobile", cell: (r: any) => r.mobile },
+              { header: "Blood Group", cell: (r: any) => r.bloodGroup ?? "—" },
+              { header: "Status", cell: (r: any) => r.status },
+            ]
+          : [
+              { header: "Patient ID", cell: (r: any) => r.id },
+              { header: "Name", cell: (r: any) => r.name },
+              { header: "Age", cell: (r: any) => r.age },
+              { header: "Gender", cell: (r: any) => r.gender },
+              { header: "Mobile", cell: (r: any) => r.mobile },
+              { header: "Diagnosis", cell: (r: any) => r.diagnose ?? "—" },
+              { header: "Assigned Doctor", cell: (r: any) => r.doctor ?? "Unassigned" },
+              { header: "Status", cell: (r: any) => r.status },
+            ],
+        rows: sortedData,
+      });
+      toast({ title: "Export complete", description: "The PDF file has been downloaded." });
+      return;
+    }
     if (exportFormat !== "csv") return;
     try {
       await downloadExportCsv("patients", {
@@ -599,8 +633,10 @@ export default function PatientsManagement() {
                         selected={selectedDate}
                         hideThemePicker
                         onSelect={(date) => {
-                          setSelectedDate(date);
-                          setIsCalendarOpen(false);
+                          if (date instanceof Date) {
+                            setSelectedDate(date);
+                            setIsCalendarOpen(false);
+                          }
                         }}
                       />
                     </PopoverContent>
@@ -616,7 +652,7 @@ export default function PatientsManagement() {
                 </div>
 
                 {/* Filters */}
-                <FilterPopover
+                <ToolbarFilter
                   title="Filters"
                   fields={patientFilterFields}
                   values={filterValues}

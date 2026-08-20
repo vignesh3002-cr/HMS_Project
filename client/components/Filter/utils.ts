@@ -71,7 +71,11 @@ export function filterDataByValues<T extends Record<string, any>>(
         .toLowerCase();
 
       if (Array.isArray(val)) {
-        return val.some((v) => itemVal.includes(String(v).toLowerCase()));
+        const itemLower = itemVal.toLowerCase();
+        return val.some((v) => {
+          const token = String(v).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          return new RegExp(`(^|[^\\p{L}\\p{N}])${token}($|[^\\p{L}\\p{N}])`, "u").test(itemLower);
+        });
       }
 
       const filterVal = String(val).toLowerCase();

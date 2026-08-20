@@ -82,6 +82,15 @@ function todayISODate(): string {
   ).padStart(2, "0")}`;
 }
 
+// Today's date in UTC -- appointment dates are stored UTC-anchored, so
+// "has the appointment's date passed" must be decided in UTC too.
+function todayUTCISODate(): string {
+  const now = new Date();
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    now.getUTCDate(),
+  ).padStart(2, "0")}`;
+}
+
 const DAY_OF_WEEK_NAMES = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"] as const;
 
 function dayOfWeekOf(dateStr: string): string {
@@ -118,11 +127,20 @@ export default function RescheduleQueue() {
   const [search, setSearch] = useState("");
   const [branches, setBranches] = useState<Branch[]>([]);
   const [doctors, setDoctors] = useState<EmployeeRecord[]>([]);
+  // Backend-computed doctor_status ("ACTIVE" | "LEAVE" | "INACTIVE") for the
+  // assign dialog's selected branch + date -- the source of truth for which
+  // doctors are eligible to take the slot (see employee.repository.ts
+  // computeDoctorStatuses: ACTIVE = has an active schedule that weekday).
+  const [doctorStatusMap, setDoctorStatusMap] = useState<Record<string, "ACTIVE" | "LEAVE" | "INACTIVE">>({});
+  const [statusesLoading, setStatusesLoading] = useState(false);
+  const [statusesLoaded, setStatusesLoaded] = useState(false);
+  const [statusesFailed, setStatusesFailed] = useState(false);
 
   // Action dialogs
   const [assignTarget, setAssignTarget] = useState<RescheduleQueueEntry | null>(null);
   const [assignDoctorId, setAssignDoctorId] = useState("");
   const [assignBranchId, setAssignBranchId] = useState("");
+  const [assignDepartmentId, setAssignDepartmentId] = useState("");
   const [assignDate, setAssignDate] = useState("");
   const [assignTime, setAssignTime] = useState("");
   const [assignReason, setAssignReason] = useState("");
@@ -131,6 +149,9 @@ export default function RescheduleQueue() {
   const [doctorSchedulesById, setDoctorSchedulesById] = useState<Record<string, DoctorScheduleRecord[]>>({});
   const [schedulesLoading, setSchedulesLoading] = useState(false);
   const [schedulesLoaded, setSchedulesLoaded] = useState(false);
+  const [departmentOptions, setDepartmentOptions] = useState<{ department_id: string; department_name: string }[]>([]);
+  const [countsLoading, setCountsLoading] = useState(false);
+  const [autoSuggestedDoctorId, setAutoSuggestedDoctorId] = useState("");
 
   const [confirmTarget, setConfirmTarget] = useState<RescheduleQueueEntry | null>(null);
   const [confirmReason, setConfirmReason] = useState("");
@@ -139,6 +160,7 @@ export default function RescheduleQueue() {
   const [cancelReason, setCancelReason] = useState("");
 
   const [processing, setProcessing] = useState(false);
+  const [autoCancelling, setAutoCancelling] = useState(false);
 
   useEffect(() => {
     const user = getUser();
@@ -162,6 +184,60 @@ export default function RescheduleQueue() {
     };
     initial();
   }, [roleOk]);
+
+  // Fetch each doctor's backend-computed status for the assign dialog's
+  // branch + date. Only "ACTIVE" doctors (active schedule on that weekday
+  // at that branch) are offered in the dropdown once both are chosen.
+  useEffect(() => {
+    if (!assignBranchId || !assignDate) {
+      setDoctorStatusMap({});
+      setStatusesLoading(false);
+      setStatusesLoaded(false);
+      setStatusesFailed(false);
+      return;
+    }
+    let cancelled = false;
+    setStatusesLoading(true);
+    setStatusesLoaded(false);
+    setStatusesFailed(false);
+    employeeApi
+      .getAll({
+        roleType: "DOCTOR",
+        branchId: assignBranchId,
+        date: assignDate,
+        limit: 500,
+      })
+      .then((res) => {
+        if (cancelled) return;
+        const map: Record<string, "ACTIVE" | "LEAVE" | "INACTIVE"> = {};
+        const fetched = res.data?.data?.employees || [];
+        fetched.forEach((e) => {
+          map[e.employee_id] = e.doctor_status || "INACTIVE";
+        });
+        setDoctorStatusMap(map);
+        setStatusesLoaded(true);
+        // Union freshly-fetched doctors into the list so a doctor created
+        // after the page loaded still appears in the dropdown.
+        setDoctors((prev) => {
+          const byId = new Map(prev.map((d) => [d.employee_id, d]));
+          fetched.forEach((e) => {
+            if (!byId.has(e.employee_id)) byId.set(e.employee_id, e);
+          });
+          return Array.from(byId.values());
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setDoctorStatusMap({});
+        setStatusesFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled) setStatusesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [assignBranchId, assignDate]);
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -190,6 +266,57 @@ export default function RescheduleQueue() {
     if (roleOk) fetchQueue();
   }, [roleOk, fetchQueue]);
 
+  // Auto-cancel queue entries whose appointment date has already passed
+  // (the original date for PENDING, the assigned date for ASSIGNED) -- a
+  // reschedule is no longer actionable once the appointment's own date is
+  // in the past, so the appointment is cancelled instead of sitting in the
+  // queue forever.
+  const autoCancelExpired = useCallback(async () => {
+    if (!roleOk || autoCancelling) return;
+    const today = todayUTCISODate();
+    const expired = entries.filter((e) => {
+      if (e.status !== "PENDING" && e.status !== "ASSIGNED") return false;
+      const effectiveDate =
+        e.status === "ASSIGNED" && e.assigned_date
+          ? toDateInputValue(e.assigned_date)
+          : toDateInputValue(e.old_appointment_date);
+      return Boolean(effectiveDate) && effectiveDate < today;
+    });
+    if (expired.length === 0) return;
+    setAutoCancelling(true);
+    let cancelled = 0;
+    try {
+      for (const entry of expired) {
+        try {
+          await doctorTransferApi.processRescheduleAction(entry.appointment_id, {
+            action: "CANCEL",
+            reason: "Auto-cancelled: appointment date has passed",
+          });
+          cancelled += 1;
+        } catch (err) {
+          console.error(
+            "[RescheduleQueue] Auto-cancel failed for",
+            entry.appointment_id,
+            err,
+          );
+        }
+      }
+      if (cancelled > 0) {
+        toast({
+          title: `Auto-cancelled ${cancelled} expired appointment${cancelled === 1 ? "" : "s"}`,
+          description: "Their appointment date had already passed.",
+        });
+        fetchQueue();
+      }
+    } finally {
+      setAutoCancelling(false);
+    }
+  }, [roleOk, autoCancelling, entries, fetchQueue, toast]);
+
+  useEffect(() => {
+    if (roleOk && entries.length > 0) autoCancelExpired();
+  }, [roleOk, entries, autoCancelExpired]);
+
   const doctorNameById = useCallback(
     (id?: string | null) => {
       if (!id) return null;
@@ -208,20 +335,61 @@ export default function RescheduleQueue() {
     [branches],
   );
 
-  const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
+const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
+
+  // Exact time string in HH:MM format for schedule comparison
+  const assignTimeOfDay = useMemo(() => {
+    if (!assignTime) return "";
+    return assignTime.length === 5 ? assignTime : assignTime.slice(0, 5);
+  }, [assignTime]);
 
   const assignDoctorFiltering = useMemo(
-    () => schedulesLoaded && !!assignTarget?.department_id && !!assignDay,
-    [schedulesLoaded, assignTarget, assignDay],
+    () => schedulesLoaded && !!assignDepartmentId && !!assignDay,
+    [schedulesLoaded, assignDepartmentId, assignDay],
   );
 
   const isAssignDoctorEligible = useCallback(
-    (doctorId: string, branchId: string, day: string) =>
+    (doctorId: string, branchId: string, day: string, targetTime?: string) =>
       (doctorSchedulesById[doctorId] || []).some(
-        (s) => s.is_active !== false && s.branch_id === branchId && s.day_of_week === day,
+        (s) =>
+          s.is_active !== false &&
+          s.branch_id === branchId &&
+          s.day_of_week === day &&
+          (!targetTime || (s.start_time && s.end_time && s.start_time <= targetTime && s.end_time > targetTime)),
       ),
     [doctorSchedulesById],
   );
+
+  // Department options for the selected branch (derived from doctors at that branch)
+  const branchDepartmentOptions = useMemo(() => {
+    if (!assignBranchId) return [];
+    const deptMap = new Map<string, string>();
+    doctors
+      .filter(
+        (d) =>
+          d.emp_status !== false &&
+          (d.branches?.some((b) => b.branch_id === assignBranchId) ?? false),
+      )
+      .forEach((d) => {
+        if (d.department_id && !deptMap.has(d.department_id)) {
+          const deptName = d.department_master?.department_name || d.department_id;
+          deptMap.set(d.department_id, deptName);
+        }
+      });
+    // Keep the defaulted department listed even when no active doctors remain at the
+    // branch, so the dropdown shows the appointment's department instead of the placeholder.
+    if (assignDepartmentId && !deptMap.has(assignDepartmentId)) {
+      const deptDoc = doctors.find((d) => d.department_id === assignDepartmentId);
+      deptMap.set(
+        assignDepartmentId,
+        deptDoc?.department_master?.department_name || assignDepartmentId,
+      );
+    }
+    return Array.from(deptMap.entries()).map(([department_id, department_name]) => ({
+      department_id,
+      department_name,
+    }));
+  }, [assignBranchId, assignDepartmentId, doctors]);
 
   const assignBranchOptions = useMemo(
     () =>
@@ -233,23 +401,6 @@ export default function RescheduleQueue() {
       })),
     [branches, assignTarget],
   );
-
-  const assignDoctorOptions = useMemo(() => {
-    const active = doctors.filter((d) => d.emp_status !== false);
-    const labelOf = (d: EmployeeRecord) =>
-      `Dr. ${[d.first_name, d.middle_name, d.last_name].filter(Boolean).join(" ")}`;
-    if (!assignDoctorFiltering) {
-      return active.map((d) => ({ label: labelOf(d), value: d.employee_id }));
-    }
-    return active
-      .filter((d) => isAssignDoctorEligible(d.employee_id, assignBranchId, assignDay))
-      .map((d) => ({
-        label: labelOf(d),
-        value: d.employee_id,
-        badge: `available ${dayLabelOf(assignDay)}`,
-      }));
-  }, [doctors, assignDoctorFiltering, isAssignDoctorEligible, assignBranchId, assignDay]);
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return entries;
@@ -264,14 +415,92 @@ export default function RescheduleQueue() {
     });
   }, [entries, search]);
 
+  // Compute doctor appointment counts from queue entries (frontend-only load balancing)
+  const doctorQueueCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    filtered.forEach((entry) => {
+      if (entry.assigned_employee_id && entry.status !== "CANCELLED") {
+        counts[entry.assigned_employee_id] = (counts[entry.assigned_employee_id] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [filtered]);
+
+  const assignDoctorOptions = useMemo(() => {
+    const active = doctors.filter((d) => d.emp_status !== false);
+    const labelOf = (d: EmployeeRecord) =>
+      `Dr. ${[d.first_name, d.middle_name, d.last_name].filter(Boolean).join(" ")}`;
+
+    // Base filter: always apply branch + department when selected
+    let eligible = active;
+    if (assignBranchId) {
+      eligible = eligible.filter(
+        (d) => d.branches?.some((b) => b.branch_id === assignBranchId) ?? false,
+      );
+    }
+    if (assignDepartmentId) {
+      eligible = eligible.filter((d) => d.department_id === assignDepartmentId);
+    }
+
+    // Status gate: once branch + date are chosen, only doctors the backend
+    // computed as ACTIVE for that exact branch + date are offered. The
+    // currently selected doctor is always kept visible so a date change can
+    // never blank the dropdown. If the status fetch failed, fall back to
+    // branch + department filtering instead of silently emptying the list.
+    if (assignBranchId && assignDate && statusesLoaded) {
+      eligible = eligible.filter(
+        (d) =>
+          doctorStatusMap[d.employee_id] === "ACTIVE" ||
+          d.employee_id === assignDoctorId,
+      );
+    }
+
+    // Time/schedule filter when branch + department + day are ready
+    if (assignDoctorFiltering) {
+      eligible = eligible.filter((d) =>
+        isAssignDoctorEligible(d.employee_id, assignBranchId, assignDay, assignTimeOfDay || undefined),
+      );
+    }
+
+    // Sort by queue count (ascending) for auto-suggestion
+    const withCounts = eligible.map((d) => ({
+      ...d,
+      queueCount: doctorQueueCounts[d.employee_id] || 0,
+    }));
+    withCounts.sort((a, b) => a.queueCount - b.queueCount);
+    return withCounts.map((d) => ({
+      label: labelOf(d),
+      value: d.employee_id,
+      badge: d.queueCount === 0 ? "Lowest load" : `${d.queueCount} queued`,
+    }));
+  }, [
+    doctors,
+    assignDoctorFiltering,
+    isAssignDoctorEligible,
+    assignBranchId,
+    assignDay,
+    assignTimeOfDay,
+    assignDepartmentId,
+    assignDate,
+    assignDoctorId,
+    doctorStatusMap,
+    statusesLoaded,
+  ]);
+
   const openAssign = (entry: RescheduleQueueEntry) => {
     setAssignDoctorId("");
     setAssignBranchId(entry.branch_id);
+    const defaultDepartmentId =
+      entry.department_id ||
+      doctors.find((d) => d.employee_id === entry.employee_id)?.department_id ||
+      "";
+    setAssignDepartmentId(defaultDepartmentId);
     setAssignDate(entry.old_appointment_date ? toDateInputValue(entry.old_appointment_date) : todayISODate());
     setAssignTime(entry.old_appointment_time ? formatTime(entry.old_appointment_time) : "");
     setAssignReason("");
     setAssignDone(false);
     setAssignDoneMessage("");
+    setAutoSuggestedDoctorId("");
     setAssignTarget(entry);
     if (entry.department_id) {
       const needIds = doctors
@@ -504,6 +733,12 @@ export default function RescheduleQueue() {
           <span className="text-xs font-bold text-gray-600 uppercase tracking-wide">
             Queue ({total} total)
           </span>
+          {autoCancelling && (
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-red-600">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Auto-cancelling expired appointments…
+            </span>
+          )}
         </div>
 
         {loading ? (
@@ -556,7 +791,7 @@ export default function RescheduleQueue() {
                     {entry.status === "PENDING" && (
                       <button
                         onClick={() => openAssign(entry)}
-                        className="px-3 py-1.5 rounded-lg bg-[#00488D] text-white text-xs font-semibold hover:bg-[#003A70]"
+                        className="px-2 py-1 rounded bg-[#00488D] text-white text-[10px] font-semibold hover:bg-[#003A70]"
                       >
                         Assign slot
                       </button>
@@ -685,20 +920,40 @@ export default function RescheduleQueue() {
               value={assignBranchId}
               onValueChange={(v) => {
                 setAssignBranchId(v);
-                if (
-                  schedulesLoaded &&
-                  assignTarget?.department_id &&
-                  assignDoctorId &&
-                  !isAssignDoctorEligible(assignDoctorId, v, assignDay)
-                ) {
-                  setAssignDoctorId("");
-                }
+                setAssignDepartmentId("");
+                setAssignDoctorId("");
+                // Department options will update via branchDepartmentOptions memo
               }}
               placeholder="Select branch"
             />
             {assignTarget && assignBranchId === assignTarget.branch_id && (
               <p className="text-[11px] text-blue-600 mt-1">
                 Defaults to the appointment's branch — changeable.
+              </p>
+            )}
+          </div>
+          {/* Department dropdown */}
+          <div>
+            <label className={labelCls}>Department</label>
+            <FormDropdown
+              name="assign_department"
+              className={inputCls}
+              options={branchDepartmentOptions.map((d) => ({
+                label: d.department_name,
+                value: d.department_id,
+                highlight: d.department_id === assignTarget?.department_id,
+                badge: d.department_id === assignTarget?.department_id ? "Appointment's department" : undefined,
+              }))}
+              value={assignDepartmentId}
+              onValueChange={(v) => {
+                setAssignDepartmentId(v);
+                setAssignDoctorId("");
+              }}
+              placeholder={branchDepartmentOptions.length ? "Select department" : "No departments at this branch"}
+            />
+            {assignTarget && assignDepartmentId === assignTarget.department_id && assignDepartmentId && (
+              <p className="text-[11px] text-blue-600 mt-1">
+                Defaults to the appointment's department — changeable.
               </p>
             )}
           </div>
@@ -710,7 +965,7 @@ export default function RescheduleQueue() {
               options={assignDoctorOptions}
               value={assignDoctorId}
               onValueChange={setAssignDoctorId}
-              disabled={schedulesLoading}
+              disabled={schedulesLoading || statusesLoading}
               placeholder={
                 assignDoctorFiltering && assignDoctorOptions.length === 0
                   ? "No doctors available"
@@ -718,24 +973,33 @@ export default function RescheduleQueue() {
               }
               emptyMessage="No doctors available"
             />
-            {schedulesLoading ? (
+            {schedulesLoading || statusesLoading ? (
               <p className="text-[11px] text-[#94A3B8] mt-1">
                 <Loader2 className="inline h-3 w-3 animate-spin mr-1" />
                 Checking doctor availability…
               </p>
+            ) : statusesFailed && assignBranchId && assignDate ? (
+              <p className="text-[11px] text-amber-600 mt-1">
+                Couldn't verify doctor availability — showing all doctors at this branch (unfiltered).
+              </p>
+            ) : assignBranchId && assignDate && assignDoctorOptions.length === 0 && !assignDoctorFiltering ? (
+              <p className="text-[11px] text-[#94A3B8] mt-1">
+                No doctor is active at {branchLabelOf(assignBranchId)} on {dayLabelOf(assignDay)} for this department.
+              </p>
             ) : assignDoctorFiltering && assignDoctorOptions.length === 0 ? (
               <p className="text-[11px] text-[#94A3B8] mt-1">
                 No doctor from the same department works at {branchLabelOf(assignBranchId)} on{" "}
-                {dayLabelOf(assignDay)}.
+                {dayLabelOf(assignDay)} at {assignTimeOfDay}.
               </p>
             ) : assignDoctorFiltering ? (
               <p className="text-[11px] text-[#94A3B8] mt-1">
-                Showing {assignDoctorOptions.length} doctor(s) working at {branchLabelOf(assignBranchId)} on{" "}
-                {dayLabelOf(assignDay)} — only these are listed.
+                Showing {assignDoctorOptions.length} doctor(s) active at {branchLabelOf(assignBranchId)} on{" "}
+                {dayLabelOf(assignDay)}
+                {assignTimeOfDay ? ` at ${assignTimeOfDay}` : ""} — sorted by queue load (lowest first).
               </p>
             ) : assignTarget?.department_id ? (
               <p className="text-[11px] text-[#94A3B8] mt-1">
-                Showing all active doctor(s) — pick a date first to filter by working hours.
+                Showing all active doctor(s) — pick a date first to filter to those working that day.
               </p>
             ) : null}
           </div>
@@ -753,10 +1017,10 @@ export default function RescheduleQueue() {
                   const day = dayOfWeekOf(v);
                   if (
                     schedulesLoaded &&
-                    assignTarget?.department_id &&
+                    assignDepartmentId &&
                     day &&
                     assignDoctorId &&
-                    !isAssignDoctorEligible(assignDoctorId, assignBranchId, day)
+                    !isAssignDoctorEligible(assignDoctorId, assignBranchId, day, assignTimeOfDay)
                   ) {
                     setAssignDoctorId("");
                   }

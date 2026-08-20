@@ -14,16 +14,19 @@ import {
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
  
-import { FilterPopover, useFilterPanel, useDoctorFilters } from "@/components/Filter";
+import { useFilterPanel, useDoctorFilters } from "@/components/Filter";
+import { ToolbarFilter, StatusToggle } from "@/components/ui/toolbar-filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
+import { downloadExportPdf } from "@/lib/exportPdf";
 import { useToast } from "@/hooks/use-toast";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { appointmentApi } from "@/api/appointment.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { DepartmentPill, DepartmentAvatarText } from "@/components/hms/DepartmentBadge";
+import { DoctorBranchDisplay } from "@/components/hms/DoctorBranchDisplay";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
@@ -90,7 +93,7 @@ function SlotProgress({ booked, total, loading }: { booked: number; total: numbe
 }
  
 // Three-dot card menu (grid only)
-function CardMenu({ onView, onEdit, onDelete, onTransfer }: { onView: () => void; onEdit: () => void; onDelete: () => void; onTransfer: () => void }) {
+function CardMenu({ onView, onEdit, onDelete, onTransfer, onRestore, deactivated }: { onView: () => void; onEdit: () => void; onDelete: () => void; onTransfer: () => void; onRestore: () => void; deactivated?: boolean }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const { can } = usePermission();
@@ -122,11 +125,19 @@ function CardMenu({ onView, onEdit, onDelete, onTransfer }: { onView: () => void
         {can("doctor.update") && (
           <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
         )}
-        {can("doctor.transfer") && (
-          <button onClick={() => { onTransfer(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Transfer</button>
-        )}
-        {can("employee.delete") && (
-          <button onClick={() => { onDelete(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">Deactivate</button>
+        {deactivated ? (
+          can("doctor.update") && (
+            <button onClick={() => { onRestore(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-green-600 hover:bg-green-50">Activate</button>
+          )
+        ) : (
+          <>
+            {can("doctor.transfer") && (
+              <button onClick={() => { onTransfer(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Transfer</button>
+            )}
+            {can("employee.delete") && (
+              <button onClick={() => { onDelete(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">Deactivate</button>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -146,14 +157,39 @@ function getInitials(name: string): string {
   return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 }
  
-function formatBranch(branch: EmployeeRecord["branch"]): string {
+function formatAssignedBranch(branch: NonNullable<EmployeeRecord["branches"]>[number]): string {
   if (!branch?.branch_name) return "\u2014";
   return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
 }
- 
+
+// `branch` stays a single joined string of EVERY assigned branch (real
+// active mappings, not the stale employees.branch_id column), so the
+// search field and the Filter panel's branch multiselect — which both
+// match with includes() — keep working across all assignments at once.
+// The per-branch list is carried separately in `branches` for the grid.
+// No fallback to employees.branch_id — mappings are the only source.
+function formatAllBranches(branches: EmployeeRecord["branches"]): string {
+  const list = branches ?? [];
+  if (list.length === 0) return "\u2014";
+  return list.map(formatAssignedBranch).join(", ");
+}
+
 function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
   const palette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const fullName = `${emp.first_name} ${emp.middle_name ? emp.middle_name + " " : ""}${emp.last_name}`;
+  const isActive = emp.emp_status === true || emp.user_table?.user_status === 0;
+  // Daily status comes straight from the backend (GET /employees with
+  // `date` computes doctor_status server-side: Active/Leave/Inactive).
+  // Doctors without a daily record fall back to account-level state.
+  const status = emp.doctor_status
+    ? emp.doctor_status === "LEAVE"
+      ? "Leave"
+      : emp.doctor_status === "INACTIVE"
+        ? "Inactive"
+        : "Active"
+    : isActive
+      ? "Active"
+      : "Inactive";
   return {
     id: emp.employee_id,
     name: fullName,
@@ -161,11 +197,19 @@ function mapEmployeeToDoctorData(emp: EmployeeRecord, index: number) {
     avatarColor: palette.avatarColor,
     initBg: palette.initBg,
     dept: emp.department_master?.department_name || emp.specialization || "Unassigned",
- 
+
     deptBg: "#E6E8EA",
     deptColor: "#475C7F",
-    branch: formatBranch(emp.branch),
-    status: (emp.emp_status === true || emp.user_table?.user_status === 0) ? "Active" : "Leave",
+    branch: formatAllBranches(emp.branches),
+    branches: (emp.branches ?? []).map((b) => ({
+      branch_id: b.branch_id,
+      branch_name: b.branch_name ?? "",
+      branch_area: b.branch_area ?? null,
+      has_schedule: b.has_schedule,
+    })),
+    status,
+    totalSlots: emp.total_slots ?? 0,
+    bookedSlots: emp.booked_count ?? 0,
     qualification: emp.qualification || "—",
     mobile: emp.mobile_no || "—",
     photo: emp.employee_photo_URL || "",
@@ -203,7 +247,7 @@ export default function Doctor() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
  
   const handleAddDoctor = () => {
-    navigate("/STAFF/add?role=Doctor");
+    navigate("/STAFF/add?role=DOCTOR");
   };
  
   const handleViewToggle = (mode: "list" | "grid") => {
@@ -213,7 +257,36 @@ export default function Doctor() {
     handleClearFilter();
   };
  
-  // Filters
+  // Real doctors fetched from the backend
+  const [realDoctors, setRealDoctors] = useState<EmployeeRecord[] | null>(null);
+  const [isDoctorsLoading, setIsDoctorsLoading] = useState(true);
+  const [showDeactivated, setShowDeactivated] = useState(false);
+
+  // Per-doctor slot booking summary for the selected date (list view progress bar)
+  const [slotSummaries, setSlotSummaries] = useState<Record<string, { total: number; booked: number }>>({});
+
+  // Mapped doctor rows -- shared by the filter field options below and the
+  // search/filter step, so both work off the exact same real data.
+  const doctorRows = useMemo(
+    () => (realDoctors ? realDoctors.map((emp, index) => mapEmployeeToDoctorData(emp, index)) : []),
+    [realDoctors],
+  );
+
+  const { doctorFilterFields } = useDoctorFilters({ doctorRows, branches });
+
+  // Only doctors with an Active status that day have real slot availability
+  // to fetch -- Leave/Inactive doctors have no working-hours on the selected
+  // date, so their slot summary is always zero. Skipping them cuts every
+  // slot-summary request (initial, poll, focus-refetch) down to just the
+  // doctors that can actually book.
+  const activeDoctorIds = useMemo(
+    () => new Set(doctorRows.filter((r) => r.status === "Active").map((r) => String(r.id))),
+    [doctorRows],
+  );
+
+  // Filters -- seeded with the fields so fields carrying a `defaultValue`
+  // (e.g. Status defaulting to ["Active"]) start applied and are restored
+  // when the user clears the filter.
   const {
     values: filterValues,
     appliedValues,
@@ -222,15 +295,8 @@ export default function Doctor() {
     handleChange: handleFilterChange,
     handleApply: handleApplyFilter,
     handleClear: handleClearFilter,
-  } = useFilterPanel();
- 
-  // Real doctors fetched from the backend
-  const [realDoctors, setRealDoctors] = useState<EmployeeRecord[] | null>(null);
-  const [isDoctorsLoading, setIsDoctorsLoading] = useState(true);
- 
-  // Per-doctor slot booking summary for the selected date (list view progress bar)
-  const [slotSummaries, setSlotSummaries] = useState<Record<string, { total: number; booked: number }>>({});
- 
+  } = useFilterPanel(doctorFilterFields);
+
   const fetchDoctors = useCallback(async () => {
     setIsDoctorsLoading(true);
     console.log("[Doctor Page] Fetching all employees from employeeApi...");
@@ -238,6 +304,10 @@ export default function Doctor() {
       const res = await employeeApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
         limit: 1000,
+        includeDeleted: showDeactivated,
+        // Pass the selected date so the backend computes doctor_status
+        // (Active/Leave/Inactive) and the day's total_slots/booked_count.
+        date: format(selectedDate, "yyyy-MM-dd"),
       });
       console.log("[Doctor Page] Response:", res.data);
       const allEmployees = res.data?.data?.employees || [];
@@ -248,7 +318,8 @@ export default function Doctor() {
       const doctors = allEmployees.filter(
         (e) =>
           e.user_table?.role_type === "DOCTOR" &&
-          !(isAdmin && me?.employee_id && e.employee_id === me.employee_id)
+          !(isAdmin && me?.employee_id && e.employee_id === me.employee_id) &&
+          (showDeactivated ? !!e.deleted_at : !e.deleted_at)
       );
       setRealDoctors(doctors);
       if (doctors.length === 0) {
@@ -269,12 +340,12 @@ export default function Doctor() {
     } finally {
       setIsDoctorsLoading(false);
     }
-  }, [toast, selectedBranchId, isAllBranches]);
+  }, [toast, selectedBranchId, isAllBranches, showDeactivated, selectedDate]);
  
-  useEffect(() => {
+useEffect(() => {
     fetchDoctors();
   }, [fetchDoctors]);
- 
+
   // Fetch each doctor's booked/total slot counts for the selected single day
   // (list view only). Total slots = the doctor's real working-hours
   // availability that day sliced into fixed 20-minute slots (backend-computed).
@@ -316,48 +387,45 @@ export default function Doctor() {
     },
     [],
   );
- 
+
   useEffect(() => {
     if (!realDoctors || realDoctors.length === 0 || viewMode !== "list") return;
     const signal = { cancelled: false };
+
+    // Only Active doctors have slots that day -- fetching summaries for
+    // Leave/Inactive doctors would be wasted requests returning zeros.
+    const activeDoctors = realDoctors.filter((d) => activeDoctorIds.has(d.employee_id));
 
     // Reset so every row shows its loading state again for the newly
     // selected date/doctor set, instead of briefly showing the previous
     // date's stale counts while the fresh fetch is in flight.
     setSlotSummaries({});
-    fetchSlotSummaries(realDoctors, selectedDate, signal);
+
+    if (activeDoctors.length === 0) return () => { signal.cancelled = true; };
+    fetchSlotSummaries(activeDoctors, selectedDate, signal);
 
     // Keep the booked/total counts live: poll periodically, and refetch as
     // soon as the tab regains focus (e.g. after booking an appointment on
     // another page/tab), instead of only updating on next full page load.
     const intervalId = window.setInterval(() => {
-      fetchSlotSummaries(realDoctors, selectedDate, signal);
+      fetchSlotSummaries(activeDoctors, selectedDate, signal);
     }, 15000);
- 
-    const handleFocus = () => fetchSlotSummaries(realDoctors, selectedDate, signal);
+
+    const handleFocus = () => fetchSlotSummaries(activeDoctors, selectedDate, signal);
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleFocus);
- 
+
     return () => {
       signal.cancelled = true;
       window.clearInterval(intervalId);
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleFocus);
     };
-  }, [realDoctors, selectedDate, viewMode, fetchSlotSummaries]);
- 
-  // Mapped doctor rows -- shared by the filter field options below and the
-  // search/filter step, so both work off the exact same real data.
-  const doctorRows = useMemo(
-    () => (realDoctors ? realDoctors.map((emp, index) => mapEmployeeToDoctorData(emp, index)) : []),
-    [realDoctors],
-  );
-
-  const { doctorFilterFields } = useDoctorFilters({ doctorRows, branches });
+  }, [realDoctors, selectedDate, viewMode, activeDoctorIds, fetchSlotSummaries]);
 
   // ---- SEARCH & FILTER ----
   const filteredData = useMemo(() => {
-    let result: Record<string, string | number>[] = [...doctorRows];
+    let result: Record<string, any>[] = [...doctorRows];
 
     if (searchQuery) {
       result = result.filter((doctor) =>
@@ -436,14 +504,43 @@ export default function Doctor() {
     : filteredData;
  
   // ---- ACTION HANDLERS ----
-  const handleView = (id: number | string) => navigate(`/doctor/view/${id}`);
+  const handleView = (id: number | string) => navigate(`/doctor/view/${id}/schedule`);
   const handleEdit = (id: number | string) => navigate(`/doctor/edit/${id}`);
   const handleTransfer = (id: number | string) => navigate(`/doctor/transfer/${id}`);
 
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
 
   const handleDelete = (id: number | string) => setDeleteTarget(String(id));
+
+  const handleRestore = (id: number | string) => setRestoreTarget(String(id));
+
+  const handleConfirmRestore = async () => {
+    if (!restoreTarget) return;
+    setIsRestoring(true);
+    try {
+      const res = await employeeApi.restore(restoreTarget);
+      if (!res.data.success) {
+        throw new Error(res.data.message);
+      }
+      toast({
+        title: "Doctor restored",
+        description: `Doctor ${restoreTarget} has been reactivated.`,
+      });
+      setRestoreTarget(null);
+      fetchDoctors();
+    } catch (err: any) {
+      toast({
+        title: "Failed to restore doctor",
+        description: err.response?.data?.message ?? err.message ?? "Something went wrong.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRestoring(false);
+    }
+  };
 
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
@@ -472,6 +569,25 @@ export default function Doctor() {
  
   // ---- EXPORT ----
   const handleExport = async (exportFormat: string) => {
+    if (exportFormat === "pdf") {
+      downloadExportPdf({
+        title: "Doctor Management",
+        subtitle: `${displayData.length} doctor${displayData.length === 1 ? "" : "s"} - exported on ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
+        filename: `doctors-${format(new Date(), "yyyy-MM-dd")}.pdf`,
+        columns: [
+          { header: "Doctor ID", cell: (r: any) => r.id },
+          { header: "Name", cell: (r: any) => r.name },
+          { header: "Department", cell: (r: any) => r.dept },
+          { header: "Qualification", cell: (r: any) => r.qualification },
+          { header: "Mobile", cell: (r: any) => r.mobile },
+          { header: "Branch", cell: (r: any) => (Array.isArray(r.branch) ? r.branch.join(", ") : r.branch) },
+          { header: "Status", cell: (r: any) => r.status },
+        ],
+        rows: displayData,
+      });
+      toast({ title: "Export complete", description: "The PDF file has been downloaded." });
+      return;
+    }
     if (exportFormat !== "csv") return;
     try {
       await downloadExportCsv("employees", {
@@ -526,21 +642,13 @@ export default function Doctor() {
                   </span>
                 </div>
               </div>
- 
               <div className="flex items-center gap-3 flex-wrap">
-                {/* Search Box */}
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Search..."
-                    value={searchQuery}
-                    onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-                    className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[250px]"
-                  />
-                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
-                </div>
- 
-                {/* View Mode Toggle */}
+                <StatusToggle
+                  showDeactivated={showDeactivated}
+                  onChange={setShowDeactivated}
+                />
+
+{/* View Mode Toggle */}
                 <div className="flex border border-[#E5E7EB] rounded-md overflow-hidden bg-[#F2F4F6] p-0.5">
                   <button
                     onClick={() => handleViewToggle("list")}
@@ -555,7 +663,22 @@ export default function Doctor() {
                     <LayoutGrid className="w-4 h-4" />
                   </button>
                 </div>
- 
+
+                {/* Search */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search doctors..."
+                    value={searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[180px] sm:w-[220px] rounded-md transition-all duration-200 focus:w-[220px] sm:focus:w-[280px]"
+                  />
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
+                </div>
+
                 {/* Date nav */}
                 <div className="flex items-center">
                   <button
@@ -583,8 +706,10 @@ export default function Doctor() {
                         selected={selectedDate}
                         hideThemePicker
                         onSelect={(date) => {
-                          setSelectedDate(date);
-                          setIsCalendarOpen(false);
+                          if (date instanceof Date) {
+                            setSelectedDate(date);
+                            setIsCalendarOpen(false);
+                          }
                         }}
                       />
                     </PopoverContent>
@@ -600,7 +725,7 @@ export default function Doctor() {
                 </div>
  
                 {/* Filters */}
-                <FilterPopover
+                <ToolbarFilter
                   title="Filters"
                   fields={doctorFilterFields}
                   values={filterValues}
@@ -634,12 +759,18 @@ export default function Doctor() {
                   { key: "dept", label: "Department", render: (r: any) => (
                     <DepartmentPill department={r.dept}>{String(r.dept)}</DepartmentPill>
                   )},
+                  { key: "branch", label: "Branch", sortable: true, render: (r: any) => (
+                    <DoctorBranchDisplay branches={r.branches} />
+                  )},
                   { key: "slots", label: "Slots", sortable: true, render: (r: any) => {
+                    if (r.status !== "Active") {
+                      return <SlotProgress booked={0} total={0} />;
+                    }
                     const summary = slotSummaries[String(r.id)];
                     return <SlotProgress booked={summary?.booked ?? 0} total={summary?.total ?? 0} loading={!summary} />;
                   }},
-                  { key: "mobile", label: "Mobile No", render: (r: any) => (
-                    <span className="text-[#191C1E] hms-content-text leading-4">{String(r.mobile)}</span>
+                  { key: "status", label: "Status", sortable: true, render: (r: any) => (
+                    <StatusBadge status={String(r.status)} />
                   )},
                   { key: "actions", label: "Actions", sortable: false, className: "w-px", headerClassName: "w-px", render: (r: any) => (
                     <div className="flex items-center gap-1">
@@ -666,12 +797,24 @@ export default function Doctor() {
                           </svg>
                         </button>
                       )}
-                      {can("employee.delete") && (
-                        <button onClick={() => handleDelete(r.id)} title="Deactivate" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
-                            <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                          </svg>
-                        </button>
+                      {showDeactivated ? (
+                        can("doctor.update") && (
+                          <button onClick={() => handleRestore(r.id)} title="Activate" className="p-1.5 rounded transition-colors duration-200 hover:bg-green-50 group">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-green-600">
+                              <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+                              <circle cx="12" cy="12" r="3" />
+                              <circle cx="12" cy="12" r="7" fill="none" />
+                            </svg>
+                          </button>
+                        )
+                      ) : (
+                        can("employee.delete") && (
+                          <button onClick={() => handleDelete(r.id)} title="Deactivate" className="p-1.5 rounded transition-colors duration-200 hover:bg-red-50 group">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-colors duration-200 stroke-[#6B7280] hover:stroke-red-600">
+                              <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                          </button>
+                        )
                       )}
                     </div>
                   )},
@@ -717,10 +860,14 @@ export default function Doctor() {
                             <span className="font-semibold">Status</span>{" : "}
                             <span className={doctor.status === "Active" ? "font-bold text-[#16A34A]" : "font-bold text-[#F97316]"}>{doctor.status}</span>
                           </p>
-                          <p className="hms-content-text text-[#191C1E] mt-1 truncate">{doctor.branch}</p>
+{doctor.branches?.length ? (
+                            <DoctorBranchDisplay branches={doctor.branches} showScheduleIndicator />
+                          ) : (
+                            <p className="hms-content-text text-[#191C1E] mt-1 truncate">{doctor.branch}</p>
+                          )}
                         </div>
                         <div className="absolute top-3 right-3">
-                          <CardMenu onView={() => handleView(doctor.id)} onEdit={() => handleEdit(doctor.id)} onDelete={() => handleDelete(doctor.id)} onTransfer={() => handleTransfer(doctor.id)} />
+                          <CardMenu onView={() => handleView(doctor.id)} onEdit={() => handleEdit(doctor.id)} onDelete={() => handleDelete(doctor.id)} onTransfer={() => handleTransfer(doctor.id)} onRestore={() => handleRestore(doctor.id)} deactivated={showDeactivated} />
                         </div>
                       </div>
                     ))}
@@ -751,7 +898,7 @@ export default function Doctor() {
         title="Deactivate Doctor?"
         description={
           deleteTarget
-            ? `Doctor ${deleteTarget} will be deactivated. They will be hidden from all lists, blocked from login, their branch assignments removed, and their future appointments flagged "Reschedule Required" for reassignment. Historical records are kept. This cannot be undone from the app.`
+            ? `Doctor ${deleteTarget} will be deactivated. They will be hidden from all lists and blocked from login, and their future appointments flagged "Reschedule Required" for reassignment. Their branch assignment is kept so activating them again restores it. Historical records are kept.`
             : ""
         }
         confirmText="Deactivate"
@@ -759,6 +906,22 @@ export default function Doctor() {
         loading={isDeleting}
         onConfirm={handleConfirmDelete}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      <ConfirmationDialog
+        open={!!restoreTarget}
+        type="LockOpen"
+        title="Activate Doctor?"
+        description={
+          restoreTarget
+            ? `Doctor ${restoreTarget} will be restored. They will become visible in all lists, be able to log in again, and regain their previous branch assignment.`
+            : ""
+        }
+        confirmText="Activate"
+        cancelText="Cancel"
+        loading={isRestoring}
+        onConfirm={handleConfirmRestore}
+        onCancel={() => setRestoreTarget(null)}
       />
     </div>
   );

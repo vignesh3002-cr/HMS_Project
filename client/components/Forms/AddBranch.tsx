@@ -16,6 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { getUser } from "@/utils/token";
+import { validateRequiredFields } from "@/lib/validation";
 
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import { PhoneInput } from "@/components/ui/phone-input";
@@ -541,19 +542,8 @@ export default function AddBranch() {
       return;
     }
 
-    const requiredFields = [...branchRequired, ...adminRequired[adminData.adminMode]];
-    const missing = requiredFields.find((f) => {
-      const val = isAdminFieldKey(f.key) ? adminData[f.key as keyof AdminFormData] : branchData[f.key as keyof BranchFormData];
-      return !String(val ?? "").trim();
-    });
-    if (missing) {
-      toast({
-        title: "Missing required field",
-        description: `Please fill in "${missing.label}".`,
-        variant: "destructive",
-      });
-      return;
-    }
+    if (!validateRequiredFields(branchRequired, branchData, toast)) return;
+    if (!validateRequiredFields(adminRequired[adminData.adminMode], adminData, toast)) return;
 
     if (
       adminData.adminMode === "NEW" &&

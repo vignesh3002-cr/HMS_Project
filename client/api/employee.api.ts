@@ -96,6 +96,17 @@ export interface EmployeeRecord {
     branch_name: string;
     branch_area?: string | null;
   } | null;
+  // Real branch assignments from user_branch_mapping (active mappings
+  // only). The legacy `branch` field above is the denormalized
+  // employees.branch_id column, which stays stale for multi-branch roles
+  // like DOCTOR — this list is the source of truth, with has_schedule
+  // flagging which assigned branches actually have an active schedule.
+  branches?: {
+    branch_id: string;
+    branch_name: string | null;
+    branch_area?: string | null;
+    has_schedule: boolean;
+  }[];
   photo?: string | null;
   employee_photo_URL?: string | null;
   employee_state?: string | null;
@@ -105,6 +116,11 @@ export interface EmployeeRecord {
   employee_no_experence?: string | number | null;
   gender?: string | null;
   dob?: string | null;
+  deleted_at?: string | null;
+  // Backend-computed fields when `date` query param is provided
+  doctor_status?: "ACTIVE" | "LEAVE" | "INACTIVE";
+  total_slots?: number;
+  booked_count?: number;
 }
 
 export interface EmployeeDetailResponse {
@@ -115,7 +131,13 @@ export interface EmployeeDetailResponse {
     parmanent_address?: string | null;
   };
   user: { role_type: string; user_status: number } | null;
-  branches: { branch_id: string; branch_name: string; status?: number }[];
+  branches: {
+    branch_id: string;
+    branch_name: string;
+    status?: number;
+    has_schedule?: boolean;
+    assigned_date?: string | null;
+  }[];
   doctorProfile?: {
     specialization: string | null;
     qualification: string | null;
@@ -135,8 +157,15 @@ export interface DoctorScheduleRecord {
   start_time: string | null;
   end_time: string | null;
   consultation_minutes: number | null;
-  is_active: boolean | null;
-  branch?: { branch_name: string } | null;
+  is_active: boolean;
+  effective_from: string | null;
+  effective_to: string | null;
+  deleted_by: string | null;
+  branch?: {
+    branch_id: string;
+    branch_name: string;
+    branch_area: string | null;
+  } | null;
 }
 
 export interface CreateEmployeeResponse {
@@ -163,6 +192,20 @@ export interface AddScheduleSlotPayload {
   shift_name?: string;
   start_time: string;
   end_time: string;
+  // Day-specific schedules: set effective_from === effective_to to the target
+  // date. Omit (or null) for a repeating weekly template row.
+  effective_from?: string | null;
+  effective_to?: string | null;
+}
+
+export interface UpdateScheduleSlotPayload {
+  branch_id: string;
+  day_of_week: DayOfWeek;
+  shift_name?: string;
+  start_time: string;
+  end_time: string;
+  effective_from?: string | null;
+  effective_to?: string | null;
 }
 
 export interface AddScheduleSlotResponse {
@@ -180,6 +223,7 @@ export interface GetEmployeesParams {
   search?: string;
   page?: number;
   limit?: number;
+  date?: string;
 }
 
 export interface UpdateEmployeePayload {
@@ -198,6 +242,16 @@ export interface UpdateEmployeePayload {
   passport_no?: string;
   permanent_address?: string;
   current_address?: string;
+  employee_photo_URL?: string;
+  employee_state?: string;
+  employee_district?: string;
+  employee_area?: string;
+  employee_pincode?: number;
+  permanent_employee_state?: string;
+  permanent_employee_district?: string;
+  permanent_employee_area?: string;
+  permanent_employee_pincode?: number;
+  employee_no_experence?: number;
   emergency_contact_name?: string;
   emergency_contact_relationship?: string;
   emergency_contact_number?: string;
@@ -208,19 +262,9 @@ export interface UpdateEmployeePayload {
   license_no?: string;
   joining_date?: string;
   emp_status?: boolean;
-  employee_photo_URL?: string;
-  employee_state?: string;
-  employee_district?: string;
-  employee_area?: string;
-  employee_pincode?: number;
-  permanent_employee_state?: string;
-  permanent_employee_district?: string;
-  permanent_employee_area?: string;
-  permanent_employee_pincode?: number;
   gender?: string;
   dob?: string;
   age?: number;
-  employee_no_experence?: number;
   branch_ids?: string[];
   consultation_minutes?: number;
   doctor_bio?: string;
@@ -255,11 +299,22 @@ export const employeeApi = {
   remove: (employeeId: string) =>
     API.delete<{ success: boolean; message: string }>(`/employees/${employeeId}`),
 
+  restore: (employeeId: string) =>
+    API.post<{ success: boolean; message: string }>(`/employees/${employeeId}/restore`),
+
   addScheduleSlot: (employeeId: string, data: AddScheduleSlotPayload) =>
     API.post<AddScheduleSlotResponse>(`/doctor-schedule/recurring/slot/${employeeId}`, data),
 
+  updateScheduleSlot: (employeeId: string, scheduleId: string | number, data: UpdateScheduleSlotPayload) =>
+    API.put<AddScheduleSlotResponse>(`/employees/${employeeId}/schedules/${scheduleId}`, data),
+
+  // Soft-deletes the schedule row via the backend's
+  // DELETE /employees/:employeeId/:schedule_id endpoint, which flips
+  // doctor_schedule.is_active to false and stamps deleted_by with the
+  // acting user. Soft-deleted rows are excluded from every schedule query,
+  // so the slot disappears from all pages once refetched.
   removeScheduleSlot: (employeeId: string, scheduleId: string | number) =>
-    API.delete<{ success: boolean; message: string; data: { schedule_id: string; soft_closed: boolean } }>(
-      `/doctor-schedule/recurring/slot/${employeeId}/${scheduleId}`,
+    API.delete<{ success: boolean; message: string }>(
+      `/employees/${employeeId}/${scheduleId}`,
     ),
 };

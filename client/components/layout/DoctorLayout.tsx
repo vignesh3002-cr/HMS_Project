@@ -2,12 +2,12 @@ import React from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import DoctorSidebar from "./DoctorSidebar";
 
-const DoctorLayout: React.FC = () => {
+const DoctorLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
 
   const getActiveItem = () => {
-    if (location.pathname === "/doctor-dashboard") {
+    if (location.pathname === "/dashboard" || location.pathname === "/doctor-dashboard") {
       return "Dashboard";
     }
 
@@ -33,7 +33,7 @@ const DoctorLayout: React.FC = () => {
   const handleNavigation = (item: string) => {
     switch (item) {
       case "Dashboard":
-        navigate("/doctor-dashboard");
+        navigate("/dashboard");
         break;
 
       case "Appointment":
@@ -67,7 +67,7 @@ const DoctorLayout: React.FC = () => {
 
       {/* Doctor Content */}
       <main className="flex-1 min-w-0 h-screen overflow-y-auto overflow-x-hidden bg-[#f8fafc]">
-        <Outlet />
+        {children ?? <Outlet />}
       </main>
     </div>
   );

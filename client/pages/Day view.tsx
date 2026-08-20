@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Loader2 } from "lucide-react";
+import { Plus, Loader2, ChevronDown, ChevronLeft, ChevronRight, Search, Check } from "lucide-react";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
@@ -8,11 +8,19 @@ import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
 import { useToast } from "@/hooks/use-toast";
 import { appointmentApi, type AppointmentRecord, type AvailableSlot } from "@/api/appointment.api";
-import { employeeApi, type EmployeeRecord, type DoctorScheduleRecord, type DayOfWeek } from "@/api/employee.api";
+import {
+  employeeApi,
+  type EmployeeRecord,
+  type DoctorScheduleRecord,
+  type DayOfWeek,
+  type EmployeeDetailResponse,
+} from "@/api/employee.api";
 import { FilterPopover, useFilterPanel, useScheduleFilters } from "@/components/Filter";
 import { usePermission } from "@/context/PermissionContext";
 import { branchApi } from "@/api/branch.api";
+import { RefreshButton } from "@/components/hms/RefreshButton";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { cn } from "@/lib/utils";
 
 /* ============================= Types ============================= */
 
@@ -50,84 +58,13 @@ interface HourRow {
   perDoctor: AppointmentSlot[][];
 }
 
-interface DoctorDaySlot extends AvailableSlot {
-  branchId: string;
-}
-
 type ScheduleViewType = "list" | "day" | "week";
 
 interface AppointmentScheduleProps {
   onViewChange?: (view: ScheduleViewType) => void;
 }
 
-/* ============================= Icons ============================= */
-
-function MenuIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <path d="M3 6h18M6 12h12M10 18h4" />
-    </svg>
-  );
-}
-
-function ChevronDownIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <path d="M6 9l6 6 6-6" />
-    </svg>
-  );
-}
-
-function ChevronLeftIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <path d="M15 6l-6 6 6 6" />
-    </svg>
-  );
-}
-
-function ChevronRightIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <path d="M9 6l6 6-6 6" />
-    </svg>
-  );
-}
-
-function PlusIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 16 12" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <path d="M8 1v10M3 6h10" />
-    </svg>
-  );
-}
-
-function SearchIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <circle cx={11} cy={11} r={7} />
-      <path d="M21 21l-4.3-4.3" />
-    </svg>
-  );
-}
-
-function DotIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth={1.5} className={className}>
-      <path d="M5 1v8M1 5h8" />
-    </svg>
-  );
-}
-
-function CheckIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <path d="M20 6L9 17l-5-5" />
-    </svg>
-  );
-}
-
-/* ============================= Data ============================= */
+/* ============================= Data helpers ============================= */
 
 // Rows are built from the backend's exact HH:mm slot list. This keeps the
 // grid aligned with each doctor's configured shift and consultation length.
@@ -151,6 +88,17 @@ function normalizeSlotTime(time: string): string {
   if (!time.includes("T")) return time;
   const d = new Date(time);
   if (isNaN(d.getTime())) return time;
+  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+// appointment_time on appointment records can arrive as "HH:MM", "HH:MM:SS"
+// or an ISO/epoch-date timestamp -- normalize all of them to "HH:MM" so the
+// booked-card label always matches the grid's slot times.
+function normalizeAppointmentTime(time: string): string {
+  if (!time) return "";
+  if (!time.includes("T")) return time.slice(0, 5);
+  const d = new Date(time);
+  if (isNaN(d.getTime())) return "";
   return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
 }
 
@@ -197,13 +145,13 @@ function EmptySlot({ onClick }: { onClick?: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="flex h-[52px] w-full items-center justify-center rounded border border-dashed border-[#c3c6d7] transition-colors hover:border-[#00488D] hover:bg-[#F7F9FB]"
+      aria-label="Add a slot for this hour"
+      className="flex h-[52px] w-full items-center justify-center rounded-md border border-dashed border-clinical-blue/30 transition-colors hover:border-clinical-blue hover:bg-clinical-blue/5"
     >
-      <DotIcon className="h-[10px] w-[10px] text-[#c3c6d7]" />
+      <Plus className="h-3.5 w-3.5 text-clinical-label/40" />
     </button>
   );
 }
-
 
 function AppointmentCard({ cell }: { cell: AppointmentSlot }) {
   const navigate = useNavigate();
@@ -213,9 +161,9 @@ function AppointmentCard({ cell }: { cell: AppointmentSlot }) {
       <button
         type="button"
         onClick={() => cell.booking && navigate("/appointments/add", { state: { slot: cell.booking } })}
-        className="flex h-[52px] w-full items-center justify-center rounded-[2px] border-l-2 border-l-[#004ac6] bg-[rgba(0,74,198,0.05)] p-1 text-center opacity-50 transition-opacity hover:opacity-80"
+        className="flex h-[52px] w-full items-center justify-center rounded-md border-l-2 border-l-clinical-blue bg-clinical-blue/5 p-1 text-center opacity-50 transition-opacity hover:opacity-80"
       >
-        <span className="font-['Manrope',sans-serif] text-[9px] font-bold leading-[13px] text-[#004ac6]">
+        <span className="text-[10px] font-bold leading-[13px] text-clinical-blue">
           New slot available
         </span>
       </button>
@@ -236,26 +184,16 @@ function AppointmentCard({ cell }: { cell: AppointmentSlot }) {
   return (
     <button
       type="button"
-      className={`flex h-[52px] w-full flex-col items-start justify-center rounded-[2px] border-l-2 p-1 pl-1.5 text-left ${cardClass}`}
+      className={cn(
+        "flex h-[52px] w-full flex-col items-start justify-center rounded-md border-l-2 p-1 pl-1.5 text-left transition-transform hover:scale-[1.02]",
+        cardClass,
+      )}
     >
-      <span className={`font-['Manrope',sans-serif] text-[10px] font-bold leading-[15px] ${labelClass}`}>
+      <span className={cn("text-[11px] font-bold leading-[15px]", labelClass)}>
         {cell.label}
       </span>
     </button>
   );
-}
-
-const AVATAR_PALETTE = [
-  { initials: "rgba(10, 92, 58, 0.7)" },
-  { initials: "#f87171" },
-  { initials: "#4a8fe8" },
-  { initials: "#a78bfa" },
-  { initials: "rgba(255, 107, 53, 0.7)" },
-];
-
-function getInitials(name: string): string {
-  const words = name.replace(/^Dr\.?\s*/i, "").trim().split(/\s+/);
-  return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
 function mapEmployeeToDayColumn(emp: EmployeeRecord): DayDoctorColumn {
@@ -273,7 +211,6 @@ function mapEmployeeToDayColumn(emp: EmployeeRecord): DayDoctorColumn {
 const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) => {
   const navigate = useNavigate();
   const { can } = usePermission();
-  const [searchTerm, setSearchTerm] = useState("");
   const [toolbarSearchTerm, setToolbarSearchTerm] = useState("");
   const [selectedDoctorName, setSelectedDoctorName] = useState<string | null>(null);
   const { toast } = useToast();
@@ -283,6 +220,8 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
+  const [viewType, setViewType] = useState<ScheduleViewType>("day");
+  const [dataVersion, setDataVersion] = useState(0);
 
   // Multi-doctor filter -- same FilterPopover used on the other pages.
   // Selecting doctors here narrows the grid down to exactly those doctors,
@@ -302,12 +241,14 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   // cards and the accurate total in the header.
   const [dayAppointments, setDayAppointments] = useState<AppointmentRecord[]>([]);
   const [isLoadingDay, setIsLoadingDay] = useState(true);
+  const [appointmentsFailed, setAppointmentsFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     const loadDayAppointments = async () => {
       setIsLoadingDay(true);
+      setAppointmentsFailed(false);
 
       try {
         const date = format(selectedDate, "yyyy-MM-dd");
@@ -328,6 +269,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         console.error("[Day View] Error:", err);
         if (!cancelled) {
           setDayAppointments([]);
+          setAppointmentsFailed(true);
           toast({
             title: "Failed to load appointments",
             description: "Couldn't reach the appointments API.",
@@ -343,13 +285,14 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     return () => {
       cancelled = true;
     };
-  }, [selectedDate, toast]);
+  }, [selectedDate, toast, dataVersion]);
 
   // All doctors (not just ones with an appointment today), so every doctor
   // gets a column and their real schedule decides which empty hours are
   // actually open.
   const [doctorColumns, setDoctorColumns] = useState<DayDoctorColumn[]>([]);
   const [isLoadingDoctors, setIsLoadingDoctors] = useState(true);
+  const [doctorsFailed, setDoctorsFailed] = useState(false);
 
   // Active branch ids -- GET /branches only ever returns branch_status:
   // "Active" rows, so this doubles as an allowlist. A doctor_schedule row can
@@ -369,16 +312,17 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   }, []);
 
   useEffect(() => {
-    const loadAllEmployees = async () => {
+    const loadAllDoctors = async () => {
       // GET /employees is paginated -- a single page (even a generously sized
-      // one) can't be assumed to hold every employee, so page 1's totalPages
+      // one) can't be assumed to hold every doctor, so page 1's totalPages
       // decides how many more pages to pull before a doctor is allowed to be
-      // silently missing from the grid.
-      const firstPage = await employeeApi.getAll({ page: 1, limit: 1000 });
+      // silently missing from the grid. Only DOCTORs are requested, so the
+      // rest of the organisation never crosses the wire.
+      const firstPage = await employeeApi.getAll({ roleType: "DOCTOR", page: 1, limit: 1000 });
       const firstData = firstPage.data?.data;
       const remainingPages = Array.from(
         { length: Math.max(0, (firstData?.totalPages ?? 1) - 1) },
-        (_, index) => employeeApi.getAll({ page: index + 2, limit: 1000 }),
+        (_, index) => employeeApi.getAll({ roleType: "DOCTOR", page: index + 2, limit: 1000 }),
       );
       const remainingResults = await Promise.all(remainingPages);
       return [
@@ -387,23 +331,31 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       ];
     };
 
-    loadAllEmployees()
+    loadAllDoctors()
       .then((employees) => {
         // Inactive doctors can still have leftover active doctor_schedule rows
         // (deactivation doesn't retire their schedule) -- getAvailableSlots
         // rejects any inactive doctor outright, so a column for one would
-        // only ever offer slots that can never actually be booked.
+        // only ever offer slots that can never actually be booked. Only an
+        // explicit `emp_status === true` counts as active (null is treated
+        // as inactive).
         const doctors = employees.filter(
-          (e) => e.user_table?.role_type === "DOCTOR" && e.emp_status !== false,
+          (e) => e.user_table?.role_type === "DOCTOR" && e.emp_status === true,
         );
         setDoctorColumns(doctors.map(mapEmployeeToDayColumn));
       })
       .catch((err) => {
         console.error("[Day View] Failed to load doctors:", err);
         setDoctorColumns([]);
+        setDoctorsFailed(true);
+        toast({
+          title: "Failed to load doctors",
+          description: "Couldn't reach the employees API.",
+          variant: "destructive",
+        });
       })
       .finally(() => setIsLoadingDoctors(false));
-  }, []);
+  }, [toast, dataVersion]);
 
   // GET /employees/:id returns each doctor's real doctor_schedule rows --
   // day_of_week decides which doctors get a column on the selected date,
@@ -413,6 +365,10 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   // includePast=true -- unlike the default call it does NOT hide times
   // already past on today's date, so a doctor's full shift still shows as
   // "New slot available" below.
+  //
+  // Results are cached per employee (the schedule rows only change when the
+  // doctor list changes), so switching days never re-fetches every doctor.
+  const scheduleCacheRef = useRef<Map<string, EmployeeDetailResponse>>(new Map());
   const [doctorScheduleDays, setDoctorScheduleDays] = useState<Record<string, string[]>>({});
   const [doctorSchedulesByEmployee, setDoctorSchedulesByEmployee] = useState<Record<string, DoctorScheduleRecord[]>>({});
   // Which branches each doctor actually has an active user_branch_mapping to --
@@ -434,36 +390,46 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
     setIsLoadingScheduleDays(true);
 
+    const missing = doctorColumns.filter((doc) => !scheduleCacheRef.current.has(doc.employeeId));
+
     Promise.all(
-      doctorColumns.map((doc) =>
+      missing.map((doc) =>
         employeeApi
           .getOne(doc.employeeId)
           .then((res) => {
-            const activeSchedules = (res.data?.data?.doctorSchedules ?? []).filter((s) => s.is_active && s.day_of_week);
-            const days = activeSchedules.map((s) => s.day_of_week as string);
-            // status: 1 = active, 0 = deactivated/historical (see branches
-            // mapping in Backend/HMS_Backend/src/modules/employee/employee.repository.ts)
-            // -- findDoctorBranchMapping only matches status: 1, so an
-            // inactive mapping here would still offer a schedule's branch as
-            // "New slot available" even though POST /appointments (and
-            // getAvailableSlots) would 400 with "Doctor is not assigned to
-            // the selected branch".
-            const mappedBranches = new Set(
-              (res.data?.data?.branches ?? [])
-                .filter((b) => b.status === undefined || b.status === 1)
-                .map((b) => b.branch_id),
-            );
-            return { employeeId: doc.employeeId, days, schedules: activeSchedules, mappedBranches };
+            scheduleCacheRef.current.set(doc.employeeId, res.data?.data);
+            return doc.employeeId;
           })
-          .catch(() => ({
-            employeeId: doc.employeeId,
-            days: [] as string[],
-            schedules: [] as DoctorScheduleRecord[],
-            mappedBranches: new Set<string>(),
-          })),
+          .catch(() => doc.employeeId),
       ),
     )
-      .then((entries) => {
+      .then(() => {
+        const entries = doctorColumns.map((doc) => {
+          const data = scheduleCacheRef.current.get(doc.employeeId);
+          if (!data) {
+            return {
+              employeeId: doc.employeeId,
+              days: [] as string[],
+              schedules: [] as DoctorScheduleRecord[],
+              mappedBranches: new Set<string>(),
+            };
+          }
+          const activeSchedules = (data.doctorSchedules ?? []).filter((s) => s.is_active && s.day_of_week);
+          const days = activeSchedules.map((s) => s.day_of_week as string);
+          // status: 1 = active, 0 = deactivated/historical (see branches
+          // mapping in Backend/HMS_Backend/src/modules/employee/employee.repository.ts)
+          // -- findDoctorBranchMapping only matches status: 1, so an
+          // inactive mapping here would still offer a schedule's branch as
+          // "New slot available" even though POST /appointments (and
+          // getAvailableSlots) would 400 with "Doctor is not assigned to
+          // the selected branch".
+          const mappedBranches = new Set(
+            (data.branches ?? [])
+              .filter((b) => b.status === undefined || b.status === 1)
+              .map((b) => b.branch_id),
+          );
+          return { employeeId: doc.employeeId, days, schedules: activeSchedules, mappedBranches };
+        });
         setDoctorScheduleDays(Object.fromEntries(entries.map((e) => [e.employeeId, e.days])));
         setDoctorSchedulesByEmployee(Object.fromEntries(entries.map((e) => [e.employeeId, e.schedules])));
         setDoctorMappedBranches(Object.fromEntries(entries.map((e) => [e.employeeId, e.mappedBranches])));
@@ -476,10 +442,12 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   const refreshDoctorSchedule = async (employeeId: string) => {
     try {
       const res = await employeeApi.getOne(employeeId);
-      const activeSchedules = (res.data?.data?.doctorSchedules ?? []).filter((s) => s.is_active && s.day_of_week);
+      const data = res.data?.data;
+      if (data) scheduleCacheRef.current.set(employeeId, data);
+      const activeSchedules = (data?.doctorSchedules ?? []).filter((s) => s.is_active && s.day_of_week);
       const days = activeSchedules.map((s) => s.day_of_week as string);
       const mappedBranches = new Set(
-        (res.data?.data?.branches ?? [])
+        (data?.branches ?? [])
           .filter((b) => b.status === undefined || b.status === 1)
           .map((b) => b.branch_id),
       );
@@ -555,6 +523,10 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   // slot list, and its is_available flag (booked = any non-cancelled,
   // non-no-show appointment at that time) decides which cells read
   // "New slot available" vs a booked card.
+  //
+  // Successful responses are cached per employee|branch|date so navigating
+  // back to a day already visited doesn't re-hit the API.
+  const slotsCacheRef = useRef<Map<string, AvailableSlot[]>>(new Map());
   const [realSlotsByDoctor, setRealSlotsByDoctor] = useState<Record<string, AvailableSlot[]>>({});
 
   useEffect(() => {
@@ -585,12 +557,19 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
           }
 
           const lists = await Promise.all(
-            Array.from(branchIds).map((branchId) =>
-              appointmentApi
+            Array.from(branchIds).map((branchId) => {
+              const cacheKey = `${doc.employeeId}|${branchId}|${dateStr}`;
+              const cached = slotsCacheRef.current.get(cacheKey);
+              if (cached) return Promise.resolve(cached);
+              return appointmentApi
                 .getAvailableSlots(doc.employeeId, branchId, dateStr, { includePast: true })
-                .then((res) => res.data?.data?.slots ?? [])
-                .catch(() => null),
-            ),
+                .then((res) => {
+                  const slots = res.data?.data?.slots ?? [];
+                  slotsCacheRef.current.set(cacheKey, slots);
+                  return slots;
+                })
+                .catch(() => null);
+            }),
           );
 
           // A doctor whose fetch failed on every branch keeps [] so the grid
@@ -656,7 +635,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   // Backend/HMS_Backend/src/modules/appointment/appointment.constants.ts) --
   // matching that here means a cancelled booking correctly frees its slot
   // back up as "New slot available" instead of looking permanently taken.
-  const NON_BLOCKING_STATUSES = useMemo(() => new Set(["CANCELLED", "NO_SHOW"]), []);
+  const NON_BLOCKING_STATUSES = useMemo(() => new Set(["CANCELLED", "NO_SHOW", "NOT_CHECKED_IN"]), []);
 
   // Fixed 24-hour axis, 12:00 AM through 11:00 PM, always fully shown --
   // independent of any doctor's actual shift, so the grid never hides part
@@ -692,10 +671,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       dayAppointments.filter((appt) => {
         if (appt.employees?.employee_id !== doc.employeeId) return false;
         if (appt.status && NON_BLOCKING_STATUSES.has(appt.status)) return false;
-        const t = new Date(appt.appointment_time);
-        if (isNaN(t.getTime())) return false;
-        const apptTime = `${String(t.getUTCHours()).padStart(2, "0")}:${String(t.getUTCMinutes()).padStart(2, "0")}`;
-        return apptTime === time;
+        return normalizeAppointmentTime(appt.appointment_time) === time;
       });
 
     const patientNameOf = (appt: AppointmentRecord): string => {
@@ -847,14 +823,15 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const viewOptions: { key: ScheduleViewType; label: string }[] = [
-     { key: "day", label: "Day View" },
-     { key: "list", label: "List View" },
+  const viewTypeOptions: { key: ScheduleViewType; label: string }[] = [
+    { key: "list", label: "List View" },
+    { key: "day", label: "Day View" },
     { key: "week", label: "Week View" },
   ];
 
   const handleViewSelect = (view: ScheduleViewType) => {
     setIsViewMenuOpen(false);
+    setViewType(view);
     if (view === "week") {
       navigate("/appointments/week-view");
     } else if (view === "list") {
@@ -895,7 +872,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   };
 
   return (
-    <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
+    <div className="flex w-full font-manrope bg-clinical-page-bg min-h-screen">
       <div className="flex flex-col flex-1 min-w-0">
         <main className="flex flex-col gap-6">
 
@@ -917,264 +894,284 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
             <div className="flex items-center gap-3">
               {can("report.export") && <ExportReport onExport={handleExport} />}
 
-
-
               {can("appointment.create") && (
-              <button
-                onClick={() => navigate("/appointments/add")}
-                className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
-              >
-
-                <Plus className="w-4 h-4" />
-                Add Appointment
-
-              </button>
+                <button
+                  onClick={() => navigate("/appointments/add")}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-clinical-blue rounded-lg text-white text-xs font-semibold shadow-sm shadow-clinical-blue/20 transition-colors hover:bg-clinical-blue-mid"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Appointment
+                </button>
               )}
 
-
             </div>
-
 
           </div>
 
           {/* ==================== MAIN CARD ==================== */}
-          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col min-h-[500px] transition-all duration-300 hover:shadow-md">
+          <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm flex flex-col min-h-[500px] transition-all duration-300 hover:shadow-md">
 
-          {/* Toolbar */}
-          <div
-            role="toolbar"
-            aria-label="Schedule filters and actions"
-            className="px-5 py-4 border-b border-[#E5E7EB] flex flex-nowrap items-center gap-2 md:gap-2.5"
-          >
+            {/* ==================== TOOLBAR ==================== */}
+
+            <div className="px-5 py-4 border-b border-[#E5E7EB] flex flex-wrap items-center justify-between gap-4">
 
 
-        {/* View Type - Day View */}
-        <div className="relative flex flex-col items-start gap-1.5" ref={viewMenuRef}>
+              <div className="flex flex-wrap items-center gap-3">
 
-          <button
-            type="button"
-            onClick={() => setIsViewMenuOpen((o) => !o)}
-            className="flex items-center gap-2 px-3 py-1.5 border border-[#e5e7eb] rounded-md text-xs font-semibold text-[#374151] hover:border-[#00488D] transition-colors"
-          >
 
-            <span>Day View</span>
-            <ChevronDownIcon
-              className={`w-3 h-3 flex-none text-[#6b7280] transition-transform duration-200 ${isViewMenuOpen ? "rotate-180" : ""}`}
-            />
-          </button>
+                <div className="relative" ref={viewMenuRef}>
 
-          <div
-            className={`absolute left-0 top-full mt-1 w-32 bg-white border border-[#e5e7eb] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
-              isViewMenuOpen ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
-            }`}
-          >
-            {viewOptions.map((opt) => (
-              <button
-                key={opt.key}
-                type="button"
-                onClick={() => handleViewSelect(opt.key)}
-                className={`flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors ${
-                  opt.key === "day" ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
-                }`}
-              >
-                {opt.label}
-                {opt.key === "day" && <CheckIcon className="w-3 h-3" />}
-              </button>
-            ))}
-          </div>
-        </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsViewMenuOpen((o) => !o)}
+                    className="flex items-center gap-2 px-3 py-1.5 border border-[#E5E7EB] rounded-md text-xs font-semibold text-[#374151] hover:border-[#00488D] transition-colors"
+                  >
 
-        {/* Search doctors */}
-        <div className="relative">
-          <input
-            type="text"
-            placeholder="Search"
-            value={toolbarSearchTerm}
-            onChange={(e) => setToolbarSearchTerm(e.target.value)}
-            aria-label="Search doctors in schedule"
-            className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:w-[200px] sm:focus:w-[250px]"
-          />
-          <SearchIcon className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#424752]" />
-        </div>
+                    {viewTypeOptions.find((opt) => opt.key === viewType)?.label}
 
-        {/* Filter doctors */}
-        <FilterPopover
-          title="Filter Doctors"
-          fields={doctorFilterFields}
-          values={filterValues}
-          onChange={handleFilterChange}
-          onApply={handleApplyFilter}
-          onClear={handleClearFilter}
-          open={isFilterOpen}
-          onOpenChange={setIsFilterOpen}
-        />
+                    <ChevronDown className={`w-3 h-3 text-[#6B7280] transition-transform duration-200 ${isViewMenuOpen ? "rotate-180" : ""}`} />
 
-        {/* Date navigation */}
-        <div role="group" aria-label="Date navigation" className="flex items-center">
-          <button
-            type="button"
-            aria-label="Previous day"
-            onClick={() => setSelectedDate((prev) => subDays(prev, 1))}
-            className="flex h-[34px] w-[25px] items-center justify-center rounded-l-lg border border-[#e5e7eb] bg-white"
-          >
-            <ChevronLeftIcon className="h-4 w-4 text-[#6b7280]" />
-          </button>
+                  </button>
 
-          <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="h-[34px] w-[90px] whitespace-nowrap border-y border-[#e5e7eb] bg-white px-[17px] py-[9px] text-center font-['Inter',sans-serif] text-[10px] font-medium leading-4 shadow-[0_1px_1px_rgba(0,0,0,0.05)]"
-              >
-                {dateLabel}
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0 border-[#e5e7eb] shadow-lg">
-              <CalendarPicker
-                selected={selectedDate}
-                hideThemePicker
-                onSelect={(date) => {
-                  setSelectedDate(date);
-                  setIsCalendarOpen(false);
-                }}
-              />
-            </PopoverContent>
-          </Popover>
-
-          <button
-            type="button"
-            aria-label="Next day"
-            onClick={() => setSelectedDate((prev) => addDays(prev, 1))}
-            className="flex h-[34px] w-[25px] items-center justify-center rounded-r-lg border border-[#e5e7eb] bg-white"
-          >
-            <ChevronRightIcon className="h-4 w-4 text-[#6b7280]" />
-          </button>
-        </div>
-      </div>
-
-          {/* Content */}
-          <div className="p-5 flex flex-col items-start gap-[29px] lg:flex-row">
-        {/* Schedule grid */}
-        <section
-          aria-label="Doctor appointment schedule grid"
-          className="max-w-full overflow-x-auto rounded-xl border border-[#E5E7EB] bg-white shadow-sm"
-        >
-          {isLoadingDay || isLoadingDoctors || isLoadingScheduleDays ? (
-            <div className="flex min-w-[400px] flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
-              <Loader2 size={24} className="animate-spin text-[#00488D]" />
-              Loading schedule...
-            </div>
-          ) : doctorColumns.length === 0 ? (
-            <div className="flex min-w-[400px] items-center justify-center py-16 text-[#6B7280] text-sm">
-              No doctors found.
-            </div>
-          ) : visibleDoctorColumns.length === 0 ? (
-            <div className="flex min-w-[400px] items-center justify-center py-16 text-[#6B7280] text-sm">
-              No doctors match your search or filters.
-            </div>
-          ) : (
-          <div
-            role="table"
-            style={{ width: `${70 + visibleDoctorColumns.length * 90}px` }}
-          >
-            {/* Header row */}
-            <div className="border-b border-[#c3c6d7] bg-white">
-              <div
-                role="row"
-                className="grid min-h-[39px]"
-                style={{ gridTemplateColumns: `70px repeat(${visibleDoctorColumns.length}, 90px)` }}
-              >
-                <div
-                  role="columnheader"
-                  className="sticky left-0 z-10 flex items-center justify-center border-r border-[#c3c6d7] bg-white pb-[12.75px] pl-2 pr-[9px] pt-[12.75px]"
-                >
-                  <span className="whitespace-nowrap text-center font-['Manrope',sans-serif] text-[9px] font-bold leading-[13.5px] text-[#515f74]">
-                    {format(selectedDate, "dd-MM-yyyy")}
-                  </span>
-                </div>
-
-                {visibleDoctorColumns.map((doc, i) => (
                   <div
-                    key={doc.employeeId}
-                    role="columnheader"
-                    title={`${doc.name} - ${doc.spec}`}
-                    className={`flex w-full flex-col items-center justify-center gap-0.5 overflow-hidden pb-1.5 pl-1.5 pr-[7px] pt-1.5 text-center ${
-                      i !== visibleDoctorColumns.length - 1 ? "border-r border-[#c3c6d7]" : ""
+                    className={`absolute left-0 top-full mt-1 w-32 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-40 transition-all duration-150 ${
+                      isViewMenuOpen ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
                     }`}
                   >
-                    <span className="line-clamp-2 w-full break-words font-['Manrope',sans-serif] text-[10px] font-bold leading-[13px] text-[#004ac6]">
-                      {doc.name}
-                    </span>
-                    <span className="w-full truncate font-['Manrope',sans-serif] text-[8px] uppercase leading-3 text-[#515f74]">
-                      {doc.spec}
-                    </span>
+                    {viewTypeOptions.map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => { handleViewSelect(opt.key); }}
+                        className={`flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors ${
+                          viewType === opt.key ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
+                        }`}
+                      >
+                        {opt.label}
+                        {viewType === opt.key && <Check className="w-3 h-3" />}
+                      </button>
+                    ))}
                   </div>
-                ))}
+
+                </div>
+
+
               </div>
+
+
+              <div className="flex items-center gap-3 flex-wrap">
+
+                {/* Search doctors */}
+
+                <div className="relative">
+
+                  <input
+                    type="text"
+                    placeholder="Search"
+                    value={toolbarSearchTerm}
+                    onChange={(e) => setToolbarSearchTerm(e.target.value)}
+                    aria-label="Search doctors in schedule"
+                    className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[250px]"
+                  />
+
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
+
+                </div>
+
+                {/* Date navigation */}
+
+                <div className="flex items-center">
+
+                  <button
+                    onClick={() => setSelectedDate((prev) => subDays(prev, 1))}
+                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                  >
+                    <ChevronLeft className="w-3 h-3 text-[#424752]" />
+                  </button>
+
+
+                  <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                    <PopoverTrigger asChild>
+                      <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
+                        {dateLabel}
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
+                      <CalendarPicker
+                        selected={selectedDate}
+                        hideThemePicker
+                        onSelect={(date) => {
+                          if (date instanceof Date) setSelectedDate(date);
+                          setIsCalendarOpen(false);
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
+
+
+                  <button
+                    onClick={() => setSelectedDate((prev) => addDays(prev, 1))}
+                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                  >
+                    <ChevronRight className="w-3 h-3 text-[#424752]" />
+                  </button>
+
+                </div>
+
+
+
+                {/* Filter doctors */}
+
+                <FilterPopover
+                  title="Filter Doctors"
+                  fields={doctorFilterFields}
+                  values={filterValues}
+                  onChange={handleFilterChange}
+                  onApply={handleApplyFilter}
+                  onClear={handleClearFilter}
+                  open={isFilterOpen}
+                  onOpenChange={setIsFilterOpen}
+                />
+
+                <RefreshButton onClick={() => setDataVersion((v) => v + 1)} isLoading={isLoadingDay || isLoadingDoctors || isLoadingScheduleDays} />
+
+              </div>
+
             </div>
 
-            {/* Time rows -- fixed 12:00 AM..11:00 PM axis; each cell stacks
-                every one of that doctor's real slots inside the hour. */}
-            {scheduleRows.map((row, rowIdx) => (
-              <div
-                key={row.hour}
-                className={rowIdx !== scheduleRows.length - 1 ? "border-b border-[#c3c6d7]" : ""}
+            {/* Content */}
+            <div className="p-5 flex flex-col items-start gap-[29px] lg:flex-row">
+              {/* Schedule grid */}
+              <section
+                aria-label="Doctor appointment schedule grid"
+                className="max-w-full overflow-x-auto rounded-xl border border-[#E2E8F0] bg-white shadow-sm"
               >
-                <div
-                  role="row"
-                  className="grid"
-                  style={{ gridTemplateColumns: `70px repeat(${visibleDoctorColumns.length}, 90px)` }}
-                >
-                  <div
-                    role="rowheader"
-                    className="sticky left-0 z-10 flex h-full min-h-[60px] items-center justify-center border-r border-[#c3c6d7] bg-[#f2f4f6] pb-2 pl-2 pr-[9px] pt-2"
-                  >
-                    <span className="whitespace-nowrap font-['Manrope',sans-serif] text-[10px] leading-[10px] text-[#515f74]">
-                      {row.label}
-                    </span>
+                {isLoadingDay || isLoadingDoctors || isLoadingScheduleDays ? (
+                  <div className="flex min-w-[400px] flex-col items-center justify-center gap-2 py-16 text-sm text-clinical-label">
+                    <Loader2 size={24} className="animate-spin text-clinical-blue" />
+                    Loading schedule...
                   </div>
+                ) : doctorsFailed ? (
+                  <div className="flex min-w-[400px] items-center justify-center py-16 text-sm text-clinical-label">
+                    Couldn't load doctors. Check the connection and try again.
+                  </div>
+                ) : appointmentsFailed ? (
+                  <div className="flex min-w-[400px] items-center justify-center py-16 text-sm text-clinical-label">
+                    Couldn't load appointments. Check the connection and try again.
+                  </div>
+                ) : doctorColumns.length === 0 ? (
+                  <div className="flex min-w-[400px] items-center justify-center py-16 text-sm text-clinical-label">
+                    No doctors found.
+                  </div>
+                ) : visibleDoctorColumns.length === 0 ? (
+                  <div className="flex min-w-[400px] items-center justify-center py-16 text-sm text-clinical-label">
+                    No doctors match your search or filters.
+                  </div>
+                ) : (
+                  <div
+                    role="table"
+                    style={{ width: `${70 + visibleDoctorColumns.length * 90}px` }}
+                  >
+                    {/* Header row */}
+                    <div className="border-b border-[#E2E8F0] bg-white">
+                      <div
+                        role="row"
+                        className="grid min-h-[42px]"
+                        style={{ gridTemplateColumns: `70px repeat(${visibleDoctorColumns.length}, 90px)` }}
+                      >
+                        <div
+                          role="columnheader"
+                          className="sticky left-0 z-10 flex items-center justify-center border-r border-[#E2E8F0] bg-white px-2 py-3"
+                        >
+                          <span className="whitespace-nowrap text-center text-[11px] font-bold text-clinical-label">
+                            {format(selectedDate, "dd-MM-yyyy")}
+                          </span>
+                        </div>
 
-                  {row.perDoctor.map((cells, i) => (
-                    <div
-                      key={i}
-                      role="cell"
-                      className={`flex h-full min-h-[60px] flex-col gap-1 p-1 ${
-                        i !== row.perDoctor.length - 1 ? "border-r border-[#c3c6d7]" : ""
-                      }`}
-                    >
-                      {cells.length === 0 ? (
-                        <EmptySlot
-                          onClick={() => {
-                            const doc = visibleDoctorColumns[i];
-                            // Reuse the branch of this doctor's existing schedule for the
-                            // selected day (if any), so the new slot lands on the same
-                            // branch as their real slots and getAvailableSlots returns both
-                            // together -- otherwise picking an arbitrary mapped branch here
-                            // can silently split the new slot onto a different branch than
-                            // the doctor's normal schedule, hiding the old slots from it.
-                            const existingBranch = (doctorSchedulesByEmployee[doc.employeeId] ?? []).find(
-                              (s) => (s.day_of_week ?? "").trim().toUpperCase() === selectedDayOfWeek && s.branch_id,
-                            )?.branch_id;
-                            const mapped = doctorMappedBranches[doc.employeeId];
-                            const branchId =
-                              existingBranch ||
-                              (mapped && mapped.size > 0 ? Array.from(mapped)[0] : null) ||
-                              doc.branchId;
-                            setAddSlotTarget({ doctorId: doc.employeeId, branchId, hour: row.hour });
-                          }}
-                        />
-                      ) : (
-                        cells.map((cell, cellIdx) => <AppointmentCard key={cellIdx} cell={cell} />)
-                      )}
+                        {visibleDoctorColumns.map((doc, i) => (
+                          <div
+                            key={doc.employeeId}
+                            role="columnheader"
+                            title={`${doc.name} - ${doc.spec}`}
+                            className={cn(
+                              "flex w-full flex-col items-center justify-center gap-0.5 overflow-hidden px-2 py-2 text-center",
+                              i !== visibleDoctorColumns.length - 1 ? "border-r border-[#E2E8F0]" : "",
+                            )}
+                          >
+                            <span className="line-clamp-2 w-full break-words text-[12px] font-bold leading-[15px] text-clinical-blue">
+                              {doc.name}
+                            </span>
+                            <span className="w-full truncate text-[10px] uppercase leading-3 text-clinical-label">
+                              {doc.spec}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-          )}
-        </section>
-          </div>
+
+                    {/* Time rows -- fixed 12:00 AM..11:00 PM axis; each cell stacks
+                        every one of that doctor's real slots inside the hour. */}
+                    {scheduleRows.map((row, rowIdx) => (
+                      <div
+                        key={row.hour}
+                        className={rowIdx !== scheduleRows.length - 1 ? "border-b border-[#E2E8F0]" : ""}
+                      >
+                        <div
+                          role="row"
+                          className="grid"
+                          style={{ gridTemplateColumns: `70px repeat(${visibleDoctorColumns.length}, 90px)` }}
+                        >
+                          <div
+                            role="rowheader"
+                            className="sticky left-0 z-10 flex h-full min-h-[60px] items-center justify-center border-r border-[#E2E8F0] bg-clinical-input-bg px-2 py-2"
+                          >
+                            <span className="whitespace-nowrap text-[11px] font-medium text-clinical-label">
+                              {row.label}
+                            </span>
+                          </div>
+
+                          {row.perDoctor.map((cells, i) => (
+                            <div
+                              key={i}
+                              role="cell"
+                              className={cn(
+                                "flex h-full min-h-[60px] flex-col gap-1 p-1.5",
+                                i !== row.perDoctor.length - 1 ? "border-r border-[#E2E8F0]" : "",
+                              )}
+                            >
+                              {cells.length === 0 ? (
+                                <EmptySlot
+                                  onClick={() => {
+                                    const doc = visibleDoctorColumns[i];
+                                    // Reuse the branch of this doctor's existing schedule for the
+                                    // selected day (if any), so the new slot lands on the same
+                                    // branch as their real slots and getAvailableSlots returns both
+                                    // together -- otherwise picking an arbitrary mapped branch here
+                                    // can silently split the new slot onto a different branch than
+                                    // the doctor's normal schedule, hiding the old slots from it.
+                                    const existingBranch = (doctorSchedulesByEmployee[doc.employeeId] ?? []).find(
+                                      (s) => (s.day_of_week ?? "").trim().toUpperCase() === selectedDayOfWeek && s.branch_id,
+                                    )?.branch_id;
+                                    const mapped = doctorMappedBranches[doc.employeeId];
+                                    const branchId =
+                                      existingBranch ||
+                                      (mapped && mapped.size > 0 ? Array.from(mapped)[0] : null) ||
+                                      doc.branchId;
+                                    setAddSlotTarget({ doctorId: doc.employeeId, branchId, hour: row.hour });
+                                  }}
+                                />
+                              ) : (
+                                cells.map((cell, cellIdx) => <AppointmentCard key={cellIdx} cell={cell} />)
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
           </div>
         </main>
       </div>

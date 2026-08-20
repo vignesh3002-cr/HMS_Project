@@ -1152,7 +1152,7 @@ export default function MySchedulePage() {
 
   const handleDayDraftAddSlot = (
     payload: ScheduleSlotAddPayload
-  ) => {
+  ): boolean => {
     if (
       !payload.day ||
       !payload.startTime ||
@@ -1162,7 +1162,7 @@ export default function MySchedulePage() {
       alert(
         "Please fill in day, start time, end time and branch."
       );
-      return;
+      return false;
     }
 
     draftKeyCounterRef.current += 1;
@@ -1199,6 +1199,7 @@ export default function MySchedulePage() {
     });
 
     setDayDraftDirty(true);
+    return true;
   };
 
   const handleDayDraftRemoveSlot = (
