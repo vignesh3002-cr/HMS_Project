@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import API, { getActiveBranchId } from "../../api/axios";
 import { employeeApi } from "../../api/employee.api";
 import { getUser } from "../../utils/token";
@@ -6268,6 +6270,119 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
     return `${cycleLabel}${status}`;
   })();
 
+  const handleDownloadSummary = () => {
+    const doc = new jsPDF({
+      orientation: "landscape",
+      unit: "pt",
+      format: "a4",
+    });
+
+    doc.setFontSize(16);
+    doc.setTextColor(20, 30, 40);
+    doc.text("Chemotherapy Summary", 40, 44);
+
+    doc.setFontSize(9);
+    doc.setTextColor(100, 116, 139);
+    const infoLine = [
+      `Patient: ${resolvedPatientId}`,
+      cancerType && `Cancer Type: ${cancerType}`,
+      stage && `Stage: ${stage}`,
+      context && `Context: ${context}`,
+      protocol && `Protocol: ${protocol}`,
+      duration && `Duration: ${duration}`,
+      current && `Current: ${current}`,
+    ]
+      .filter(Boolean)
+      .join("   |   ");
+    doc.text(infoLine, 40, 60);
+
+    const tableStyles = {
+      fontSize: 8,
+      cellPadding: 5,
+      textColor: [30, 41, 59] as [number, number, number],
+      lineColor: [226, 232, 240] as [number, number, number],
+      lineWidth: 0.5,
+    };
+    const headStyles = {
+      fillColor: [0, 71, 133] as [number, number, number],
+      textColor: [255, 255, 255] as [number, number, number],
+      fontSize: 8.5,
+      fontStyle: "bold" as const,
+    };
+
+    let y = 72;
+
+    const renderTable = (
+      title: string,
+      head: string[],
+      body: string[][]
+    ) => {
+      if (y > 420) {
+        doc.addPage();
+        y = 40;
+      }
+      doc.setFontSize(11);
+      doc.setTextColor(49, 46, 129);
+      doc.text(title, 40, y);
+      y += 8;
+      autoTable(doc, {
+        startY: y,
+        head: [head],
+        body,
+        styles: tableStyles,
+        headStyles,
+        alternateRowStyles: { fillColor: [247, 249, 251] },
+        margin: { left: 40, right: 40 },
+      });
+      y = (doc as any).lastAutoTable?.finalY ?? y;
+      y += 24;
+    };
+
+    renderTable(
+      "Chemotherapy Orders",
+      ["Drug Name", "Form", "Dose", "Unit", "Volume"],
+      chemotherapyOrders.map((row) => [
+        row.drug,
+        row.form,
+        row.dose,
+        row.unit,
+        row.volume,
+      ])
+    );
+    renderTable(
+      "Premedication",
+      ["Drug Name", "Dose", "Route", "Time"],
+      premedications.map((row) => [row.drug, row.dose, row.route, row.time])
+    );
+    renderTable(
+      "Discharge Medication",
+      ["Drug Name", "Dose", "Frequency", "Instruction", "Duration"],
+      dischargeMedications.map((row) => [
+        row.drug,
+        row.dose,
+        row.frequency,
+        row.instruction,
+        row.duration,
+      ])
+    );
+
+    y += 8;
+    doc.setFontSize(9);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`Next Visit Date: ${nextVisitDate || "—"}`, 40, y);
+    doc.text(`Next Cycle: ${nextCycle || "—"}`, 300, y);
+
+    const blob = doc.output("blob");
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `chemotherapy-summary-${resolvedPatientId || "patient"}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const Step = ({
     label,
     active = false,
@@ -6584,6 +6699,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
 
         <button
           type="button"
+          onClick={handleDownloadSummary}
           className="rounded-md bg-[#5624D0] px-8 py-3 font-medium text-white shadow-sm transition-colors hover:bg-[#4a1fb5]"
         >
           Print / Download Summary
