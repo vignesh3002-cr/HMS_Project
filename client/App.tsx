@@ -84,6 +84,7 @@ import DoctorLeave from "./pages/doctor/LeavePage";
 import DoctorSchedule from "./pages/doctor/MySchedulePage";
 import DoctorReviews from "./pages/doctor/ReviewPage";
 import Consultation from "./pages/doctor/Patientconsut";
+import DoctorPatientProfile from "./pages/doctor/profile patient "; 
 
 // ============================================================
 // HOOKS / AUTH
@@ -540,6 +541,15 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <Consultation />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/doctor/profile-patient"
+              element={
+                <ProtectedRoute>
+                  <DoctorPatientProfile />
                 </ProtectedRoute>
               }
             />
