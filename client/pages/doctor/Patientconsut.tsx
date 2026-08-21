@@ -6963,6 +6963,15 @@ const MedicationPortal: React.FC<{ onBackToProfile?: () => void }> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>("Medications");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showDischargeDashboard, setShowDischargeDashboard] = useState(false);
+
+  if (showDischargeDashboard) {
+    return (
+      <DischargeDetailsPortal
+        onBack={() => setShowDischargeDashboard(false)}
+      />
+    );
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50 font-sans text-slate-800">
@@ -7107,6 +7116,10 @@ const MedicationPortal: React.FC<{ onBackToProfile?: () => void }> = ({
                     onClick={() => {
                       if (tab === "Order Summary") {
                         onBackToProfile?.();
+                        return;
+                      }
+                      if (tab === "Discharge") {
+                        setShowDischargeDashboard(true);
                         return;
                       }
                       setActiveTab(tab);
@@ -7319,6 +7332,7 @@ function HMSPatientPortal() {
   const [selectedDay, setSelectedDay] = useState("Day 1");
   const [showBranchMenu, setShowBranchMenu] = useState(false);
   const [showMedicationPortal, setShowMedicationPortal] = useState(false);
+  const [showDischargePortal, setShowDischargePortal] = useState(false);
 
   const tabs = ["Order Summary", "Medications", "Discharge", "History", "Notes & Documents"];
   const days = [
@@ -7332,6 +7346,12 @@ function HMSPatientPortal() {
   if (showMedicationPortal) {
     return (
       <MedicationPortal onBackToProfile={() => setShowMedicationPortal(false)} />
+    );
+  }
+
+  if (showDischargePortal) {
+    return (
+      <DischargeDetailsPortal onBack={() => setShowDischargePortal(false)} />
     );
   }
 
@@ -7470,6 +7490,8 @@ function HMSPatientPortal() {
 <button key={tab} type="button" onClick={() => {
           if (tab === "Medications") {
             setShowMedicationPortal(true);
+          } else if (tab === "Discharge") {
+            setShowDischargePortal(true);
           } else {
             setActiveTab(tab);
           }
@@ -7940,7 +7962,17 @@ function HMSPatientPortal() {
     so it can live in this file, original file left untouched)
 ============================================================ */
 
-function DischargeDetailsPortal() {
+function DischargeDetailsPortal({ onBack }: { onBack?: () => void }) {
+  const [showBranchMenu, setShowBranchMenu] = useState(false);
+
+  const tabs = [
+    "Order Summary",
+    "Medications",
+    "Discharge",
+    "History",
+    "Notes & Documents",
+  ];
+
   const medications = [
     {
       medication: "Ondansetron",
@@ -7985,139 +8017,136 @@ function DischargeDetailsPortal() {
   ];
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50 text-gray-800">
-      {/* =========================================================
-          MAIN CONTENT
-      ========================================================== */}
-      <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-white">
-        {/* =======================================================
-            TOP HEADER
-        ======================================================== */}
-        <header className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-8 py-4">
-          {/* Branch Selector */}
-          <button
-            type="button"
-            className="flex items-center text-sm font-medium text-gray-600 transition hover:text-blue-700"
-          >
-            <i className="fa-solid fa-code-branch mr-2" />
-            <span>Main Branch</span>
-            <i className="fa-solid fa-chevron-down ml-2 text-[10px]" />
-          </button>
+    <>
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+      <div className="font-[Inter,sans-serif] text-[#1e293b] antialiased flex h-screen overflow-hidden bg-[#f8fafc]">
 
-          {/* Header Actions */}
-          <div className="flex items-center space-x-6">
-            {/* Notification */}
-            <button
-              type="button"
-              aria-label="Notifications"
-              className="relative text-gray-400 transition hover:text-gray-600"
-            >
-              <i className="fa-regular fa-bell text-xl" />
+{/* BEGIN: Main Content */}
+<main className="flex-1 flex flex-col h-full overflow-hidden bg-[#f8fafc] relative">
+{/* BEGIN: Top Header */}
+<header className="h-[72px] bg-[#f8fafc] border-b border-[#e2e8f0] flex items-center justify-between px-8 shrink-0 z-10">
+<div className="flex items-center gap-4">
+{onBack && (
+<button type="button" aria-label="Go back" onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-slate-100">
+<svg viewBox="0 0 24 24" fill="none" stroke="#334155" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+<path d="M19 12H5" />
+<path d="m12 19-7-7 7-7" />
+</svg>
+</button>
+)}
+<div className="relative">
+<button type="button" onClick={() => setShowBranchMenu(v => !v)} className="flex items-center text-sm font-medium text-[#1e293b] cursor-pointer hover:text-[#1d4ed8] transition-colors">
+<i className="fa-solid fa-code-branch mr-2 text-[#64748b]"></i> Main Branch <i className="fa-solid fa-chevron-down ml-2 text-[10px] text-[#64748b]"></i>
+</button>
+<div className={`absolute top-9 left-0 z-30 bg-white border border-[#e2e8f0] rounded-lg shadow-lg p-2 w-44 ${showBranchMenu ? "block" : "hidden"}`}>
+<button type="button" className="w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-50">Main Branch</button>
+<button type="button" className="w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-50">Branch 02</button>
+</div>
+</div>
+</div>
+<div className="flex items-center space-x-6">
+<button className="text-[#64748b] hover:text-[#1e293b] relative">
+<i className="fa-regular fa-bell text-[20px]"></i>
+<span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-2.5 w-2.5">
+<span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#ef4444] border-2 border-[#f8fafc]"></span>
+</span>
+</button>
+<div className="flex items-center space-x-3 cursor-pointer pl-6 border-l border-[#e2e8f0]">
+<span className="text-sm font-bold text-[#1d4ed8]">HMS</span>
+<div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white">
+<i className="fa-solid fa-user text-sm"></i>
+</div>
+</div>
+</div>
+</header>
+{/* END: Top Header */}
+<div className="flex-1 overflow-y-auto relative">
+<div className="p-8 max-w-[1400px] mx-auto pb-32">
+{/* BEGIN: Patient Header Card */}
+<div className="bg-white rounded-[16px] border border-[#e2e8f0] p-6 shadow-sm mb-6 flex justify-between items-center">
+<div className="flex items-center">
+<img alt="Vijaya Nallusamy" className="w-20 h-20 rounded-full border-4 border-white shadow-sm object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCVmv5vhpN6g6IwvwVBONWYZS06j9iELGi3guKAqt6M68HTL3HxSslWkIMAEQjWeTlKNOdnc-Pipmecvq47y_J4JkJpXBa7ODMic8izxEnar0D-CTbCOUggEhRCTr29jfsIrqPw9jJJRvmghxFC8vXF6U5zjzrn_8ajoH2ovseUywhLI0FurjCqa2DjfMMM3yvISAkY7jN2EjygmPh_WvJa_vc06-pRUGw2Xu4pFrWdOcPdAl4HggI"/>
+<div className="ml-6">
+<div className="flex items-center space-x-3 mb-1">
+<h2 className="text-xl font-bold text-[#1e293b]">Vijaya Nallusamy</h2>
+<span className="bg-slate-100 text-[#64748b] px-3 py-1 rounded-full text-xs font-semibold">ONC-2026-10025</span>
+</div>
+<div className="text-sm text-[#64748b] flex items-center space-x-3">
+<span>51Y / Female</span>
+<span className="w-1 h-1 rounded-full bg-slate-300"></span>
+<span className="text-[#1d4ed8] font-semibold">Ductal Carcinoma Stage II</span>
+</div>
+</div>
+</div>
+<div className="flex items-center">
+<div className="flex space-x-8 px-8 border-r border-[#e2e8f0]">
+<div className="space-y-4">
+<div>
+<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">HEIGHT</div>
+<div className="font-bold text-sm">154 cm</div>
+</div>
+<div>
+<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BP</div>
+<div className="font-bold text-sm">118/74</div>
+</div>
+</div>
+<div className="space-y-4">
+<div>
+<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">WEIGHT</div>
+<div className="font-bold text-sm">52 kg</div>
+</div>
+<div>
+<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">PULSE</div>
+<div className="font-bold text-sm">78 bpm</div>
+</div>
+</div>
+<div className="space-y-4">
+<div>
+<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BSA</div>
+<div className="font-bold text-sm">1.49 m²</div>
+</div>
+<div>
+<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">TEMP</div>
+<div className="font-bold text-sm">36.8 °C</div>
+</div>
+</div>
+<div className="space-y-4">
+<div>
+<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BMI</div>
+<div className="font-bold text-sm">21.93</div>
+</div>
+<div>
+<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">SPO2</div>
+<div className="font-bold text-sm">99%</div>
+</div>
+</div>
+</div>
+<div className="pl-8">
+<div className="bg-blue-50/50 border border-blue-100 rounded-[12px] p-4 w-[220px]">
+<div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: NEOADJUVANT</div>
+<div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">TAXOL - WEEKLY</div>
+<div className="flex items-center text-xs text-[#64748b] font-medium">
+<span className="w-2 h-2 rounded-full bg-[#10b981] mr-2"></span> Active Protocol
+                    </div>
+</div>
+</div>
+</div>
+</div>
+{/* END: Patient Header Card */}
+{/* BEGIN: Tabs */}
+<div className="border-b border-[#e2e8f0] mb-6">
+<nav className="flex space-x-8">
+{tabs.map((tab) => (
+<button key={tab} type="button" onClick={() => { if (tab !== "Discharge") { onBack?.(); } }} className={`px-1 py-3 border-b-2 text-sm font-medium transition-colors ${tab === "Discharge" ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
+{tab}
+</button>
+))}
+</nav>
+</div>
+{/* END: Tabs */}
 
-              <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
-            </button>
-
-            {/* HMS */}
-            <span className="border-l border-gray-200 pl-6 text-sm font-medium text-blue-800">
-              HMS
-            </span>
-
-            {/* User Avatar */}
-            <img
-              alt="User Avatar"
-              className="h-8 w-8 rounded-full border border-gray-200 object-cover"
-              src="https://lh3.googleusercontent.com/aida-public/AB6AXuCIHvJge2LvW3eFD4wTRhjQKbm3gnRoVrLkP3VBa4O4COpx_fZtctxdLqVy9urkxL-4uufp5zE05ex8uATVruTBv8w3RnxlljNpLHnqsZd6xOKqZh7WnTU3UCA8FhoGVUGmoXnSJiFPy-3x4EH15iT3zgBRjrHNFeR9sfsk6gP0488Sn6S1ZonFNh1QB0_5LK3qCeSptn1A9VZ606w0fgrv3_erZzcv0vv0DAggBroA9clcMV21oxE"
-            />
-          </div>
-        </header>
-
-        {/* =======================================================
-            SCROLLABLE CONTENT
-        ======================================================== */}
-        <div className="flex-1 overflow-y-auto bg-[#fafafa] p-8">
-          {/* =====================================================
-              PATIENT HEADER CARD
-          ====================================================== */}
-          <section className="mb-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            {/* Alerts */}
-            <div className="mt-0 flex items-center justify-between border-t border-gray-100 pt-0">
-              <div className="flex flex-wrap gap-3">
-                {/* Allergy */}
-                <span className="inline-flex items-center rounded-md bg-red-100 px-3 py-1.5 text-sm font-medium text-red-700">
-                  <i className="fa-solid fa-triangle-exclamation mr-2 text-xs" />
-                  Allergy: Penicillin
-                </span>
-
-                {/* Previous Cycle */}
-                <span className="inline-flex items-center rounded-md bg-blue-100 px-3 py-1.5 text-sm font-medium text-blue-800">
-                  <i className="fa-solid fa-clock-rotate-left mr-2 text-xs" />
-                  Previous Cycle: Grade 2 Neutropenia
-                </span>
-
-                {/* Central Line */}
-                <span className="inline-flex items-center rounded-md bg-blue-100 px-3 py-1.5 text-sm font-medium text-blue-700">
-                  <i className="fa-regular fa-circle-check mr-2 text-xs" />
-                  Central Line Available
-                </span>
-              </div>
-
-              <button
-                type="button"
-                className="ml-4 flex shrink-0 items-center text-sm font-medium text-blue-800 transition hover:underline"
-              >
-                View Full Alerts (2)
-                <i className="fa-solid fa-arrow-right ml-1 text-xs" />
-              </button>
-            </div>
-          </section>
-
-          {/* =====================================================
-              NAVIGATION TABS
-          ====================================================== */}
-          <div className="mb-6 border-b border-gray-200">
-            <nav className="-mb-px flex gap-8 overflow-x-auto">
-              {/* Order Summary */}
-              <button
-                type="button"
-                className="whitespace-nowrap border-b-2 border-transparent px-1 py-4 text-lg font-medium text-gray-500 transition hover:border-gray-300 hover:text-gray-700"
-              >
-                Order Summary
-              </button>
-
-              {/* Medications */}
-              <button
-                type="button"
-                className="whitespace-nowrap border-b-2 border-transparent px-1 py-4 text-lg font-medium text-gray-500 transition hover:border-gray-300 hover:text-gray-700"
-              >
-                Medications
-              </button>
-
-              {/* Discharge - Active */}
-              <button
-                type="button"
-                className="whitespace-nowrap border-b-2 border-blue-800 px-1 py-4 text-lg font-medium text-blue-800"
-              >
-                Discharge
-              </button>
-
-              {/* History */}
-              <button
-                type="button"
-                className="whitespace-nowrap border-b-2 border-transparent px-1 py-4 text-lg font-medium text-gray-500 transition hover:border-gray-300 hover:text-gray-700"
-              >
-                History
-              </button>
-
-              {/* Notes */}
-              <button
-                type="button"
-                className="whitespace-nowrap border-b-2 border-transparent px-1 py-4 text-lg font-medium text-gray-500 transition hover:border-gray-300 hover:text-gray-700"
-              >
-                Notes & Documents
-              </button>
-            </nav>
-          </div>
-
+       
           {/* =====================================================
               MAIN GRID
           ====================================================== */}
@@ -8387,8 +8416,12 @@ function DischargeDetailsPortal() {
               </section>
             </div>
           </div>
-        </div>
-      </main>
-    </div>
+</div>
+</div>
+</main>
+{/* END: Main Content */}
+
+      </div>
+    </>
   );
 }
