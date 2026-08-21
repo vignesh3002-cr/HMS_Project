@@ -817,7 +817,7 @@ export default function DoctorDashboard() {
                       </td>
 
                       <td className="h-[50px] border-b border-slate-100 px-4 py-2 text-center">
-                        {(appointment.originalStatus === "SCHEDULED"|| appointment.originalStatus === "RESCHEDULED") && (
+                        {(appointment.originalStatus === "SCHEDULED"|| appointment.originalStatus === "RESCHEDULED" || appointment.originalStatus === "NOT_CHECKED_IN") && (
                           <button
                             type="button"
                             onClick={() => handleCheckIn(appointment.appointmentId)}
@@ -837,7 +837,7 @@ export default function DoctorDashboard() {
     )}
                           </button>
                         )}
-                        {(appointment.originalStatus === "IN_CONSULTATION") && (
+                        {(appointment.originalStatus === "IN_CONSULTATION" || appointment.originalStatus==="CHECKED_IN") && (
                           <button
                             type="button"
                             className="inline-flex items-center justify-center px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 transition-colors"
