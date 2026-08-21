@@ -84,7 +84,7 @@ import DoctorLeave from "./pages/doctor/LeavePage";
 import DoctorSchedule from "./pages/doctor/MySchedulePage";
 import DoctorReviews from "./pages/doctor/ReviewPage";
 import Consultation from "./pages/doctor/Patientconsut";
-import DoctorPatientProfile from "./pages/doctor/history"; 
+import DoctorPatientProfile from "./pages/doctor/notes and doc"; 
 
 // ============================================================
 // HOOKS / AUTH
