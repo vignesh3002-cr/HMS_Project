@@ -67,6 +67,13 @@ async function findNearestAvailableDate(
     try {
       const res = await appointmentApi.getAvailableSlots(doctorId, branchId, dateStr);
       const slots = res.data?.data?.slots || [];
+      const isCancelled = res.data?.data?.is_cancelled ?? false;
+      // Skip cancelled days when searching for nearest available date.
+      // On week-off/leave days (not cancelled) the form stays put with free-time entry.
+      if (isCancelled) {
+        continue;
+      }
+      // On normal scheduled days with available slots, jump to that date.
       if (slots.some((s) => s.is_available)) {
         return dateStr;
       }
@@ -221,6 +228,7 @@ export default function AddAppointment() {
   // selected branch (backend returns an empty slots array in that case) or the
   // slots request itself failed - shown as "Doctor is not assigned for this day".
   const [doctorUnavailable, setDoctorUnavailable] = useState(false);
+  const [slotsCancelled, setSlotsCancelled] = useState(false);
 
   // The selected doctor's active weekly schedules (from employeeApi.getOne) -
   // used to derive which weekdays they actually work at the selected branch,
@@ -357,15 +365,18 @@ export default function AddAppointment() {
           { includePast: true },
         );
         const slots = res.data.data?.slots || [];
+        const isCancelled = res.data.data?.is_cancelled ?? false;
+        setSlotsCancelled(isCancelled);
         setAvailableSlots(slots.filter((s) => s.is_available));
         // Empty slots array = the backend found no active schedule for this
         // doctor/branch/date (a fully-booked day still returns slot entries).
-        setDoctorUnavailable(slots.length === 0);
+        setDoctorUnavailable(slots.length === 0 && !isCancelled);
         openSlots = slots.filter((s) => s.is_available);
       } catch (error) {
         fetchError = error;
         setAvailableSlots([]);
         setDoctorUnavailable(true);
+        setSlotsCancelled(false);
       }
 
       if (cancelled) return;
@@ -589,7 +600,7 @@ export default function AddAppointment() {
     (doc) =>
       (!formData.departmentId || doc.department_id === formData.departmentId) &&
       (formData.branchId && formData.selectDate
-        ? doc.doctor_status === "ACTIVE" || doc.employee_id === formData.doctorId
+        ? true
         : true),
   );
 
@@ -887,8 +898,10 @@ export default function AddAppointment() {
                     ...doctorsForDropdown.map((doc) => {
                       const fullName = `Dr. ${doc.first_name}${doc.middle_name ? ` ${doc.middle_name}` : ""} ${doc.last_name}`;
                       const specialty = doc.specialization || doc.department_master?.department_name;
+                      const statusLabel =
+                        doc.doctor_status === "LEAVE" ? " (On Leave)" : "";
                       return {
-                        label: specialty ? `${fullName} (${specialty})` : fullName,
+                        label: `${fullName}${statusLabel}${specialty ? ` (${specialty})` : ""}`,
                         value: doc.employee_id,
                       };
                     }),
@@ -897,12 +910,8 @@ export default function AddAppointment() {
                   onValueChange={applyDoctorSelection}
                   placeholder={
                     formData.branchId && doctorsForDropdown.length === 0
-                      ? formData.selectDate
-                        ? "No doctors active on this date for this branch/department"
-                        : "No doctors match this branch/department"
-                      : doctors.length
-                        ? "Select Doctor"
-                        : "Loading doctors..."
+                      ? "No doctors available for this date (including on leave)"
+                      : "No doctors match this branch/department"
                   }
                 />
               </div>
@@ -1004,13 +1013,27 @@ export default function AddAppointment() {
                     <Loader2 className="w-4 h-4 animate-spin" />
                     Loading available slots...
                   </div>
+                ) : doctorUnavailable && slotsCancelled ? (
+                  <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
+                    Doctor is unavailable on this date (marked as cancelled)
+                  </div>
                 ) : doctorUnavailable ? (
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
                     Doctor is not assigned for this day
                   </div>
                 ) : availableSlots.length === 0 ? (
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
-                    No available time slots for this doctor on the selected date
+                    <input
+                      type="time"
+                      className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          timeSlot: e.target.value,
+                        }))
+                      }
+                      placeholder="Select a time"
+                    />
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
