@@ -486,7 +486,12 @@ const Consultation: React.FC = () => {
       name: "SUMMARY",
       active: activeStep === "SUMMARY",
        icon: <StepCheckLogo />,
-       
+
+    },
+    {
+      name: "HISTORY",
+      active: activeStep === "HISTORY",
+      icon: <StepCheckLogo />,
     },
   ];
 
@@ -852,6 +857,8 @@ const Consultation: React.FC = () => {
                   <FollowUp embedded patientId={patientDisplayId} />
 ) : activeStep === "SUMMARY" ? (
                   <Summary embedded patientId={patientDisplayId} />
+                ) : activeStep === "HISTORY" ? (
+                  <HistoryDashboard embedded />
                 ) : (
                   <>
                     {/* =================================================
@@ -7306,6 +7313,8 @@ const MedicationPortal: React.FC<{ onBackToProfile?: () => void }> = ({
                   </aside>
                 </div>
               </>
+            ) : activeTab === "History" ? (
+              <HistoryDashboard embedded />
             ) : (
               <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-sm">
                 <i className="fa-solid fa-file-medical mb-4 text-3xl text-[#0052cc]" />
@@ -7502,6 +7511,10 @@ function HMSPatientPortal() {
 </nav>
 </div>
 {/* END: Tabs */}
+{activeTab === "History" ? (
+<HistoryDashboard embedded />
+) : (
+<>
 <div className="flex space-x-6 mb-8">
 {/* Left Side (Timeline & Day Selector) */}
 <div className="flex-1 space-y-6">
@@ -7923,6 +7936,8 @@ function HMSPatientPortal() {
 </div>
 </div>
 {/* END: Instructions Card */}
+</>
+)}
 </div>
 </div>
 {/* BEGIN: Footer */}
@@ -7956,6 +7971,630 @@ function HMSPatientPortal() {
 }
 
 /* ============================================================
+   HISTORY DASHBOARD COMPONENT
+   (combined from client/pages/doctor/history.tsx —
+    renamed HealthcareDashboard → HistoryDashboard so it can
+    live in this file as an embedded step, embedded prop added,
+    original history.tsx file left untouched)
+============================================================ */
+
+const HistoryDashboard: React.FC<{ embedded?: boolean }> = ({
+  embedded = false,
+}) => {
+  const vitals = [
+    ["Height", "154 cm"],
+    ["Weight", "52 kg"],
+    ["BSA", "1.49 m²"],
+    ["BMI", "21.93"],
+    ["BP", "118/74"],
+    ["Pulse", "78 bpm"],
+    ["Temp", "36.8 °C"],
+    ["SPO2", "99%"],
+  ];
+
+  const cycles = [
+    {
+      cycle: "CYCLE 06 (FINAL)",
+      date: "16 Feb 2026 - 19 Feb 2026",
+      description:
+        "Protocol completed. Patient shows excellent clinical response with 80% tumor reduction.",
+        final: true,
+    },
+    {
+      cycle: "CYCLE 05",
+      date: "09 Feb 2026 - 12 Feb 2026",
+      description:
+        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
+        final: false,
+    },
+    {
+      cycle: "CYCLE 04",
+      date: "05 Feb 2026 - 07 Feb 2026",
+      description:
+        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
+        final: false,
+    },
+    {
+      cycle: "CYCLE 03",
+      date: "01 Feb 2026 - 03 Feb 2026",
+      description:
+        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
+        final: false,
+    },
+    {
+      cycle: "CYCLE 02",
+      date: "24 Jan 2026 - 28 Jan 2026",
+      description:
+        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
+        final: false,
+    },
+    {
+      cycle: "CYCLE 01",
+      date: "18 Jan 2026 - 21 Jan 2026",
+      description:
+        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
+        final: false,
+    },
+  ];
+
+  const cycleHistory = [
+    ["CYCLE 06", "16 Feb 2026 - 19 Feb 2026"],
+    ["CYCLE 05", "09 Feb 2026 - 12 Feb 2026"],
+    ["CYCLE 04", "05 Feb 2026 - 07 Feb 2026"],
+    ["CYCLE 03", "01 Feb 2026 - 03 Feb 2026"],
+    ["CYCLE 02", "24 Jan 2026 - 28 Jan 2026"],
+    ["CYCLE 01", "18 Jan 2026 - 21 Jan 2026"],
+  ];
+
+  const medications = [
+    {
+      medication: "Ondansetron",
+      start: "18 Jan 2026",
+      end: "Present",
+      dosage: "8 mg",
+      route: "Oral",
+      status: "ACTIVE",
+    },
+    {
+      medication: "Dexamethasone",
+      start: "18 Jan 2026",
+      end: "19 Feb 2026",
+      dosage: "20 mg",
+      route: "IV",
+      status: "COMPLETED",
+    },
+    {
+      medication: "Filgrastim",
+      start: "19 Jan 2026",
+      end: "24 Jan 2026",
+      dosage: "300 mcg",
+      route: "Subcutaneous",
+      status: "COMPLETED",
+    },
+  ];
+
+  /* =========================================================
+     CONTENT (PATIENT HEADER + HISTORY SECTIONS + ACTIONS)
+  ========================================================= */
+
+  const content = (
+    <>
+      {/* TIMELINE + RIGHT COLUMN */}
+      <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6 bg-slate-50/50">
+        {/* LEFT */}
+        <div className="lg:col-span-2">
+          <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <i className="fa-solid fa-chart-line text-blue-600" />
+
+                <h2 className="text-lg font-bold text-gray-900">
+                  Treatment Timeline
+                </h2>
+              </div>
+
+              <span className="text-sm font-medium text-gray-500">
+                Aug 2026 - Present
+              </span>
+            </div>
+
+            {/* Timeline */}
+            <div className="relative pl-4 space-y-6">
+              <div className="absolute left-[21px] top-4 bottom-4 w-px bg-gray-200" />
+
+              {cycles.map((item) => (
+                <div
+                  key={item.cycle}
+                  className="relative flex items-start"
+                >
+                  <div className="absolute left-[-4px] top-3 w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center ring-4 ring-white z-10">
+                    <i className="fa-solid fa-check text-white text-[10px]" />
+                  </div>
+
+                  <div
+                    className={`ml-8 w-full rounded-lg p-4 transition hover:shadow-md ${
+                      item.final
+                        ? "bg-blue-50/40 border border-blue-100"
+                        : "bg-white border border-gray-200"
+                    }`}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <h3
+                        className={`font-bold text-sm ${
+                          item.final
+                            ? "text-blue-700"
+                            : "text-gray-800"
+                        }`}
+                      >
+                        {item.cycle}
+                      </h3>
+
+                      <span className="text-sm text-gray-500">
+                        {item.date}
+                      </span>
+                    </div>
+
+                    <p className="text-sm text-gray-700">
+                      {item.description}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT */}
+        <div className="space-y-6">
+          {/* VITAL TREND */}
+          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+            <h2 className="text-base font-bold text-gray-900 mb-4">
+              Vitals Trend History
+            </h2>
+
+            <div className="mb-4">
+              <div className="flex justify-between text-xs text-gray-500 uppercase font-semibold mb-2">
+                <span>WEIGHT (KG)</span>
+                <span>Avg 51.8</span>
+              </div>
+
+              <div className="flex items-end h-12 gap-1">
+                <div className="w-full bg-blue-100 rounded-t h-[60%]" />
+                <div className="w-full bg-blue-200 rounded-t h-[65%]" />
+                <div className="w-full bg-blue-200 rounded-t h-[62%]" />
+                <div className="w-full bg-blue-200 rounded-t h-[68%]" />
+                <div className="w-full bg-blue-200 rounded-t h-[64%]" />
+                <div className="w-full bg-blue-700 rounded-t h-[70%]" />
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-gray-500 font-medium">
+                BP / PULSE / TEMP
+              </span>
+
+              <button
+                type="button"
+                className="text-blue-600 font-bold hover:underline"
+              >
+                VIEW DETAILED CHARTS
+              </button>
+            </div>
+          </div>
+
+          {/* DOCUMENT HISTORY */}
+          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-base font-bold text-gray-900">
+                Document History
+              </h2>
+
+              <button
+                type="button"
+                className="text-xs text-blue-600 font-bold hover:underline uppercase"
+              >
+                View All
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50/50 hover:bg-gray-50 transition">
+                <div className="flex items-center gap-3">
+                  <i className="fa-regular fa-file-pdf text-red-500 text-lg" />
+
+                  <div>
+                    <div className="text-sm font-semibold text-gray-800">
+                      Final_Summary.pdf
+                    </div>
+
+                    <div className="text-xs text-gray-500">
+                      19 Feb 2026
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <i className="fa-solid fa-download" />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50/50 hover:bg-gray-50 transition">
+                <div className="flex items-center gap-3">
+                  <i className="fa-regular fa-file-pdf text-red-500 text-lg" />
+
+                  <div>
+                    <div className="text-sm font-semibold text-gray-800">
+                      Cycle_6_Report.pdf
+                    </div>
+
+                    <div className="text-xs text-gray-500">
+                      16 Feb 2026
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <i className="fa-solid fa-download" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* CHEMOTHERAPY CYCLE HISTORY */}
+      <section className="px-6 pb-6">
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="flex justify-between items-center p-5 border-b border-gray-200 bg-gray-50/50">
+            <h2 className="text-lg font-bold text-gray-900">
+              Chemotherapy Cycle History
+            </h2>
+
+            <button
+              type="button"
+              className="text-sm text-blue-600 font-bold hover:underline"
+            >
+              View Protocol Details
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-6 py-3 font-semibold">
+                    Cycle
+                  </th>
+
+                  <th className="px-6 py-3 font-semibold">
+                    Dates
+                  </th>
+
+                  <th className="px-6 py-3 font-semibold">
+                    Agent
+                  </th>
+
+                  <th className="px-6 py-3 font-semibold">
+                    Planned Dose
+                  </th>
+
+                  <th className="px-6 py-3 font-semibold">
+                    Actual Dose
+                  </th>
+
+                  <th className="px-6 py-3 font-semibold text-right">
+                    Outcome
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-gray-100">
+                {cycleHistory.map(([cycle, dates]) => (
+                  <tr
+                    key={cycle}
+                    className="hover:bg-gray-50"
+                  >
+                    <td className="px-6 py-4 font-medium text-gray-900">
+                      {cycle}
+                    </td>
+
+                    <td className="px-6 py-4 text-gray-500">
+                      {dates}
+                    </td>
+
+                    <td className="px-6 py-4 text-gray-700">
+                      Paclitaxel
+                    </td>
+
+                    <td className="px-6 py-4 text-gray-700">
+                      80 mg/m²
+                    </td>
+
+                    <td className="px-6 py-4 text-gray-700">
+                      80 mg/m²
+                    </td>
+
+                    <td className="px-6 py-4 text-right">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                        SUCCESSFUL
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {/* MEDICATION HISTORY */}
+      <section className="px-6 pb-6">
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="flex justify-between items-center p-5 border-b border-gray-200 bg-gray-50/50">
+            <h2 className="text-lg font-bold text-gray-900">
+              Medication History
+            </h2>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-6 py-3 font-semibold">
+                    Medication
+                  </th>
+
+                  <th className="px-6 py-3 font-semibold">
+                    Start Date
+                  </th>
+
+                  <th className="px-6 py-3 font-semibold">
+                    End Date
+                  </th>
+
+                  <th className="px-6 py-3 font-semibold">
+                    Dosage
+                  </th>
+
+                  <th className="px-6 py-3 font-semibold">
+                    Route
+                  </th>
+
+                  <th className="px-6 py-3 font-semibold text-right">
+                    Status
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-gray-100">
+                {medications.map((medication) => (
+                  <tr
+                    key={medication.medication}
+                    className="hover:bg-gray-50"
+                  >
+                    <td className="px-6 py-4 font-medium text-gray-900">
+                      {medication.medication}
+                    </td>
+
+                    <td className="px-6 py-4 text-gray-500">
+                      {medication.start}
+                    </td>
+
+                    <td className="px-6 py-4 text-gray-500">
+                      {medication.end}
+                    </td>
+
+                    <td className="px-6 py-4 text-gray-700">
+                      {medication.dosage}
+                    </td>
+
+                    <td className="px-6 py-4 text-gray-700">
+                      {medication.route}
+                    </td>
+
+                    <td className="px-6 py-4 text-right">
+                      {medication.status === "ACTIVE" ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                          ACTIVE
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                          COMPLETED
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {/* ADVERSE EVENTS */}
+      <section className="px-6 pb-6">
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="flex justify-between items-center p-5 border-b border-gray-200 bg-gray-50/50">
+            <h2 className="text-lg font-bold text-gray-900">
+              Adverse Events History
+            </h2>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-6 py-3 font-semibold">
+                    Date
+                  </th>
+
+                  <th className="px-6 py-3 font-semibold">
+                    Event
+                  </th>
+
+                  <th className="px-6 py-3 font-semibold">
+                    Grade
+                  </th>
+
+                  <th className="px-6 py-3 font-semibold">
+                    Action Taken
+                  </th>
+
+                  <th className="px-6 py-3 font-semibold text-right">
+                    Outcome
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-gray-100">
+                <tr className="hover:bg-gray-50">
+                  <td className="px-6 py-4 text-gray-500">
+                    12 Feb 2026
+                  </td>
+
+                  <td className="px-6 py-4 font-medium text-gray-900">
+                    Peripheral Neuropathy
+                  </td>
+
+                  <td className="px-6 py-4 text-gray-700">
+                    Grade 1
+                  </td>
+
+                  <td className="px-6 py-4 text-gray-700">
+                    Dose maintained
+                  </td>
+
+                  <td className="px-6 py-4 text-right">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                      ONGOING
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {/* ACTION BUTTONS */}
+      <div className="px-6 pb-8 flex justify-end gap-4">
+        <button
+          type="button"
+          className="px-6 py-2.5 border border-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-colors text-sm"
+        >
+          Save &amp; Exit
+        </button>
+
+        <button
+          type="button"
+          className="px-6 py-2.5 border border-blue-600 text-blue-600 font-semibold rounded-lg hover:bg-blue-50 transition-colors text-sm"
+        >
+          Generate Report
+        </button>
+
+        <button
+          type="button"
+          className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm text-sm"
+        >
+          Submit Review
+        </button>
+      </div>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <>
+        <link
+          rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+        />
+        <div className="w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          {content}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <link
+        rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+      />
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      />
+      <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800 font-sans">
+        {/* TOP HEADER */}
+        <header className="bg-[#f2f4f7] border-b border-gray-200 px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <i className="fa-solid fa-code-branch text-gray-500" />
+
+            <span className="font-medium text-gray-800">
+              Main Branch
+            </span>
+
+            <i className="fa-solid fa-chevron-down text-gray-500 text-xs" />
+          </div>
+
+          <div className="flex items-center gap-6">
+            <div className="relative">
+              <i className="fa-regular fa-bell text-gray-500 text-lg" />
+
+              <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border border-white" />
+            </div>
+
+            <span className="text-blue-600 font-semibold text-sm">
+              HMS
+            </span>
+
+            <div className="w-8 h-8 rounded-full bg-slate-800 border-2 border-slate-300 flex items-center justify-center overflow-hidden">
+              <i className="fa-solid fa-user text-white text-xs" />
+            </div>
+          </div>
+        </header>
+
+        {/* MAIN CONTENT */}
+        <main className="max-w-[1400px] mx-auto bg-white flex-grow pb-12 w-full shadow-sm">
+          {content}
+        </main>
+
+        {/* FOOTER */}
+        <footer className="bg-white border-t border-gray-200 mt-auto">
+          <div className="max-w-[1400px] mx-auto px-6 py-6 flex flex-col md:flex-row justify-between items-center text-sm text-gray-500">
+            <div className="mb-4 md:mb-0">
+              © 2026 Hospital Management System. All rights reserved.
+            </div>
+
+            <div className="flex gap-6">
+              <button className="hover:text-gray-900 transition-colors">
+                Privacy Policy
+              </button>
+
+              <button className="hover:text-gray-900 transition-colors">
+                Terms of Service
+              </button>
+
+              <button className="hover:text-gray-900 transition-colors">
+                Help Center
+              </button>
+            </div>
+          </div>
+        </footer>
+      </div>
+    </>
+  );
+};
+
+/* ============================================================
    PATIENT DISCHARGE DASHBOARD COMPONENT
    (combined from client/pages/doctor/discharage  details.tsx —
     renamed PatientDischargeDashboard → DischargeDetailsPortal
@@ -7964,6 +8603,7 @@ function HMSPatientPortal() {
 
 function DischargeDetailsPortal({ onBack }: { onBack?: () => void }) {
   const [showBranchMenu, setShowBranchMenu] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   const tabs = [
     "Order Summary",
@@ -8138,7 +8778,7 @@ function DischargeDetailsPortal({ onBack }: { onBack?: () => void }) {
 <div className="border-b border-[#e2e8f0] mb-6">
 <nav className="flex space-x-8">
 {tabs.map((tab) => (
-<button key={tab} type="button" onClick={() => { if (tab !== "Discharge") { onBack?.(); } }} className={`px-1 py-3 border-b-2 text-sm font-medium transition-colors ${tab === "Discharge" ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
+<button key={tab} type="button" onClick={() => { if (tab === "History") { setShowHistory(true); return; } setShowHistory(false); if (tab !== "Discharge") { onBack?.(); } }} className={`px-1 py-3 border-b-2 text-sm font-medium transition-colors ${tab === "Discharge" ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
 {tab}
 </button>
 ))}
@@ -8150,6 +8790,9 @@ function DischargeDetailsPortal({ onBack }: { onBack?: () => void }) {
           {/* =====================================================
               MAIN GRID
           ====================================================== */}
+          {showHistory ? (
+            <HistoryDashboard embedded />
+          ) : (
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
             {/* ===================================================
                 LEFT COLUMN
@@ -8416,6 +9059,7 @@ function DischargeDetailsPortal({ onBack }: { onBack?: () => void }) {
               </section>
             </div>
           </div>
+          )}
 </div>
 </div>
 </main>
