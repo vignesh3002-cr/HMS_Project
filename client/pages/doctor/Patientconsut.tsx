@@ -96,6 +96,10 @@ const Consultation: React.FC = () => {
     string[]
   >([]);
 
+  const [investigationNotes, setInvestigationNotes] = useState<
+    Record<string, string>
+  >({});
+
   const [showLabReview, setShowLabReview] = useState(false);
   const [activeStep, setActiveStep] = useState("CONSULTATION");
   const [showProfilePortal, setShowProfilePortal] = useState(false);
@@ -1200,6 +1204,39 @@ const Consultation: React.FC = () => {
 
                   </div>
 
+                  {selectedInvestigations.length > 0 && (
+                    <div className="flex w-full flex-col gap-4 pt-2">
+
+                      {selectedInvestigations.map((investigation) => (
+
+                        <div
+                          key={investigation}
+                          className="flex flex-col gap-2"
+                        >
+
+                          <label className="text-xs font-bold leading-4 text-slate-500">
+                            Clinical Notes - {investigation}
+                          </label>
+
+                          <textarea
+                            value={investigationNotes[investigation] ?? ""}
+                            onChange={(e) =>
+                              setInvestigationNotes((prev) => ({
+                                ...prev,
+                                [investigation]: e.target.value,
+                              }))
+                            }
+                            placeholder={`Enter clinical notes for ${investigation}`}
+                            className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-300"
+                          />
+
+                        </div>
+
+                      ))}
+
+                    </div>
+                  )}
+
                   <div className="flex w-full flex-col gap-2 pt-2">
 
                     <label className="text-xs font-bold leading-4 text-slate-500">
@@ -1940,7 +1977,10 @@ const Diagnosis: React.FC<{
     );
   };
 
-  const loadSubtypesForCancerType = (cancerTypeId: string) => {
+  const loadSubtypesForCancerType = (
+    cancerTypeId: string,
+    autoSelectIcd = true
+  ) => {
     if (!cancerTypeId) return;
     const requestId = ++diagnosisRequestRef.current;
     setDiagnosisLoading(true);
@@ -1954,10 +1994,10 @@ const Diagnosis: React.FC<{
         const items = response.data.data;
         setSubtypes(items);
         const first = items[0];
-        if (first) {
+        if (first && autoSelectIcd) {
           setFormData((previous) => ({
             ...previous,
-            icdCode: first.icd10_subtype ?? "",
+            icdCode: previous.icdCode || first.icd10_subtype || "",
           }));
         }
       })
@@ -1976,7 +2016,10 @@ const Diagnosis: React.FC<{
       });
   };
 
-  const loadStagesForCancerType = (cancerTypeId: string) => {
+  const loadStagesForCancerType = (
+    cancerTypeId: string,
+    resetStageSelection = true
+  ) => {
     if (!cancerTypeId) return;
     const requestId = ++stagingRequestRef.current;
     setDiagnosisLoading(true);
@@ -2027,6 +2070,7 @@ const Diagnosis: React.FC<{
         }
         setTnmStages(tnmOptions.sort());
         setGrades(gradeOptions.sort());
+        if (!resetStageSelection) return;
         setFormData((previous) => ({
           ...previous,
           cancerStage: "",
@@ -2058,13 +2102,35 @@ const Diagnosis: React.FC<{
         const fetched = response.data.data;
         setCancerTypes(fetched);
 
+        let savedType = "";
+        try {
+          const savedDraft = JSON.parse(
+            localStorage.getItem(diagnosisDraftKey) ?? ""
+          ) as Partial<FormData> | null;
+          savedType = savedDraft?.type ?? "";
+        } catch (error) {
+          console.error("Failed to read diagnosis draft:", error);
+        }
+
+        const matchedSavedType = savedType
+          ? fetched.find((item) => item.cancer_type === savedType)
+          : undefined;
+
+        if (matchedSavedType) {
+          // Restoring a saved draft: reload options for the saved
+          // type without overwriting the user's selections.
+          loadSubtypesForCancerType(matchedSavedType.cancer_type_id, false);
+          loadStagesForCancerType(matchedSavedType.cancer_type_id, false);
+          return;
+        }
+
         const initial = fetched[0];
 
         if (initial) {
           setFormData((previous) => ({
             ...previous,
-            type: initial.cancer_type,
-            icdCode: initial.icd10 ?? "",
+            type: previous.type || initial.cancer_type,
+            icdCode: previous.icdCode || initial.icd10 || "",
           }));
           loadSubtypesForCancerType(initial.cancer_type_id);
           loadStagesForCancerType(initial.cancer_type_id);
@@ -2929,17 +2995,6 @@ if (embedded) {
             </tbody>
           </table>
         </div>
-
-        {/* Add Drug */}
-        <div className="flex justify-end p-6">
-          <button
-            type="button"
-            onClick={handleAddDrug}
-            className="rounded border border-blue-600 px-6 py-2 text-sm font-semibold text-blue-600 transition-colors duration-200 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-          >
-            Add Drug
-          </button>
-        </div>
       </div>
 
       {/* FOOTER ACTION */}
@@ -3185,17 +3240,6 @@ if (embedded) {
                     ))}
                   </tbody>
                 </table>
-              </div>
-
-              {/* Add Drug */}
-              <div className="flex justify-end p-6">
-                <button
-                  type="button"
-                  onClick={handleAddDrug}
-                  className="rounded border border-blue-600 px-6 py-2 text-sm font-semibold text-blue-600 transition-colors duration-200 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                >
-                  Add Drug
-                </button>
               </div>
             </div>
 
@@ -4170,17 +4214,6 @@ const ChemotherapyOrder: React.FC<{
                   ))}
                 </tbody>
               </table>
-            </div>
-
-            {/* Add Drug */}
-            <div className="mt-6 flex justify-end">
-              <button
-                type="button"
-                onClick={handleAddDrug}
-                className="inline-flex items-center justify-center rounded-md border border-blue-200 bg-blue-50 px-6 py-2.5 text-sm font-semibold text-blue-600 shadow-sm transition-colors hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-              >
-                Add Drug
-              </button>
             </div>
           </div>
         ) : activeTab === "Premedication" ? (
@@ -6747,6 +6780,11 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
     URL.revokeObjectURL(url);
   };
 
+  const handleSubmitSummary = () => {
+    if (!resolvedPatientId) return;
+    localStorage.removeItem(`hms_diagnosis_form_${resolvedPatientId}`);
+  };
+
   const Step = ({
     label,
     active = false,
@@ -7056,6 +7094,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
       <div className="mb-8 flex flex-wrap justify-end gap-4">
         <button
           type="button"
+          onClick={handleSubmitSummary}
           className="rounded-md bg-[#5624D0] px-8 py-3 font-medium text-white shadow-sm transition-colors hover:bg-[#4a1fb5]"
         >
           Submit
