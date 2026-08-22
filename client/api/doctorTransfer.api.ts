@@ -21,8 +21,21 @@ export interface InitiateTransferPayload {
   new_department_id?: string;
   effective_date: string;
   transfer_reason: string;
-  working_hours: TransferWorkingHour[];
+  working_hours?: TransferWorkingHour[];
   consultation_minutes?: number;
+
+  // Date-specific schedule change routed through the transfer flow so
+  // ADD/OVERRIDE/CANCEL notes get the appointment-protection popup.
+  schedule_change?: {
+    action: "CREATE" | "UPDATE" | "DELETE";
+    mode: "ADD" | "OVERRIDE" | "CANCEL";
+    branch_id: string;
+    change_date: string;
+    start_time?: string;
+    end_time?: string;
+    reason?: string;
+    change_id?: number;
+  };
 }
 
 export interface TransferAppointmentSummary {

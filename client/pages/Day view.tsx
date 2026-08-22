@@ -635,7 +635,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   // Backend/HMS_Backend/src/modules/appointment/appointment.constants.ts) --
   // matching that here means a cancelled booking correctly frees its slot
   // back up as "New slot available" instead of looking permanently taken.
-  const NON_BLOCKING_STATUSES = useMemo(() => new Set(["CANCELLED", "NO_SHOW", "NOT_CHECKED_IN"]), []);
+  const NON_BLOCKING_STATUSES = useMemo(() => new Set(["CANCELLED", "NO_SHOW"]), []);
 
   // Fixed 24-hour axis, 12:00 AM through 11:00 PM, always fully shown --
   // independent of any doctor's actual shift, so the grid never hides part

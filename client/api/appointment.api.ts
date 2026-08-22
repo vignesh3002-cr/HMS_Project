@@ -104,6 +104,7 @@ export interface GetAppointmentsParams {
   date?: string;
   dateFrom?: string;
   dateTo?: string;
+  excludeStatuses?: string;
   sortBy?: "appointment_date" | "created_at" | "token_number" | "status";
   sortOrder?: "asc" | "desc";
   page?: number;

@@ -10,6 +10,7 @@ import { branchApi, Branch } from "@/api/branch.api";
 import { getUser } from "@/utils/token";
 import { departmentApi, Department } from "@/api/department.api";
 import { employeeApi, type EmployeeRecord, type DoctorScheduleRecord } from "@/api/employee.api";
+import { doctorScheduleApi, type ScheduleChangeRecord } from "@/api/doctorSchedule.api";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
 import {
   appointmentApi,
@@ -110,6 +111,20 @@ function timeStringToMinutes(time: string): number {
   const [hours, minutes] = time.split(":").map(Number);
   return hours * 60 + minutes;
 }
+
+// The hospital operates in Asia/Kolkata (IST), UTC+05:30 with no daylight
+// saving. "Now" in IST is UTC now shifted by a fixed offset, so Local and
+// Vercel behave identically regardless of the browser/server timezone.
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+const getNowInIST = () => new Date(Date.now() + IST_OFFSET_MS);
+const getTodayInIST = () => {
+  const d = getNowInIST();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+};
+const getNowMinutesInIST = () => {
+  const d = getNowInIST();
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
+};
 
 const inputClass =
   "w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200";
@@ -226,6 +241,13 @@ export default function AddAppointment() {
   // used to derive which weekdays they actually work at the selected branch,
   // so the calendar only enables those dates.
   const [doctorSchedules, setDoctorSchedules] = useState<DoctorScheduleRecord[]>([]);
+
+  // Date-specific (non-recurring) schedule changes for the selected doctor:
+  // ADD / OVERRIDE / CANCEL records pinned to exact dates (created from the
+  // doctor's Day/Week view). The calendar needs these so a one-off working
+  // date WITHOUT any recurring template row becomes selectable, while a
+  // CANCELLED date gets disabled even though its weekday has a template.
+  const [doctorChanges, setDoctorChanges] = useState<ScheduleChangeRecord[]>([]);
 
   // Doctors actually assigned to the currently selected branch -- used to
   // narrow the Department and Doctor dropdowns down to what's actually
@@ -354,14 +376,24 @@ export default function AddAppointment() {
           formData.doctorId,
           formData.branchId,
           formData.selectDate,
-          { includePast: true },
         );
         const slots = res.data.data?.slots || [];
-        setAvailableSlots(slots.filter((s) => s.is_available));
+
+        // Defensive client-side filter: for today (in IST) drop any slot whose
+        // time is at or before the current IST time. The backend is the source
+        // of truth, but a past slot must never leak through to the UI.
+        const todayInIST = getTodayInIST();
+        const nowMinutesInIST = getNowMinutesInIST();
+        const isTodayIST = formData.selectDate === todayInIST;
+        const futureSlots = slots.filter(
+          (s) => s.is_available && (!isTodayIST || timeStringToMinutes(s.time) > nowMinutesInIST),
+        );
+
+        setAvailableSlots(futureSlots);
         // Empty slots array = the backend found no active schedule for this
         // doctor/branch/date (a fully-booked day still returns slot entries).
         setDoctorUnavailable(slots.length === 0);
-        openSlots = slots.filter((s) => s.is_available);
+        openSlots = futureSlots;
       } catch (error) {
         fetchError = error;
         setAvailableSlots([]);
@@ -434,8 +466,8 @@ export default function AddAppointment() {
         // highlighted.
         const preferredMinutes = timeStringToMinutes(preferredTime);
         const exact = openSlots.find((s) => timeStringToMinutes(s.time) === preferredMinutes);
-        const isToday = formData.selectDate === format(new Date(), "yyyy-MM-dd");
-        const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+        const isToday = formData.selectDate === getTodayInIST();
+        const nowMinutes = getNowMinutesInIST();
         const preferredIsPast = isToday && preferredMinutes <= nowMinutes;
 
         if (exact) {
@@ -623,11 +655,63 @@ export default function AddAppointment() {
     return days;
   }, [doctorSchedules, formData.doctorId, formData.branchId]);
 
+  // Exact-date meanings from the doctor's Day/Week view schedule changes,
+  // scoped to the selected branch: ISO yyyy-mm-dd -> what was pinned there.
+  const changeInfoByDate = useMemo(() => {
+    const map = new Map<string, { cancelled: boolean; extra: boolean }>();
+    for (const c of doctorChanges) {
+      if (formData.branchId && c.branch_id !== formData.branchId) continue;
+      const match = /^(\d{4}-\d{2}-\d{2})/.exec(c.change_date ?? "");
+      if (!match) continue;
+      const entry = map.get(match[1]) ?? { cancelled: false, extra: false };
+      if (c.mode === "CANCEL") entry.cancelled = true;
+      else if (c.mode === "ADD" || c.mode === "OVERRIDE") entry.extra = true;
+      map.set(match[1], entry);
+    }
+    return map;
+  }, [doctorChanges, formData.branchId]);
+
   const isDateDisabled = (date: Date) => {
     if (!formData.doctorId || !formData.branchId) return false;
+
+    // Date-specific changes take priority over the weekly template: a
+    // CANCELLED date is always off, while an ADD/OVERRIDE date is always
+    // selectable -- the slots API serves real bookable slots for it even
+    // when the weekday has no recurring template row.
+    const info = changeInfoByDate.get(format(date, "yyyy-MM-dd"));
+    if (info?.cancelled) return true;
+    if (info?.extra) return false;
+
+    if (!workingWeekdays) return false;
     if (workingWeekdays.size === 0) return true;
     return !workingWeekdays.has(format(date, "EEEE").toUpperCase());
   };
+
+  // The slots API can return the same time more than once (e.g. overlapping
+  // schedule rows) and the Day View flow injects a matching slot, so dedupe
+  // by the slot's actual minute value before rendering.
+  const uniqueSlots = useMemo(() => {
+    const seen = new Set<number>();
+    return [...availableSlots]
+      .sort((a, b) => timeStringToMinutes(a.time) - timeStringToMinutes(b.time))
+      .filter((s) => {
+        const m = timeStringToMinutes(s.time);
+        if (seen.has(m)) return false;
+        seen.add(m);
+        return true;
+      });
+  }, [availableSlots]);
+
+  // Loads the selected doctor's date-specific ADD/OVERRIDE/CANCEL records
+  // (best effort — a failure just means the calendar falls back to the
+  // weekly-template rules).
+  const loadDoctorChanges = (doctorId: string) =>
+    doctorScheduleApi
+      .getChanges(doctorId)
+      .then((res) =>
+        setDoctorChanges((res.data?.data ?? []).filter((c) => c.is_active !== false)),
+      )
+      .catch(() => setDoctorChanges([]));
 
   // Shared by the Doctor dropdown's onValueChange and the doctor-preselect
   // effect below -- looks up the doctor's real specialization/department and
@@ -648,7 +732,10 @@ export default function AddAppointment() {
       timeSlot: "",
     }));
 
-    if (!val) return;
+    if (!val) {
+      setDoctorChanges([]);
+      return;
+    }
 
     setFindingNearestDate(true);
 
@@ -657,6 +744,7 @@ export default function AddAppointment() {
       .then((res) => {
         const mappedBranches = activeBranches(res.data?.data?.branches || []);
         setDoctorSchedules(res.data?.data?.doctorSchedules || []);
+        void loadDoctorChanges(val);
         const nextBranchId =
           mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
           mappedBranches[0]?.branch_id;
@@ -716,6 +804,7 @@ export default function AddAppointment() {
       .getOne(preselectedSlot.doctorId)
       .then((res) => setDoctorSchedules(res.data?.data?.doctorSchedules || []))
       .catch(() => {});
+    void loadDoctorChanges(preselectedSlot.doctorId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preselectedSlot]);
 
@@ -1014,11 +1103,9 @@ export default function AddAppointment() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                    {[...availableSlots]
-                      .sort((a, b) => timeStringToMinutes(a.time) - timeStringToMinutes(b.time))
-                      .map((slot) => (
+                    {uniqueSlots.map((slot) => (
                       <button
-                        key={`${slot.schedule_id}-${slot.time}`}
+                        key={slot.time}
                         type="button"
                         onClick={() => setFormData((prev) => ({ ...prev, timeSlot: slot.time }))}
                         className={`h-10 text-sm font-bold rounded-lg transition-all duration-200 ${

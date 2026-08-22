@@ -28,6 +28,7 @@ import {
   Shield,
   Key,
   ClipboardList,
+  Activity,
 } from "lucide-react";
 
 const navIcon: Record<string, React.ReactNode> = {
@@ -39,6 +40,7 @@ const navIcon: Record<string, React.ReactNode> = {
   "Reschedule Queue": <ClipboardList size={16} />,
   Billing: <Receipt size={16} />,
   Protocol: <FileText size={16} />,
+  Cancer: <Activity size={16} />,
   Admin: <Settings size={16} />,
   Permissions: <Shield size={16} />,
   Roles: <Key size={16} />,
@@ -83,11 +85,24 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
   // Admin nav item is a label that toggles a Permissions/Roles dropdown
   // instead of linking to the old AdminDashboard hub page.
   const isAdminSectionActive = /^\/admin(\/|$)/i.test(location.pathname);
-  const [adminMenuOpen, setAdminMenuOpen] = useState(isAdminSectionActive);
+
+  // Protocol nav item is also a label that toggles a Cancer dropdown
+  // instead of linking directly to the Protocol master page.
+  const isProtocolSectionActive = /^\/protocol(\/|$)/i.test(location.pathname);
+
+  // Tracks which dropdown section is currently expanded (by label).
+  const [openMenu, setOpenMenu] = useState<string | null>(() =>
+    isAdminSectionActive
+      ? "Admin"
+      : isProtocolSectionActive
+        ? "Protocol"
+        : null,
+  );
 
   useEffect(() => {
-    if (isAdminSectionActive) setAdminMenuOpen(true);
-  }, [isAdminSectionActive]);
+    if (isAdminSectionActive) setOpenMenu("Admin");
+    else if (isProtocolSectionActive) setOpenMenu("Protocol");
+  }, [isAdminSectionActive, isProtocolSectionActive]);
 
   const [logoutOpen, setLogoutOpen] = useState(false);
 
@@ -125,6 +140,11 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
       ]
     : [];
 
+  // Protocol is a dropdown header (like Admin) whose sub-pages live under
+  // /protocol/... . It is shown for every user (no permission gate) so the
+  // Protocol master page always loads.
+  const protocolChildren = [{ label: "Cancer", to: "/protocol/cancer" }];
+
   const navItems = [
     { label: "Dashboard", to: "/dashboard" },
     { label: "Staff", to: "/staff", permission: "employee.read" },
@@ -141,7 +161,10 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
       permission: "doctor.transfer",
     },
     { label: "Billing", to: "/billing" },
-    { label: "Protocol", to: "/protocol", hasArrow: true },
+    {
+      label: "Protocol",
+      children: protocolChildren,
+    },
     ...(adminChildren.length > 0
       ? [
           {
@@ -215,10 +238,18 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
                 <div key={item.label}>
                   <button
                     type="button"
-                    onClick={() => setAdminMenuOpen((open) => !open)}
+                    onClick={() =>
+                      setOpenMenu((current) =>
+                        current === item.label ? null : item.label,
+                      )
+                    }
                     className={cn(
                       "w-full flex items-center gap-2 px-3 py-2 rounded-[4px] text-xs font-semibold tracking-[0.6px] capitalize",
-                      isAdminSectionActive
+                      (item.label === "Admin"
+                        ? isAdminSectionActive
+                        : item.label === "Protocol"
+                          ? isProtocolSectionActive
+                          : false)
                         ? "bg-[#00488D] text-white shadow-sm"
                         : "text-[#475569] hover:bg-[#E6E8EA]",
                     )}
@@ -229,11 +260,11 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
                       size={12}
                       className={cn(
                         "ml-auto transition-transform duration-150",
-                        adminMenuOpen && "rotate-180",
+                        openMenu === item.label && "rotate-180",
                       )}
                     />
                   </button>
-                  {adminMenuOpen && (
+                  {openMenu === item.label && (
                     <div className="ml-6 mt-1 flex flex-col gap-1">
                       {item.children.map((child) => (
                         <NavLink
@@ -279,7 +310,6 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
                 >
                   {navIcon[item.label]}
                   {item.label}
-                  {item.hasArrow && <ChevronDown size={12} className="ml-auto" />}
                 </NavLink>
               ),
             )}

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2, MoreVertical } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import HmsTable from "@/components/hms/HmsTable";
-import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
+import { format, isToday, isTomorrow, isYesterday, addDays, subDays, startOfWeek, endOfWeek, subWeeks, startOfMonth, endOfMonth, subMonths } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import { useFilterPanel, useDashboardFilters } from "@/components/Filter";
@@ -14,7 +14,6 @@ import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { encounterApi, type EncounterRecord } from "@/api/encounter.api";
 import { patientApi } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
-import { getEffectiveAppointmentStatus } from "@/lib/appointmentStatus";
 import { branchApi } from "@/api/branch.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
@@ -215,8 +214,44 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
     reason: doc.reason_for_visit || "—",
     date: formatDateOnly(doc.appointment_date),
     time: formatTimeOnly(doc.appointment_time),
-    status: formatAppointmentStatus(getEffectiveAppointmentStatus(doc)),
+    status: formatAppointmentStatus(doc.status ?? ""),
   };
+}
+
+type BranchPerfRange = "today" | "yesterday" | "tomorrow" | "thisWeek" | "lastWeek" | "thisMonth" | "lastMonth";
+
+const BRANCH_PERF_RANGE_OPTIONS: { value: BranchPerfRange; label: string }[] = [
+  { value: "today", label: "Today" },
+  { value: "yesterday", label: "Yesterday" },
+  { value: "tomorrow", label: "Tomorrow" },
+  { value: "thisWeek", label: "This Week" },
+  { value: "lastWeek", label: "Last Week" },
+  { value: "thisMonth", label: "This Month" },
+  { value: "lastMonth", label: "Last Month" },
+];
+
+function getBranchPerfRangeDates(range: BranchPerfRange, base: Date): { dateFrom: string; dateTo: string } {
+  const weekStart = startOfWeek(base, { weekStartsOn: 1 });
+  const weekEnd = endOfWeek(base, { weekStartsOn: 1 });
+  const lastWeekStart = subWeeks(weekStart, 1);
+  const lastWeekEnd = subWeeks(weekEnd, 1);
+  const monthStart = startOfMonth(base);
+  const monthEnd = endOfMonth(base);
+  const lastMonthStart = startOfMonth(subMonths(base, 1));
+  const lastMonthEnd = endOfMonth(subMonths(base, 1));
+
+  const ranges: Record<BranchPerfRange, { dateFrom: Date; dateTo: Date }> = {
+    today: { dateFrom: base, dateTo: base },
+    yesterday: { dateFrom: subDays(base, 1), dateTo: subDays(base, 1) },
+    tomorrow: { dateFrom: addDays(base, 1), dateTo: addDays(base, 1) },
+    thisWeek: { dateFrom: weekStart, dateTo: weekEnd },
+    lastWeek: { dateFrom: lastWeekStart, dateTo: lastWeekEnd },
+    thisMonth: { dateFrom: monthStart, dateTo: monthEnd },
+    lastMonth: { dateFrom: lastMonthStart, dateTo: lastMonthEnd },
+  };
+
+  const { dateFrom, dateTo } = ranges[range];
+  return { dateFrom: format(dateFrom, "yyyy-MM-dd"), dateTo: format(dateTo, "yyyy-MM-dd") };
 }
 
 function parseStatValue(value: string): number {
@@ -451,8 +486,9 @@ export default function Dashboard() {
   // Each branch's pct/color is driven purely by its own real total
   // appointment count (not a share of the other branches' totals), bucketed
   // into fixed tiers rather than scaled linearly.
-  const [branches, setBranches] = useState<{ id: string; name: string; pct: number; color: string }[]>([]);
+  const [branches, setBranches] = useState<{ id: string; name: string; count: number; pct: number; color: string }[]>([]);
   const [branchPerfLoading, setBranchPerfLoading] = useState(false);
+  const [branchPerfRange, setBranchPerfRange] = useState<BranchPerfRange>("today");
 
   // Appointment count -> progress bar percentage + color tiers:
   //   1-6   booked -> 5%   green   (6 grouped into the 1-5 tier)
@@ -467,20 +503,24 @@ export default function Dashboard() {
     return { pct: 100, color: "#EF4444" };
   }
 
-  const fetchBranchPerformance = useCallback(async () => {
+  const fetchBranchPerformance = useCallback(async (range: BranchPerfRange) => {
     setBranchPerfLoading(true);
     try {
       const branchRes = await branchApi.getAll();
       const branchList = branchRes.data?.data || [];
 
+      // Only appointments booked within the selected date range (relative to
+      // the main date picker) count toward each branch's volume.
+      const { dateFrom, dateTo } = getBranchPerfRangeDates(range, selectedDate);
+
       // Use each branch's real `total` count from the API (not a
       // truncated page of rows) so the percentage reflects every
-      // appointment ever booked at that branch, not just the first
-      // page fetched.
+      // appointment booked at that branch in the range, not just the
+      // first page fetched.
       const counts = await Promise.all(
         branchList.map((b) =>
           appointmentApi
-            .getAll({ branchId: b.branch_id, limit: 1 })
+            .getAll({ branchId: b.branch_id, limit: 1, dateFrom, dateTo, excludeStatuses: "CANCELLED,NO_SHOW" })
             .then((res) => res.data?.data?.total ?? 0)
             .catch(() => 0),
         ),
@@ -493,6 +533,7 @@ export default function Dashboard() {
           return {
             id: b.branch_id,
             name: b.branch_area ? `${b.branch_name} (${b.branch_area})` : (b.branch_name || b.branch_id),
+            count,
             pct,
             color,
           };
@@ -503,20 +544,21 @@ export default function Dashboard() {
     } finally {
       setBranchPerfLoading(false);
     }
-  }, []);
+  }, [selectedDate]);
 
   // Load branch performance independently of the Appointments tab fetch so
   // the widget always gets data — previously it only ran as a side effect of
   // fetchAppointments, so it stayed empty when that fetch was skipped (no
-  // appointment.read permission) or failed.
+  // appointment.read permission) or failed. Refetches when the date range
+  // selector changes or when the main date picker moves.
   useEffect(() => {
     if (!permissions.includes("appointment.read")) {
       setBranches([]);
       setBranchPerfLoading(false);
       return;
     }
-    fetchBranchPerformance();
-  }, [permissions, fetchBranchPerformance]);
+    fetchBranchPerformance(branchPerfRange);
+  }, [permissions, branchPerfRange, selectedDate, fetchBranchPerformance]);
 
   const fetchAppointments = useCallback(async () => {
     if (!permissions.includes("appointment.read")) {
@@ -1254,9 +1296,15 @@ export default function Dashboard() {
                   <h3 className="text-[#191C1E] font-extrabold text-base leading-6 tracking-[-0.4px]">Branch Performance</h3>
                   <p className="text-[#424752] text-[9px] font-semibold tracking-[0.9px] capitalize">Efficiency</p>
                 </div>
-                <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-                  <path d="M3.33333 11.6667H5V7.5H3.33333V11.6667ZM10 11.6667H11.6667V3.33333H10V11.6667ZM6.66667 11.6667H8.33333V9.16667H6.66667V11.6667ZM6.66667 7.5H8.33333V5.83333H6.66667V7.5ZM1.66667 15C1.20833 15.815972 14.8368 14.5104 14.184 15 13.7917 15 13.3333V1.66667C13.3333 1.20833 13.7917.815972 14.5104.489583C14.184.163194 13.7917 0 13.3333 0H1.66667C1.20833 0 .815972.163194.489583.489583C.163194.815972 0 1.20833 0 1.66667V13.3333C0 13.7917.163194 14.184.489583 14.5104C.815972 14.8368 1.20833 15 1.66667 15Z" fill="#00488D"/>
-                </svg>
+                <select
+                  value={branchPerfRange}
+                  onChange={(e) => setBranchPerfRange(e.target.value as BranchPerfRange)}
+                  className="px-2 py-1 rounded border border-[rgba(194,198,212,0.40)] bg-white text-[#424752] text-[9px] font-semibold tracking-[0.9px] outline-none cursor-pointer focus:border-[#00488D]"
+                >
+                  {BRANCH_PERF_RANGE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
               </div>
               <div className="flex flex-col gap-4 max-h-[220px] overflow-y-auto hide-scrollbar pr-1">
                 {branchPerfLoading && branches.length === 0 && (
@@ -1274,7 +1322,10 @@ export default function Dashboard() {
                   <div key={branch.id} className="flex flex-col gap-1">
                     <div className="flex justify-between">
                       <span className="text-[#191C1E] text-[9px] font-semibold tracking-[0.9px] capitalize">{branch.name}</span>
-                      <span className="text-[9px] font-semibold tracking-[0.9px] uppercase" style={{ color: branch.color }}>{animatedValues[branch.id] ?? 0}%</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] font-semibold tracking-[0.9px] text-[#8C8D8F]">{branch.count} {branch.count === 1 ? "appt" : "appts"}</span>
+                        <span className="text-[9px] font-semibold tracking-[0.9px] uppercase" style={{ color: branch.color }}>{animatedValues[branch.id] ?? 0}%</span>
+                      </div>
                     </div>
                     <div className="h-1.5 rounded-full bg-[#ECEEF0] overflow-hidden">
                       <div className="h-full rounded-full" style={{ width: `${animatedValues[branch.id] ?? 0}%`, background: branch.color }} />

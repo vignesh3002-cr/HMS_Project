@@ -100,6 +100,9 @@ export default function Login() {
       // --------------------------------------------------
       saveToken(response.token, rememberMe);
       saveUser(response.user, rememberMe);
+      try {
+        sessionStorage.setItem("justLoggedIn", "true");
+      } catch {}
 
       console.log("New authentication information saved.");
 
@@ -139,6 +142,7 @@ export default function Login() {
 
         navigate("/dashboard", {
           replace: true,
+          state: { fromLogin: true },
         });
 
         return;
@@ -158,6 +162,7 @@ export default function Login() {
 
         navigate("/dashboard", {
           replace: true,
+          state: { fromLogin: true },
         });
 
         return;
@@ -179,6 +184,7 @@ export default function Login() {
 
       navigate("/dashboard", {
         replace: true,
+        state: { fromLogin: true },
       });
     } catch (error: any) {
       console.error("LOGIN ERROR:", error);

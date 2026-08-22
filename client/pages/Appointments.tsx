@@ -20,7 +20,6 @@ import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { encounterApi } from "@/api/encounter.api";
-import { getEffectiveAppointmentStatus } from "@/lib/appointmentStatus";
 import { useToast } from "@/hooks/use-toast";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
@@ -67,7 +66,6 @@ const STATUS_LABELS: Record<string, string> = {
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
   NO_SHOW: "No Show",
-  NOT_CHECKED_IN: "Not Checked In",
   RESCHEDULED: "Rescheduled",
   RESCHEDULE_REQUIRED: "Reschedule Required",
   TRANSFER_REVIEW_REQUIRED: "Transfer Review Required",
@@ -155,7 +153,7 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
     date: formatAppointmentDate(record.appointment_date),
     time: formatAppointmentTime(record.appointment_time),
     sortDate,
-    status: STATUS_LABELS[getEffectiveAppointmentStatus(record)] ?? (record.status || "Unknown"),
+    status: STATUS_LABELS[record.status ?? ""] ?? (record.status || "Unknown"),
   };
 }
 
