@@ -215,3 +215,6 @@ const data: MyRouteResponse = await response.json();
 - Department dropdown shows `[{ label: "All Departments", value: "__ALL__" }]` when Admin is selected
 - Submit handles `__ALL__` by falling back to first department ID
 - Added `ALL_DEPARTMENTS_VALUE = "__ALL__"` sentinel
+### 8. Allow appointment booking on week-offs and leave days (unless CANCEL)
+ - Backend (HMS_Backend-main/src/modules/appointment/appointment.service.ts): validateBookingContext now allows off-day/leave bookings when no CANCEL change exists; bookAppointment/updateAppointment skip pickScheduleForTime when isOffDayBooking=true; getAvailableSlots returns is_cancelled flag.
+ - Frontend (HMS_Project/client): AddAppointment.tsx shows free-time input on week-off/leave days; doctor dropdown includes LEAVE doctors labeled (On Leave); Edit Appointment.tsx same handling. CANCEL changes remain absolute priority.

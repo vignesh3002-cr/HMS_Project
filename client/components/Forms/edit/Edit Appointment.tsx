@@ -80,6 +80,13 @@ async function findNearestAvailableDate(
     try {
       const res = await appointmentApi.getAvailableSlots(doctorId, branchId, dateStr);
       const slots = res.data?.data?.slots || [];
+      const isCancelled = res.data?.data?.is_cancelled ?? false;
+      // Skip cancelled days when searching for nearest available date.
+      // On week-off/leave days (not cancelled) the form stays put with free-time entry.
+      if (isCancelled) {
+        continue;
+      }
+      // On normal scheduled days with available slots, jump to that date.
       if (slots.some((s) => s.is_available)) {
         return dateStr;
       }
@@ -154,6 +161,7 @@ export default function EditAppointment() {
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [findingNearestDate, setFindingNearestDate] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [isCancelled, setIsCancelled] = useState(false);
 
   useEffect(() => {
     branchApi
@@ -277,14 +285,17 @@ export default function EditAppointment() {
 
     setLoadingSlots(true);
 
-    appointmentApi
+appointmentApi
       .getAvailableSlots(formData.doctorId, formData.branchId, formData.selectDate)
       .then((res) => {
         const slots = res.data.data?.slots || [];
+        const isCancelled = res.data.data?.is_cancelled ?? false;
         setAvailableSlots(slots.filter((s) => s.is_available));
+        setIsCancelled(isCancelled);
       })
       .catch(() => {
         setAvailableSlots([]);
+        setIsCancelled(false);
       })
       .finally(() => setLoadingSlots(false));
   }, [formData.doctorId, formData.branchId, formData.selectDate]);
@@ -674,9 +685,17 @@ export default function EditAppointment() {
                     <Loader2 className="w-4 h-4 animate-spin" />
                     Loading available slots...
                   </div>
-                ) : slotsToShow.length === 0 ? (
+                ) : slotsToShow.length === 0 && !isCancelled ? (
                   <div className="col-span-full py-8 text-center text-sm text-amber-500 bg-amber-50 rounded-xl">
-                    No available slots for this doctor on the selected date
+                    <input
+                      type="time"
+                      className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                      placeholder="Select a time"
+                    />
+                  </div>
+                ) : slotsToShow.length === 0 && isCancelled ? (
+                  <div className="col-span-full py-8 text-center text-sm text-gray-800 bg-gray-100 rounded-xl">
+                    Doctor is unavailable on this date (marked as cancelled)
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
