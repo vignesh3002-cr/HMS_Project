@@ -99,6 +99,7 @@ const Consultation: React.FC = () => {
   const [showLabReview, setShowLabReview] = useState(false);
   const [activeStep, setActiveStep] = useState("CONSULTATION");
   const [showProfilePortal, setShowProfilePortal] = useState(false);
+  const [proceeding, setProceeding] = useState(false);
 
   /* ============================================================
      PATIENT DATA (from dashboard appointment click)
@@ -398,8 +399,40 @@ const Consultation: React.FC = () => {
      NEXT
   ============================================================ */
 
-  const proceedNext = () => {
-    showToast("Proceeding to Lab Report Review");
+  const proceedNext = async () => {
+    if (proceeding) return;
+
+    if (!encounter) {
+      showToast(
+        encounterError ||
+          "No active encounter found. Cannot save consultation details."
+      );
+      return;
+    }
+
+    try {
+      setProceeding(true);
+
+      const payload: { clinical_notes?: string } = {};
+      if (consultationNotes.trim()) {
+        payload.clinical_notes = consultationNotes;
+      }
+
+      await encounterApi.update(encounter.encounter_no, payload);
+
+      showToast("Consultation saved");
+
+      selectStep("LAB REPORT REVIEW");
+    } catch (error: any) {
+      console.error("Failed to save consultation details:", error);
+      showToast(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to save consultation details."
+      );
+    } finally {
+      setProceeding(false);
+    }
   };
 
   /* ============================================================
@@ -842,9 +875,18 @@ const Consultation: React.FC = () => {
               <div className="flex w-full flex-col gap-5">
 
                 {showLabReview ? (
-                  <LabReview embedded />
+                  <LabReview
+                    embedded
+                    patientId={consultationState?.patientId}
+                    encounterNo={encounter?.encounter_no}
+                    onNext={() => selectStep("DIAGNOSIS")}
+                  />
                 ) : activeStep === "DIAGNOSIS" ? (
-                  <Diagnosis embedded patientId={patientDisplayId} />
+                  <Diagnosis
+                    embedded
+                    patientId={patientDisplayId}
+                    onNext={() => selectStep("TREATMENT PLAN")}
+                  />
                 ) : activeStep === "TREATMENT PLAN" ? (
                   <TreatmentPlan
                     embedded
@@ -855,11 +897,21 @@ const Consultation: React.FC = () => {
                   <ChemotherapyOrder
                     embedded
                     patientId={patientDisplayId}
+                    onNext={() => selectStep("DISCHARGE MEDICATION")}
                   />
                 ) : activeStep === "DISCHARGE MEDICATION" ? (
-                  <DischargeMedication embedded />
+                  <DischargeMedication
+                    embedded
+                    patientId={consultationState?.patientId}
+                    encounterNo={encounter?.encounter_no}
+                    onNext={() => selectStep("FOLLOW UP")}
+                  />
                 ) : activeStep === "FOLLOW UP" ? (
-                  <FollowUp embedded patientId={patientDisplayId} />
+                  <FollowUp
+                    embedded
+                    patientId={patientDisplayId}
+                    onNext={() => selectStep("SUMMARY")}
+                  />
 ) : activeStep === "SUMMARY" ? (
                   <Summary embedded patientId={patientDisplayId} />
                 ) : activeStep === "HISTORY" ? (
@@ -1406,10 +1458,16 @@ const ArrowRightIcon = () => (
   </svg>
 );
 
-const LabReview: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
+const LabReview: React.FC<{
+  embedded?: boolean;
+  patientId?: string;
+  encounterNo?: string;
+  onNext?: () => void;
+}> = ({ embedded = false, patientId, encounterNo, onNext }) => {
   const [observations, setObservations] = useState("");
   const [notifications, setNotifications] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [savingObservations, setSavingObservations] = useState(false);
 
   const handleCancel = () => {
     setObservations("");
@@ -1420,8 +1478,58 @@ const LabReview: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
     setSaved(true);
   };
 
-  const handleProceed = () => {
-    alert("Proceeding to Treatment Plan");
+  const handleProceed = async () => {
+    if (savingObservations) return;
+
+    try {
+      setSavingObservations(true);
+
+      let targetEncounterNo = encounterNo ?? "";
+
+      if (!targetEncounterNo && patientId) {
+        const branchId =
+          getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+        const response = await encounterApi.getAll({
+          branchId,
+          patientId,
+          status: "OPEN",
+          page: 1,
+          limit: 5,
+        });
+        const found =
+          response.data.data?.encounters.find(
+            (item) => item.patient_id === patientId
+          ) ?? null;
+        targetEncounterNo = found?.encounter_no ?? "";
+      }
+
+      if (!targetEncounterNo) {
+        window.alert(
+          "No active encounter found. Cannot save lab review observations."
+        );
+        return;
+      }
+
+      const payload: { advice?: string } = {};
+      if (observations.trim()) {
+        payload.advice = observations;
+      }
+
+      await encounterApi.update(targetEncounterNo, payload);
+
+      setSaved(true);
+
+      onNext?.();
+    } catch (error: any) {
+      console.error("Failed to save lab review observations:", error);
+      window.alert(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to save lab review observations."
+      );
+    } finally {
+      setSavingObservations(false);
+    }
   };
 
   const handleViewReport = (name: string) => {
@@ -1662,9 +1770,10 @@ const LabReview: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
           <button
             type="button"
             onClick={handleProceed}
-            className="flex items-center gap-2 rounded-xl bg-[#2563EB] px-8 py-3 text-[15px] font-bold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            disabled={savingObservations}
+            className="flex items-center gap-2 rounded-xl bg-[#2563EB] px-8 py-3 text-[15px] font-bold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Proceed to Treatment Plan
+            {savingObservations ? "Saving…" : "Proceed to Treatment Plan"}
             <ArrowRightIcon />
           </button>
         </div>
@@ -1755,9 +1864,14 @@ const DoubleArrowIcon = () => (
   </svg>
 );
 
-const Diagnosis: React.FC<{ embedded?: boolean; patientId?: string }> = ({
+const Diagnosis: React.FC<{
+  embedded?: boolean;
+  patientId?: string;
+  onNext?: () => void;
+}> = ({
   embedded = false,
   patientId,
+  onNext,
 }) => {
   const location = useLocation();
   const statePatientId =
@@ -2131,7 +2245,7 @@ const Diagnosis: React.FC<{ embedded?: boolean; patientId?: string }> = ({
         })
       );
 
-      alert("Diagnosis saved. Proceeding to the next step.");
+      onNext?.();
     } catch (error: any) {
       console.error("Failed to save staging details:", error);
       setDiagnosisError(
@@ -2636,14 +2750,24 @@ const MailIcon = () => (
   </svg>
 );
 
-const DischargeMedication: React.FC<{ embedded?: boolean }> = ({
+const DischargeMedication: React.FC<{
+  embedded?: boolean;
+  patientId?: string;
+  encounterNo?: string;
+  onNext?: () => void;
+}> = ({
   embedded = false,
+  patientId,
+  encounterNo,
+  onNext,
 }) => {
   const [medications, setMedications] = useState<DischargeMedicationItem[]>(
     []
   );
 
   const [activeStep, setActiveStep] = useState(1);
+  const [savingMeds, setSavingMeds] = useState(false);
+  const [medsError, setMedsError] = useState("");
 
   const handleAddDrug = () => {
     const newMedication: DischargeMedicationItem = {
@@ -2658,9 +2782,88 @@ const DischargeMedication: React.FC<{ embedded?: boolean }> = ({
     setMedications((current) => [...current, newMedication]);
   };
 
-  const handleNext = () => {
-    if (activeStep < 3) {
-      setActiveStep((current) => current + 1);
+  const resolveEncounterNo = async () => {
+    if (encounterNo) return encounterNo;
+    if (!patientId) return "";
+    const branchId = getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+    const response = await encounterApi.getAll({
+      branchId,
+      patientId,
+      status: "OPEN",
+      page: 1,
+      limit: 5,
+    });
+    const found =
+      response.data.data?.encounters.find(
+        (item) => item.patient_id === patientId
+      ) ?? null;
+    return found?.encounter_no ?? "";
+  };
+
+  const handleNext = async () => {
+    if (savingMeds) return;
+
+    try {
+      setSavingMeds(true);
+      setMedsError("");
+
+      const targetEncounterNo = await resolveEncounterNo();
+
+      if (!targetEncounterNo) {
+        setMedsError(
+          "No active encounter found. Cannot save discharge medications."
+        );
+        return;
+      }
+
+      const medicationLines = medications
+        .filter((item) => item.drugName.trim())
+        .map(
+          (item, index) =>
+            `${index + 1}. ${[
+              item.drugName,
+              item.dosage,
+              item.frequency,
+              item.instruction,
+              item.duration,
+            ]
+              .filter(Boolean)
+              .join(" | ")}`
+        );
+
+      const encounterResponse = await encounterApi.getByNumber(
+        targetEncounterNo
+      );
+      const existingAdvice = encounterResponse.data.data?.advice ?? "";
+      const cleanedAdvice = existingAdvice
+        .replace(/\n*\[Discharge Medication\][\s\S]*$/, "")
+        .trimEnd();
+
+      const adviceParts = [cleanedAdvice];
+      if (medicationLines.length > 0) {
+        adviceParts.push("[Discharge Medication]", ...medicationLines);
+      }
+      const advice = adviceParts.filter(Boolean).join("\n\n").trim();
+
+      const payload: { advice?: string } = {};
+      if (advice) payload.advice = advice;
+
+      await encounterApi.update(targetEncounterNo, payload);
+
+      if (activeStep < 3) {
+        setActiveStep((current) => current + 1);
+      }
+
+      onNext?.();
+    } catch (error: any) {
+      console.error("Failed to save discharge medications:", error);
+      setMedsError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to save discharge medications. Please try again."
+      );
+    } finally {
+      setSavingMeds(false);
     }
   };
 
@@ -2749,14 +2952,18 @@ if (embedded) {
       </div>
 
       {/* FOOTER ACTION */}
-      <div className="mb-8 flex w-full justify-end">
+      <div className="mb-8 flex w-full flex-col items-end gap-2">
+        {medsError && (
+          <div className="text-sm font-medium text-red-600">{medsError}</div>
+        )}
         <button
           type="button"
           onClick={handleNext}
-          className="flex items-center gap-2 rounded-md bg-[#1d4ed8] px-8 py-3 font-bold text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          disabled={savingMeds}
+          className="flex items-center gap-2 rounded-md bg-[#1d4ed8] px-8 py-3 font-bold text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <DoubleArrowIcon />
-          Next
+          {savingMeds ? "Saving…" : "Next"}
         </button>
       </div>
     </div>
@@ -3109,7 +3316,8 @@ type RegimenProtocolDetail = {
 const ChemotherapyOrder: React.FC<{
   embedded?: boolean;
   patientId?: string;
-}> = ({ embedded = false, patientId }) => {
+  onNext?: () => void;
+}> = ({ embedded = false, patientId, onNext }) => {
   const location = useLocation();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
@@ -3136,6 +3344,8 @@ const ChemotherapyOrder: React.FC<{
   });
 
   const protocolRef = useRef<RegimenProtocolDetail | null>(null);
+  const planIdRef = useRef<string>("");
+  const [savingOrder, setSavingOrder] = useState(false);
   const latestCycleRef = useRef<
     NonNullable<ChemotherapyPlan["chemotherapy_cycle"]>[number] | null
   >(null);
@@ -3278,12 +3488,59 @@ const ChemotherapyOrder: React.FC<{
     "Admin Instructions",
   ];
 
-  const handleSave = () => {
-    console.log("Saved chemotherapy order:", {
-      cycleDay,
-      startDate,
-      drugs,
-    });
+  const handleSave = async () => {
+    if (savingOrder) return;
+
+    if (!resolvedPatientId) {
+      setPlanError(
+        "Patient is not selected. Open this page from a patient consultation to continue."
+      );
+      return;
+    }
+
+    if (!planIdRef.current) {
+      setPlanError(
+        "No chemotherapy plan found for this patient. Complete the Treatment Plan step first."
+      );
+      return;
+    }
+
+    const cycleMatch = cycleDay.match(/Cycle\s+(\d+)/i);
+    const cycleNumber = cycleMatch ? Number(cycleMatch[1]) : 1;
+
+    const isoMatch = startDate.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const dmyMatch = startDate.trim().match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+    const plannedDate = isoMatch
+      ? `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`
+      : dmyMatch
+        ? `${dmyMatch[3]}-${dmyMatch[2].padStart(2, "0")}-${dmyMatch[1].padStart(2, "0")}`
+        : "";
+
+    if (!plannedDate) {
+      setPlanError("Please pick a valid start date before saving.");
+      return;
+    }
+
+    try {
+      setSavingOrder(true);
+      setPlanError("");
+
+      await API.post(`/chemotherapy/plans/${planIdRef.current}/cycles`, {
+        cycle_number: cycleNumber,
+        planned_date: plannedDate,
+      });
+
+      onNext?.();
+    } catch (error: any) {
+      console.error("Failed to save chemotherapy order:", error);
+      setPlanError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to save the chemotherapy order. Please try again."
+      );
+    } finally {
+      setSavingOrder(false);
+    }
   };
 
   const formatDateDMY = (value?: string | null) => {
@@ -3397,6 +3654,8 @@ const ChemotherapyOrder: React.FC<{
         const plans = response.data.data;
         const plan = plans[0];
         if (!plan) return;
+
+        planIdRef.current = plan.chemotherapy_plan_id;
 
         if (!userTouched.current.startDate) {
           setStartDate(formatDateDMY(plan.treatment_start_date));
@@ -3789,10 +4048,11 @@ const ChemotherapyOrder: React.FC<{
               <button
                 type="button"
                 onClick={handleSave}
-                className="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                disabled={savingOrder}
+                className="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <SaveIcon />
-                Save
+                {savingOrder ? "Saving…" : "Save"}
               </button>
             </div>
           </div>
@@ -4214,9 +4474,14 @@ const ChemotherapyOrder: React.FC<{
 
 type FollowUpStep = 1 | 2 | 3;
 
-const FollowUp: React.FC<{ embedded?: boolean; patientId?: string }> = ({
+const FollowUp: React.FC<{
+  embedded?: boolean;
+  patientId?: string;
+  onNext?: () => void;
+}> = ({
   embedded = false,
   patientId,
+  onNext,
 }) => {
   const location = useLocation();
   const statePatientId = (
@@ -4229,6 +4494,8 @@ const FollowUp: React.FC<{ embedded?: boolean; patientId?: string }> = ({
   const [cycleOptions, setCycleOptions] = useState<string[]>([]);
   const [plan, setPlan] = useState("");
   const [notes, setNotes] = useState("");
+  const [submittingFollowUp, setSubmittingFollowUp] = useState(false);
+  const [followUpError, setFollowUpError] = useState("");
 
   useEffect(() => {
     if (!resolvedPatientId) return;
@@ -4283,17 +4550,98 @@ const FollowUp: React.FC<{ embedded?: boolean; patientId?: string }> = ({
     window.history.back();
   };
 
-  const handleSubmit = () => {
-    const followUpData = {
-      nextVisitDate,
-      nextCycle,
-      plan,
-      notes,
-    };
+  const handleSubmit = async () => {
+    if (submittingFollowUp) return;
 
-    console.log("Follow Up Submitted:", followUpData);
+    if (!resolvedPatientId) {
+      setFollowUpError(
+        "Patient is not selected. Open this page from a patient consultation to continue."
+      );
+      return;
+    }
 
-    alert("Follow-up submitted successfully.");
+    const trimmedDate = nextVisitDate.trim();
+    const isoMatch = trimmedDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const dmyMatch = trimmedDate.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+    const followupDate = isoMatch
+      ? `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`
+      : dmyMatch
+        ? `${dmyMatch[3]}-${dmyMatch[2].padStart(2, "0")}-${dmyMatch[1].padStart(2, "0")}`
+        : "";
+
+    if (!followupDate) {
+      setFollowUpError(
+        "Please pick a valid Next Visit Date before submitting."
+      );
+      return;
+    }
+
+    try {
+      setSubmittingFollowUp(true);
+      setFollowUpError("");
+
+      const branchId =
+        getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+      const plansResponse = await API.get<{
+        success: boolean;
+        data: ChemotherapyPlan[];
+      }>("/chemotherapy/plans", {
+        params: { patient_id: resolvedPatientId, branchId },
+      });
+      const planId =
+        plansResponse.data.data?.[0]?.chemotherapy_plan_id ?? "";
+
+      if (!planId) {
+        setFollowUpError(
+          "No chemotherapy plan found for this patient. Complete the earlier steps first."
+        );
+        return;
+      }
+
+      const cyclesResponse = await API.get<{
+        success: boolean;
+        data: {
+          chemotherapy_cycle_id: string;
+          cycle_number: number;
+        }[];
+      }>(`/chemotherapy/plans/${planId}/cycles`);
+      const cycles = cyclesResponse.data.data ?? [];
+      const latestCycle = cycles[cycles.length - 1];
+
+      if (!latestCycle?.chemotherapy_cycle_id) {
+        setFollowUpError(
+          "No chemotherapy cycle found. Complete the Chemotherapy Order step first."
+        );
+        return;
+      }
+
+      const payload: Record<string, string> = {
+        followup_date: followupDate,
+      };
+
+      const noteParts = [plan ? `Plan: ${plan}` : "", notes.trim()].filter(
+        Boolean
+      );
+      if (noteParts.length > 0) {
+        payload.followup_notes = noteParts.join("\n");
+      }
+
+      await API.post(
+        `/chemotherapy/cycles/${latestCycle.chemotherapy_cycle_id}/followup`,
+        payload
+      );
+
+      onNext?.();
+    } catch (error: any) {
+      console.error("Failed to submit follow-up:", error);
+      setFollowUpError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to submit the follow-up. Please try again."
+      );
+    } finally {
+      setSubmittingFollowUp(false);
+    }
   };
 
   const handleViewProfile = () => {
@@ -4591,14 +4939,20 @@ const FollowUp: React.FC<{ embedded?: boolean; patientId?: string }> = ({
       </div>
 
       {/* FORM ACTION */}
-      <div className="flex justify-end">
+      <div className="flex flex-col items-end gap-2">
+        {followUpError && (
+          <div className="text-sm font-medium text-red-600">
+            {followUpError}
+          </div>
+        )}
         <button
           type="button"
           onClick={handleSubmit}
-          className="inline-flex items-center justify-center rounded-lg border border-transparent bg-[#2557D6] px-8 py-3 text-base font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          disabled={submittingFollowUp}
+          className="inline-flex items-center justify-center rounded-lg border border-transparent bg-[#2557D6] px-8 py-3 text-base font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <DoubleArrowIcon />
-          Submit
+          {submittingFollowUp ? "Submitting…" : "Submit"}
         </button>
       </div>
     </>
