@@ -521,16 +521,7 @@ const Consultation: React.FC = () => {
        icon: <StepCheckLogo />,
 
     },
-    {
-      name: "HISTORY",
-      active: activeStep === "HISTORY",
-      icon: <StepCheckLogo />,
-    },
-    {
-      name: "NOTES & DOCUMENTS",
-      active: activeStep === "NOTES & DOCUMENTS",
-      icon: <StepCheckLogo />,
-    },
+    
   ];
 
   /* ============================================================
@@ -6945,7 +6936,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
           ================================================== */}
           <section>
             <h3 className="mb-4 text-lg font-medium text-indigo-900">
-              Premedication
+              Pre-medication
             </h3>
 
             <div className="overflow-x-auto">
