@@ -210,6 +210,7 @@ export default function DoctorDashboard() {
   const [dashboardSchedules, setDashboardSchedules] = useState<DashboardSchedule[]>([]);
   const [totalAppointments, setTotalAppointments] = useState(0);
   const [cancelledAppointments, setCancelledAppointments] = useState(0);
+  const [totalPatients, setTotalPatients] = useState(0);
   const [loading, setLoading] = useState(true);
   const [branchLoading, setBranchLoading] = useState(false);
   const [checkInLoading, setCheckInLoading] = useState<string | null>(null);
@@ -260,6 +261,7 @@ export default function DoctorDashboard() {
         setDashboardSchedules([]);
         setTotalAppointments(0);
         setCancelledAppointments(0);
+        setTotalPatients(0);
       }
       setDashboardError("");
 
@@ -292,26 +294,29 @@ export default function DoctorDashboard() {
         setHospital(firstActiveBranch.branch_name);
       }
 
-      const [appointmentsResponse, cancelledResponse] = await Promise.all([
-        doctorDashboardApi.getAppointments({
-          employeeId,
-          branchId,
-          date: today,
-          page: 1,
-          limit: 10,
-        }),
-        doctorDashboardApi.getAppointments({
-          employeeId,
-          branchId,
-          date: today,
-          status: "CANCELLED",
-          page: 1,
-          limit: 1,
-        }),
-      ]);
+      const [appointmentsResponse, cancelledResponse, patientCountResponse] =
+        await Promise.all([
+          doctorDashboardApi.getAppointments({
+            employeeId,
+            branchId,
+            date: today,
+            page: 1,
+            limit: 10,
+          }),
+          doctorDashboardApi.getAppointments({
+            employeeId,
+            branchId,
+            date: today,
+            status: "CANCELLED",
+            page: 1,
+            limit: 1,
+          }),
+          doctorDashboardApi.getPatientCount({ employeeId, branchId }),
+        ]);
 
       setTotalAppointments(appointmentsResponse.data.data.total);
       setCancelledAppointments(cancelledResponse.data.data.total);
+      setTotalPatients(patientCountResponse.data.data.totalPatients);
 
       const mappedAppointments = appointmentsResponse.data.data.appointments
         .map(
@@ -670,7 +675,7 @@ export default function DoctorDashboard() {
                     </div>
 
                     <div className="text-2xl font-semibold leading-8 tracking-[-0.24px]">
-                      1,284
+                      {loading ? "—" : totalPatients.toLocaleString()}
                     </div>
                   </div>
 
@@ -681,7 +686,7 @@ export default function DoctorDashboard() {
 
                 <div className="flex items-center gap-2 pt-4 text-base leading-6 text-green-600">
                   <Icon name="trend" className="h-3.5 w-3.5" />
-                  <span>84 new this month</span>
+                  <span>Unique patients booked</span>
                 </div>
               </article>
 
@@ -989,7 +994,7 @@ export default function DoctorDashboard() {
                     <div className="absolute right-0 top-[55px] z-30 w-[180px] overflow-hidden rounded border border-slate-200 bg-white shadow-[0_5px_15px_rgba(0,0,0,0.12)]">
                       {(activeBranches(doctor?.branches).length
                         ? activeBranches(doctor?.branches)
-                        : [{ branch_id: "", branch_name: fallbackHospital }]
+                        : [{ branch_id: "", branch_name: hospital || "Select Branch" }]
                       ).map((branch) => (
                         <button
                           type="button"

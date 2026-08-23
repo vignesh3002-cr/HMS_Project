@@ -94,6 +94,16 @@ export interface DashboardAppointmentsResponse {
   };
 }
 
+export interface DashboardPatientCountResponse {
+  success: boolean;
+  message: string;
+  data: {
+    employeeId: string;
+    branchId: string | null;
+    totalPatients: number;
+  };
+}
+
 export const doctorDashboardApi = {
   getCurrentUser() {
     return API.get<DashboardAuthResponse>("/auth/me");
@@ -112,6 +122,12 @@ export const doctorDashboardApi = {
     limit?: number;
   }) {
     return API.get<DashboardAppointmentsResponse>("/appointments", {
+      params,
+    });
+  },
+
+  getPatientCount(params: { employeeId: string; branchId?: string | null }) {
+    return API.get<DashboardPatientCountResponse>("/appointments/patient-count", {
       params,
     });
   },
