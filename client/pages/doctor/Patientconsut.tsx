@@ -1,4 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -14,6 +19,15 @@ import {
   encounterApi,
   type EncounterRecord,
 } from "../../api/encounter.api";
+import {
+  labTestMasterApi,
+  type LabTestMasterRecord,
+} from "../../api/labTestMaster.api";
+import {
+  labOrderApi,
+  labOrderItemApi,
+  type LabOrderItemRecord,
+} from "../../api/labOrder.api";
 import { Calendar } from "../../components/ui/calendar";
 import { ClinicalDetailsSection } from "../../components/hms/ClinicalDetailsSection";
 import {
@@ -64,6 +78,7 @@ interface ConsultationState {
   appointmentDate?: string;
   appointmentTime?: string;
   consultedBy?: string;
+  visit_type?: string;
 }
 
 const StepCheckLogo = ({ active = false }: { active?: boolean }) => (
@@ -219,10 +234,18 @@ const Consultation: React.FC = () => {
     Record<string, string>
   >({});
 
+  const [labTests, setLabTests] = useState<LabTestMasterRecord[]>([]);
+  const [labTestsLoading, setLabTestsLoading] = useState(true);
+  const [labTestsError, setLabTestsError] = useState("");
+
   const [showLabReview, setShowLabReview] = useState(false);
   const [activeStep, setActiveStep] = useState("CONSULTATION");
   const [showProfilePortal, setShowProfilePortal] = useState(false);
   const [proceeding, setProceeding] = useState(false);
+
+  const [orderedTestIds, setOrderedTestIds] = useState<Set<string>>(
+    new Set()
+  );
 
   /* ============================================================
      PATIENT DATA (from dashboard appointment click)
@@ -327,6 +350,40 @@ const Consultation: React.FC = () => {
     };
   }, [consultationState?.patientId]);
 
+  /* ============================================================
+     LOAD INVESTIGATION OPTIONS (lab_test_master table)
+     Populates the Investigations / Scans checkboxes from the
+     backend GET /lab-test-master API.
+   ============================================================ */
+
+  useEffect(() => {
+    let cancelled = false;
+    setLabTestsLoading(true);
+    setLabTestsError("");
+    labTestMasterApi
+      .getAll()
+      .then((response) => {
+        if (cancelled) return;
+        setLabTests(response.data.data ?? []);
+      })
+      .catch((error) => {
+        console.error("Failed to load lab tests:", error);
+        if (!cancelled) {
+          const message =
+            error?.response?.data?.message ||
+            error?.message ||
+            "Failed to load investigation options.";
+          setLabTestsError(message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLabTestsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const patientName = patient
     ? [
         patient.patient_first_name,
@@ -358,7 +415,7 @@ const Consultation: React.FC = () => {
   );
 
   const visitTime = formatTimeAMPM(consultationState?.appointmentTime);
-
+  const visitType = consultationState?.visit_type || "";
   const consultedBy = consultationState?.consultedBy || "";
 
   /* ============================================================
@@ -566,24 +623,30 @@ const Consultation: React.FC = () => {
 
   /* ============================================================
      INVESTIGATIONS
-  ============================================================ */
+     Real test names pulled from the lab_test_master table via
+     GET /lab-test-master (see client/api/labTestMaster.api.ts)
+   ============================================================ */
 
-  const investigations = [
-    "CBC",
-    "CT Scan Chest",
-    "Bone Scan",
-    "USG",
-    "CT Scan Abdomen",
-    "ECHO",
-    "RFT",
-    "PET CT Scan",
-    "ECG",
-    "Serum Electrolytes",
-    "MRI",
-    "Pulmonary Function Test",
-    "Chest X-Ray",
-    "Other",
-  ];
+  const investigations = labTests
+    .filter((test) => test.test_status === null || test.test_status === 1)
+    .map((test) => test.test_name);
+
+  /* Selected tests that have not been placed as lab_order_items yet.
+     LabReview places these automatically when it opens. */
+
+  const pendingLabTests = labTests.filter(
+    (test) =>
+      selectedInvestigations.includes(test.test_name) &&
+      !orderedTestIds.has(test.lab_test_id)
+  );
+
+  const handleTestsOrdered = useCallback((testIds: string[]) => {
+    setOrderedTestIds((prev) => {
+      const next = new Set(prev);
+      testIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }, []);
 
   /* ============================================================
      STEPS
@@ -983,6 +1046,8 @@ const Consultation: React.FC = () => {
                     embedded
                     patientId={consultationState?.patientId}
                     encounterNo={encounter?.encounter_no}
+                    pendingTests={pendingLabTests}
+                    onOrdered={handleTestsOrdered}
                     onNext={() => selectStep("DIAGNOSIS")}
                   />
                 ) : activeStep === "DIAGNOSIS" ? (
@@ -1183,32 +1248,11 @@ const Consultation: React.FC = () => {
                       </label>
 
                       <div className="relative h-[38px]">
-
-                        <select className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none">
-
-                          <option value="">
-                            Select Visit Type
-                          </option>
-
-                          <option>
-                            Follow Up
-                          </option>
-
-                          <option>
-                            New Consultation
-                          </option>
-
-                        </select>
-
-                        <svg
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="#94a3b8"
-                          strokeWidth="1.8"
-                          className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
-                        >
-                          <path d="m6 9 6 6 6-6" />
-                        </svg>
+                          <input
+                            className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] pl-[33px] text-[11px] leading-5 text-slate-700 outline-none"
+                            value={visitType}
+                            readOnly
+                          />
 
                       </div>
 
@@ -1283,7 +1327,28 @@ const Consultation: React.FC = () => {
                     Investigations / Scans
                   </div>
 
-                  <div className="grid w-full grid-cols-3 grid-rows-5 gap-y-3">
+                  {labTestsLoading && (
+                    <div className="flex items-center gap-2 text-sm leading-5 text-slate-500">
+                      Loading investigations...
+                    </div>
+                  )}
+
+                  {!labTestsLoading && labTestsError && (
+                    <div className="flex w-full flex-col gap-1 rounded-md border border-red-200 bg-red-50 p-3">
+                      <div className="text-xs font-medium leading-4 text-red-700">
+                        {labTestsError}
+                      </div>
+                    </div>
+                  )}
+
+                  {!labTestsLoading && !labTestsError && investigations.length === 0 && (
+                    <div className="flex items-center gap-2 text-sm leading-5 text-slate-500">
+                      No lab tests available.
+                    </div>
+                  )}
+
+                  {!labTestsLoading && !labTestsError && investigations.length > 0 && (
+                  <div className="grid w-full grid-cols-3 gap-y-3">
 
                     {investigations.map((investigation) => (
 
@@ -1312,6 +1377,7 @@ const Consultation: React.FC = () => {
                     ))}
 
                   </div>
+                  )}
 
                   {selectedInvestigations.length > 0 && (
                     <div className="flex w-full flex-col gap-4 pt-2">
@@ -1521,15 +1587,19 @@ export default Consultation;
    (combined from client/pages/doctor/labreview.tsx —
     renamed App → LabReview, duplicate React/useState import
     removed so it can live in this file)
+
+   Table rows come from the lab_order_item table via
+   GET /lab-order-item filtered to the consulted patient.
 ============================================================ */
 
-interface Investigation {
-  name: string;
-  orderedDate: string;
-  status: "Completed";
-}
-
-const investigations: Investigation[] = [];
+const formatOrderedDate = (value?: string | null) => {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${day}-${month}-${date.getFullYear()}`;
+};
 
 const CheckIcon = ({ className = "h-5 w-5" }: { className?: string }) => (
   <svg
@@ -1599,12 +1669,147 @@ const LabReview: React.FC<{
   embedded?: boolean;
   patientId?: string;
   encounterNo?: string;
+  pendingTests?: LabTestMasterRecord[];
+  onOrdered?: (testIds: string[]) => void;
   onNext?: () => void;
-}> = ({ embedded = false, patientId, encounterNo, onNext }) => {
+}> = ({
+  embedded = false,
+  patientId,
+  encounterNo,
+  pendingTests = [],
+  onOrdered,
+  onNext,
+}) => {
   const [observations, setObservations] = useState("");
   const [notifications, setNotifications] = useState(false);
   const [saved, setSaved] = useState(false);
   const [savingObservations, setSavingObservations] = useState(false);
+
+  /* ------------------------------------------------------------
+     LAB ORDER ITEMS (lab_order_item table via GET /lab-order-item)
+     One row per investigation ordered for this patient.
+     item_status: "Ordered" initially → "Completed" once reported.
+  ------------------------------------------------------------ */
+
+  const [orderedItems, setOrderedItems] = useState<LabOrderItemRecord[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(true);
+  const [itemsError, setItemsError] = useState("");
+  const [orderError, setOrderError] = useState("");
+
+  const placingRef = useRef(false);
+
+  const loadItems = useCallback(() => {
+    let cancelled = false;
+    setItemsLoading(true);
+    setItemsError("");
+    labOrderItemApi
+      .getAll()
+      .then((response) => {
+        if (cancelled) return;
+        const allItems = response.data.data ?? [];
+        const forPatient = allItems.filter(
+          (item) =>
+            item.lab_order?.patient_history?.patient_id === patientId
+        );
+        setOrderedItems(forPatient);
+      })
+      .catch((error: any) => {
+        console.error("Failed to load lab order items:", error);
+        if (!cancelled) {
+          setItemsError(
+            error?.response?.data?.message ||
+              error?.message ||
+              "Failed to load laboratory investigations."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setItemsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
+
+  useEffect(() => {
+    loadItems();
+  }, [loadItems]);
+
+  /* ------------------------------------------------------------
+     AUTO-PLACE the selected investigations when Lab Review opens:
+     one lab_order per visit (POST /lab-order) + one lab_order_item
+     per test (POST /lab-order-item, status defaults to "Ordered").
+     Runs no matter how this step was reached (Proceed button or
+     the stepper), and reports placed ids back to the parent so
+     re-entering the step never duplicates orders.
+  ------------------------------------------------------------ */
+
+  useEffect(() => {
+    if (placingRef.current) return;
+    if (!patientId || pendingTests.length === 0) return;
+
+    placingRef.current = true;
+    setItemsLoading(true);
+    setOrderError("");
+
+    (async () => {
+      try {
+        let employeeId = getUser()?.employee_id ?? null;
+
+        if (!employeeId) {
+          const me = await API.get<{
+            success: boolean;
+            user?: { employee_id?: string | null };
+          }>("/auth/me");
+          employeeId = me.data?.user?.employee_id ?? null;
+        }
+
+        if (!employeeId) {
+          throw new Error(
+            "Could not resolve the logged-in doctor. Please log in again."
+          );
+        }
+
+        const branchId =
+          getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+
+        const orderResponse = await labOrderApi.create({
+          patient_id: patientId,
+          doctor_employee_id: employeeId,
+          ...(branchId ? { branch_id: branchId } : {}),
+        });
+
+        const labOrderId = orderResponse.data.data?.lab_order_id;
+
+        if (!labOrderId) {
+          throw new Error("Failed to create the lab order.");
+        }
+
+        await Promise.all(
+          pendingTests.map((test) =>
+            labOrderItemApi.create({
+              lab_order_id: labOrderId,
+              lab_test_id: test.lab_test_id,
+              ...(branchId ? { branch_id: branchId } : {}),
+            })
+          )
+        );
+
+        onOrdered?.(pendingTests.map((test) => test.lab_test_id));
+      } catch (error: any) {
+        console.error("Failed to place lab order:", error);
+        setOrderError(
+          error?.response?.data?.message ||
+            error?.message ||
+            "Failed to place the lab order for the selected investigations."
+        );
+      } finally {
+        setItemsLoading(false);
+        loadItems();
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patientId]);
 
   const handleCancel = () => {
     setObservations("");
@@ -1672,9 +1877,31 @@ const LabReview: React.FC<{
           </h2>
 
           <span className="text-sm font-medium text-gray-500">
-            {investigations.length} Reports Found
+            {itemsLoading
+              ? "Loading..."
+              : `${orderedItems.length} Reports Found`}
           </span>
         </div>
+
+        {itemsError && (
+          <div className="border-b border-gray-100 bg-red-50 px-8 py-4 text-sm text-red-700">
+            {itemsError}
+          </div>
+        )}
+
+        {orderError && (
+          <div className="border-b border-gray-100 bg-red-50 px-8 py-4 text-sm text-red-700">
+            Failed to place order: {orderError}
+          </div>
+        )}
+
+        {!patientId && pendingTests.length > 0 && (
+          <div className="border-b border-gray-100 bg-amber-50 px-8 py-4 text-sm text-amber-700">
+            Cannot place the selected investigations: this page was opened
+            without a patient reference. Go back and open the patient from the
+            appointments list.
+          </div>
+        )}
 
         {/* Table */}
         <div className="w-full overflow-x-auto">
@@ -1700,36 +1927,76 @@ const LabReview: React.FC<{
             </thead>
 
             <tbody className="bg-white text-gray-700">
-              {investigations.map((investigation) => (
+              {!itemsLoading && !itemsError && orderedItems.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={4}
+                    className="px-8 py-6 text-center text-sm text-gray-500"
+                  >
+                    No investigations have been ordered for this patient yet.
+                  </td>
+                </tr>
+              )}
+
+              {orderedItems.map((item) => {
+                const status = item.item_status || "Ordered";
+                const completed = status === "Completed";
+
+                return (
                 <tr
-                  key={investigation.name}
+                  key={item.lab_order_item_id}
                   className="border-b border-[#F3F4F6] transition-colors last:border-b-0 hover:bg-gray-50"
                 >
                   <td className="px-8 py-5 text-[15px] font-semibold">
-                    {investigation.name}
+                    {item.lab_test_master?.test_name ?? "—"}
                   </td>
 
                   <td className="px-8 py-5 text-gray-600">
-                    {investigation.orderedDate}
+                    {formatOrderedDate(
+                      item.lab_order?.order_datetime ?? item.created_at
+                    )}
                   </td>
 
                   <td className="px-8 py-5">
-                    <span className="inline-flex items-center rounded-full bg-[#DCFCE7] px-3 py-1 text-sm font-semibold text-[#166534]">
-                      {investigation.status}
+                    <span
+                      className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${
+                        completed
+                          ? "bg-[#DCFCE7] text-[#166534]"
+                          : "bg-[#FEF3C7] text-[#92400E]"
+                      }`}
+                    >
+                      {status}
                     </span>
                   </td>
 
                   <td className="px-8 py-5 text-right">
                     <button
                       type="button"
-                      onClick={() => handleViewReport(investigation.name)}
-                      className="inline-flex items-center justify-center rounded-lg bg-[#F0F5FF] px-4 py-2 text-sm font-semibold text-[#2563EB] transition-colors hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                      onClick={() =>
+                        completed &&
+                        handleViewReport(
+                          item.lab_test_master?.test_name ??
+                            item.lab_order_item_id
+                        )
+                      }
+                      disabled={!completed}
+                      title={
+                        completed
+                          ? "View report"
+                          : "Report available once the test is Completed"
+                      }
+                      className={`inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+                        completed
+                          ? "bg-[#F0F5FF] text-[#2563EB] hover:bg-blue-100 focus:ring-blue-500"
+                          : "cursor-not-allowed bg-slate-100 text-slate-400"
+                      }`}
                     >
                       View Report
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
