@@ -83,8 +83,9 @@ import DashboardRedirect from "./pages/DashboardRedirect";
 import DoctorLeave from "./pages/doctor/LeavePage";
 import DoctorSchedule from "./pages/doctor/MySchedulePage";
 import DoctorReviews from "./pages/doctor/ReviewPage";
+import DoctorProfile from "./pages/doctor/Profile";
 import Consultation from "./pages/doctor/Patientconsut";
-import DoctorPatientProfile from "./pages/doctor/Medication"; 
+import DoctorPatientProfile from "./pages/doctor/notes and doc"; 
 
 // ============================================================
 // HOOKS / AUTH
@@ -133,6 +134,10 @@ const doctorRoutes = [
     path: "/doctor/reviews",
     element: <DoctorReviews />,
   },
+{
+    path: "/doctor/profile",
+    element: <DoctorProfile />,
+},
 ];
 
 // ============================================================

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { getActiveBranchId } from "../../api/axios";
 import {
   doctorDashboardApi,
@@ -27,6 +28,8 @@ interface Appointment {
   appointmentId: string;
   originalStatus: string;
 }
+
+const fallbackHospital = "HMS Main Hospital";
 
 const chartData = [
   { day: "Mon", completed: 153.59, rescheduled: 51.19 },
@@ -206,6 +209,9 @@ export default function DoctorDashboard() {
   const [period, setPeriod] = useState("Last 7 Days");
   const [hospital, setHospital] = useState("");
   const [doctor, setDoctor] = useState<DashboardDoctorResponse["data"] | null>(null);
+  const doctorName = doctor?.employee
+    ? `Dr. ${doctor.employee.first_name} ${doctor.employee.last_name}`
+    : "Dr. Jenkins";
   const [dashboardAppointments, setDashboardAppointments] = useState<Appointment[]>([]);
   const [dashboardSchedules, setDashboardSchedules] = useState<DashboardSchedule[]>([]);
   const [totalAppointments, setTotalAppointments] = useState(0);
@@ -433,10 +439,6 @@ export default function DoctorDashboard() {
     day: "numeric",
     year: "numeric",
   });
-
-  const doctorName = doctor?.employee
-    ? `Dr. ${doctor.employee.first_name} ${doctor.employee.last_name}`
-    : "Dr. Jenkins";
 
   const doctorId = doctor?.employee?.employee_id || "-";
 

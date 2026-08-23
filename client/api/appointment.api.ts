@@ -24,6 +24,7 @@ export interface AvailableSlotsResult {
   date: string;
   day_of_week: string;
   slots: AvailableSlot[];
+  is_cancelled?: boolean;
 }
 
 export interface AppointmentResponse {
