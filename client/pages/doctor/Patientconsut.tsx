@@ -6844,6 +6844,7 @@ type SummaryPlanItem = {
   drug_role: string | null;
   protocol_dose: number | null;
   protocol_dose_unit: string | null;
+  calculated_dose?: number | string | null;
   formulation: string | null;
   dilution_volume: string | null;
   administration_route: string | null;
@@ -7719,23 +7720,6 @@ const tabs: Tab[] = [
   "Notes & Documents",
 ];
 
-const premedications = [
-  { no: 1, medication: "Decadron", sub: "(Dexamethasone)", dose: "12 mg", route: ["IV", "Push"], timing: ["T-30", "mins"] },
-  { no: 2, medication: "Avil (Pheniramine)", sub: "", dose: "22.75", dose2: "mg", route: ["IV", "Push"], timing: ["T-15", "mins"] },
-  { no: 3, medication: "Palzen (Palonosetron)", sub: "", dose: "0.25", dose2: "mg", route: ["IV", "Push"], timing: ["T-10", "mins"] },
-];
-
-const chemoDrugs = [
-  { no: 1, drug: "Taxol (Paclitaxel)", calc: "80 mg/m²", actual: "137.6 mg", route: "IV Infusion", diluent: "NS 250ml", status: "GIVEN" },
-  { no: 2, drug: "Herceptin (Trastuzumab)", calc: "2 mg", actual: "128 mg", route: "IV Infusion", diluent: "NS 100ml", status: "PENDING" },
-  { no: 3, drug: "Carboplatin", calc: "AUC 6", actual: "450 mg", route: "IV Infusion", diluent: "D5W 500ml", status: "PENDING" },
-];
-
-const dischargeMeds = [
-  { no: 1, medication: "Capecitabine", dose: "12 mg", frequency: "2-0-2", instruction: "Twice Daily", duration: "5 Days" },
-  { no: 2, medication: "Paracetamol", dose: "22.75 mg", frequency: "2-0-2", instruction: "Once Daily", duration: "5 Days" },
-];
-
 function StatusBadge({ children, warning = false }: { children: React.ReactNode; warning?: boolean }) {
   return (
     <span className={`inline-flex rounded-md px-2.5 py-1 text-[10px] font-bold uppercase ${
@@ -7765,6 +7749,8 @@ const MedicationPortal: React.FC<{
   patientAgeSex?: string;
   patientDisplayId?: string;
   patientId?: string;
+  plan?: SummaryPlan | null;
+  allergies?: PatientAllergyRecord[];
 }> = ({
   onBackToProfile,
   patientName = "",
@@ -7772,10 +7758,32 @@ const MedicationPortal: React.FC<{
   patientAgeSex = "",
   patientDisplayId = "",
   patientId = "",
+  plan = null,
+  allergies = [],
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>("Medications");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showDischargeDashboard, setShowDischargeDashboard] = useState(false);
+
+  /* Recent medication details for THIS selected patient, sourced from
+     the fetched chemotherapy plan (GET /chemotherapy/plans?patient_id=). */
+  const medPlanItems = plan?.chemotherapy_plan_items ?? [];
+  const medPremedications = medPlanItems.filter(
+    (item) => (item.drug_role ?? "").toUpperCase() === "PREMEDICATION",
+  );
+  const medChemoDrugs = medPlanItems.filter(
+    (item) => (item.drug_role ?? "").toUpperCase() === "PRIMARY",
+  );
+  const medSupportiveCount = medPlanItems.filter(
+    (item) =>
+      !["PREMEDICATION", "PRIMARY"].includes(
+        (item.drug_role ?? "").toUpperCase(),
+      ),
+  ).length;
+  const medAllergyNames = allergies
+    .map((item) => item.allergy_master?.substance_name)
+    .filter(Boolean)
+    .join(", ");
 
   if (showDischargeDashboard) {
     return (
@@ -7840,7 +7848,7 @@ const MedicationPortal: React.FC<{
             <div className="text-sm text-[#64748b] flex items-center space-x-3">
 <span>{patientAgeSex}</span>
             <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-            <span className="text-[#1d4ed8] font-semibold">Ductal Carcinoma Stage II</span>
+<span className="text-[#1d4ed8] font-semibold">{[plan?.cancer_subtype || plan?.cancer_type, plan?.cancer_stage].filter(Boolean).join(" ") || "—"}</span>
             </div>
             </div>
             </div>
@@ -7849,50 +7857,50 @@ const MedicationPortal: React.FC<{
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">HEIGHT</div>
-            <div className="font-bold text-sm">154 cm</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BP</div>
-            <div className="font-bold text-sm">118/74</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             </div>
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">WEIGHT</div>
-            <div className="font-bold text-sm">52 kg</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">PULSE</div>
-            <div className="font-bold text-sm">78 bpm</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             </div>
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BSA</div>
-            <div className="font-bold text-sm">1.49 m²</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">TEMP</div>
-            <div className="font-bold text-sm">36.8 °C</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             </div>
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BMI</div>
-            <div className="font-bold text-sm">21.93</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">SPO2</div>
-            <div className="font-bold text-sm">99%</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             </div>
             </div>
             <div className="pl-8">
             <div className="bg-blue-50/50 border border-blue-100 rounded-[12px] p-4 w-[220px]">
-            <div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: NEOADJUVANT</div>
-            <div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">TAXOL - WEEKLY</div>
+            <div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: {plan?.treatment_intent || "—"}</div>
+            <div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">{plan?.regimen_name || "—"}</div>
             <div className="flex items-center text-xs text-[#64748b] font-medium">
-            <span className="w-2 h-2 rounded-full bg-[#10b981] mr-2"></span> Active Protocol
+            <span className={`w-2 h-2 rounded-full mr-2 ${plan ? "bg-[#10b981]" : "bg-slate-300"}`}></span> {plan?.treatment_status || "No Plan"}
                     </div>
             </div>
             </div>
@@ -7905,18 +7913,13 @@ const MedicationPortal: React.FC<{
             <div className="flex items-center space-x-8">
             <div className="flex items-center">
             <i className="fa-solid fa-triangle-exclamation text-[#ef4444] mr-2"></i>
-            <span className="text-[#ef4444] font-semibold">Allergy:</span> <span className="ml-1 text-[#1e293b]">Penicillin</span>
+            <span className="text-[#ef4444] font-semibold">Allergy:</span> <span className="ml-1 text-[#1e293b]">{medAllergyNames || "—"}</span>
             </div>
             <div className="flex items-center">
             <i className="fa-solid fa-clock-rotate-left text-[#f59e0b] mr-2"></i>
-            <span className="text-[#f59e0b] font-semibold">Previous Cycle:</span> <span className="ml-1 text-[#1e293b]">Grade 2 Neutropenia</span>
-            </div>
-            <div className="flex items-center text-[#1d4ed8] font-medium">
-            <i className="fa-solid fa-link mr-2"></i>
-            <span>Central Line Available</span>
+            <span className="text-[#f59e0b] font-semibold">Previous Cycle:</span> <span className="ml-1 text-[#1e293b]">{plan?.completed_cycles ? `Cycle ${plan.completed_cycles} completed` : "—"}</span>
             </div>
             </div>
-            <a className="text-[#1d4ed8] font-semibold hover:underline" href="#">View Full Alerts (2)</a>
             </div>
             {/* END: Alerts Banner */}
 
@@ -7954,10 +7957,10 @@ const MedicationPortal: React.FC<{
                 {/* Summary cards */}
                 <div className="grid grid-cols-1 gap-4 pt-4 sm:grid-cols-2 xl:grid-cols-4">
                   {[
-                    ["TOTAL MEDS", "8", "fa-solid fa-pills", "bg-blue-50 text-[#0052cc]"],
-                    ["PREMEDS", "3", "fa-solid fa-syringe", "bg-purple-50 text-purple-600"],
-                    ["CHEMO", "3", "fa-solid fa-hourglass-half", "bg-red-50 text-red-500"],
-                    ["SUPPORTIVE", "2", "fa-solid fa-heart-pulse", "bg-emerald-50 text-emerald-500"],
+                    ["TOTAL MEDS", String(medPlanItems.length), "fa-solid fa-pills", "bg-blue-50 text-[#0052cc]"],
+                    ["PREMEDS", String(medPremedications.length), "fa-solid fa-syringe", "bg-purple-50 text-purple-600"],
+                    ["CHEMO", String(medChemoDrugs.length), "fa-solid fa-hourglass-half", "bg-red-50 text-red-500"],
+                    ["OTHER", String(medSupportiveCount), "fa-solid fa-heart-pulse", "bg-emerald-50 text-emerald-500"],
                   ].map(([label, value, icon, cls]) => (
                     <div key={label} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                       <div>
@@ -7975,7 +7978,7 @@ const MedicationPortal: React.FC<{
                   <div className="min-w-0 flex-1 space-y-6">
                     {/* Premeds */}
                     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                      <SectionHeader icon="fa-solid fa-chevron-down" title="Premedications" badge="3 Prescribed" />
+                      <SectionHeader icon="fa-solid fa-chevron-down" title="Premedications" badge={`${medPremedications.length} Prescribed`} />
                       <div className="overflow-x-auto">
                         <table className="w-full min-w-[700px] text-left text-sm">
                           <thead className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
@@ -7989,19 +7992,25 @@ const MedicationPortal: React.FC<{
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
-                            {premedications.map((m) => (
-                              <tr key={m.no} className="transition-colors hover:bg-slate-50">
-                                <td className="px-6 py-4 text-center text-slate-400">{m.no}</td>
-                                <td className="px-6 py-4">
-                                  <p className="font-bold text-slate-800">{m.medication}</p>
-                                  {m.sub && <p className="text-xs text-slate-500">{m.sub}</p>}
-                                </td>
-                                <td className="px-6 py-4 text-slate-700">{m.dose}{m.dose2 && <><br />{m.dose2}</>}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.route.map((x) => <React.Fragment key={x}>{x}<br /></React.Fragment>)}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.timing.map((x) => <React.Fragment key={x}>{x}<br /></React.Fragment>)}</td>
-                                <td className="px-6 py-4 text-center"><StatusBadge>GIVEN</StatusBadge></td>
+                            {medPremedications.length === 0 ? (
+                              <tr>
+                                <td colSpan={6} className="px-6 py-6 text-center text-xs text-slate-400">No premedications found for this patient.</td>
                               </tr>
-                            ))}
+                            ) : (
+                              medPremedications.map((item, index) => (
+                                <tr key={item.chemotherapy_plan_item_id} className="transition-colors hover:bg-slate-50">
+                                  <td className="px-6 py-4 text-center text-slate-400">{index + 1}</td>
+                                  <td className="px-6 py-4">
+                                    <p className="font-bold text-slate-800">{item.medicine_master?.medicine_name ?? "—"}</p>
+                                    {item.medicine_master?.generic_name && <p className="text-xs text-slate-500">{item.medicine_master.generic_name}</p>}
+                                  </td>
+                                  <td className="px-6 py-4 text-slate-700">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
+                                  <td className="px-6 py-4 text-slate-700">{item.administration_route ?? "—"}</td>
+                                  <td className="px-6 py-4 text-slate-700">{item.frequency ?? item.remarks ?? "—"}</td>
+                                  <td className="px-6 py-4 text-center"><StatusBadge>{item.drug_role || "PRESCRIBED"}</StatusBadge></td>
+                                </tr>
+                              ))
+                            )}
                           </tbody>
                         </table>
                       </div>
@@ -8009,7 +8018,7 @@ const MedicationPortal: React.FC<{
 
                     {/* Chemo */}
                     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                      <SectionHeader icon="fa-solid fa-chevron-down" title="Chemotherapy Drugs" badge="Active Cycle" badgeClass="border border-red-100 bg-red-50 text-red-600" />
+                      <SectionHeader icon="fa-solid fa-chevron-down" title="Chemotherapy Drugs" badge={`${medChemoDrugs.length} Prescribed`} badgeClass="border border-red-100 bg-red-50 text-red-600" />
                       <div className="overflow-x-auto">
                         <table className="w-full min-w-[850px] text-left text-sm">
                           <thead className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
@@ -8024,17 +8033,23 @@ const MedicationPortal: React.FC<{
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
-                            {chemoDrugs.map((m) => (
-                              <tr key={m.no} className="transition-colors hover:bg-slate-50">
-                                <td className="px-6 py-4 text-center text-slate-400">{m.no}</td>
-                                <td className="px-6 py-4"><a href="#" className="font-bold text-[#0052cc] hover:underline">{m.drug}</a></td>
-                                <td className="px-6 py-4 text-xs text-slate-500">{m.calc}</td>
-                                <td className="px-6 py-4 font-bold text-slate-800">{m.actual}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.route}</td>
-                                <td className="px-6 py-4 text-xs text-slate-500">{m.diluent}</td>
-                                <td className="px-6 py-4 text-center"><StatusBadge warning={m.status === "PENDING"}>{m.status}</StatusBadge></td>
+                            {medChemoDrugs.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="px-6 py-6 text-center text-xs text-slate-400">No chemotherapy drugs found for this patient.</td>
                               </tr>
-                            ))}
+                            ) : (
+                              medChemoDrugs.map((item, index) => (
+                                <tr key={item.chemotherapy_plan_item_id} className="transition-colors hover:bg-slate-50">
+                                  <td className="px-6 py-4 text-center text-slate-400">{index + 1}</td>
+                                  <td className="px-6 py-4"><span className="font-bold text-[#0052cc]">{item.medicine_master?.medicine_name ?? "—"}</span></td>
+                                  <td className="px-6 py-4 text-xs text-slate-500">{item.protocol_dose != null ? `${item.protocol_dose}${item.protocol_dose_unit ? ` ${item.protocol_dose_unit}` : ""}` : "—"}</td>
+                                  <td className="px-6 py-4 font-bold text-slate-800">{item.calculated_dose ?? item.protocol_dose ?? "—"}</td>
+                                  <td className="px-6 py-4 text-slate-700">{item.administration_route ?? "—"}</td>
+                                  <td className="px-6 py-4 text-xs text-slate-500">{item.dilution_volume ?? "—"}</td>
+                                  <td className="px-6 py-4 text-center"><StatusBadge>{item.drug_role || "PLANNED"}</StatusBadge></td>
+                                </tr>
+                              ))
+                            )}
                           </tbody>
                         </table>
                       </div>
@@ -8042,7 +8057,7 @@ const MedicationPortal: React.FC<{
 
                     {/* Discharge */}
                     <section className="mb-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                      <SectionHeader icon="fa-solid fa-chevron-down" title="Discharge Medication" badge="3 Prescribed" />
+                      <SectionHeader icon="fa-solid fa-chevron-down" title="Discharge Medication" badge="0 Prescribed" />
                       <div className="overflow-x-auto">
                         <table className="w-full min-w-[750px] text-left text-sm">
                           <thead className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
@@ -8056,16 +8071,9 @@ const MedicationPortal: React.FC<{
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
-                            {dischargeMeds.map((m) => (
-                              <tr key={m.no} className="transition-colors hover:bg-slate-50">
-                                <td className="px-6 py-4 text-center text-slate-400">{m.no}</td>
-                                <td className="px-6 py-4 font-bold text-slate-800">{m.medication}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.dose}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.frequency}</td>
-                                <td className="px-6 py-4 font-medium text-slate-800">{m.instruction}</td>
-                                <td className="px-6 py-4 font-bold text-slate-800">{m.duration}</td>
-                              </tr>
-                            ))}
+                            <tr>
+                              <td colSpan={6} className="px-6 py-6 text-center text-xs text-slate-400">No discharge medications found for this patient yet.</td>
+                            </tr>
                           </tbody>
                         </table>
                       </div>
@@ -8081,9 +8089,12 @@ const MedicationPortal: React.FC<{
                           <i className="fa-regular fa-calendar text-xl" />
                         </div>
                         <div>
-                          <p className="text-lg font-bold text-slate-800">06 Jun 2026</p>
-                          <p className="mb-1 text-sm text-slate-500">09:30 AM</p>
-                          <p className="text-sm font-medium text-[#0052cc]">Day 2 Treatment</p>
+                          <p className="text-lg font-bold text-slate-800">{(() => {
+                            const c = timelineCycles.find((c) => c.num === selectedCycle) ?? null;
+                            return c?.date || "—";
+                          })()}</p>
+                          <p className="mb-1 text-sm text-slate-500">—</p>
+                          <p className="text-sm font-medium text-[#0052cc]">{selectedCycle ? `Cycle ${selectedCycle}` : "—"}</p>
                         </div>
                       </div>
                       <button className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50">
@@ -8098,21 +8109,9 @@ const MedicationPortal: React.FC<{
                       </div>
                       <div className="relative space-y-8 pl-4 before:absolute before:inset-y-0 before:left-5 before:w-px before:bg-slate-200">
                         <div className="relative">
-                          <span className="absolute -left-6 top-1.5 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-white" />
-                          <p className="mb-0.5 text-sm font-bold text-slate-800">09:00 AM</p>
-                          <p className="text-sm text-slate-600">Decadron Administered</p>
-                          <p className="mt-0.5 text-xs text-slate-400">Nurse: Elena R.</p>
-                        </div>
-                        <div className="relative">
-                          <span className="absolute -left-6 top-1.5 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-white" />
-                          <p className="mb-0.5 text-sm font-bold text-slate-800">09:15 AM</p>
-                          <p className="text-sm text-slate-600">Avil Administered</p>
-                        </div>
-                        <div className="relative">
-                          <span className="absolute -left-6 top-1.5 h-3 w-3 rounded-full bg-[#0052cc] ring-4 ring-blue-50" />
-                          <p className="mb-0.5 text-sm font-bold text-slate-800">10:00 AM</p>
-                          <p className="text-sm font-bold text-[#0052cc]">Taxol Infusion Started</p>
-                          <p className="mt-0.5 text-xs text-slate-400">Remaining: 42 mins</p>
+                          <span className="absolute -left-6 top-1.5 h-2.5 w-2.5 rounded-full bg-slate-300 ring-4 ring-white" />
+                          <p className="mb-0.5 text-sm font-bold text-slate-800">—</p>
+                          <p className="text-sm text-slate-600">No medication administration records found for this patient yet.</p>
                         </div>
                       </div>
                     </section>
@@ -8475,14 +8474,14 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
-    if (!patientId || activeTab !== "Order Summary") return;
+    if (!patientId) return;
     let cancelled = false;
 
-    /* Order Summary is driven ONLY by
+    /* Latest plan for THIS selected patient via
        GET /chemotherapy/plans?patient_id=<id> (newest first).
        The branch filter is tried first; when it comes back empty
        (plan was saved under another branch) retry without it.
-       ============================================================ */
+       Runs for every tab so Medications gets the same data. */
     const loadSavedPlan = async () => {
       const fetchPlans = async (branchId?: string) => {
         const response = await API.get<{
@@ -8802,6 +8801,8 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
         patientAgeSex={patientAgeSex}
         patientDisplayId={patientDisplayId}
         patientId={consultationState?.patientId || ""}
+        plan={savedPlan}
+        allergies={patientAllergies}
       />
     );
   }
