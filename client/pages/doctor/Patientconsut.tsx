@@ -4,6 +4,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import API, { getActiveBranchId } from "../../api/axios";
 import { employeeApi } from "../../api/employee.api";
+import { appointmentApi } from "../../api/appointment.api";
 import { getUser } from "../../utils/token";
 import {
   patientApi,
@@ -81,6 +82,124 @@ const StepCheckLogo = ({ active = false }: { active?: boolean }) => (
   </svg>
 );
 
+/* ============================================================
+   ACTIVE ENCOUNTER LOOKUP
+   The encounter exists in the DB but the strict query
+   (branch + patient + OPEN) can return empty when the active
+   branch selector points to a different branch than the one
+   the encounter was created under. Retry progressively:
+     1. Active branch + OPEN        (original behaviour)
+     2. Any allowed branch + OPEN   (recovers branch mismatch)
+     3. Any allowed branch, any state, OPEN preferred
+   ============================================================ */
+
+const findActiveEncounter = async (
+  patientId: string,
+): Promise<EncounterRecord | null> => {
+  const branchId = getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+
+  try {
+    const response = await encounterApi.getAll({
+      branchId,
+      patientId,
+      status: "OPEN",
+      page: 1,
+      limit: 5,
+    });
+    const encounters = response.data.data?.encounters ?? [];
+    const current =
+      encounters.find((item) => item.patient_id === patientId) ??
+      encounters[0] ??
+      null;
+    if (current) return current;
+  } catch (error) {
+    console.error("Failed to load encounter:", error);
+  }
+
+  let openEncounters: EncounterRecord[] = [];
+  try {
+    const response = await encounterApi.getAll({
+      patientId,
+      status: "OPEN",
+      page: 1,
+      limit: 10,
+    });
+    openEncounters = response.data.data?.encounters ?? [];
+  } catch {
+    // Multi-branch users without an active selection get a 403 here.
+  }
+  const openMatch = openEncounters.find(
+    (item) => item.patient_id === patientId,
+  );
+  if (openMatch) return openMatch;
+
+  try {
+    const response = await encounterApi.getAll({
+      patientId,
+      page: 1,
+      limit: 10,
+    });
+    const encounters = response.data.data?.encounters ?? [];
+    const anyOpen = encounters.find(
+      (item) => item.patient_id === patientId && item.status === "OPEN",
+    );
+    if (anyOpen) return anyOpen;
+  } catch (error) {
+    console.error("Failed to load encounter:", error);
+  }
+
+  /* ============================================================
+     SELF-HEAL
+     Check-in flips the appointment status before the encounter
+     is created; when creation failed (e.g. the linked schedule
+     was deactivated) the appointment is stuck with no encounter.
+     Recreate it here from the patient's most recent in-progress
+     appointment so clinical details load instead of erroring.
+     ============================================================ */
+
+  const inProgressStatuses = ["IN_CONSULTATION", "CHECKED_IN"];
+  for (const status of inProgressStatuses) {
+    let candidates: { appointment_id: string }[] = [];
+    try {
+      const apptResponse = await appointmentApi.getAll({
+        patientId,
+        status,
+        sortBy: "created_at",
+        sortOrder: "desc",
+        page: 1,
+        limit: 5,
+      });
+      candidates = apptResponse.data.data?.appointments ?? [];
+    } catch {
+      continue;
+    }
+    for (const appt of candidates) {
+      try {
+        await encounterApi.create({ appointment_id: appt.appointment_id });
+      } catch {
+        // "Encounter already exists" or not creatable - the lookup below decides.
+      }
+      try {
+        const response = await encounterApi.getAll({
+          patientId,
+          status: "OPEN",
+          page: 1,
+          limit: 5,
+        });
+        const healed =
+          response.data.data?.encounters.find(
+            (item) => item.patient_id === patientId,
+          ) ?? null;
+        if (healed) return healed;
+      } catch (error) {
+        console.error("Failed to load encounter:", error);
+      }
+    }
+  }
+
+  return null;
+};
+
 const Consultation: React.FC = () => {
   /* ============================================================
      STATE
@@ -95,6 +214,10 @@ const Consultation: React.FC = () => {
   const [selectedInvestigations, setSelectedInvestigations] = useState<
     string[]
   >([]);
+
+  const [investigationNotes, setInvestigationNotes] = useState<
+    Record<string, string>
+  >({});
 
   const [showLabReview, setShowLabReview] = useState(false);
   const [activeStep, setActiveStep] = useState("CONSULTATION");
@@ -179,19 +302,9 @@ const Consultation: React.FC = () => {
     if (!patientId) return;
     let cancelled = false;
     setEncounterError("");
-    // GET /encounters is branch-scoped (branchScope middleware 403s
-    // "Please select a branch first." when no branch is sent and the
-    // user maps to more than one branch).
-    const branchId = getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
-    encounterApi
-      .getAll({ branchId, patientId, status: "OPEN", page: 1, limit: 5 })
-      .then((response) => {
+    findActiveEncounter(patientId)
+      .then((current) => {
         if (cancelled) return;
-        const encounters = response.data.data?.encounters ?? [];
-        const current =
-          encounters.find((item) => item.patient_id === patientId) ??
-          encounters[0] ??
-          null;
         setEncounter(current);
         if (!current) {
           setEncounterError(
@@ -529,7 +642,7 @@ const Consultation: React.FC = () => {
   ============================================================ */
 
   if (showProfilePortal) {
-    return <HMSPatientPortal />;
+    return <HMSPatientPortal onBack={() => setShowProfilePortal(false)} />;
   }
 
   return (
@@ -1200,6 +1313,39 @@ const Consultation: React.FC = () => {
 
                   </div>
 
+                  {selectedInvestigations.length > 0 && (
+                    <div className="flex w-full flex-col gap-4 pt-2">
+
+                      {selectedInvestigations.map((investigation) => (
+
+                        <div
+                          key={investigation}
+                          className="flex flex-col gap-2"
+                        >
+
+                          <label className="text-xs font-bold leading-4 text-slate-500">
+                            Clinical Notes - {investigation}
+                          </label>
+
+                          <textarea
+                            value={investigationNotes[investigation] ?? ""}
+                            onChange={(e) =>
+                              setInvestigationNotes((prev) => ({
+                                ...prev,
+                                [investigation]: e.target.value,
+                              }))
+                            }
+                            placeholder={`Enter clinical notes for ${investigation}`}
+                            className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-300"
+                          />
+
+                        </div>
+
+                      ))}
+
+                    </div>
+                  )}
+
                   <div className="flex w-full flex-col gap-2 pt-2">
 
                     <label className="text-xs font-bold leading-4 text-slate-500">
@@ -1478,19 +1624,7 @@ const LabReview: React.FC<{
       let targetEncounterNo = encounterNo ?? "";
 
       if (!targetEncounterNo && patientId) {
-        const branchId =
-          getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
-        const response = await encounterApi.getAll({
-          branchId,
-          patientId,
-          status: "OPEN",
-          page: 1,
-          limit: 5,
-        });
-        const found =
-          response.data.data?.encounters.find(
-            (item) => item.patient_id === patientId
-          ) ?? null;
+        const found = await findActiveEncounter(patientId);
         targetEncounterNo = found?.encounter_no ?? "";
       }
 
@@ -1940,7 +2074,10 @@ const Diagnosis: React.FC<{
     );
   };
 
-  const loadSubtypesForCancerType = (cancerTypeId: string) => {
+  const loadSubtypesForCancerType = (
+    cancerTypeId: string,
+    autoSelectIcd = true
+  ) => {
     if (!cancerTypeId) return;
     const requestId = ++diagnosisRequestRef.current;
     setDiagnosisLoading(true);
@@ -1954,10 +2091,10 @@ const Diagnosis: React.FC<{
         const items = response.data.data;
         setSubtypes(items);
         const first = items[0];
-        if (first) {
+        if (first && autoSelectIcd) {
           setFormData((previous) => ({
             ...previous,
-            icdCode: first.icd10_subtype ?? "",
+            icdCode: previous.icdCode || first.icd10_subtype || "",
           }));
         }
       })
@@ -1976,7 +2113,10 @@ const Diagnosis: React.FC<{
       });
   };
 
-  const loadStagesForCancerType = (cancerTypeId: string) => {
+  const loadStagesForCancerType = (
+    cancerTypeId: string,
+    resetStageSelection = true
+  ) => {
     if (!cancerTypeId) return;
     const requestId = ++stagingRequestRef.current;
     setDiagnosisLoading(true);
@@ -2027,6 +2167,7 @@ const Diagnosis: React.FC<{
         }
         setTnmStages(tnmOptions.sort());
         setGrades(gradeOptions.sort());
+        if (!resetStageSelection) return;
         setFormData((previous) => ({
           ...previous,
           cancerStage: "",
@@ -2058,13 +2199,35 @@ const Diagnosis: React.FC<{
         const fetched = response.data.data;
         setCancerTypes(fetched);
 
+        let savedType = "";
+        try {
+          const savedDraft = JSON.parse(
+            localStorage.getItem(diagnosisDraftKey) ?? ""
+          ) as Partial<FormData> | null;
+          savedType = savedDraft?.type ?? "";
+        } catch (error) {
+          console.error("Failed to read diagnosis draft:", error);
+        }
+
+        const matchedSavedType = savedType
+          ? fetched.find((item) => item.cancer_type === savedType)
+          : undefined;
+
+        if (matchedSavedType) {
+          // Restoring a saved draft: reload options for the saved
+          // type without overwriting the user's selections.
+          loadSubtypesForCancerType(matchedSavedType.cancer_type_id, false);
+          loadStagesForCancerType(matchedSavedType.cancer_type_id, false);
+          return;
+        }
+
         const initial = fetched[0];
 
         if (initial) {
           setFormData((previous) => ({
             ...previous,
-            type: initial.cancer_type,
-            icdCode: initial.icd10 ?? "",
+            type: previous.type || initial.cancer_type,
+            icdCode: previous.icdCode || initial.icd10 || "",
           }));
           loadSubtypesForCancerType(initial.cancer_type_id);
           loadStagesForCancerType(initial.cancer_type_id);
@@ -2776,18 +2939,7 @@ const DischargeMedication: React.FC<{
   const resolveEncounterNo = async () => {
     if (encounterNo) return encounterNo;
     if (!patientId) return "";
-    const branchId = getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
-    const response = await encounterApi.getAll({
-      branchId,
-      patientId,
-      status: "OPEN",
-      page: 1,
-      limit: 5,
-    });
-    const found =
-      response.data.data?.encounters.find(
-        (item) => item.patient_id === patientId
-      ) ?? null;
+    const found = await findActiveEncounter(patientId);
     return found?.encounter_no ?? "";
   };
 
@@ -2928,17 +3080,6 @@ if (embedded) {
               ))}
             </tbody>
           </table>
-        </div>
-
-        {/* Add Drug */}
-        <div className="flex justify-end p-6">
-          <button
-            type="button"
-            onClick={handleAddDrug}
-            className="rounded border border-blue-600 px-6 py-2 text-sm font-semibold text-blue-600 transition-colors duration-200 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-          >
-            Add Drug
-          </button>
         </div>
       </div>
 
@@ -3186,17 +3327,6 @@ if (embedded) {
                   </tbody>
                 </table>
               </div>
-
-              {/* Add Drug */}
-              <div className="flex justify-end p-6">
-                <button
-                  type="button"
-                  onClick={handleAddDrug}
-                  className="rounded border border-blue-600 px-6 py-2 text-sm font-semibold text-blue-600 transition-colors duration-200 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                >
-                  Add Drug
-                </button>
-              </div>
             </div>
 
             {/* FOOTER ACTION */}
@@ -3234,6 +3364,7 @@ type Drug = {
   dose: string;
   unit: string;
   volume: string;
+  planItemId?: string;
 };
 
 type ChemotherapyPlanItem = {
@@ -3336,7 +3467,17 @@ const ChemotherapyOrder: React.FC<{
 
   const protocolRef = useRef<RegimenProtocolDetail | null>(null);
   const planIdRef = useRef<string>("");
+  const planItemsRef = useRef<ChemotherapyPlanItem[]>([]);
   const [savingOrder, setSavingOrder] = useState(false);
+
+  /* Edit-in-place state (medication rows) */
+  const [editingRow, setEditingRow] = useState<{
+    kind: "drug" | "premedication";
+    id: number;
+  } | null>(null);
+  const [editDraft, setEditDraft] = useState<Drug | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
   const latestCycleRef = useRef<
     NonNullable<ChemotherapyPlan["chemotherapy_cycle"]>[number] | null
   >(null);
@@ -3675,11 +3816,13 @@ const ChemotherapyOrder: React.FC<{
             plan.protocol_name || plan.regimen_name || ""
           );
           const planItems = plan.chemotherapy_plan_items ?? [];
+          planItemsRef.current = planItems;
           const toPlanDrug = (
             item: ChemotherapyPlanItem,
             index: number
           ): Drug => ({
             id: index,
+            planItemId: item.chemotherapy_plan_item_id,
             name:
               item.medicine_master?.medicine_name ||
               item.medicine_master?.generic_name ||
@@ -3758,11 +3901,143 @@ const ChemotherapyOrder: React.FC<{
     );
   };
 
+  const startEdit = (kind: "drug" | "premedication", drug: Drug) => {
+    if (editingRow || savingEdit) return;
+
+    userTouched.current[kind === "drug" ? "drugs" : "premedication"] = true;
+    setEditError("");
+    setEditingRow({ kind, id: drug.id });
+    setEditDraft({ ...drug });
+  };
+
   const handleEdit = (id: number) => {
     const drug = drugs.find((item) => item.id === id);
 
     if (drug) {
-      console.log("Edit drug:", drug);
+      startEdit("drug", drug);
+    }
+  };
+
+  const handleEditPremedication = (id: number) => {
+    const drug = premedicationDrugs.find(
+      (item) => item.id === id
+    );
+
+    if (drug) {
+      startEdit("premedication", drug);
+    }
+  };
+
+  const cancelEdit = () => {
+    if (savingEdit) return;
+
+    setEditingRow(null);
+    setEditDraft(null);
+    setEditError("");
+  };
+
+  const updateEditDraft = (field: keyof Drug, value: string) => {
+    setEditDraft((previous) =>
+      previous
+        ? {
+            ...previous,
+            [field]: value,
+          }
+        : previous
+    );
+  };
+
+  const resolvePlanItemId = (
+    kind: "drug" | "premedication",
+    name: string
+  ) => {
+    const role = kind === "drug" ? "PRIMARY" : "PREMEDICATION";
+    const normalizedName = name.trim().toLowerCase();
+
+    const matched = planItemsRef.current.find(
+      (item) =>
+        (!item.drug_role || item.drug_role === role) &&
+        (
+          item.medicine_master?.medicine_name ||
+          item.medicine_master?.generic_name ||
+          ""
+        )
+          .trim()
+          .toLowerCase() === normalizedName
+    );
+
+    return matched?.chemotherapy_plan_item_id ?? "";
+  };
+
+  const saveEditedDrug = async () => {
+    if (!editDraft || !editingRow || savingEdit) return;
+
+    const trimmedDose = editDraft.dose.trim();
+
+    if (trimmedDose && Number.isNaN(Number(trimmedDose))) {
+      setEditError("Dose must be a valid number.");
+      return;
+    }
+
+    try {
+      setSavingEdit(true);
+      setEditError("");
+
+      let planItemId = "";
+
+      if (planIdRef.current) {
+        planItemId =
+          editDraft.planItemId ||
+          resolvePlanItemId(editingRow.kind, editDraft.name);
+
+        if (!planItemId) {
+          throw new Error(
+            "Could not match this medication to the patient's chemotherapy plan."
+          );
+        }
+
+        await API.put(
+          `/chemotherapy/plans/${planIdRef.current}/items/${planItemId}`,
+          {
+            dosage: trimmedDose === "" ? null : Number(trimmedDose),
+            dosage_unit: editDraft.unit.trim() || null,
+          }
+        );
+
+        editDraft.planItemId = planItemId;
+      } else {
+        throw new Error(
+          "No chemotherapy plan found for this patient. Complete the Treatment Plan step first."
+        );
+      }
+
+      const updatedDrug: Drug = { ...editDraft };
+
+      if (editingRow.kind === "drug") {
+        setDrugs((current) =>
+          current.map((item) =>
+            item.id === editingRow.id ? updatedDrug : item
+          )
+        );
+      } else {
+        setPremedicationDrugs((current) =>
+          current.map((item) =>
+            item.id === editingRow.id ? updatedDrug : item
+          )
+        );
+      }
+
+      setEditingRow(null);
+      setEditDraft(null);
+    } catch (error: any) {
+      console.error("Failed to save medication changes:", error);
+      setEditError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to save the medication changes. Please try again."
+      );
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -3772,16 +4047,6 @@ const ChemotherapyOrder: React.FC<{
     setPremedicationDrugs((current) =>
       current.filter((drug) => drug.id !== id)
     );
-  };
-
-  const handleEditPremedication = (id: number) => {
-    const drug = premedicationDrugs.find(
-      (item) => item.id === id
-    );
-
-    if (drug) {
-      console.log("Edit premedication drug:", drug);
-    }
   };
 
   /* Icons (scoped inside the component) */
@@ -4052,6 +4317,11 @@ const ChemotherapyOrder: React.FC<{
         {/* ================= ORDER TABLE ================= */}
         {activeTab === "Chemotherapy Orders" ? (
           <div className="p-8">
+            {editingRow?.kind === "drug" && editError && (
+              <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+                {editError}
+              </div>
+            )}
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -4072,10 +4342,6 @@ const ChemotherapyOrder: React.FC<{
                       Unit
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Volume
-                    </th>
-
                     <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
                       Action
                     </th>
@@ -4086,7 +4352,7 @@ const ChemotherapyOrder: React.FC<{
                   {planLoading && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={5}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
                         Loading chemotherapy orders…
@@ -4097,7 +4363,7 @@ const ChemotherapyOrder: React.FC<{
                   {!planLoading && !planError && drugs.length === 0 && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={5}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
                         No chemotherapy orders found for this patient.
@@ -4108,7 +4374,7 @@ const ChemotherapyOrder: React.FC<{
                   {planError && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={5}
                         className="px-6 py-8 text-center text-sm text-red-500"
                       >
                         {planError}
@@ -4116,7 +4382,99 @@ const ChemotherapyOrder: React.FC<{
                     </tr>
                   )}
 
-                  {drugs.map((drug) => (
+                  {drugs.map((drug) => {
+                    const isEditingRow =
+                      editingRow?.kind === "drug" &&
+                      editingRow.id === drug.id;
+
+                    if (isEditingRow && editDraft) {
+                      return (
+                        <tr
+                          key={drug.id}
+                          className="bg-blue-50/40 transition-colors"
+                        >
+                          <td className="px-3 py-3 pl-6 pr-3">
+                            <input
+                              type="text"
+                              value={editDraft.name}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "name",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[160px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.form}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "form",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[120px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.dose}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "dose",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.unit}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "unit",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={saveEditedDrug}
+                                disabled={savingEdit}
+                                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {savingEdit ? "Saving…" : "Save"}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={cancelEdit}
+                                disabled={savingEdit}
+                                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return (
                     <tr
                       key={drug.id}
                       className="transition-colors hover:bg-gray-50"
@@ -4135,10 +4493,6 @@ const ChemotherapyOrder: React.FC<{
 
                       <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
                         {drug.unit}
-                      </td>
-
-                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-500">
-                        {drug.volume}
                       </td>
 
                       <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
@@ -4167,24 +4521,19 @@ const ChemotherapyOrder: React.FC<{
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
-            </div>
-
-            {/* Add Drug */}
-            <div className="mt-6 flex justify-end">
-              <button
-                type="button"
-                onClick={handleAddDrug}
-                className="inline-flex items-center justify-center rounded-md border border-blue-200 bg-blue-50 px-6 py-2.5 text-sm font-semibold text-blue-600 shadow-sm transition-colors hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-              >
-                Add Drug
-              </button>
             </div>
           </div>
         ) : activeTab === "Premedication" ? (
           <div className="p-8">
+            {editingRow?.kind === "premedication" && editError && (
+              <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+                {editError}
+              </div>
+            )}
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -4205,10 +4554,6 @@ const ChemotherapyOrder: React.FC<{
                       Unit
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Volume
-                    </th>
-
                     <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
                       Action
                     </th>
@@ -4219,7 +4564,7 @@ const ChemotherapyOrder: React.FC<{
                   {planLoading && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={5}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
                         Loading premedication…
@@ -4232,7 +4577,7 @@ const ChemotherapyOrder: React.FC<{
                     premedicationDrugs.length === 0 && (
                       <tr>
                         <td
-                          colSpan={6}
+                          colSpan={5}
                           className="px-6 py-8 text-center text-sm text-gray-500"
                         >
                           No premedication drugs found for this protocol.
@@ -4243,7 +4588,7 @@ const ChemotherapyOrder: React.FC<{
                   {planError && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={5}
                         className="px-6 py-8 text-center text-sm text-red-500"
                       >
                         {planError}
@@ -4251,7 +4596,99 @@ const ChemotherapyOrder: React.FC<{
                     </tr>
                   )}
 
-                  {premedicationDrugs.map((drug) => (
+                  {premedicationDrugs.map((drug) => {
+                    const isEditingRow =
+                      editingRow?.kind === "premedication" &&
+                      editingRow.id === drug.id;
+
+                    if (isEditingRow && editDraft) {
+                      return (
+                        <tr
+                          key={drug.id}
+                          className="bg-blue-50/40 transition-colors"
+                        >
+                          <td className="px-3 py-3 pl-6 pr-3">
+                            <input
+                              type="text"
+                              value={editDraft.name}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "name",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[160px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.form}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "form",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[120px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.dose}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "dose",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.unit}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "unit",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={saveEditedDrug}
+                                disabled={savingEdit}
+                                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {savingEdit ? "Saving…" : "Save"}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={cancelEdit}
+                                disabled={savingEdit}
+                                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return (
                     <tr
                       key={drug.id}
                       className="transition-colors hover:bg-gray-50"
@@ -4270,10 +4707,6 @@ const ChemotherapyOrder: React.FC<{
 
                       <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
                         {drug.unit}
-                      </td>
-
-                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-500">
-                        {drug.volume}
                       </td>
 
                       <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
@@ -4302,7 +4735,8 @@ const ChemotherapyOrder: React.FC<{
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -6704,13 +7138,12 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
 
     renderTable(
       "Chemotherapy Orders",
-      ["Drug Name", "Form", "Dose", "Unit", "Volume"],
+      ["Drug Name", "Form", "Dose", "Unit"],
       chemotherapyOrders.map((row) => [
         row.drug,
         row.form,
         row.dose,
         row.unit,
-        row.volume,
       ])
     );
     renderTable(
@@ -6745,6 +7178,11 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const handleSubmitSummary = () => {
+    if (!resolvedPatientId) return;
+    localStorage.removeItem(`hms_diagnosis_form_${resolvedPatientId}`);
   };
 
   const Step = ({
@@ -6906,9 +7344,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
                       Unit
                     </th>
 
-                    <th className="pb-3 font-medium text-slate-900">
-                      Volume
-                    </th>
+                    
                   </tr>
                 </thead>
 
@@ -6920,9 +7356,6 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
                       <td className="py-3">{item.dose}</td>
                       <td className="py-3 text-xs uppercase">
                         {item.unit}
-                      </td>
-                      <td className="py-3 text-xs uppercase">
-                        {item.volume}
                       </td>
                     </tr>
                   ))}
@@ -7056,6 +7489,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
       <div className="mb-8 flex flex-wrap justify-end gap-4">
         <button
           type="button"
+          onClick={handleSubmitSummary}
           className="rounded-md bg-[#5624D0] px-8 py-3 font-medium text-white shadow-sm transition-colors hover:bg-[#4a1fb5]"
         >
           Submit
@@ -7317,8 +7751,20 @@ function SectionHeader({ icon, title, badge, badgeClass = "bg-blue-100 text-[#00
   );
 }
 
-const MedicationPortal: React.FC<{ onBackToProfile?: () => void }> = ({
+const MedicationPortal: React.FC<{
+  onBackToProfile?: () => void;
+  patientName?: string;
+  patientPhoto?: string;
+  patientAgeSex?: string;
+  patientDisplayId?: string;
+  patientId?: string;
+}> = ({
   onBackToProfile,
+  patientName = "",
+  patientPhoto = "",
+  patientAgeSex = "",
+  patientDisplayId = "",
+  patientId = "",
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>("Medications");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -7328,6 +7774,7 @@ const MedicationPortal: React.FC<{ onBackToProfile?: () => void }> = ({
     return (
       <DischargeDetailsPortal
         onBack={() => setShowDischargeDashboard(false)}
+        patientId={patientId}
       />
     );
   }
@@ -7377,14 +7824,14 @@ const MedicationPortal: React.FC<{ onBackToProfile?: () => void }> = ({
             {/* BEGIN: Patient Header Card */}
             <div className="bg-white rounded-[16px] border border-[#e2e8f0] p-6 shadow-sm mb-6 flex justify-between items-center">
             <div className="flex items-center">
-            <img alt="Vijaya Nallusamy" className="w-20 h-20 rounded-full border-4 border-white shadow-sm object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCVmv5vhpN6g6IwvwVBONWYZS06j9iELGi3guKAqt6M68HTL3HxSslWkIMAEQjWeTlKNOdnc-Pipmecvq47y_J4JkJpXBa7ODMic8izxEnar0D-CTbCOUggEhRCTr29jfsIrqPw9jJJRvmghxFC8vXF6U5zjzrn_8ajoH2ovseUywhLI0FurjCqa2DjfMMM3yvISAkY7jN2EjygmPh_WvJa_vc06-pRUGw2Xu4pFrWdOcPdAl4HggI"/>
+<img alt={patientName} className="w-20 h-20 rounded-full border-4 border-white shadow-sm object-cover" src={patientPhoto}/>
             <div className="ml-6">
             <div className="flex items-center space-x-3 mb-1">
-            <h2 className="text-xl font-bold text-[#1e293b]">Vijaya Nallusamy</h2>
-            <span className="bg-slate-100 text-[#64748b] px-3 py-1 rounded-full text-xs font-semibold">ONC-2026-10025</span>
+<h2 className="text-xl font-bold text-[#1e293b]">{patientName}</h2>
+<span className="bg-slate-100 text-[#64748b] px-3 py-1 rounded-full text-xs font-semibold">{patientDisplayId}</span>
             </div>
             <div className="text-sm text-[#64748b] flex items-center space-x-3">
-            <span>51Y / Female</span>
+<span>{patientAgeSex}</span>
             <span className="w-1 h-1 rounded-full bg-slate-300"></span>
             <span className="text-[#1d4ed8] font-semibold">Ductal Carcinoma Stage II</span>
             </div>
@@ -7690,31 +8137,451 @@ const MedicationPortal: React.FC<{ onBackToProfile?: () => void }> = ({
     original file's component name, original file left untouched)
 ============================================================ */
 
-function HMSPatientPortal() {
+interface ChemoMatchingProtocol {
+  id?: string;
+  protocol_id: string;
+  regimen_code: string;
+  regimen_name: string;
+  treatment_intent?: string | null;
+  standard_cycles?: number | null;
+  cycle_interval_days?: number | null;
+}
+
+/* ============================================================
+   FULL STAGING DETAIL RECORDS (GET /oncology/staging-details/:id)
+   Every field the backend can return for the selected patient.
+   ============================================================ */
+
+interface StagingPatientBio {
+  patient_id?: string;
+  patient_first_name?: string | null;
+  patient_last_name?: string | null;
+  patient_dob?: string | null;
+  patient_age?: number | string | null;
+  patient_gender?: string | null;
+}
+
+interface StagingIhcRecord {
+  ihc_id?: string;
+  er_status?: string | null;
+  er_percent?: number | null;
+  pr_status?: string | null;
+  pr_percent?: number | null;
+  her2_ihc?: string | null;
+  her2_fish?: string | null;
+  her2_fish_ratio?: number | string | null;
+  her2_avg_copy?: number | string | null;
+  ki67_percent?: number | null;
+  pdl1_tps?: number | null;
+  pdl1_cps?: number | null;
+  pdl1_clone?: string | null;
+  mmr_mlh1?: string | null;
+  mmr_msh2?: string | null;
+  mmr_msh6?: string | null;
+  mmr_pms2?: string | null;
+  mmr_overall?: string | null;
+  p53_ihc?: string | null;
+  ar_status?: string | null;
+  mlh1_methylation?: string | null;
+}
+
+interface StagingMolecularRecord {
+  mol_id?: string;
+  egfr_status?: string | null;
+  egfr_mutation_type?: string | null;
+  alk_status?: string | null;
+  alk_test_method?: string | null;
+  ros1_status?: string | null;
+  kras_g12c?: string | null;
+  kras_mutation?: string | null;
+  braf_v600e?: string | null;
+  brca1_germline?: string | null;
+  brca2_germline?: string | null;
+  brca_somatic?: string | null;
+  hrd_status?: string | null;
+  hrd_score?: number | string | null;
+  hrd_assay?: string | null;
+  msi_status?: string | null;
+  msi_test_method?: string | null;
+  tmb?: number | string | null;
+  tmb_assay?: string | null;
+  ngs_panel?: string | null;
+  flt3_itd?: string | null;
+  flt3_itd_allelic_ratio?: number | string | null;
+  flt3_tkd?: string | null;
+  npm1_mutation?: string | null;
+  idh1_mutation?: string | null;
+  idh2_mutation?: string | null;
+  bcr_abl1?: number | string | null;
+  bcr_abl1_transcript?: string | null;
+}
+
+interface StagingDerivedRecord {
+  ajcc_stage?: string | null;
+  breast_mol_subtype?: string | null;
+  icd10_auto?: string | null;
+  icd_o3_auto?: string | null;
+  pdl1_score_type?: string | null;
+  germline_referral_flag?: boolean | null;
+  lynch_syndrome_flag?: boolean | null;
+  eln_risk?: string | null;
+  lymphoma_deauville?: number | null;
+  tnbc_subtype?: string | null;
+  suggested_therapy?: string | null;
+  recommended_tests?: string | null;
+}
+
+interface StagingDetailRecord {
+  id?: string;
+  staging_detail_id?: string;
+  patient_id?: string;
+  diagnosis_id?: string | null;
+  visit_date?: string | null;
+  diagnosis_date?: string | null;
+  biopsy_date?: string | null;
+  consulting_oncologist?: string | null;
+  icd10_code?: string | null;
+  icd_o3_topo?: string | null;
+  icd_o3_morpho?: string | null;
+  staging_system?: string | null;
+  clinical_stage?: string | null;
+  t_stage?: string | null;
+  n_stage?: string | null;
+  m_stage?: string | null;
+  metastasis_sites?: unknown;
+  laterality?: string | null;
+  performance_status?: number | null;
+  employee_id?: string | null;
+  branch_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  cancer_types?: { cancer_type?: string | null } | null;
+  cancer_subtypes?: { subtype_name?: string | null } | null;
+  ihc_results?: StagingIhcRecord | null;
+  molecular_results?: StagingMolecularRecord | null;
+  derived_fields?: StagingDerivedRecord | null;
+  patient_bio_data?: StagingPatientBio | null;
+  employees?: {
+    first_name?: string | null;
+    last_name?: string | null;
+  } | null;
+  her2_positive?: boolean | null;
+}
+
+interface PatientAllergyRecord {
+  id: string;
+  allergy_id: string;
+  reaction: string | null;
+  severity: string | null;
+  status: string | null;
+  allergy_master?: {
+    substance_name?: string | null;
+    substance_type?: string | null;
+    severity_level?: string | null;
+  } | null;
+}
+
+interface ChemotherapyVitalsRecord {
+  height?: string | number | null;
+  weight?: string | number | null;
+  blood_pressure_systolic?: number | null;
+  blood_pressure_diastolic?: number | null;
+  pulse_rate?: number | null;
+  body_temperature?: string | number | null;
+  body_surface_area?: string | number | null;
+  bmi?: string | number | null;
+  spo2?: number | null;
+}
+
+interface ChemotherapyAdverseEventRecord {
+  adverse_event_name?: string | null;
+  ctcae_grade?: number | string | null;
+  event_date?: string | null;
+}
+
+interface ChemotherapyCycleRecord {
+  chemotherapy_cycle_id: string;
+  cycle_number?: number | null;
+  chemotherapy_vitals?: ChemotherapyVitalsRecord[];
+  chemotherapy_adverse_event?: ChemotherapyAdverseEventRecord[];
+}
+
+interface SavedPlanSummary {
+  chemotherapy_plan_id: string;
+  regimen_name?: string | null;
+  treatment_intent?: string | null;
+}
+
+interface ChemoPlanPreview {
+  staging_detail_id: string;
+  patient_id: string;
+  cancer_type: string | null;
+  cancer_subtype: string | null;
+  clinical_stage: string | null;
+  suggested_therapy: string | null;
+  breast_mol_subtype: string | null;
+  germline_referral_flag: boolean;
+  matching_protocols: ChemoMatchingProtocol[];
+}
+
+/* ============================================================
+   LATEST PLAN PREVIEW LOADER
+   Resolves the selected patient's most recent staging detail
+   (GET /oncology/staging-details, newest first) and then loads
+   GET /chemotherapy/plans/preview?staging_detail_id=<latest>
+   - the same chain the Order Summary panels render.
+
+   The staging list endpoint FILTERS by the branchId query param
+   but only AUTHORIZATES via the x-branch-id header. So when the
+   active branch selection points somewhere else than where the
+   diagnosis was saved - or nothing is selected at all - the
+   strict call returns empty/403 even though data exists. Retry
+   without the filter before giving up.
+   ============================================================ */
+
+const loadLatestPlanPreview = async (
+  patientId: string
+): Promise<{
+  preview: ChemoPlanPreview | null;
+  staging: StagingDetailRecord | null;
+  error: string;
+}> => {
+  const branchId = getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+
+  const stagingAttempts: { params: Record<string, unknown> }[] = [
+    { params: { patient_id: patientId, limit: 1, branchId } },
+    { params: { patient_id: patientId, limit: 1 } },
+  ];
+
+  let lastError =
+    "No staging details found for this patient yet. Complete the Diagnosis step to populate the Order Summary.";
+
+  for (const attempt of stagingAttempts) {
+    let stagingDetailId = "";
+
+    try {
+      const stagingResponse = await API.get<{
+        success: boolean;
+        data: { staging_detail_id: string }[];
+      }>("/oncology/staging-details", attempt);
+      stagingDetailId =
+        stagingResponse.data?.data?.[0]?.staging_detail_id ?? "";
+    } catch (error: any) {
+      lastError =
+        error?.response?.data?.message ||
+        error?.message ||
+        lastError;
+      continue;
+    }
+
+    if (!stagingDetailId) continue;
+
+    // Full record - every saved field (TNM, ICD codes, dates, IHC,
+    // molecular results, derived fields, patient bio, oncologist).
+    let fullStaging: StagingDetailRecord | null = null;
+    try {
+      const detailResponse = await API.get<{
+        success: boolean;
+        data: StagingDetailRecord;
+      }>(`/oncology/staging-details/${encodeURIComponent(stagingDetailId)}`);
+      fullStaging = detailResponse.data?.data ?? null;
+    } catch {
+      // The summary preview below still renders without it.
+    }
+
+    try {
+      const previewResponse = await API.get<{
+        success: boolean;
+        data: ChemoPlanPreview;
+      }>("/chemotherapy/plans/preview", {
+        params: { staging_detail_id: stagingDetailId },
+      });
+
+      const preview = previewResponse.data?.data ?? null;
+
+      // Only accept preview data for THIS selected patient.
+      if (preview && preview.patient_id && preview.patient_id !== patientId) {
+        return {
+          preview: null,
+          staging: null,
+          error:
+            "Saved diagnosis belongs to a different patient. Re-save the Diagnosis step for this patient.",
+        };
+      }
+
+      const staging =
+        fullStaging && fullStaging.patient_id === patientId
+          ? fullStaging
+          : null;
+
+      return { preview, staging, error: "" };
+    } catch (error: any) {
+      return {
+        preview: null,
+        staging: null,
+        error:
+          error?.response?.data?.message ||
+          error?.message ||
+          "Failed to load chemotherapy plan preview.",
+      };
+    }
+  }
+
+  return { preview: null, staging: null, error: lastError };
+};
+
+function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [activeTab, setActiveTab] = useState("Order Summary");
   const [selectedDay, setSelectedDay] = useState("Day 1");
   const [showBranchMenu, setShowBranchMenu] = useState(false);
   const [showMedicationPortal, setShowMedicationPortal] = useState(false);
   const [showDischargePortal, setShowDischargePortal] = useState(false);
+  const [planPreview, setPlanPreview] = useState<ChemoPlanPreview | null>(
+    null
+  );
+  const [planPreviewError, setPlanPreviewError] = useState("");
+  const [patientAllergies, setPatientAllergies] = useState<
+    PatientAllergyRecord[]
+  >([]);
+
+  const location = useLocation();
+  const consultationState = location.state as ConsultationState | null;
+
+  const [patient, setPatient] = useState<PatientRecord | null>(null);
+
+  useEffect(() => {
+    const patientId = consultationState?.patientId;
+    if (!patientId) return;
+    let cancelled = false;
+    patientApi
+      .getById(patientId)
+      .then((response) => {
+        if (cancelled) return;
+        setPatient(response.data.data);
+      })
+      .catch((error) => {
+        console.error("Failed to load patient:", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [consultationState?.patientId]);
+
+  useEffect(() => {
+    const patientId = consultationState?.patientId;
+    let cancelled = false;
+    setPlanPreview(null);
+    setPlanPreviewError("");
+
+    if (!patientId) return;
+
+    const loadPlanPreview = async () => {
+      const { preview, error } = await loadLatestPlanPreview(patientId);
+      if (cancelled) return;
+      setPlanPreview(preview);
+      setPlanPreviewError(error);
+    };
+
+    loadPlanPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [consultationState?.patientId]);
+
+  useEffect(() => {
+    const patientId = consultationState?.patientId;
+    if (!patientId) return;
+    let cancelled = false;
+    API.get<{ success: boolean; data: PatientAllergyRecord[] }>(
+      `/clinical-details/patients/${patientId}/allergies`
+    )
+      .then((response) => {
+        if (!cancelled) {
+          setPatientAllergies(response.data?.data ?? []);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load patient allergies:", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [consultationState?.patientId]);
+
+  const patientName = patient
+    ? [
+        patient.patient_first_name,
+        patient.patient_middle_name,
+        patient.patient_last_name,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : "";
+
+  const patientPhoto = patient?.patient_photo_url || "";
+
+  const patientAgeSex = patient
+    ? `${patient.patient_age ?? "—"}Y / ${patient.patient_gender ?? ""}`
+    : "";
+
+  const patientDisplayId = patient?.patient_id || "";
+
+  const recentCancerType =
+    [planPreview?.cancer_type, planPreview?.cancer_subtype]
+      .filter(Boolean)
+      .join(" ");
+
+  const recentStage = planPreview?.clinical_stage || "";
+
+  const recentDiagnosis =
+    [
+      planPreview?.cancer_subtype || planPreview?.cancer_type,
+      planPreview?.clinical_stage,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+  const recentTherapy =
+    planPreview?.suggested_therapy ||
+    planPreview?.matching_protocols?.[0]?.regimen_name ||
+    "";
+
+  const recentIntent =
+    planPreview?.matching_protocols?.[0]?.treatment_intent || "";
+
+  const recentAllergyNames = patientAllergies
+    .map((item) => item.allergy_master?.substance_name)
+    .filter(Boolean)
+    .join(", ");
 
   const tabs = ["Order Summary", "Medications", "Discharge", "History", "Notes & Documents"];
   const days = [
-    { label: "Day 1", date: "05 Jun 2026" },
-    { label: "Day 2", date: "06 Jun 2026" },
-    { label: "Day 3", date: "07 Jun 2026" },
+    { label: "Day 1", date: "" },
+    { label: "Day 2", date: "" },
+    { label: "Day 3", date: "" },
   ];
 
   const handlePrint = () => window.print();
 
   if (showMedicationPortal) {
     return (
-      <MedicationPortal onBackToProfile={() => setShowMedicationPortal(false)} />
+      <MedicationPortal
+        onBackToProfile={() => setShowMedicationPortal(false)}
+        patientName={patientName}
+        patientPhoto={patientPhoto}
+        patientAgeSex={patientAgeSex}
+        patientDisplayId={patientDisplayId}
+        patientId={consultationState?.patientId || ""}
+      />
     );
   }
 
   if (showDischargePortal) {
     return (
-      <DischargeDetailsPortal onBack={() => setShowDischargePortal(false)} />
+      <DischargeDetailsPortal
+        onBack={() => setShowDischargePortal(false)}
+        patientId={consultationState?.patientId || ""}
+      />
     );
   }
 
@@ -7729,6 +8596,15 @@ function HMSPatientPortal() {
 <main className="flex-1 flex flex-col h-full overflow-hidden bg-[#f8fafc] relative">
 {/* BEGIN: Top Header */}
 <header className="h-[72px] bg-[#f8fafc] border-b border-[#e2e8f0] flex items-center justify-between px-8 shrink-0 z-10">
+<div className="flex items-center gap-4">
+{onBack && (
+<button type="button" aria-label="Go back" onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-slate-100">
+<svg viewBox="0 0 24 24" fill="none" stroke="#334155" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+<path d="M19 12H5" />
+<path d="m12 19-7-7 7-7" />
+</svg>
+</button>
+)}
 <div className="relative">
 <button type="button" onClick={() => setShowBranchMenu(v => !v)} className="flex items-center text-sm font-medium text-[#1e293b] cursor-pointer hover:text-[#1d4ed8] transition-colors">
 <i className="fa-solid fa-code-branch mr-2 text-[#64748b]"></i> Main Branch <i className="fa-solid fa-chevron-down ml-2 text-[10px] text-[#64748b]"></i>
@@ -7736,6 +8612,7 @@ function HMSPatientPortal() {
 <div className={`absolute top-9 left-0 z-30 bg-white border border-[#e2e8f0] rounded-lg shadow-lg p-2 w-44 ${showBranchMenu ? "block" : "hidden"}`}>
 <button type="button" className="w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-50">Main Branch</button>
 <button type="button" className="w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-50">Branch 02</button>
+</div>
 </div>
 </div>
 <div className="flex items-center space-x-6">
@@ -7759,16 +8636,16 @@ function HMSPatientPortal() {
 {/* BEGIN: Patient Header Card */}
 <div className="bg-white rounded-[16px] border border-[#e2e8f0] p-6 shadow-sm mb-6 flex justify-between items-center">
 <div className="flex items-center">
-<img alt="Vijaya Nallusamy" className="w-20 h-20 rounded-full border-4 border-white shadow-sm object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCVmv5vhpN6g6IwvwVBONWYZS06j9iELGi3guKAqt6M68HTL3HxSslWkIMAEQjWeTlKNOdnc-Pipmecvq47y_J4JkJpXBa7ODMic8izxEnar0D-CTbCOUggEhRCTr29jfsIrqPw9jJJRvmghxFC8vXF6U5zjzrn_8ajoH2ovseUywhLI0FurjCqa2DjfMMM3yvISAkY7jN2EjygmPh_WvJa_vc06-pRUGw2Xu4pFrWdOcPdAl4HggI"/>
+<img alt={patientName} className="w-20 h-20 rounded-full border-4 border-white shadow-sm object-cover" src={patientPhoto}/>
 <div className="ml-6">
 <div className="flex items-center space-x-3 mb-1">
-<h2 className="text-xl font-bold text-[#1e293b]">Vijaya Nallusamy</h2>
-<span className="bg-slate-100 text-[#64748b] px-3 py-1 rounded-full text-xs font-semibold">ONC-2026-10025</span>
+<h2 className="text-xl font-bold text-[#1e293b]">{patientName}</h2>
+<span className="bg-slate-100 text-[#64748b] px-3 py-1 rounded-full text-xs font-semibold">{patientDisplayId}</span>
 </div>
 <div className="text-sm text-[#64748b] flex items-center space-x-3">
-<span>51Y / Female</span>
+<span>{patientAgeSex}</span>
 <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-<span className="text-[#1d4ed8] font-semibold">Ductal Carcinoma Stage II</span>
+<span className="text-[#1d4ed8] font-semibold">{recentDiagnosis}</span>
 </div>
 </div>
 </div>
@@ -7777,48 +8654,48 @@ function HMSPatientPortal() {
 <div className="space-y-4">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">HEIGHT</div>
-<div className="font-bold text-sm">154 cm</div>
+<div className="font-bold text-sm">—</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BP</div>
-<div className="font-bold text-sm">118/74</div>
+<div className="font-bold text-sm">—</div>
 </div>
 </div>
 <div className="space-y-4">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">WEIGHT</div>
-<div className="font-bold text-sm">52 kg</div>
+<div className="font-bold text-sm">—</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">PULSE</div>
-<div className="font-bold text-sm">78 bpm</div>
+<div className="font-bold text-sm">—</div>
 </div>
 </div>
 <div className="space-y-4">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BSA</div>
-<div className="font-bold text-sm">1.49 m²</div>
+<div className="font-bold text-sm">—</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">TEMP</div>
-<div className="font-bold text-sm">36.8 °C</div>
+<div className="font-bold text-sm">—</div>
 </div>
 </div>
 <div className="space-y-4">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BMI</div>
-<div className="font-bold text-sm">21.93</div>
+<div className="font-bold text-sm">—</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">SPO2</div>
-<div className="font-bold text-sm">99%</div>
+<div className="font-bold text-sm">—</div>
 </div>
 </div>
 </div>
 <div className="pl-8">
 <div className="bg-blue-50/50 border border-blue-100 rounded-[12px] p-4 w-[220px]">
-<div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: NEOADJUVANT</div>
-<div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">TAXOL - WEEKLY</div>
+<div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: {recentIntent || "—"}</div>
+<div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">{recentTherapy || "—"}</div>
 <div className="flex items-center text-xs text-[#64748b] font-medium">
 <span className="w-2 h-2 rounded-full bg-[#10b981] mr-2"></span> Active Protocol
                     </div>
@@ -7832,11 +8709,11 @@ function HMSPatientPortal() {
 <div className="flex items-center space-x-8">
 <div className="flex items-center">
 <i className="fa-solid fa-triangle-exclamation text-[#ef4444] mr-2"></i>
-<span className="text-[#ef4444] font-semibold">Allergy:</span> <span className="ml-1 text-[#1e293b]">Penicillin</span>
+<span className="text-[#ef4444] font-semibold">Allergy:</span> <span className="ml-1 text-[#1e293b]">{recentAllergyNames || "—"}</span>
 </div>
 <div className="flex items-center">
 <i className="fa-solid fa-clock-rotate-left text-[#f59e0b] mr-2"></i>
-<span className="text-[#f59e0b] font-semibold">Previous Cycle:</span> <span className="ml-1 text-[#1e293b]">Grade 2 Neutropenia</span>
+<span className="text-[#f59e0b] font-semibold">Previous Cycle:</span> <span className="ml-1 text-[#1e293b]">—</span>
 </div>
 <div className="flex items-center text-[#1d4ed8] font-medium">
 <i className="fa-solid fa-link mr-2"></i>
@@ -7871,15 +8748,20 @@ function HMSPatientPortal() {
 <PatientNotesDocuments embedded />
 ) : (
 <>
+{planPreviewError && (
+<div className="mb-6 flex items-center rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+<i className="fa-solid fa-triangle-exclamation mr-2"></i> {planPreviewError}
+</div>
+)}
 <div className="flex space-x-6 mb-8">
 {/* Left Side (Timeline & Day Selector) */}
 <div className="flex-1 space-y-6">
 {/* BEGIN: Treatment Timeline */}
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-6 h-[200px]">
 <div className="flex items-center mb-8">
-<h3 className="text-lg font-bold text-[#1e293b]">Cycle 6</h3>
+<h3 className="text-lg font-bold text-[#1e293b]">Cycle —</h3>
 <div className="ml-3 text-sm text-[#64748b] flex items-center cursor-pointer hover:text-[#1e293b]">
-                  (14 May - 21 May 2026) <i className="fa-solid fa-chevron-down text-[10px] ml-2"></i>
+                  — <i className="fa-solid fa-chevron-down text-[10px] ml-2"></i>
 </div>
 </div>
 <div className="relative px-8 mt-4">
@@ -7889,28 +8771,28 @@ function HMSPatientPortal() {
 <div className="w-10 h-10 rounded-full bg-[#1d4ed8] text-white flex items-center justify-center font-bold ring-[6px] ring-white">1</div>
 <div className="mt-3 text-center">
 <div className="text-sm font-semibold text-[#1e293b]">Day 1</div>
-<div className="text-[11px] text-[#64748b] mt-1">05 Jun 2026</div>
+<div className="text-[11px] text-[#64748b] mt-1">—</div>
 </div>
 </div>
 <div className="flex flex-col items-center">
 <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center font-bold ring-[6px] ring-white">2</div>
 <div className="mt-3 text-center">
 <div className="text-sm font-medium text-[#64748b]">Day 2</div>
-<div className="text-[11px] text-slate-400 mt-1">06 Jun 2026</div>
+<div className="text-[11px] text-slate-400 mt-1">—</div>
 </div>
 </div>
 <div className="flex flex-col items-center">
 <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center font-bold ring-[6px] ring-white">3</div>
 <div className="mt-3 text-center">
 <div className="text-sm font-medium text-[#64748b]">Day 3</div>
-<div className="text-[11px] text-slate-400 mt-1">07 Jun 2026</div>
+<div className="text-[11px] text-slate-400 mt-1">—</div>
 </div>
 </div>
 <div className="flex flex-col items-center">
 <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center font-bold ring-[6px] ring-white"><i className="fa-regular fa-map"></i></div>
 <div className="mt-3 text-center">
 <div className="text-sm font-medium text-[#64748b]">Follow-up</div>
-<div className="text-[11px] text-slate-400 mt-1">21 Jun 2026</div>
+<div className="text-[11px] text-slate-400 mt-1">—</div>
 </div>
 </div>
 </div>
@@ -7924,7 +8806,7 @@ function HMSPatientPortal() {
 {days.map((day) => (
 <button key={day.label} type="button" onClick={() => setSelectedDay(day.label)} className={`px-6 py-2 rounded-[8px] shadow-sm text-center min-w-[100px] transition-colors ${selectedDay === day.label ? "bg-[#1d4ed8] text-white" : "text-[#1e293b] hover:bg-slate-50"}`}>
 <div className="text-sm font-semibold">{day.label}</div>
-<div className={`text-[10px] font-normal mt-0.5 ${selectedDay === day.label ? "opacity-90" : "text-[#64748b]"}`}>{day.date}</div>
+{day.date ? <div className={`text-[10px] font-normal mt-0.5 ${selectedDay === day.label ? "opacity-90" : "text-[#64748b]"}`}>{day.date}</div> : null}
 </button>
 ))}
 <button className="px-6 py-2 text-[#1d4ed8] hover:bg-blue-50 transition-colors rounded-[8px] text-sm font-semibold flex items-center justify-center">
@@ -7945,9 +8827,9 @@ function HMSPatientPortal() {
 <i className="fa-regular fa-calendar text-lg"></i>
 </div>
 <div>
-<div className="text-sm font-bold text-[#1e293b]">06 Jun 2026</div>
-<div className="text-xs text-[#64748b] mt-1">09:30 AM</div>
-<div className="text-xs text-[#64748b] mt-1">Day 2 Treatment</div>
+<div className="text-sm font-bold text-[#1e293b]">—</div>
+<div className="text-xs text-[#64748b] mt-1">—</div>
+<div className="text-xs text-[#64748b] mt-1">—</div>
 </div>
 </div>
 </div>
@@ -7958,20 +8840,20 @@ function HMSPatientPortal() {
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-6 w-[220px] h-[200px] flex flex-col justify-between">
 <h4 className="text-sm font-bold text-[#1e293b] mb-2">Treatment Progress</h4>
 <div className="flex items-center justify-between">
-<div className="relative w-16 h-16 rounded-full bg-[conic-gradient(#1d4ed8_0%_33%,#e2e8f0_33%_100%)] flex items-center justify-center">
+<div className="relative w-16 h-16 rounded-full bg-[conic-gradient(#e2e8f0_0%_100%)] flex items-center justify-center">
 <div className="absolute inset-[6px] rounded-full bg-white"></div>
-<span className="relative z-10 text-sm font-bold text-[#1e293b]">33%</span>
+<span className="relative z-10 text-sm font-bold text-[#1e293b]">—</span>
 </div>
 <div className="text-right">
 <div className="text-[10px] text-[#64748b] uppercase tracking-wide font-semibold mb-1">Completed</div>
-<div className="text-sm font-bold text-[#1e293b] mb-3">1 / 3 <span className="text-xs font-medium text-[#64748b] normal-case tracking-normal">Days</span></div>
+<div className="text-sm font-bold text-[#1e293b] mb-3">— <span className="text-xs font-medium text-[#64748b] normal-case tracking-normal">Days</span></div>
 <div className="text-[10px] text-[#64748b] uppercase tracking-wide font-semibold mb-1">Remaining</div>
-<div className="text-sm font-bold text-[#1e293b]">2 Days</div>
+<div className="text-sm font-bold text-[#1e293b]">—</div>
 </div>
 </div>
 <div className="pt-4 flex justify-between items-center text-xs">
 <span className="text-[#64748b] font-medium">Next Visit</span>
-<span className="font-bold text-[#1e293b]">06 Jun 2026</span>
+<span className="font-bold text-[#1e293b]">—</span>
 </div>
 </div>
 {/* END: Treatment Progress */}
@@ -7986,29 +8868,29 @@ function HMSPatientPortal() {
 <div className="grid grid-cols-3 gap-4 mb-5">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">CYCLE</div>
-<div className="font-bold text-sm">6</div>
+<div className="font-bold text-sm">—</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">DAY</div>
-<div className="font-bold text-sm">1</div>
+<div className="font-bold text-sm">—</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">TOTAL DAYS</div>
-<div className="font-bold text-sm">3</div>
+<div className="font-bold text-sm">—</div>
 </div>
 </div>
 <div className="grid grid-cols-3 gap-4">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">START DATE</div>
-<div className="font-bold text-sm">14 May<br/>2026</div>
+<div className="font-bold text-sm">—<br/>—</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">END DATE</div>
-<div className="font-bold text-sm">21 May<br/>2026</div>
+<div className="font-bold text-sm">—<br/>—</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">NEXT DAY</div>
-<div className="font-bold text-sm">06 Jun<br/>2026</div>
+<div className="font-bold text-sm">—<br/>—</div>
 </div>
 </div>
 </div>
@@ -8017,16 +8899,16 @@ function HMSPatientPortal() {
 <div className="grid grid-cols-2 gap-4 mb-5">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">TYPE</div>
-<div className="font-bold text-sm">Ductal<br/>Carcinoma</div>
+<div className="font-bold text-sm">{recentCancerType || "—"}</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">STAGE</div>
-<div className="font-bold text-sm">Stage II</div>
+<div className="font-bold text-sm">{recentStage || "—"}</div>
 </div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">GRADE</div>
-<div className="font-bold text-sm">G3</div>
+<div className="font-bold text-sm">—</div>
 </div>
 </div>
 </div>
@@ -8035,7 +8917,7 @@ function HMSPatientPortal() {
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-5">
 <div className="flex items-center mb-4">
 <h4 className="text-sm font-bold text-[#1e293b] mr-3">Lab Validation</h4>
-<span className="px-2 py-0.5 bg-green-50 text-[#10b981] text-[10px] font-bold uppercase rounded border border-green-100">Approved</span>
+<span className="px-2 py-0.5 bg-slate-50 text-[#64748b] text-[10px] font-bold uppercase rounded border border-slate-200">—</span>
 </div>
 <table className="w-full text-left text-sm mb-4">
 <thead>
@@ -8047,73 +8929,48 @@ function HMSPatientPortal() {
 </tr>
 </thead>
 <tbody>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">Hb</td>
-<td className="py-3 font-semibold">12.6 g/dL</td>
-<td className="py-3 text-[#64748b]">11 - 15</td>
-<td className="py-3 font-semibold text-[#10b981] flex items-center"><div className="w-1.5 h-1.5 rounded-full bg-[#10b981] mr-2"></div>Normal</td>
-</tr>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">WBC</td>
-<td className="py-3 font-semibold">6,200 /μL</td>
-<td className="py-3 text-[#64748b]">4,000 - 11,000</td>
-<td className="py-3 font-semibold text-[#10b981] flex items-center"><div className="w-1.5 h-1.5 rounded-full bg-[#10b981] mr-2"></div>Normal</td>
-</tr>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">Platelets</td>
-<td className="py-3 font-semibold">2.45 L</td>
-<td className="py-3 text-[#64748b]">1.50 - 4.00</td>
-<td className="py-3 font-semibold text-[#f59e0b] flex items-center"><div className="w-1.5 h-1.5 rounded-full bg-[#f59e0b] mr-2"></div>Borderline</td>
-</tr>
 <tr>
-<td className="py-3 text-[#64748b]">Creatinine</td>
-<td className="py-3 font-semibold">0.8 mg/dL</td>
-<td className="py-3 text-[#64748b]">0.6 - 1.2</td>
-<td className="py-3 font-semibold text-[#10b981] flex items-center"><div className="w-1.5 h-1.5 rounded-full bg-[#10b981] mr-2"></div>Normal</td>
+<td colSpan={4} className="py-6 text-center text-xs text-[#64748b]">No lab validation records found.</td>
 </tr>
 </tbody>
 </table>
 <div className="border-t border-slate-100 pt-3 flex justify-between items-center text-sm">
 <span className="text-[#64748b]">Chemo Clearance :</span>
-<span className="font-bold text-[#10b981] uppercase">Approved</span>
+<span className="font-bold text-[#64748b] uppercase">—</span>
 </div>
 </div>
 <div className="bg-blue-50/50 rounded-[16px] shadow-sm border border-blue-100 p-5 relative overflow-hidden">
 <div className="flex items-center justify-between mb-5">
 <div className="flex items-center text-[#1d4ed8]">
 <i className="fa-solid fa-flask text-lg mr-2"></i>
-<h4 className="text-sm font-bold uppercase">PROTOCOL: TAXOL - WEEKLY</h4>
+<h4 className="text-sm font-bold uppercase">PROTOCOL: {recentTherapy || "—"}</h4>
 </div>
 <a className="text-xs text-[#1d4ed8] font-medium hover:underline flex items-center" href="#">View Protocol <i className="fa-solid fa-chevron-right text-[10px] ml-1"></i></a>
 </div>
 <div className="grid grid-cols-4 gap-4">
 <div>
 <div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">DOSE</div>
-<div className="font-bold text-sm text-[#1e293b]">80 mg/m²</div>
+<div className="font-bold text-sm text-[#1e293b]">—</div>
 </div>
 <div>
 <div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">PATIENT DOSE</div>
-<div className="font-bold text-sm text-[#1e293b]">120 mg</div>
+<div className="font-bold text-sm text-[#1e293b]">—</div>
 </div>
 <div>
 <div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">ROUTE</div>
-<div className="font-bold text-sm text-[#1e293b]">IV</div>
+<div className="font-bold text-sm text-[#1e293b]">—</div>
 </div>
 <div>
 <div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">DILUENT</div>
-<div className="font-bold text-sm text-[#1e293b]">Dextrose</div>
+<div className="font-bold text-sm text-[#1e293b]">—</div>
 </div>
 <div>
 <div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">VOLUME</div>
-<div className="font-bold text-sm text-[#1e293b]">100 ml</div>
+<div className="font-bold text-sm text-[#1e293b]">—</div>
 </div>
 <div>
 <div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">INF. TIME</div>
-<div className="font-bold text-sm text-[#1e293b]">60 mins</div>
-</div>
-<div className="col-span-2 flex items-end justify-end space-x-2">
-<span className="px-2 py-1 bg-blue-100 text-[#1d4ed8] text-[10px] font-bold rounded">WEEKLY</span>
-<span className="px-2 py-1 bg-white border border-slate-200 text-[#64748b] text-[10px] font-bold rounded">IV BOLUS</span>
+<div className="font-bold text-sm text-[#1e293b]">—</div>
 </div>
 </div>
 </div>
@@ -8138,29 +8995,8 @@ function HMSPatientPortal() {
 </tr>
 </thead>
 <tbody>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">1</td>
-<td className="py-3 font-semibold text-[#1e293b]">Inj. Decadron</td>
-<td className="py-3 text-[#64748b]">8 mg</td>
-<td className="py-3 text-[#64748b]">IV Bolus</td>
-<td className="py-3 text-[#64748b]">30m before</td>
-<td className="py-3 font-semibold text-[#10b981] text-right"><i className="fa-solid fa-check mr-1"></i> Given</td>
-</tr>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">2</td>
-<td className="py-3 font-semibold text-[#1e293b]">Inj. Avil</td>
-<td className="py-3 text-[#64748b]">2 cc</td>
-<td className="py-3 text-[#64748b]">IV Bolus</td>
-<td className="py-3 text-[#64748b]">30m before</td>
-<td className="py-3 font-semibold text-[#10b981] text-right"><i className="fa-solid fa-check mr-1"></i> Given</td>
-</tr>
 <tr>
-<td className="py-3 text-[#64748b]">3</td>
-<td className="py-3 font-semibold text-[#1e293b]">Inj. Palzen</td>
-<td className="py-3 text-[#64748b]">0.25 mg</td>
-<td className="py-3 text-[#64748b]">IV Bolus</td>
-<td className="py-3 text-[#64748b]">30m before</td>
-<td className="py-3 font-semibold text-[#10b981] text-right"><i className="fa-solid fa-check mr-1"></i> Given</td>
+<td colSpan={6} className="py-6 text-center text-xs text-[#64748b]">No premedications found.</td>
 </tr>
 </tbody>
 </table>
@@ -8184,29 +9020,8 @@ function HMSPatientPortal() {
 </tr>
 </thead>
 <tbody>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">1</td>
-<td className="py-3 font-semibold text-[#1e293b]">Inj. Taxol</td>
-<td className="py-3 text-[#64748b]">120 mg</td>
-<td className="py-3 text-[#64748b]">IV</td>
-<td className="py-3 text-[#64748b]">NS 100ml</td>
-<td className="py-3 font-semibold text-[#10b981] text-right"><i className="fa-solid fa-check mr-1"></i> Given</td>
-</tr>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">2</td>
-<td className="py-3 font-semibold text-[#1e293b]">Inj. Herceptin</td>
-<td className="py-3 text-[#64748b]">150 mg</td>
-<td className="py-3 text-[#64748b]">IV</td>
-<td className="py-3 text-[#64748b]">NS 250ml</td>
-<td className="py-3 font-semibold text-[#f59e0b] text-right"><i className="fa-solid fa-clock mr-1"></i> Pending</td>
-</tr>
 <tr>
-<td className="py-3 text-[#64748b]">3</td>
-<td className="py-3 font-semibold text-[#1e293b]">Inj. Carboplatin</td>
-<td className="py-3 text-[#64748b]">AUC 5</td>
-<td className="py-3 text-[#64748b]">IV</td>
-<td className="py-3 text-[#64748b]">Dextrose</td>
-<td className="py-3 font-semibold text-[#64748b] text-right"><i className="fa-solid fa-ban mr-1"></i> Not Started</td>
+<td colSpan={6} className="py-6 text-center text-xs text-[#64748b]">No chemo orders found.</td>
 </tr>
 </tbody>
 </table>
@@ -8230,37 +9045,8 @@ function HMSPatientPortal() {
 </tr>
 </thead>
 <tbody>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">1</td>
-<td className="py-3 font-semibold text-[#1e293b]">Capecitabine</td>
-<td className="py-3 text-[#64748b]">500 mg</td>
-<td className="py-3 text-[#64748b]">2-0-2</td>
-<td className="py-3 text-[#64748b]">After Food</td>
-<td className="py-3 text-[#64748b] text-right">14 Days</td>
-</tr>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">2</td>
-<td className="py-3 font-semibold text-[#1e293b]">Domstal</td>
-<td className="py-3 text-[#64748b]">10 mg</td>
-<td className="py-3 text-[#64748b]">1-1-1</td>
-<td className="py-3 text-[#64748b]">NS 250ml</td>
-<td className="py-3 text-[#64748b] text-right">10 Days</td>
-</tr>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">3</td>
-<td className="py-3 font-semibold text-[#1e293b]">Loperamide</td>
-<td className="py-3 text-[#64748b]">2 mg</td>
-<td className="py-3 text-[#64748b]">0-0-1</td>
-<td className="py-3 text-[#64748b]">Dextrose</td>
-<td className="py-3 text-[#64748b] text-right">5 Days</td>
-</tr>
 <tr>
-<td className="py-3 text-[#64748b]">4</td>
-<td className="py-3 font-semibold text-[#1e293b]">Pantoprazole</td>
-<td className="py-3 text-[#64748b]">40 mg</td>
-<td className="py-3 text-[#64748b]">2-2-0</td>
-<td className="py-3 text-[#64748b]">Dextrose</td>
-<td className="py-3 text-[#64748b] text-right">8 Days</td>
+<td colSpan={6} className="py-6 text-center text-xs text-[#64748b]">No discharge medications found.</td>
 </tr>
 </tbody>
 </table>
@@ -8278,16 +9064,14 @@ function HMSPatientPortal() {
 </div>
 <p className="text-sm text-[#64748b] mb-3">Premedication tablets to take a day before:</p>
 <ul className="space-y-2 text-sm text-[#1e293b] font-medium list-disc list-inside">
-<li>Tab. Avil 25 mg (Night - After Food)</li>
-<li>Tab. Dexamethasone 4 mg (Night - After Food)</li>
-<li>Tab. Pantodac 40 mg (Night - Before Food)</li>
+<li>No instructions recorded.</li>
 </ul>
-<a className="inline-block mt-4 text-sm font-semibold text-[#1d4ed8] underline" href="#">Investigation for Next Cycle: TC, Sugar, CBC, LFT, Creatinine.</a>
+<a className="inline-block mt-4 text-sm font-semibold text-[#1d4ed8] underline" href="#">Investigation for Next Cycle: —</a>
 </div>
 <div className="bg-slate-50 border border-slate-200 rounded-[12px] p-5 flex flex-col items-center justify-center w-[160px] h-full">
 <div className="text-[10px] text-[#1d4ed8] font-bold uppercase tracking-wider mb-2">NEXT CYCLE</div>
 <div className="flex items-center text-sm font-bold text-[#1d4ed8]">
-<i className="fa-regular fa-calendar mr-2"></i> 21 May 2026
+<i className="fa-regular fa-calendar mr-2"></i> —
               </div>
 </div>
 </div>
@@ -8299,8 +9083,8 @@ function HMSPatientPortal() {
 {/* BEGIN: Footer */}
 <footer className="absolute bottom-0 left-0 right-0 bg-white border-t border-[#e2e8f0] px-8 py-4 flex items-center justify-between z-20">
 <div>
-<div className="text-xs text-[#64748b]">Created by <span className="font-medium text-[#1e293b]">Dr. Naveen</span> on 05 Jun 2026, 09:30 AM</div>
-<div className="text-xs text-[#64748b] mt-1">Last updated by <span className="font-medium text-[#1e293b]">Admin</span> on 05 Jun 2026, 04:35 PM</div>
+<div className="text-xs text-[#64748b]">Created by <span className="font-medium text-[#1e293b]">—</span> on —</div>
+<div className="text-xs text-[#64748b] mt-1">Last updated by <span className="font-medium text-[#1e293b]">—</span> on —</div>
 </div>
 <div className="flex items-center space-x-4">
 <button type="button" onClick={handlePrint} className="px-4 py-2 border border-[#e2e8f0] rounded-[8px] text-sm font-semibold text-[#1e293b] hover:bg-slate-50 transition-colors flex items-center">
@@ -8957,10 +9741,235 @@ const HistoryDashboard: React.FC<{ embedded?: boolean }> = ({
     so it can live in this file, original file left untouched)
 ============================================================ */
 
-function DischargeDetailsPortal({ onBack }: { onBack?: () => void }) {
+function DischargeDetailsPortal({
+  onBack,
+  patientId,
+}: {
+  onBack?: () => void;
+  patientId?: string;
+}) {
   const [showBranchMenu, setShowBranchMenu] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showNotesDocs, setShowNotesDocs] = useState(false);
+  const [showOrderSummary, setShowOrderSummary] = useState(false);
+  const [planPreview, setPlanPreview] = useState<ChemoPlanPreview | null>(null);
+  const [stagingDetail, setStagingDetail] =
+    useState<StagingDetailRecord | null>(null);
+  const [planPreviewLoading, setPlanPreviewLoading] = useState(false);
+  const [planPreviewError, setPlanPreviewError] = useState("");
+
+  // Recent details for THIS selected patient via
+  // /chemotherapy/plans/preview?staging_detail_id=<latest staging detail>.
+  useEffect(() => {
+    if (!patientId) {
+      setPlanPreview(null);
+      setStagingDetail(null);
+      setPlanPreviewLoading(false);
+      setPlanPreviewError(
+        "No patient selected. Open this page from a patient consultation to load recent details."
+      );
+      return;
+    }
+    let cancelled = false;
+    setPlanPreviewLoading(true);
+    setPlanPreviewError("");
+    loadLatestPlanPreview(patientId)
+      .then(({ preview, staging, error }) => {
+        if (cancelled) return;
+        setPlanPreview(preview);
+        setStagingDetail(staging);
+        setPlanPreviewError(error);
+      })
+      .finally(() => {
+        if (!cancelled) setPlanPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
+
+  const orderSummaryDiagnosis = planPreview
+    ? [planPreview.cancer_type, planPreview.cancer_subtype]
+        .filter(Boolean)
+        .join(" — ")
+    : "";
+
+  /* Every non-empty saved field, ready to render. */
+  const fmtDate = (value?: string | null) => {
+    if (!value) return "";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return `${String(d.getDate()).padStart(2, "0")}-${String(
+      d.getMonth() + 1
+    ).padStart(2, "0")}-${d.getFullYear()}`;
+  };
+
+  const buildEntries = (pairs: [string, unknown][]): [string, string][] =>
+    pairs
+      .map(([label, value]) => {
+        let v: unknown = value;
+        if (v === null || v === undefined || v === "") return null;
+        if (typeof v === "object") v = JSON.stringify(v);
+        return [label, String(v)] as [string, string];
+      })
+      .filter((p): p is [string, string] => p !== null);
+
+  const sd = stagingDetail;
+  const ihc = sd?.ihc_results ?? null;
+  const mol = sd?.molecular_results ?? null;
+  const der = sd?.derived_fields ?? null;
+
+  const diagnosisEntries = buildEntries([
+    ["Cancer Type", sd?.cancer_types?.cancer_type],
+    ["Subtype", sd?.cancer_subtypes?.subtype_name],
+    ["Clinical Stage", sd?.clinical_stage],
+    ["Staging System", sd?.staging_system],
+    ["T Stage", sd?.t_stage],
+    ["N Stage", sd?.n_stage],
+    ["M Stage", sd?.m_stage],
+    ["Laterality", sd?.laterality],
+    ["Performance Status", sd?.performance_status],
+    ["Metastasis Sites", sd?.metastasis_sites],
+    ["ICD-10", sd?.icd10_code],
+    ["ICD-O-3 Topography", sd?.icd_o3_topo],
+    ["ICD-O-3 Morphology", sd?.icd_o3_morpho],
+    ["Visit Date", sd?.visit_date ? fmtDate(sd.visit_date) : ""],
+    ["Diagnosis Date", sd?.diagnosis_date ? fmtDate(sd.diagnosis_date) : ""],
+    ["Biopsy Date", sd?.biopsy_date ? fmtDate(sd.biopsy_date) : ""],
+    [
+      "Consulting Oncologist",
+      sd?.consulting_oncologist ||
+        (sd?.employees
+          ? [sd.employees.first_name, sd.employees.last_name]
+              .filter(Boolean)
+              .join(" ")
+          : ""),
+    ],
+    ["Patient", sd?.patient_bio_data
+      ? [
+          sd.patient_bio_data.patient_first_name,
+          sd.patient_bio_data.patient_last_name,
+        ]
+          .filter(Boolean)
+          .join(" ") +
+        (sd.patient_bio_data.patient_gender ||
+        sd.patient_bio_data.patient_age
+          ? ` — ${
+              sd.patient_bio_data.patient_age ?? ""
+            } ${sd.patient_bio_data.patient_gender ?? ""}`.trim()
+          : "")
+      : ""],
+    ["Diagnosis ID", sd?.diagnosis_id],
+    ["Staging Detail ID", sd?.staging_detail_id],
+    ["Saved On", sd?.created_at ? fmtDate(sd.created_at) : ""],
+  ]);
+
+  const derivedEntries = der
+    ? buildEntries([
+        ["AJCC Stage (auto)", der.ajcc_stage],
+        ["Breast Molecular Subtype", der.breast_mol_subtype],
+        ["TNBC Subtype", der.tnbc_subtype],
+        ["ELN Risk", der.eln_risk],
+        ["Deauville Score", der.lymphoma_deauville],
+        ["PD-L1 Score Type", der.pdl1_score_type],
+        ["Suggested Therapy", der.suggested_therapy],
+        ["Recommended Tests", der.recommended_tests],
+        ["ICD-10 (auto)", der.icd10_auto],
+        ["ICD-O-3 (auto)", der.icd_o3_auto],
+        [
+          "Germline Referral",
+          der.germline_referral_flag == null
+            ? ""
+            : der.germline_referral_flag
+            ? "Required"
+            : "Not required",
+        ],
+        [
+          "Lynch Syndrome",
+          der.lynch_syndrome_flag == null
+            ? ""
+            : der.lynch_syndrome_flag
+            ? "Positive"
+            : "Negative",
+        ],
+        [
+          "HER2 Positive",
+          sd && sd.her2_positive != null
+            ? sd.her2_positive
+              ? "Yes"
+              : "No"
+            : "",
+        ],
+      ])
+    : [];
+
+  const ihcEntries = ihc
+    ? buildEntries([
+        ["ER Status", ihc.er_status],
+        ["ER %", ihc.er_percent],
+        ["PR Status", ihc.pr_status],
+        ["PR %", ihc.pr_percent],
+        ["HER2 IHC", ihc.her2_ihc],
+        ["HER2 FISH", ihc.her2_fish],
+        ["HER2 FISH Ratio", ihc.her2_fish_ratio],
+        ["HER2 Avg Copy", ihc.her2_avg_copy],
+        ["Ki-67 %", ihc.ki67_percent],
+        ["PD-L1 TPS", ihc.pdl1_tps],
+        ["PD-L1 CPS", ihc.pdl1_cps],
+        ["PD-L1 Clone", ihc.pdl1_clone],
+        ["MMR MLH1", ihc.mmr_mlh1],
+        ["MMR MSH2", ihc.mmr_msh2],
+        ["MMR MSH6", ihc.mmr_msh6],
+        ["MMR PMS2", ihc.mmr_pms2],
+        ["MMR Overall", ihc.mmr_overall],
+        ["p53 IHC", ihc.p53_ihc],
+        ["AR Status", ihc.ar_status],
+        ["MLH1 Methylation", ihc.mlh1_methylation],
+      ])
+    : [];
+
+  const molecularEntries = mol
+    ? buildEntries([
+        ["EGFR Status", mol.egfr_status],
+        ["EGFR Mutation Type", mol.egfr_mutation_type],
+        ["ALK Status", mol.alk_status],
+        ["ALK Test Method", mol.alk_test_method],
+        ["ROS1 Status", mol.ros1_status],
+        ["KRAS G12C", mol.kras_g12c],
+        ["KRAS Mutation", mol.kras_mutation],
+        ["BRAF V600E", mol.braf_v600e],
+        ["BRCA1 Germline", mol.brca1_germline],
+        ["BRCA2 Germline", mol.brca2_germline],
+        ["BRCA Somatic", mol.brca_somatic],
+        ["HRD Status", mol.hrd_status],
+        ["HRD Score", mol.hrd_score],
+        ["HRD Assay", mol.hrd_assay],
+        ["MSI Status", mol.msi_status],
+        ["MSI Test Method", mol.msi_test_method],
+        ["TMB", mol.tmb],
+        ["TMB Assay", mol.tmb_assay],
+        ["NGS Panel", mol.ngs_panel],
+        ["FLT3-ITD", mol.flt3_itd],
+        ["FLT3-ITD Allelic Ratio", mol.flt3_itd_allelic_ratio],
+        ["FLT3 TKD", mol.flt3_tkd],
+        ["NPM1 Mutation", mol.npm1_mutation],
+        ["IDH1 Mutation", mol.idh1_mutation],
+        ["IDH2 Mutation", mol.idh2_mutation],
+        ["BCR-ABL1", mol.bcr_abl1],
+        ["BCR-ABL1 Transcript", mol.bcr_abl1_transcript],
+      ])
+    : [];
+
+  const renderEntryGrid = (entries: [string, string][]) => (
+    <div className="grid grid-cols-1 gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
+      {entries.map(([label, value]) => (
+        <div key={label} className="rounded-lg border border-slate-100 bg-slate-50/60 p-4">
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
+          <p className="break-words text-sm font-semibold text-slate-800">{value}</p>
+        </div>
+      ))}
+    </div>
+  );
 
   const tabs = [
     "Order Summary",
@@ -9135,9 +10144,9 @@ function DischargeDetailsPortal({ onBack }: { onBack?: () => void }) {
 <div className="border-b border-[#e2e8f0] mb-6">
 <nav className="flex space-x-8">
 {tabs.map((tab) => {
-const isActive = showNotesDocs ? tab === "Notes & Documents" : showHistory ? tab === "History" : tab === "Discharge";
+const isActive = showNotesDocs ? tab === "Notes & Documents" : showHistory ? tab === "History" : showOrderSummary ? tab === "Order Summary" : tab === "Discharge";
 return (
-<button key={tab} type="button" onClick={() => { if (tab === "History") { setShowHistory(true); setShowNotesDocs(false); return; } if (tab === "Notes & Documents") { setShowNotesDocs(true); setShowHistory(false); return; } setShowHistory(false); setShowNotesDocs(false); if (tab !== "Discharge") { onBack?.(); } }} className={`px-1 py-3 border-b-2 text-sm font-medium transition-colors ${isActive ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
+<button key={tab} type="button" onClick={() => { if (tab === "History") { setShowHistory(true); setShowNotesDocs(false); setShowOrderSummary(false); return; } if (tab === "Notes & Documents") { setShowNotesDocs(true); setShowHistory(false); setShowOrderSummary(false); return; } if (tab === "Order Summary") { setShowHistory(false); setShowNotesDocs(false); setShowOrderSummary(true); return; } setShowHistory(false); setShowNotesDocs(false); setShowOrderSummary(false); if (tab !== "Discharge") { onBack?.(); } }} className={`px-1 py-3 border-b-2 text-sm font-medium transition-colors ${isActive ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
 {tab}
 </button>
 );
@@ -9146,7 +10155,8 @@ return (
 </div>
 {/* END: Tabs */}
 
-       
+
+          
           {/* =====================================================
               MAIN GRID
           ====================================================== */}
@@ -9154,6 +10164,88 @@ return (
             <HistoryDashboard embedded />
           ) : showNotesDocs ? (
             <PatientNotesDocuments embedded />
+          ) : showOrderSummary ? (
+          /* =================================================
+              ORDER SUMMARY - ALL recent details of the selected
+              patient fetched from the backend
+          ================================================== */
+          <div className="space-y-6">
+            {planPreviewLoading && (
+              <div className="flex items-center rounded-[12px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+                <i className="fa-solid fa-circle-notch fa-spin mr-2"></i> Loading recent details…
+              </div>
+            )}
+            {!planPreviewLoading && planPreviewError && (
+              <div className="flex items-center rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                <i className="fa-solid fa-triangle-exclamation mr-2"></i> {planPreviewError}
+              </div>
+            )}
+            {!planPreviewLoading && (planPreview || stagingDetail) && (
+              <>
+                <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <SectionHeader icon="fa-solid fa-file-medical" title={`Diagnosis & Staging — ${orderSummaryDiagnosis || "—"}`} badge={stagingDetail?.clinical_stage || planPreview?.clinical_stage || "—"} />
+                  {diagnosisEntries.length > 0 ? renderEntryGrid(diagnosisEntries) : (
+                    <p className="px-6 py-6 text-sm text-slate-400">No diagnosis fields saved yet.</p>
+                  )}
+                </section>
+
+                {derivedEntries.length > 0 && (
+                  <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <SectionHeader icon="fa-solid fa-wand-magic-sparkles" title="Auto-Derived Classification" badge="Derived Fields" badgeClass="bg-purple-100 text-purple-700" />
+                    {renderEntryGrid(derivedEntries)}
+                  </section>
+                )}
+
+                {ihc && ihcEntries.length > 0 && (
+                  <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <SectionHeader icon="fa-solid fa-microscope" title={`IHC Results${ihc.ihc_id ? ` — ${ihc.ihc_id}` : ""}`} badge={`${ihcEntries.length} Values`} badgeClass="bg-cyan-100 text-cyan-700" />
+                    {renderEntryGrid(ihcEntries)}
+                  </section>
+                )}
+
+                {mol && molecularEntries.length > 0 && (
+                  <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <SectionHeader icon="fa-solid fa-dna" title={`Molecular Results${mol.mol_id ? ` — ${mol.mol_id}` : ""}`} badge={`${molecularEntries.length} Values`} badgeClass="bg-emerald-100 text-emerald-700" />
+                    {renderEntryGrid(molecularEntries)}
+                  </section>
+                )}
+
+                <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <SectionHeader icon="fa-solid fa-list-check" title="Matching Protocols" badge={`${planPreview?.matching_protocols?.length ?? 0} Found`} />
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[700px] text-left text-sm">
+                      <thead className="border-b border-slate-100 bg-slate-50/60 text-[10px] uppercase tracking-wider text-slate-400">
+                        <tr>
+                          <th className="px-6 py-3 font-semibold">Protocol</th>
+                          <th className="px-6 py-3 font-semibold">Regimen</th>
+                          <th className="px-6 py-3 font-semibold">Intent</th>
+                          <th className="px-6 py-3 text-center font-semibold">Cycles</th>
+                          <th className="px-6 py-3 text-center font-semibold">Interval</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(planPreview?.matching_protocols ?? []).length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-6 text-center text-slate-400">No matching protocols found for this diagnosis.</td>
+                          </tr>
+                        ) : (
+                          (planPreview?.matching_protocols ?? []).map((protocol, index) => (
+                            <tr key={protocol.id ?? `${protocol.protocol_id}-${index}`} className="border-b border-slate-50 last:border-0">
+                              <td className="px-6 py-3 font-semibold text-slate-700">{protocol.protocol_id}</td>
+                              <td className="px-6 py-3 text-slate-600">{protocol.regimen_name}</td>
+                              <td className="px-6 py-3 text-slate-600">{protocol.treatment_intent || "—"}</td>
+                              <td className="px-6 py-3 text-center text-slate-600">{protocol.standard_cycles ?? "—"}</td>
+                              <td className="px-6 py-3 text-center text-slate-600">{protocol.cycle_interval_days ? `${protocol.cycle_interval_days} days` : "—"}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </>
+            )}
+          </div>
           ) : (
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
             {/* ===================================================
