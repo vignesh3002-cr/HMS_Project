@@ -6849,6 +6849,8 @@ type SummaryPlanItem = {
   administration_route: string | null;
   frequency: string | null;
   remarks: string | null;
+  cycle_day?: number | null;
+  administration_day?: number | null;
   medicine_master: {
     medicine_name: string;
     generic_name: string | null;
@@ -8438,6 +8440,7 @@ const loadLatestPlanPreview = async (
 function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [activeTab, setActiveTab] = useState("Order Summary");
   const [selectedDay, setSelectedDay] = useState("Day 1");
+  const [selectedCycle, setSelectedCycle] = useState(1);
   const [showBranchMenu, setShowBranchMenu] = useState(false);
   const [showMedicationPortal, setShowMedicationPortal] = useState(false);
   const [showDischargePortal, setShowDischargePortal] = useState(false);
@@ -8607,13 +8610,21 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const orderTherapy = savedPlan?.regimen_name || recentTherapy;
   const orderIntent = savedPlan?.treatment_intent || recentIntent;
 
-  /* Plan items split by drug_role: PREMEDICATION drugs render in the
-     Premedications table, PRIMARY drugs render in Chemo Orders. */
+  /* Plan items split by drug_role and the SELECTED DAY: PREMEDICATION
+     drugs render in the Premedications table, PRIMARY drugs render in
+     Chemo Orders - both only for the day picked in the Select Day
+     control (items without an explicit day belong to Day 1). */
+  const selectedDayNumber =
+    Number(selectedDay.replace("Day ", "")) || 1;
   const premedicationItems = (savedPlan?.chemotherapy_plan_items ?? []).filter(
-    (item) => (item.drug_role ?? "").toUpperCase() === "PREMEDICATION",
+    (item) =>
+      (item.drug_role ?? "").toUpperCase() === "PREMEDICATION" &&
+      (item.cycle_day ?? item.administration_day ?? 1) === selectedDayNumber,
   );
   const primaryChemoItems = (savedPlan?.chemotherapy_plan_items ?? []).filter(
-    (item) => (item.drug_role ?? "").toUpperCase() === "PRIMARY",
+    (item) =>
+      (item.drug_role ?? "").toUpperCase() === "PRIMARY" &&
+      (item.cycle_day ?? item.administration_day ?? 1) === selectedDayNumber,
   );
 
   const planCycles = (savedPlan?.chemotherapy_cycle ?? []).filter(
@@ -8651,24 +8662,39 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const displayCycleDay =
     latestPlanCycle?.cycle_day ?? derivedCycleInfo?.day ?? null;
 
-  /* Treatment timeline: Day 1..3 dates come from the plan start date +
-     cycle interval; a node counts as done once its date has passed.
-     The follow-up node shows the plan's expected end date. */
+  /* Treatment timeline: one node per CYCLE, Cycle 1 through the final
+     planned cycle of the selected protocol. Day counting / interval
+     stays hidden - each node just shows its real start date and is
+     done/current/future. The follow-up node shows the plan's expected
+     end date. */
   const todayOrder = new Date();
   todayOrder.setHours(0, 0, 0, 0);
-  const timelineDays = (() => {
-    if (!savedPlan?.treatment_start_date || !savedPlan?.cycle_interval_days) {
+
+  const timelineCycles = (() => {
+    if (
+      !savedPlan?.treatment_start_date ||
+      !savedPlan?.planned_cycles ||
+      !savedPlan?.cycle_interval_days
+    ) {
       return [];
     }
     const start = new Date(savedPlan.treatment_start_date);
     if (Number.isNaN(start.getTime())) return [];
-    return [0, 1, 2].map((offset) => {
-      const d = new Date(start);
-      d.setDate(d.getDate() + offset * savedPlan.cycle_interval_days);
+    const interval = savedPlan.cycle_interval_days || 1;
+    return Array.from({ length: savedPlan.planned_cycles }, (_, idx) => {
+      const cycle = idx + 1;
+      const dStart = new Date(start);
+      dStart.setDate(dStart.getDate() + idx * interval);
+      const dEnd = new Date(dStart);
+      dEnd.setDate(dEnd.getDate() + interval);
+      const t = todayOrder.getTime();
       return {
-        label: `Day ${offset + 1}`,
-        date: fmtOrderDate(d.toISOString()),
-        done: d.getTime() < todayOrder.getTime(),
+        label: `Cycle ${cycle}`,
+        num: cycle,
+        date: fmtOrderDate(dStart.toISOString()),
+        done: dEnd.getTime() <= t,
+        isCurrent: dStart.getTime() <= t && t < dEnd.getTime(),
+        active: cycle === selectedCycle,
       };
     });
   })();
@@ -8764,11 +8790,6 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   );
 
   const tabs = ["Order Summary", "Medications", "Discharge", "History", "Notes & Documents"];
-  const days = [
-    { label: "Day 1", date: "" },
-    { label: "Day 2", date: "" },
-    { label: "Day 3", date: "" },
-  ];
 
   const handlePrint = () => window.print();
 
@@ -8976,27 +8997,22 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 {/* BEGIN: Treatment Timeline */}
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-6 h-[200px]">
 <div className="flex items-center mb-8">
-<h3 className="text-lg font-bold text-[#1e293b]">Cycle {displayCycleNumber || "—"}</h3>
+<h3 className="text-lg font-bold text-[#1e293b]">Cycle {selectedCycle || displayCycleNumber || "—"}</h3>
 <div className="ml-3 text-sm text-[#64748b] flex items-center cursor-pointer hover:text-[#1e293b]">
                   {orderIntent || savedPlan?.treatment_status || "—"} <i className="fa-solid fa-chevron-down text-[10px] ml-2"></i>
 </div>
 </div>
-<div className="relative px-8 mt-4">
-<div className="absolute top-[18px] left-[60px] right-[60px] h-[2px] bg-slate-200"></div>
-<div className="flex justify-between relative z-10">
-{(timelineDays.length > 0
-  ? timelineDays
-  : [
-      { label: "Day 1", date: "", done: false },
-      { label: "Day 2", date: "", done: false },
-      { label: "Day 3", date: "", done: false },
-    ]
-).map((day) => (
-<div key={day.label} className="flex flex-col items-center">
-<div className={`w-10 h-10 rounded-full ${day.done ? "bg-[#1d4ed8] text-white" : "bg-slate-100 text-slate-400"} flex items-center justify-center font-bold ring-[6px] ring-white`}>{day.label.replace("Day ", "")}</div>
+{timelineCycles.length > 0 ? (
+<div className="relative mt-4 overflow-x-auto hide-scrollbar">
+<div className="relative min-w-max px-8">
+<div className="absolute top-[18px] left-[40px] right-[40px] h-[2px] bg-slate-200"></div>
+<div className="relative z-10 flex gap-x-12 min-w-max justify-between">
+{timelineCycles.map((cycle) => (
+<div key={cycle.label} className="flex flex-col items-center" title={`${cycle.label} · starts ${cycle.date}`}>
+<div className={`w-10 h-10 rounded-full ${cycle.active || cycle.isCurrent ? "bg-[#1d4ed8] text-white ring-4 ring-[#1d4ed8]/20" : cycle.done ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-400"} flex items-center justify-center font-bold ring-[6px] ring-white`}>{cycle.num}</div>
 <div className="mt-3 text-center">
-<div className={`text-sm ${day.done ? "font-semibold text-[#1e293b]" : "font-medium text-[#64748b]"}`}>{day.label}</div>
-<div className={`text-[11px] mt-1 ${day.done ? "text-[#64748b]" : "text-slate-400"}`}>{day.date || "—"}</div>
+<div className={`text-sm ${cycle.active || cycle.isCurrent ? "font-semibold text-[#1e293b]" : "font-medium text-[#64748b]"}`}>{cycle.label}</div>
+<div className={`text-[11px] mt-1 ${cycle.done ? "text-[#64748b]" : "text-slate-400"}`}>{cycle.date}</div>
 </div>
 </div>
 ))}
@@ -9010,23 +9026,47 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </div>
 </div>
 </div>
+) : (
+<div className="relative px-8 mt-4">
+<div className="absolute top-[18px] left-[60px] right-[60px] h-[2px] bg-slate-200"></div>
+<div className="flex justify-between relative z-10">
+{["1", "2", "3"].map((num) => (
+<div key={num} className="flex flex-col items-center">
+<div className={`w-10 h-10 rounded-full ${num === "1" ? "bg-[#1d4ed8] text-white" : "bg-slate-100 text-slate-400"} flex items-center justify-center font-bold ring-[6px] ring-white`}>{num}</div>
+<div className="mt-3 text-center">
+<div className={`text-sm ${num === "1" ? "font-semibold text-[#1e293b]" : "font-medium text-[#64748b]"}`}>Day {num}</div>
+<div className="text-[11px] text-slate-400 mt-1">—</div>
+</div>
+</div>
+))}
+<div className="flex flex-col items-center">
+<div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center font-bold ring-[6px] ring-white"><i className="fa-regular fa-map"></i></div>
+<div className="mt-3 text-center">
+<div className="text-sm font-medium text-[#64748b]">Follow-up</div>
+<div className="text-[11px] text-slate-400 mt-1">{timelineFollowUpDate || "—"}</div>
+</div>
+</div>
+</div>
+</div>
+)}
+</div>
 {/* END: Treatment Timeline */}
-{/* BEGIN: Day Selector */}
+{/* BEGIN: Cycle Selector */}
 <div className="flex items-center">
-<span className="text-sm font-semibold text-[#1e293b] mr-4">Select Day</span>
-<div className="flex bg-white rounded-[12px] border border-[#e2e8f0] shadow-sm p-1">
-{days.map((day) => (
-<button key={day.label} type="button" onClick={() => setSelectedDay(day.label)} className={`px-6 py-2 rounded-[8px] shadow-sm text-center min-w-[100px] transition-colors ${selectedDay === day.label ? "bg-[#1d4ed8] text-white" : "text-[#1e293b] hover:bg-slate-50"}`}>
-<div className="text-sm font-semibold">{day.label}</div>
-{day.date ? <div className={`text-[10px] font-normal mt-0.5 ${selectedDay === day.label ? "opacity-90" : "text-[#64748b]"}`}>{day.date}</div> : null}
+<span className="text-sm font-semibold text-[#1e293b] mr-4 shrink-0">Select Cycle</span>
+<div className="flex bg-white rounded-[12px] border border-[#e2e8f0] shadow-sm p-1 overflow-x-auto hide-scrollbar max-w-full">
+{(timelineCycles.length > 0
+  ? timelineCycles
+  : [{ label: "Cycle 1", num: 1, date: "" }]
+).map((cycle) => (
+<button key={cycle.label} type="button" onClick={() => setSelectedCycle(cycle.num)} className={`px-6 py-2 rounded-[8px] shadow-sm text-center min-w-[100px] transition-colors ${selectedCycle === cycle.num ? "bg-[#1d4ed8] text-white" : "text-[#1e293b] hover:bg-slate-50"}`}>
+<div className="text-sm font-semibold whitespace-nowrap">{cycle.label}</div>
+{cycle.date ? <div className={`text-[10px] font-normal mt-0.5 ${selectedCycle === cycle.num ? "opacity-90" : "text-[#64748b]"}`}>{cycle.date}</div> : null}
 </button>
 ))}
-<button className="px-6 py-2 text-[#1d4ed8] hover:bg-blue-50 transition-colors rounded-[8px] text-sm font-semibold flex items-center justify-center">
-<i className="fa-solid fa-plus mr-1.5"></i> Add Day
-                  </button>
 </div>
 </div>
-{/* END: Day Selector */}
+{/* END: Cycle Selector */}
 </div>
 {/* Right Side (Cards) */}
 <div className="flex space-x-6">
