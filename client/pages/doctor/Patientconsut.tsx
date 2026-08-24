@@ -6945,11 +6945,14 @@ type SummaryPlanItem = {
   drug_role: string | null;
   protocol_dose: number | null;
   protocol_dose_unit: string | null;
+  calculated_dose?: number | string | null;
   formulation: string | null;
   dilution_volume: string | null;
   administration_route: string | null;
   frequency: string | null;
   remarks: string | null;
+  cycle_day?: number | null;
+  administration_day?: number | null;
   medicine_master: {
     medicine_name: string;
     generic_name: string | null;
@@ -6975,17 +6978,22 @@ type SummaryPlan = {
   cycle_interval_days: number | null;
   treatment_start_date: string | null;
   expected_end_date: string | null;
+  ecog_status?: number | string | null;
+  karnofsky_score?: number | string | null;
+  diagnosis_id?: string | null;
+  staging_detail_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  employees?: {
+    first_name?: string | null;
+    last_name?: string | null;
+  } | null;
   chemotherapy_cycle: {
     cycle_number: number;
     cycle_day: number | null;
   }[] | null;
   chemotherapy_plan_items: SummaryPlanItem[] | null;
-  oncology_staging_detail: {
-    clinical_stage: string | null;
-    cancer_types: { cancer_type: string } | null;
-    cancer_subtypes: { subtype_name: string } | null;
-    derived_fields: { ajcc_stage: string | null } | null;
-  } | null;
+  oncology_staging_detail: StagingDetailRecord | null;
 };
 
 type ChemoOrderRow = {
@@ -7813,23 +7821,6 @@ const tabs: Tab[] = [
   "Notes & Documents",
 ];
 
-const premedications = [
-  { no: 1, medication: "Decadron", sub: "(Dexamethasone)", dose: "12 mg", route: ["IV", "Push"], timing: ["T-30", "mins"] },
-  { no: 2, medication: "Avil (Pheniramine)", sub: "", dose: "22.75", dose2: "mg", route: ["IV", "Push"], timing: ["T-15", "mins"] },
-  { no: 3, medication: "Palzen (Palonosetron)", sub: "", dose: "0.25", dose2: "mg", route: ["IV", "Push"], timing: ["T-10", "mins"] },
-];
-
-const chemoDrugs = [
-  { no: 1, drug: "Taxol (Paclitaxel)", calc: "80 mg/m²", actual: "137.6 mg", route: "IV Infusion", diluent: "NS 250ml", status: "GIVEN" },
-  { no: 2, drug: "Herceptin (Trastuzumab)", calc: "2 mg", actual: "128 mg", route: "IV Infusion", diluent: "NS 100ml", status: "PENDING" },
-  { no: 3, drug: "Carboplatin", calc: "AUC 6", actual: "450 mg", route: "IV Infusion", diluent: "D5W 500ml", status: "PENDING" },
-];
-
-const dischargeMeds = [
-  { no: 1, medication: "Capecitabine", dose: "12 mg", frequency: "2-0-2", instruction: "Twice Daily", duration: "5 Days" },
-  { no: 2, medication: "Paracetamol", dose: "22.75 mg", frequency: "2-0-2", instruction: "Once Daily", duration: "5 Days" },
-];
-
 function StatusBadge({ children, warning = false }: { children: React.ReactNode; warning?: boolean }) {
   return (
     <span className={`inline-flex rounded-md px-2.5 py-1 text-[10px] font-bold uppercase ${
@@ -7859,6 +7850,8 @@ const MedicationPortal: React.FC<{
   patientAgeSex?: string;
   patientDisplayId?: string;
   patientId?: string;
+  plan?: SummaryPlan | null;
+  allergies?: PatientAllergyRecord[];
 }> = ({
   onBackToProfile,
   patientName = "",
@@ -7866,10 +7859,57 @@ const MedicationPortal: React.FC<{
   patientAgeSex = "",
   patientDisplayId = "",
   patientId = "",
+  plan = null,
+  allergies = [],
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>("Medications");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showDischargeDashboard, setShowDischargeDashboard] = useState(false);
+
+  /* Recent medication details for THIS selected patient, sourced from
+     the fetched chemotherapy plan (GET /chemotherapy/plans?patient_id=). */
+  const medPlanItems = plan?.chemotherapy_plan_items ?? [];
+  const medPremedications = medPlanItems.filter(
+    (item) => (item.drug_role ?? "").toUpperCase() === "PREMEDICATION",
+  );
+  const medChemoDrugs = medPlanItems.filter(
+    (item) => (item.drug_role ?? "").toUpperCase() === "PRIMARY",
+  );
+  const medSupportiveCount = medPlanItems.filter(
+    (item) =>
+      !["PREMEDICATION", "PRIMARY"].includes(
+        (item.drug_role ?? "").toUpperCase(),
+      ),
+  ).length;
+  const medAllergyNames = allergies
+    .map((item) => item.allergy_master?.substance_name)
+    .filter(Boolean)
+    .join(", ");
+
+  /* Currently running cycle of the fetched plan + its real start date. */
+  const medFmtDate = (value?: string | null) => {
+    if (!value) return "";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return `${String(d.getDate()).padStart(2, "0")}-${String(
+      d.getMonth() + 1,
+    ).padStart(2, "0")}-${d.getFullYear()}`;
+  };
+  const medCurrentCycleInfo = (() => {
+    if (!plan?.treatment_start_date || !plan?.cycle_interval_days) return null;
+    const start = new Date(plan.treatment_start_date);
+    if (Number.isNaN(start.getTime())) return null;
+    const interval = plan.cycle_interval_days || 1;
+    const planned = plan.planned_cycles || 1;
+    const daysElapsed = Math.floor(
+      (Date.now() - start.getTime()) / 86400000,
+    );
+    let cycle = daysElapsed < 0 ? 1 : Math.floor(daysElapsed / interval) + 1;
+    if (planned > 0 && cycle > planned) cycle = planned;
+    const d = new Date(start);
+    d.setDate(d.getDate() + (cycle - 1) * interval);
+    return { cycle, date: medFmtDate(d.toISOString()) };
+  })();
 
   if (showDischargeDashboard) {
     return (
@@ -7934,7 +7974,7 @@ const MedicationPortal: React.FC<{
             <div className="text-sm text-[#64748b] flex items-center space-x-3">
 <span>{patientAgeSex}</span>
             <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-            <span className="text-[#1d4ed8] font-semibold">Ductal Carcinoma Stage II</span>
+<span className="text-[#1d4ed8] font-semibold">{[plan?.cancer_subtype || plan?.cancer_type, plan?.cancer_stage].filter(Boolean).join(" ") || "—"}</span>
             </div>
             </div>
             </div>
@@ -7943,50 +7983,50 @@ const MedicationPortal: React.FC<{
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">HEIGHT</div>
-            <div className="font-bold text-sm">154 cm</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BP</div>
-            <div className="font-bold text-sm">118/74</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             </div>
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">WEIGHT</div>
-            <div className="font-bold text-sm">52 kg</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">PULSE</div>
-            <div className="font-bold text-sm">78 bpm</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             </div>
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BSA</div>
-            <div className="font-bold text-sm">1.49 m²</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">TEMP</div>
-            <div className="font-bold text-sm">36.8 °C</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             </div>
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BMI</div>
-            <div className="font-bold text-sm">21.93</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">SPO2</div>
-            <div className="font-bold text-sm">99%</div>
+            <div className="font-bold text-sm">—</div>
             </div>
             </div>
             </div>
             <div className="pl-8">
             <div className="bg-blue-50/50 border border-blue-100 rounded-[12px] p-4 w-[220px]">
-            <div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: NEOADJUVANT</div>
-            <div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">TAXOL - WEEKLY</div>
+            <div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: {plan?.treatment_intent || "—"}</div>
+            <div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">{plan?.regimen_name || "—"}</div>
             <div className="flex items-center text-xs text-[#64748b] font-medium">
-            <span className="w-2 h-2 rounded-full bg-[#10b981] mr-2"></span> Active Protocol
+            <span className={`w-2 h-2 rounded-full mr-2 ${plan ? "bg-[#10b981]" : "bg-slate-300"}`}></span> {plan?.treatment_status || "No Plan"}
                     </div>
             </div>
             </div>
@@ -7999,18 +8039,13 @@ const MedicationPortal: React.FC<{
             <div className="flex items-center space-x-8">
             <div className="flex items-center">
             <i className="fa-solid fa-triangle-exclamation text-[#ef4444] mr-2"></i>
-            <span className="text-[#ef4444] font-semibold">Allergy:</span> <span className="ml-1 text-[#1e293b]">Penicillin</span>
+            <span className="text-[#ef4444] font-semibold">Allergy:</span> <span className="ml-1 text-[#1e293b]">{medAllergyNames || "—"}</span>
             </div>
             <div className="flex items-center">
             <i className="fa-solid fa-clock-rotate-left text-[#f59e0b] mr-2"></i>
-            <span className="text-[#f59e0b] font-semibold">Previous Cycle:</span> <span className="ml-1 text-[#1e293b]">Grade 2 Neutropenia</span>
-            </div>
-            <div className="flex items-center text-[#1d4ed8] font-medium">
-            <i className="fa-solid fa-link mr-2"></i>
-            <span>Central Line Available</span>
+            <span className="text-[#f59e0b] font-semibold">Previous Cycle:</span> <span className="ml-1 text-[#1e293b]">{plan?.completed_cycles ? `Cycle ${plan.completed_cycles} completed` : "—"}</span>
             </div>
             </div>
-            <a className="text-[#1d4ed8] font-semibold hover:underline" href="#">View Full Alerts (2)</a>
             </div>
             {/* END: Alerts Banner */}
 
@@ -8048,10 +8083,10 @@ const MedicationPortal: React.FC<{
                 {/* Summary cards */}
                 <div className="grid grid-cols-1 gap-4 pt-4 sm:grid-cols-2 xl:grid-cols-4">
                   {[
-                    ["TOTAL MEDS", "8", "fa-solid fa-pills", "bg-blue-50 text-[#0052cc]"],
-                    ["PREMEDS", "3", "fa-solid fa-syringe", "bg-purple-50 text-purple-600"],
-                    ["CHEMO", "3", "fa-solid fa-hourglass-half", "bg-red-50 text-red-500"],
-                    ["SUPPORTIVE", "2", "fa-solid fa-heart-pulse", "bg-emerald-50 text-emerald-500"],
+                    ["TOTAL MEDS", String(medPlanItems.length), "fa-solid fa-pills", "bg-blue-50 text-[#0052cc]"],
+                    ["PREMEDS", String(medPremedications.length), "fa-solid fa-syringe", "bg-purple-50 text-purple-600"],
+                    ["CHEMO", String(medChemoDrugs.length), "fa-solid fa-hourglass-half", "bg-red-50 text-red-500"],
+                    ["OTHER", String(medSupportiveCount), "fa-solid fa-heart-pulse", "bg-emerald-50 text-emerald-500"],
                   ].map(([label, value, icon, cls]) => (
                     <div key={label} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                       <div>
@@ -8069,7 +8104,7 @@ const MedicationPortal: React.FC<{
                   <div className="min-w-0 flex-1 space-y-6">
                     {/* Premeds */}
                     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                      <SectionHeader icon="fa-solid fa-chevron-down" title="Premedications" badge="3 Prescribed" />
+                      <SectionHeader icon="fa-solid fa-chevron-down" title="Premedications" badge={`${medPremedications.length} Prescribed`} />
                       <div className="overflow-x-auto">
                         <table className="w-full min-w-[700px] text-left text-sm">
                           <thead className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
@@ -8083,19 +8118,25 @@ const MedicationPortal: React.FC<{
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
-                            {premedications.map((m) => (
-                              <tr key={m.no} className="transition-colors hover:bg-slate-50">
-                                <td className="px-6 py-4 text-center text-slate-400">{m.no}</td>
-                                <td className="px-6 py-4">
-                                  <p className="font-bold text-slate-800">{m.medication}</p>
-                                  {m.sub && <p className="text-xs text-slate-500">{m.sub}</p>}
-                                </td>
-                                <td className="px-6 py-4 text-slate-700">{m.dose}{m.dose2 && <><br />{m.dose2}</>}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.route.map((x) => <React.Fragment key={x}>{x}<br /></React.Fragment>)}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.timing.map((x) => <React.Fragment key={x}>{x}<br /></React.Fragment>)}</td>
-                                <td className="px-6 py-4 text-center"><StatusBadge>GIVEN</StatusBadge></td>
+                            {medPremedications.length === 0 ? (
+                              <tr>
+                                <td colSpan={6} className="px-6 py-6 text-center text-xs text-slate-400">No premedications found for this patient.</td>
                               </tr>
-                            ))}
+                            ) : (
+                              medPremedications.map((item, index) => (
+                                <tr key={item.chemotherapy_plan_item_id} className="transition-colors hover:bg-slate-50">
+                                  <td className="px-6 py-4 text-center text-slate-400">{index + 1}</td>
+                                  <td className="px-6 py-4">
+                                    <p className="font-bold text-slate-800">{item.medicine_master?.medicine_name ?? "—"}</p>
+                                    {item.medicine_master?.generic_name && <p className="text-xs text-slate-500">{item.medicine_master.generic_name}</p>}
+                                  </td>
+                                  <td className="px-6 py-4 text-slate-700">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
+                                  <td className="px-6 py-4 text-slate-700">{item.administration_route ?? "—"}</td>
+                                  <td className="px-6 py-4 text-slate-700">{item.frequency ?? item.remarks ?? "—"}</td>
+                                  <td className="px-6 py-4 text-center"><StatusBadge>{item.drug_role || "PRESCRIBED"}</StatusBadge></td>
+                                </tr>
+                              ))
+                            )}
                           </tbody>
                         </table>
                       </div>
@@ -8103,7 +8144,7 @@ const MedicationPortal: React.FC<{
 
                     {/* Chemo */}
                     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                      <SectionHeader icon="fa-solid fa-chevron-down" title="Chemotherapy Drugs" badge="Active Cycle" badgeClass="border border-red-100 bg-red-50 text-red-600" />
+                      <SectionHeader icon="fa-solid fa-chevron-down" title="Chemotherapy Drugs" badge={`${medChemoDrugs.length} Prescribed`} badgeClass="border border-red-100 bg-red-50 text-red-600" />
                       <div className="overflow-x-auto">
                         <table className="w-full min-w-[850px] text-left text-sm">
                           <thead className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
@@ -8118,17 +8159,23 @@ const MedicationPortal: React.FC<{
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
-                            {chemoDrugs.map((m) => (
-                              <tr key={m.no} className="transition-colors hover:bg-slate-50">
-                                <td className="px-6 py-4 text-center text-slate-400">{m.no}</td>
-                                <td className="px-6 py-4"><a href="#" className="font-bold text-[#0052cc] hover:underline">{m.drug}</a></td>
-                                <td className="px-6 py-4 text-xs text-slate-500">{m.calc}</td>
-                                <td className="px-6 py-4 font-bold text-slate-800">{m.actual}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.route}</td>
-                                <td className="px-6 py-4 text-xs text-slate-500">{m.diluent}</td>
-                                <td className="px-6 py-4 text-center"><StatusBadge warning={m.status === "PENDING"}>{m.status}</StatusBadge></td>
+                            {medChemoDrugs.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="px-6 py-6 text-center text-xs text-slate-400">No chemotherapy drugs found for this patient.</td>
                               </tr>
-                            ))}
+                            ) : (
+                              medChemoDrugs.map((item, index) => (
+                                <tr key={item.chemotherapy_plan_item_id} className="transition-colors hover:bg-slate-50">
+                                  <td className="px-6 py-4 text-center text-slate-400">{index + 1}</td>
+                                  <td className="px-6 py-4"><span className="font-bold text-[#0052cc]">{item.medicine_master?.medicine_name ?? "—"}</span></td>
+                                  <td className="px-6 py-4 text-xs text-slate-500">{item.protocol_dose != null ? `${item.protocol_dose}${item.protocol_dose_unit ? ` ${item.protocol_dose_unit}` : ""}` : "—"}</td>
+                                  <td className="px-6 py-4 font-bold text-slate-800">{item.calculated_dose ?? item.protocol_dose ?? "—"}</td>
+                                  <td className="px-6 py-4 text-slate-700">{item.administration_route ?? "—"}</td>
+                                  <td className="px-6 py-4 text-xs text-slate-500">{item.dilution_volume ?? "—"}</td>
+                                  <td className="px-6 py-4 text-center"><StatusBadge>{item.drug_role || "PLANNED"}</StatusBadge></td>
+                                </tr>
+                              ))
+                            )}
                           </tbody>
                         </table>
                       </div>
@@ -8136,7 +8183,7 @@ const MedicationPortal: React.FC<{
 
                     {/* Discharge */}
                     <section className="mb-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                      <SectionHeader icon="fa-solid fa-chevron-down" title="Discharge Medication" badge="3 Prescribed" />
+                      <SectionHeader icon="fa-solid fa-chevron-down" title="Discharge Medication" badge="0 Prescribed" />
                       <div className="overflow-x-auto">
                         <table className="w-full min-w-[750px] text-left text-sm">
                           <thead className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
@@ -8150,16 +8197,9 @@ const MedicationPortal: React.FC<{
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
-                            {dischargeMeds.map((m) => (
-                              <tr key={m.no} className="transition-colors hover:bg-slate-50">
-                                <td className="px-6 py-4 text-center text-slate-400">{m.no}</td>
-                                <td className="px-6 py-4 font-bold text-slate-800">{m.medication}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.dose}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.frequency}</td>
-                                <td className="px-6 py-4 font-medium text-slate-800">{m.instruction}</td>
-                                <td className="px-6 py-4 font-bold text-slate-800">{m.duration}</td>
-                              </tr>
-                            ))}
+                            <tr>
+                              <td colSpan={6} className="px-6 py-6 text-center text-xs text-slate-400">No discharge medications found for this patient yet.</td>
+                            </tr>
                           </tbody>
                         </table>
                       </div>
@@ -8175,9 +8215,9 @@ const MedicationPortal: React.FC<{
                           <i className="fa-regular fa-calendar text-xl" />
                         </div>
                         <div>
-                          <p className="text-lg font-bold text-slate-800">06 Jun 2026</p>
-                          <p className="mb-1 text-sm text-slate-500">09:30 AM</p>
-                          <p className="text-sm font-medium text-[#0052cc]">Day 2 Treatment</p>
+                          <p className="text-lg font-bold text-slate-800">{medCurrentCycleInfo?.date || "—"}</p>
+                          <p className="mb-1 text-sm text-slate-500">—</p>
+                          <p className="text-sm font-medium text-[#0052cc]">{medCurrentCycleInfo ? `Cycle ${medCurrentCycleInfo.cycle}` : "—"}</p>
                         </div>
                       </div>
                       <button className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50">
@@ -8192,21 +8232,9 @@ const MedicationPortal: React.FC<{
                       </div>
                       <div className="relative space-y-8 pl-4 before:absolute before:inset-y-0 before:left-5 before:w-px before:bg-slate-200">
                         <div className="relative">
-                          <span className="absolute -left-6 top-1.5 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-white" />
-                          <p className="mb-0.5 text-sm font-bold text-slate-800">09:00 AM</p>
-                          <p className="text-sm text-slate-600">Decadron Administered</p>
-                          <p className="mt-0.5 text-xs text-slate-400">Nurse: Elena R.</p>
-                        </div>
-                        <div className="relative">
-                          <span className="absolute -left-6 top-1.5 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-white" />
-                          <p className="mb-0.5 text-sm font-bold text-slate-800">09:15 AM</p>
-                          <p className="text-sm text-slate-600">Avil Administered</p>
-                        </div>
-                        <div className="relative">
-                          <span className="absolute -left-6 top-1.5 h-3 w-3 rounded-full bg-[#0052cc] ring-4 ring-blue-50" />
-                          <p className="mb-0.5 text-sm font-bold text-slate-800">10:00 AM</p>
-                          <p className="text-sm font-bold text-[#0052cc]">Taxol Infusion Started</p>
-                          <p className="mt-0.5 text-xs text-slate-400">Remaining: 42 mins</p>
+                          <span className="absolute -left-6 top-1.5 h-2.5 w-2.5 rounded-full bg-slate-300 ring-4 ring-white" />
+                          <p className="mb-0.5 text-sm font-bold text-slate-800">—</p>
+                          <p className="text-sm text-slate-600">No medication administration records found for this patient yet.</p>
                         </div>
                       </div>
                     </section>
@@ -8534,13 +8562,12 @@ const loadLatestPlanPreview = async (
 function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [activeTab, setActiveTab] = useState("Order Summary");
   const [selectedDay, setSelectedDay] = useState("Day 1");
+  const [selectedCycle, setSelectedCycle] = useState(1);
   const [showBranchMenu, setShowBranchMenu] = useState(false);
   const [showMedicationPortal, setShowMedicationPortal] = useState(false);
   const [showDischargePortal, setShowDischargePortal] = useState(false);
-  const [planPreview, setPlanPreview] = useState<ChemoPlanPreview | null>(
-    null
-  );
-  const [planPreviewError, setPlanPreviewError] = useState("");
+  const [savedPlan, setSavedPlan] = useState<SummaryPlan | null>(null);
+  const [planNotice, setPlanNotice] = useState("");
   const [patientAllergies, setPatientAllergies] = useState<
     PatientAllergyRecord[]
   >([]);
@@ -8570,24 +8597,62 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
-    let cancelled = false;
-    setPlanPreview(null);
-    setPlanPreviewError("");
-
     if (!patientId) return;
+    let cancelled = false;
 
-    const loadPlanPreview = async () => {
-      const { preview, error } = await loadLatestPlanPreview(patientId);
+    /* Latest plan for THIS selected patient via
+       GET /chemotherapy/plans?patient_id=<id> (newest first).
+       The branch filter is tried first; when it comes back empty
+       (plan was saved under another branch) retry without it.
+       Runs for every tab so Medications gets the same data. */
+    const loadSavedPlan = async () => {
+      const fetchPlans = async (branchId?: string) => {
+        const response = await API.get<{
+          success: boolean;
+          data: SummaryPlan[];
+        }>("/chemotherapy/plans", {
+          params: {
+            patient_id: patientId,
+            page: 1,
+            limit: 1,
+            ...(branchId ? { branchId } : {}),
+          },
+        });
+        return response.data?.data ?? [];
+      };
+
+      const branchId =
+        getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+
+      let plans: SummaryPlan[] = [];
+      try {
+        plans = await fetchPlans(branchId);
+      } catch {
+        plans = [];
+      }
+
+      if (plans.length === 0) {
+        try {
+          plans = await fetchPlans();
+        } catch {
+          plans = [];
+        }
+      }
+
       if (cancelled) return;
-      setPlanPreview(preview);
-      setPlanPreviewError(error);
+      setSavedPlan(plans[0] ?? null);
+      setPlanNotice(
+        plans.length === 0
+          ? "No chemotherapy plan found for this patient yet. Complete the Treatment Plan step to populate the Order Summary."
+          : ""
+      );
     };
 
-    loadPlanPreview();
+    loadSavedPlan();
     return () => {
       cancelled = true;
     };
-  }, [consultationState?.patientId]);
+  }, [consultationState?.patientId, activeTab]);
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
@@ -8628,39 +8693,225 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const patientDisplayId = patient?.patient_id || "";
 
   const recentCancerType =
-    [planPreview?.cancer_type, planPreview?.cancer_subtype]
+    [savedPlan?.cancer_type, savedPlan?.cancer_subtype]
       .filter(Boolean)
       .join(" ");
 
-  const recentStage = planPreview?.clinical_stage || "";
+  const recentStage = savedPlan?.cancer_stage || "";
 
   const recentDiagnosis =
     [
-      planPreview?.cancer_subtype || planPreview?.cancer_type,
-      planPreview?.clinical_stage,
+      savedPlan?.cancer_subtype || savedPlan?.cancer_type,
+      savedPlan?.cancer_stage,
     ]
       .filter(Boolean)
       .join(" ");
 
-  const recentTherapy =
-    planPreview?.suggested_therapy ||
-    planPreview?.matching_protocols?.[0]?.regimen_name ||
-    "";
+  const recentTherapy = savedPlan?.regimen_name || "";
 
-  const recentIntent =
-    planPreview?.matching_protocols?.[0]?.treatment_intent || "";
+  const recentIntent = savedPlan?.treatment_intent || "";
 
   const recentAllergyNames = patientAllergies
     .map((item) => item.allergy_master?.substance_name)
     .filter(Boolean)
     .join(", ");
 
+  /* ============================================================
+     ORDER SUMMARY - all recent details of the selected patient
+     resolved from the fetched staging record + saved chemo plan.
+     ============================================================ */
+  const fmtOrderDate = (value?: string | null) => {
+    if (!value) return "";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return `${String(d.getDate()).padStart(2, "0")}-${String(
+      d.getMonth() + 1
+    ).padStart(2, "0")}-${d.getFullYear()}`;
+  };
+
+  const orderTherapy = savedPlan?.regimen_name || recentTherapy;
+  const orderIntent = savedPlan?.treatment_intent || recentIntent;
+
+  /* Plan items split by drug_role and the SELECTED DAY: PREMEDICATION
+     drugs render in the Premedications table, PRIMARY drugs render in
+     Chemo Orders - both only for the day picked in the Select Day
+     control (items without an explicit day belong to Day 1). */
+  const selectedDayNumber =
+    Number(selectedDay.replace("Day ", "")) || 1;
+  const premedicationItems = (savedPlan?.chemotherapy_plan_items ?? []).filter(
+    (item) =>
+      (item.drug_role ?? "").toUpperCase() === "PREMEDICATION" &&
+      (item.cycle_day ?? item.administration_day ?? 1) === selectedDayNumber,
+  );
+  const primaryChemoItems = (savedPlan?.chemotherapy_plan_items ?? []).filter(
+    (item) =>
+      (item.drug_role ?? "").toUpperCase() === "PRIMARY" &&
+      (item.cycle_day ?? item.administration_day ?? 1) === selectedDayNumber,
+  );
+
+  const planCycles = (savedPlan?.chemotherapy_cycle ?? []).filter(
+    (cycle) => typeof cycle.cycle_number === "number"
+  );
+  const latestPlanCycle =
+    planCycles.length > 0
+      ? planCycles.reduce((a, b) =>
+          (b.cycle_number as number) >= (a.cycle_number as number) ? b : a
+        )
+      : null;
+
+  /* When no chemo cycle has been recorded yet for this plan, derive the
+     current cycle/day from the treatment window (start date + interval). */
+  const derivedCycleInfo = (() => {
+    if (!savedPlan?.treatment_start_date || !savedPlan?.cycle_interval_days) {
+      return null;
+    }
+    const start = new Date(savedPlan.treatment_start_date);
+    if (Number.isNaN(start.getTime())) return null;
+    const daysElapsed = Math.floor(
+      (Date.now() - start.getTime()) / 86400000,
+    );
+    const interval = savedPlan.cycle_interval_days;
+    if (interval <= 0) return null;
+    if (daysElapsed < 0) return { cycle: 1, day: 1 };
+    const cycle = Math.floor(daysElapsed / interval) + 1;
+    const planned = savedPlan.planned_cycles || 0;
+    if (planned > 0 && cycle > planned) return null;
+    return { cycle, day: (daysElapsed % interval) + 1 };
+  })();
+
+  const displayCycleNumber =
+    latestPlanCycle?.cycle_number ?? derivedCycleInfo?.cycle ?? null;
+  const displayCycleDay =
+    latestPlanCycle?.cycle_day ?? derivedCycleInfo?.day ?? null;
+
+  /* Treatment timeline: one node per CYCLE, Cycle 1 through the final
+     planned cycle of the selected protocol. Day counting / interval
+     stays hidden - each node just shows its real start date and is
+     done/current/future. The follow-up node shows the plan's expected
+     end date. */
+  const todayOrder = new Date();
+  todayOrder.setHours(0, 0, 0, 0);
+
+  const timelineCycles = (() => {
+    if (
+      !savedPlan?.treatment_start_date ||
+      !savedPlan?.planned_cycles ||
+      !savedPlan?.cycle_interval_days
+    ) {
+      return [];
+    }
+    const start = new Date(savedPlan.treatment_start_date);
+    if (Number.isNaN(start.getTime())) return [];
+    const interval = savedPlan.cycle_interval_days || 1;
+    return Array.from({ length: savedPlan.planned_cycles }, (_, idx) => {
+      const cycle = idx + 1;
+      const dStart = new Date(start);
+      dStart.setDate(dStart.getDate() + idx * interval);
+      const dEnd = new Date(dStart);
+      dEnd.setDate(dEnd.getDate() + interval);
+      const t = todayOrder.getTime();
+      return {
+        label: `Cycle ${cycle}`,
+        num: cycle,
+        date: fmtOrderDate(dStart.toISOString()),
+        done: dEnd.getTime() <= t,
+        isCurrent: dStart.getTime() <= t && t < dEnd.getTime(),
+        active: cycle === selectedCycle,
+      };
+    });
+  })();
+  const timelineFollowUpDate = savedPlan?.expected_end_date
+    ? fmtOrderDate(savedPlan.expected_end_date)
+    : "";
+  const totalTreatmentDays =
+    savedPlan?.planned_cycles && savedPlan?.cycle_interval_days
+      ? savedPlan.planned_cycles * savedPlan.cycle_interval_days
+      : null;
+  const completedTreatmentDays =
+    savedPlan?.completed_cycles != null && savedPlan?.cycle_interval_days
+      ? Math.min(savedPlan.completed_cycles, savedPlan.planned_cycles || savedPlan.completed_cycles) *
+        savedPlan.cycle_interval_days
+      : null;
+  const remainingTreatmentDays =
+    totalTreatmentDays != null && completedTreatmentDays != null
+      ? Math.max(totalTreatmentDays - completedTreatmentDays, 0)
+      : null;
+  const progressPercent =
+    savedPlan?.planned_cycles && savedPlan?.completed_cycles != null
+      ? Math.min(
+          Math.round(
+            (savedPlan.completed_cycles / savedPlan.planned_cycles) * 100
+          ),
+          100
+        )
+      : null;
+
+  const buildOrderEntries = (pairs: [string, unknown][]): [string, string][] =>
+    pairs
+      .map(([label, value]) => {
+        let v: unknown = value;
+        if (v === null || v === undefined || v === "") return null;
+        if (typeof v === "object") v = JSON.stringify(v);
+        return [label, String(v)] as [string, string];
+      })
+      .filter((p): p is [string, string] => p !== null);
+
+  /* Embedded staging snapshot comes straight from the plan response. */
+  const osd = savedPlan?.oncology_staging_detail ?? null;
+
+  const diagnosisOrderEntries = buildOrderEntries([
+    ["Cancer Type", osd?.cancer_types?.cancer_type ?? savedPlan?.cancer_type],
+    ["Subtype", osd?.cancer_subtypes?.subtype_name ?? savedPlan?.cancer_subtype],
+    ["Clinical Stage", osd?.clinical_stage ?? savedPlan?.cancer_stage],
+    ["Staging System", osd?.staging_system],
+    ["T Stage", osd?.t_stage],
+    ["N Stage", osd?.n_stage],
+    ["M Stage", osd?.m_stage],
+    ["Laterality", osd?.laterality],
+    ["Performance Status", osd?.performance_status],
+    ["Metastasis Sites", osd?.metastasis_sites],
+    ["ICD-10", osd?.icd10_code],
+    ["ICD-O-3 Topography", osd?.icd_o3_topo],
+    ["ICD-O-3 Morphology", osd?.icd_o3_morpho],
+    ["Visit Date", fmtOrderDate(osd?.visit_date)],
+    ["Diagnosis Date", fmtOrderDate(osd?.diagnosis_date)],
+    ["Biopsy Date", fmtOrderDate(osd?.biopsy_date)],
+    [
+      "Consulting Oncologist",
+      osd?.consulting_oncologist ||
+        (savedPlan?.employees
+          ? [
+              savedPlan.employees.first_name,
+              savedPlan.employees.last_name,
+            ]
+              .filter(Boolean)
+              .join(" ")
+          : ""),
+    ],
+    ["Diagnosis ID", osd?.diagnosis_id ?? savedPlan?.diagnosis_id],
+    ["Staging Detail ID", osd?.staging_detail_id ?? savedPlan?.staging_detail_id],
+    ["Treatment Status", savedPlan?.treatment_status],
+    ["ECOG Status", savedPlan?.ecog_status],
+    ["Karnofsky Score", savedPlan?.karnofsky_score],
+    ["Saved On", fmtOrderDate(osd?.created_at)],
+  ]);
+
+  const renderOrderEntryGrid = (entries: [string, string][]) => (
+    <div className="grid grid-cols-1 gap-x-8 gap-y-3 px-6 py-5 sm:grid-cols-2 lg:grid-cols-3">
+      {entries.map(([label, value]) => (
+        <div key={label}>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[#64748b] mb-0.5">
+            {label}
+          </div>
+          <div className="text-sm font-medium text-[#1e293b] break-words">
+            {value}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
   const tabs = ["Order Summary", "Medications", "Discharge", "History", "Notes & Documents"];
-  const days = [
-    { label: "Day 1", date: "" },
-    { label: "Day 2", date: "" },
-    { label: "Day 3", date: "" },
-  ];
 
   const handlePrint = () => window.print();
 
@@ -8673,6 +8924,8 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
         patientAgeSex={patientAgeSex}
         patientDisplayId={patientDisplayId}
         patientId={consultationState?.patientId || ""}
+        plan={savedPlan}
+        allergies={patientAllergies}
       />
     );
   }
@@ -8795,8 +9048,8 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </div>
 <div className="pl-8">
 <div className="bg-blue-50/50 border border-blue-100 rounded-[12px] p-4 w-[220px]">
-<div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: {recentIntent || "—"}</div>
-<div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">{recentTherapy || "—"}</div>
+<div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: {orderIntent || "—"}</div>
+<div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">{orderTherapy || "—"}</div>
 <div className="flex items-center text-xs text-[#64748b] font-medium">
 <span className="w-2 h-2 rounded-full bg-[#10b981] mr-2"></span> Active Protocol
                     </div>
@@ -8849,73 +9102,95 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 <PatientNotesDocuments embedded />
 ) : (
 <>
-{planPreviewError && (
+{planNotice && (
 <div className="mb-6 flex items-center rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-<i className="fa-solid fa-triangle-exclamation mr-2"></i> {planPreviewError}
+<i className="fa-solid fa-triangle-exclamation mr-2"></i> {planNotice}
 </div>
 )}
+{/* BEGIN: Recent Details Sections (fetched for the selected patient) */}
+{diagnosisOrderEntries.length > 0 && (
+<section className="mb-6 overflow-hidden rounded-[16px] shadow-sm border border-[#e2e8f0] bg-white">
+  <SectionHeader icon="fa-solid fa-file-medical" title={`Diagnosis & Staging — ${[osd?.cancer_types?.cancer_type, osd?.cancer_subtypes?.subtype_name].filter(Boolean).join(" — ") || orderTherapy || "—"}`} badge={osd?.clinical_stage || savedPlan?.cancer_stage || "—"} />
+  {renderOrderEntryGrid(diagnosisOrderEntries)}
+</section>
+)}
+{/* END: Recent Details Sections */}
 <div className="flex space-x-6 mb-8">
 {/* Left Side (Timeline & Day Selector) */}
 <div className="flex-1 space-y-6">
 {/* BEGIN: Treatment Timeline */}
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-6 h-[200px]">
 <div className="flex items-center mb-8">
-<h3 className="text-lg font-bold text-[#1e293b]">Cycle —</h3>
+<h3 className="text-lg font-bold text-[#1e293b]">Cycle {selectedCycle || displayCycleNumber || "—"}</h3>
 <div className="ml-3 text-sm text-[#64748b] flex items-center cursor-pointer hover:text-[#1e293b]">
-                  — <i className="fa-solid fa-chevron-down text-[10px] ml-2"></i>
+                  {orderIntent || savedPlan?.treatment_status || "—"} <i className="fa-solid fa-chevron-down text-[10px] ml-2"></i>
 </div>
 </div>
-<div className="relative px-8 mt-4">
-<div className="absolute top-[18px] left-[60px] right-[60px] h-[2px] bg-slate-200"></div>
-<div className="flex justify-between relative z-10">
-<div className="flex flex-col items-center">
-<div className="w-10 h-10 rounded-full bg-[#1d4ed8] text-white flex items-center justify-center font-bold ring-[6px] ring-white">1</div>
+{timelineCycles.length > 0 ? (
+<div className="relative mt-4 overflow-x-auto hide-scrollbar">
+<div className="relative min-w-max px-8">
+<div className="absolute top-[18px] left-[40px] right-[40px] h-[2px] bg-slate-200"></div>
+<div className="relative z-10 flex gap-x-12 min-w-max justify-between">
+{timelineCycles.map((cycle) => (
+<div key={cycle.label} className="flex flex-col items-center" title={`${cycle.label} · starts ${cycle.date}`}>
+<div className={`w-10 h-10 rounded-full ${cycle.active || cycle.isCurrent ? "bg-[#1d4ed8] text-white ring-4 ring-[#1d4ed8]/20" : cycle.done ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-400"} flex items-center justify-center font-bold ring-[6px] ring-white`}>{cycle.num}</div>
 <div className="mt-3 text-center">
-<div className="text-sm font-semibold text-[#1e293b]">Day 1</div>
-<div className="text-[11px] text-[#64748b] mt-1">—</div>
+<div className={`text-sm ${cycle.active || cycle.isCurrent ? "font-semibold text-[#1e293b]" : "font-medium text-[#64748b]"}`}>{cycle.label}</div>
+<div className={`text-[11px] mt-1 ${cycle.done ? "text-[#64748b]" : "text-slate-400"}`}>{cycle.date}</div>
 </div>
 </div>
-<div className="flex flex-col items-center">
-<div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center font-bold ring-[6px] ring-white">2</div>
-<div className="mt-3 text-center">
-<div className="text-sm font-medium text-[#64748b]">Day 2</div>
-<div className="text-[11px] text-slate-400 mt-1">—</div>
-</div>
-</div>
-<div className="flex flex-col items-center">
-<div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center font-bold ring-[6px] ring-white">3</div>
-<div className="mt-3 text-center">
-<div className="text-sm font-medium text-[#64748b]">Day 3</div>
-<div className="text-[11px] text-slate-400 mt-1">—</div>
-</div>
-</div>
+))}
 <div className="flex flex-col items-center">
 <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center font-bold ring-[6px] ring-white"><i className="fa-regular fa-map"></i></div>
 <div className="mt-3 text-center">
 <div className="text-sm font-medium text-[#64748b]">Follow-up</div>
+<div className="text-[11px] text-slate-400 mt-1">{timelineFollowUpDate || "—"}</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+) : (
+<div className="relative px-8 mt-4">
+<div className="absolute top-[18px] left-[60px] right-[60px] h-[2px] bg-slate-200"></div>
+<div className="flex justify-between relative z-10">
+{["1", "2", "3"].map((num) => (
+<div key={num} className="flex flex-col items-center">
+<div className={`w-10 h-10 rounded-full ${num === "1" ? "bg-[#1d4ed8] text-white" : "bg-slate-100 text-slate-400"} flex items-center justify-center font-bold ring-[6px] ring-white`}>{num}</div>
+<div className="mt-3 text-center">
+<div className={`text-sm ${num === "1" ? "font-semibold text-[#1e293b]" : "font-medium text-[#64748b]"}`}>Day {num}</div>
 <div className="text-[11px] text-slate-400 mt-1">—</div>
 </div>
 </div>
+))}
+<div className="flex flex-col items-center">
+<div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center font-bold ring-[6px] ring-white"><i className="fa-regular fa-map"></i></div>
+<div className="mt-3 text-center">
+<div className="text-sm font-medium text-[#64748b]">Follow-up</div>
+<div className="text-[11px] text-slate-400 mt-1">{timelineFollowUpDate || "—"}</div>
 </div>
 </div>
+</div>
+</div>
+)}
 </div>
 {/* END: Treatment Timeline */}
-{/* BEGIN: Day Selector */}
+{/* BEGIN: Cycle Selector */}
 <div className="flex items-center">
-<span className="text-sm font-semibold text-[#1e293b] mr-4">Select Day</span>
-<div className="flex bg-white rounded-[12px] border border-[#e2e8f0] shadow-sm p-1">
-{days.map((day) => (
-<button key={day.label} type="button" onClick={() => setSelectedDay(day.label)} className={`px-6 py-2 rounded-[8px] shadow-sm text-center min-w-[100px] transition-colors ${selectedDay === day.label ? "bg-[#1d4ed8] text-white" : "text-[#1e293b] hover:bg-slate-50"}`}>
-<div className="text-sm font-semibold">{day.label}</div>
-{day.date ? <div className={`text-[10px] font-normal mt-0.5 ${selectedDay === day.label ? "opacity-90" : "text-[#64748b]"}`}>{day.date}</div> : null}
+<span className="text-sm font-semibold text-[#1e293b] mr-4 shrink-0">Select Cycle</span>
+<div className="flex bg-white rounded-[12px] border border-[#e2e8f0] shadow-sm p-1 overflow-x-auto hide-scrollbar max-w-full">
+{(timelineCycles.length > 0
+  ? timelineCycles
+  : [{ label: "Cycle 1", num: 1, date: "" }]
+).map((cycle) => (
+<button key={cycle.label} type="button" onClick={() => setSelectedCycle(cycle.num)} className={`px-6 py-2 rounded-[8px] shadow-sm text-center min-w-[100px] transition-colors ${selectedCycle === cycle.num ? "bg-[#1d4ed8] text-white" : "text-[#1e293b] hover:bg-slate-50"}`}>
+<div className="text-sm font-semibold whitespace-nowrap">{cycle.label}</div>
+{cycle.date ? <div className={`text-[10px] font-normal mt-0.5 ${selectedCycle === cycle.num ? "opacity-90" : "text-[#64748b]"}`}>{cycle.date}</div> : null}
 </button>
 ))}
-<button className="px-6 py-2 text-[#1d4ed8] hover:bg-blue-50 transition-colors rounded-[8px] text-sm font-semibold flex items-center justify-center">
-<i className="fa-solid fa-plus mr-1.5"></i> Add Day
-                  </button>
 </div>
 </div>
-{/* END: Day Selector */}
+{/* END: Cycle Selector */}
 </div>
 {/* Right Side (Cards) */}
 <div className="flex space-x-6">
@@ -8941,13 +9216,13 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-6 w-[220px] h-[200px] flex flex-col justify-between">
 <h4 className="text-sm font-bold text-[#1e293b] mb-2">Treatment Progress</h4>
 <div className="flex items-center justify-between">
-<div className="relative w-16 h-16 rounded-full bg-[conic-gradient(#e2e8f0_0%_100%)] flex items-center justify-center">
+<div className="relative w-16 h-16 rounded-full bg-[conic-gradient(#e2e8f0_0%_100%)] flex items-center justify-center" style={progressPercent != null ? { backgroundImage: `conic-gradient(#1d4ed8 ${progressPercent}%, #e2e8f0 ${progressPercent}% 100%)` } : undefined}>
 <div className="absolute inset-[6px] rounded-full bg-white"></div>
-<span className="relative z-10 text-sm font-bold text-[#1e293b]">—</span>
+<span className="relative z-10 text-sm font-bold text-[#1e293b]">{progressPercent != null ? `${progressPercent}%` : "—"}</span>
 </div>
 <div className="text-right">
 <div className="text-[10px] text-[#64748b] uppercase tracking-wide font-semibold mb-1">Completed</div>
-<div className="text-sm font-bold text-[#1e293b] mb-3">— <span className="text-xs font-medium text-[#64748b] normal-case tracking-normal">Days</span></div>
+<div className="text-sm font-bold text-[#1e293b] mb-3">{completedTreatmentDays ?? "—"} <span className="text-xs font-medium text-[#64748b] normal-case tracking-normal">Days</span></div>
 <div className="text-[10px] text-[#64748b] uppercase tracking-wide font-semibold mb-1">Remaining</div>
 <div className="text-sm font-bold text-[#1e293b]">—</div>
 </div>
@@ -8969,29 +9244,29 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 <div className="grid grid-cols-3 gap-4 mb-5">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">CYCLE</div>
-<div className="font-bold text-sm">—</div>
+<div className="font-bold text-sm">{displayCycleNumber ? `${displayCycleNumber}${savedPlan?.planned_cycles ? ` / ${savedPlan.planned_cycles}` : ""}` : "—"}</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">DAY</div>
-<div className="font-bold text-sm">—</div>
+<div className="font-bold text-sm">{displayCycleDay ?? "—"}</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">TOTAL DAYS</div>
-<div className="font-bold text-sm">—</div>
+<div className="font-bold text-sm">{totalTreatmentDays ?? "—"}</div>
 </div>
 </div>
 <div className="grid grid-cols-3 gap-4">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">START DATE</div>
-<div className="font-bold text-sm">—<br/>—</div>
+<div className="font-bold text-sm">{fmtOrderDate(savedPlan?.treatment_start_date) || "—"}<br/></div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">END DATE</div>
-<div className="font-bold text-sm">—<br/>—</div>
+<div className="font-bold text-sm">{fmtOrderDate(savedPlan?.expected_end_date) || "—"}<br/></div>
 </div>
 <div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">NEXT DAY</div>
-<div className="font-bold text-sm">—<br/>—</div>
+<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">INTERVAL</div>
+<div className="font-bold text-sm">{savedPlan?.cycle_interval_days ? `${savedPlan.cycle_interval_days} days` : "—"}</div>
 </div>
 </div>
 </div>
@@ -9044,7 +9319,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 <div className="flex items-center justify-between mb-5">
 <div className="flex items-center text-[#1d4ed8]">
 <i className="fa-solid fa-flask text-lg mr-2"></i>
-<h4 className="text-sm font-bold uppercase">PROTOCOL: {recentTherapy || "—"}</h4>
+<h4 className="text-sm font-bold uppercase">PROTOCOL: {orderTherapy || "—"}</h4>
 </div>
 <a className="text-xs text-[#1d4ed8] font-medium hover:underline flex items-center" href="#">View Protocol <i className="fa-solid fa-chevron-right text-[10px] ml-1"></i></a>
 </div>
@@ -9096,9 +9371,22 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </tr>
 </thead>
 <tbody>
+{premedicationItems.length === 0 ? (
 <tr>
 <td colSpan={6} className="py-6 text-center text-xs text-[#64748b]">No premedications found.</td>
 </tr>
+) : (
+premedicationItems.map((item, index) => (
+<tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
+<td className="py-2">{index + 1}</td>
+<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.administration_route ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.frequency ?? item.remarks ?? "—"}</td>
+<td className="py-2 text-right"><StatusBadge>{item.drug_role || "PREMEDICATION"}</StatusBadge></td>
+</tr>
+))
+)}
 </tbody>
 </table>
 </div>
@@ -9121,9 +9409,22 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </tr>
 </thead>
 <tbody>
+{primaryChemoItems.length === 0 ? (
 <tr>
 <td colSpan={6} className="py-6 text-center text-xs text-[#64748b]">No chemo orders found.</td>
 </tr>
+) : (
+primaryChemoItems.map((item, index) => (
+<tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
+<td className="py-2">{index + 1}</td>
+<td className="py-2 font-medium text-[#1e293b]">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
+<td className="py-2">{item.administration_route ?? "—"}</td>
+<td className="py-2">{item.dilution_volume ?? "—"}</td>
+<td className="py-2 text-right"><StatusBadge>{item.drug_role || "ORDERED"}</StatusBadge></td>
+</tr>
+))
+)}
 </tbody>
 </table>
 </div>
@@ -9184,8 +9485,8 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 {/* BEGIN: Footer */}
 <footer className="absolute bottom-0 left-0 right-0 bg-white border-t border-[#e2e8f0] px-8 py-4 flex items-center justify-between z-20">
 <div>
-<div className="text-xs text-[#64748b]">Created by <span className="font-medium text-[#1e293b]">—</span> on —</div>
-<div className="text-xs text-[#64748b] mt-1">Last updated by <span className="font-medium text-[#1e293b]">—</span> on —</div>
+<div className="text-xs text-[#64748b]">Created by <span className="font-medium text-[#1e293b]">{[savedPlan?.employees?.first_name, savedPlan?.employees?.last_name].filter(Boolean).join(" ") || "—"}</span> on {fmtOrderDate(savedPlan?.created_at) || "—"}</div>
+<div className="text-xs text-[#64748b] mt-1">Last updated by <span className="font-medium text-[#1e293b]">{[savedPlan?.employees?.first_name, savedPlan?.employees?.last_name].filter(Boolean).join(" ") || "—"}</span> on {fmtOrderDate(savedPlan?.updated_at) || "—"}</div>
 </div>
 <div className="flex items-center space-x-4">
 <button type="button" onClick={handlePrint} className="px-4 py-2 border border-[#e2e8f0] rounded-[8px] text-sm font-semibold text-[#1e293b] hover:bg-slate-50 transition-colors flex items-center">
@@ -10310,40 +10611,6 @@ return (
                     {renderEntryGrid(molecularEntries)}
                   </section>
                 )}
-
-                <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                  <SectionHeader icon="fa-solid fa-list-check" title="Matching Protocols" badge={`${planPreview?.matching_protocols?.length ?? 0} Found`} />
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[700px] text-left text-sm">
-                      <thead className="border-b border-slate-100 bg-slate-50/60 text-[10px] uppercase tracking-wider text-slate-400">
-                        <tr>
-                          <th className="px-6 py-3 font-semibold">Protocol</th>
-                          <th className="px-6 py-3 font-semibold">Regimen</th>
-                          <th className="px-6 py-3 font-semibold">Intent</th>
-                          <th className="px-6 py-3 text-center font-semibold">Cycles</th>
-                          <th className="px-6 py-3 text-center font-semibold">Interval</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(planPreview?.matching_protocols ?? []).length === 0 ? (
-                          <tr>
-                            <td colSpan={5} className="px-6 py-6 text-center text-slate-400">No matching protocols found for this diagnosis.</td>
-                          </tr>
-                        ) : (
-                          (planPreview?.matching_protocols ?? []).map((protocol, index) => (
-                            <tr key={protocol.id ?? `${protocol.protocol_id}-${index}`} className="border-b border-slate-50 last:border-0">
-                              <td className="px-6 py-3 font-semibold text-slate-700">{protocol.protocol_id}</td>
-                              <td className="px-6 py-3 text-slate-600">{protocol.regimen_name}</td>
-                              <td className="px-6 py-3 text-slate-600">{protocol.treatment_intent || "—"}</td>
-                              <td className="px-6 py-3 text-center text-slate-600">{protocol.standard_cycles ?? "—"}</td>
-                              <td className="px-6 py-3 text-center text-slate-600">{protocol.cycle_interval_days ? `${protocol.cycle_interval_days} days` : "—"}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
               </>
             )}
           </div>
