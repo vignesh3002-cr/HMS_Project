@@ -7286,6 +7286,11 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
   const [plan, setPlan] = useState<SummaryPlan | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState("");
+  const [dischargeMedications, setDischargeMedications] = useState<
+    DischargeRow[]
+  >([]);
+  const [dischargeLoading, setDischargeLoading] = useState(false);
+  const [dischargeError, setDischargeError] = useState("");
 
   useEffect(() => {
     if (!resolvedPatientId) return;
@@ -7327,6 +7332,107 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
     };
   }, [resolvedPatientId]);
 
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    let cancelled = false;
+
+    const resolveProtocolId = async (): Promise<string> => {
+      const savedProtocolId = localStorage.getItem(
+        `hms_selected_protocol_id_${resolvedPatientId}`
+      );
+      if (savedProtocolId) return savedProtocolId;
+
+      try {
+        const draft = JSON.parse(
+          localStorage.getItem(`hms_treatment_plan_${resolvedPatientId}`) ??
+            ""
+        ) as { protocol?: string } | null;
+        if (draft?.protocol) return draft.protocol;
+      } catch {
+        // Malformed draft - continue with the plan lookup.
+      }
+
+      const response = await API.get<{
+        success: boolean;
+        data: {
+          chemotherapy_regimen_protocol?: {
+            protocol_id?: string;
+          } | null;
+        }[];
+      }>("/chemotherapy/plans", {
+        params: {
+          patient_id: resolvedPatientId,
+          branchId:
+            getActiveBranchId() ?? getUser()?.branch_id ?? undefined,
+        },
+      });
+      const planRow = response.data.data?.[0];
+      return planRow?.chemotherapy_regimen_protocol?.protocol_id ?? "";
+    };
+
+    setDischargeLoading(true);
+    setDischargeError("");
+
+    resolveProtocolId()
+      .then(async (protocolId) => {
+        if (!protocolId) return [];
+
+        const response = await API.get<{
+          success: boolean;
+          data: DischargeMedicineRecord[];
+        }>(
+          `/chemotherapy/regimen-protocols/${encodeURIComponent(
+            protocolId
+          )}/discharge-medicines`
+        );
+
+        return [...(response.data.data ?? [])].sort(
+          (a, b) => (a.drug_sequence ?? 0) - (b.drug_sequence ?? 0)
+        );
+      })
+      .then((records) => {
+        if (cancelled) return;
+        setDischargeMedications(
+          records.map((item) => ({
+            drug:
+              item.medicine_master?.medicine_name ||
+              item.medicine_master?.generic_name ||
+              "",
+            dose:
+              item.patient_dose != null && item.patient_dose !== ""
+                ? `${item.patient_dose} ${
+                    item.patient_dose_unit ?? item.medicine_master?.unit ?? ""
+                  }`.trim()
+                : "",
+            frequency: item.frequency || "",
+            instruction:
+              item.administration_detail ||
+              item.comment ||
+              item.composition ||
+              "",
+            duration: item.duration || "",
+          }))
+        );
+      })
+      .catch((error: any) => {
+        console.error("Failed to load discharge medicines:", error);
+        if (cancelled) return;
+        setDischargeMedications([]);
+        setDischargeError(
+          error?.response?.data?.message ||
+            error?.message ||
+            "Failed to load discharge medicines."
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setDischargeLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId]);
+
   const planItems = plan?.chemotherapy_plan_items ?? [];
 
   const chemotherapyOrders: ChemoOrderRow[] = planItems
@@ -7355,25 +7461,6 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
       dose: item.protocol_dose != null ? String(item.protocol_dose) : "",
       route: item.administration_route || "",
       time: item.frequency || "",
-    }));
-
-  const dischargeMedications: DischargeRow[] = planItems
-    .filter(
-      (item) =>
-        item.drug_role === "SUPPORTIVE" ||
-        item.drug_role === "POSTMEDICATION"
-    )
-    .map((item) => ({
-      drug:
-        item.medicine_master?.medicine_name ||
-        item.medicine_master?.generic_name ||
-        "",
-      dose: item.protocol_dose != null ? String(item.protocol_dose) : "",
-      frequency: item.frequency || "",
-      instruction: item.remarks || "",
-      duration: item.administration_route
-        ? `via ${item.administration_route}`
-        : "",
     }));
 
   const cancerType =
@@ -7763,6 +7850,22 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
             <h3 className="mb-4 text-lg font-medium text-indigo-900">
               Discharge Medication
             </h3>
+
+            {dischargeLoading && (
+              <div className="mb-4 text-sm text-slate-500">
+                Loading discharge medicines...
+              </div>
+            )}
+            {dischargeError && (
+              <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {dischargeError}
+              </div>
+            )}
+            {!dischargeLoading && !dischargeError && dischargeMedications.length === 0 && (
+              <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                No discharge medicines found for this patient's protocol.
+              </div>
+            )}
 
             <div className="overflow-x-auto">
               <table className="w-full min-w-[700px] text-left text-sm">
