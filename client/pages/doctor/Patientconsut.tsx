@@ -7785,6 +7785,31 @@ const MedicationPortal: React.FC<{
     .filter(Boolean)
     .join(", ");
 
+  /* Currently running cycle of the fetched plan + its real start date. */
+  const medFmtDate = (value?: string | null) => {
+    if (!value) return "";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return `${String(d.getDate()).padStart(2, "0")}-${String(
+      d.getMonth() + 1,
+    ).padStart(2, "0")}-${d.getFullYear()}`;
+  };
+  const medCurrentCycleInfo = (() => {
+    if (!plan?.treatment_start_date || !plan?.cycle_interval_days) return null;
+    const start = new Date(plan.treatment_start_date);
+    if (Number.isNaN(start.getTime())) return null;
+    const interval = plan.cycle_interval_days || 1;
+    const planned = plan.planned_cycles || 1;
+    const daysElapsed = Math.floor(
+      (Date.now() - start.getTime()) / 86400000,
+    );
+    let cycle = daysElapsed < 0 ? 1 : Math.floor(daysElapsed / interval) + 1;
+    if (planned > 0 && cycle > planned) cycle = planned;
+    const d = new Date(start);
+    d.setDate(d.getDate() + (cycle - 1) * interval);
+    return { cycle, date: medFmtDate(d.toISOString()) };
+  })();
+
   if (showDischargeDashboard) {
     return (
       <DischargeDetailsPortal
@@ -8089,12 +8114,9 @@ const MedicationPortal: React.FC<{
                           <i className="fa-regular fa-calendar text-xl" />
                         </div>
                         <div>
-                          <p className="text-lg font-bold text-slate-800">{(() => {
-                            const c = timelineCycles.find((c) => c.num === selectedCycle) ?? null;
-                            return c?.date || "—";
-                          })()}</p>
+                          <p className="text-lg font-bold text-slate-800">{medCurrentCycleInfo?.date || "—"}</p>
                           <p className="mb-1 text-sm text-slate-500">—</p>
-                          <p className="text-sm font-medium text-[#0052cc]">{selectedCycle ? `Cycle ${selectedCycle}` : "—"}</p>
+                          <p className="text-sm font-medium text-[#0052cc]">{medCurrentCycleInfo ? `Cycle ${medCurrentCycleInfo.cycle}` : "—"}</p>
                         </div>
                       </div>
                       <button className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50">
