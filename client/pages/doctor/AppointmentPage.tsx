@@ -123,7 +123,6 @@ const STATUS_STYLES: Record<AppointmentStatus, string> = {
   Reschedule: "bg-purple-50 text-purple-600",
   "In Consultation": "bg-cyan-50 text-cyan-600",
   "No Show": "bg-gray-50 text-gray-500",
-  "Not Checked In": "bg-gray-50 text-gray-600",
   "Transfer Review": "bg-indigo-50 text-indigo-600",
   "Reschedule Required": "bg-purple-50 text-purple-600",
 };
