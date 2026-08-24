@@ -413,11 +413,42 @@ const Consultation: React.FC = () => {
   const [visitDate, setVisitDate] = useState(
     formatDateDMY(consultationState?.appointmentDate)
   );
-
   const visitTime = formatTimeAMPM(consultationState?.appointmentTime);
-  const visitType = consultationState?.visit_type || "";
-  const consultedBy = consultationState?.consultedBy || "";
 
+  /* ------------------------------------------------------------
+     VISIT TYPE
+     Primary source: visit_type passed by the Dashboard via router
+     state (appointment_history.Patient_visit_type). If it was not
+     supplied (or empty), fall back to the appointment linked to the
+     active encounter.
+  ------------------------------------------------------------ */
+
+  const [fallbackVisitType, setFallbackVisitType] = useState("");
+
+  useEffect(() => {
+    if (consultationState?.visit_type) return;
+    const appointmentId = encounter?.appointment_id;
+    if (!appointmentId) return;
+    let cancelled = false;
+    appointmentApi
+      .getOne(appointmentId)
+      .then((response) => {
+        if (cancelled) return;
+        const value = response.data?.data?.Patient_visit_type ?? "";
+        setFallbackVisitType(value);
+      })
+      .catch((error) => {
+        console.error("Failed to load appointment visit type:", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [consultationState?.visit_type, encounter?.appointment_id]);
+
+  const visitType =
+    consultationState?.visit_type || fallbackVisitType || "";
+
+  const consultedBy = consultationState?.consultedBy || "";
   /* ============================================================
      TOAST
   ============================================================ */
@@ -1251,6 +1282,7 @@ const Consultation: React.FC = () => {
                           <input
                             className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] pl-[33px] text-[11px] leading-5 text-slate-700 outline-none"
                             value={visitType}
+                            placeholder="Not recorded"
                             readOnly
                           />
 
