@@ -68,9 +68,10 @@ async function findNearestAvailableDate(
       const res = await appointmentApi.getAvailableSlots(doctorId, branchId, dateStr);
       const slots = res.data?.data?.slots || [];
       const isCancelled = res.data?.data?.is_cancelled ?? false;
-      // Skip cancelled days when searching for nearest available date.
-      // On week-off/leave days (not cancelled) the form stays put with free-time entry.
-      if (isCancelled) {
+      // Skip cancelled and leave days when searching for nearest
+      // available date. On plain week-off days (not cancelled, not
+      // on leave) the form stays put with free-time entry.
+      if (isCancelled || (res.data?.data?.is_on_leave ?? false)) {
         continue;
       }
       // On normal scheduled days with available slots, jump to that date.
@@ -229,6 +230,9 @@ export default function AddAppointment() {
   // slots request itself failed - shown as "Doctor is not assigned for this day".
   const [doctorUnavailable, setDoctorUnavailable] = useState(false);
   const [slotsCancelled, setSlotsCancelled] = useState(false);
+  // Backend flagged the whole day as PENDING/APPROVED doctor leave.
+  const [doctorOnLeave, setDoctorOnLeave] = useState(false);
+  const [leaveReason, setLeaveReason] = useState<string | null>(null);
 
   // The selected doctor's active weekly schedules (from employeeApi.getOne) -
   // used to derive which weekdays they actually work at the selected branch,
@@ -342,11 +346,15 @@ export default function AddAppointment() {
     if (!formData.doctorId || !formData.branchId || !formData.selectDate) {
       setAvailableSlots([]);
       setDoctorUnavailable(false);
+      setDoctorOnLeave(false);
+      setLeaveReason(null);
       return;
     }
 
     setLoadingSlots(true);
     setDoctorUnavailable(false);
+    setDoctorOnLeave(false);
+    setLeaveReason(null);
     setFormData((prev) => ({ ...prev, timeSlot: "" }));
     let cancelled = false;
 
@@ -366,17 +374,24 @@ export default function AddAppointment() {
         );
         const slots = res.data.data?.slots || [];
         const isCancelled = res.data.data?.is_cancelled ?? false;
+        const isOnLeave = res.data.data?.is_on_leave ?? false;
         setSlotsCancelled(isCancelled);
+        setDoctorOnLeave(isOnLeave);
+        setLeaveReason(res.data.data?.leave_reason ?? null);
         setAvailableSlots(slots.filter((s) => s.is_available));
         // Empty slots array = the backend found no active schedule for this
         // doctor/branch/date (a fully-booked day still returns slot entries).
-        setDoctorUnavailable(slots.length === 0 && !isCancelled);
+        setDoctorUnavailable(
+          slots.length === 0 && !isCancelled && !isOnLeave
+        );
         openSlots = slots.filter((s) => s.is_available);
       } catch (error) {
         fetchError = error;
         setAvailableSlots([]);
         setDoctorUnavailable(true);
         setSlotsCancelled(false);
+        setDoctorOnLeave(false);
+        setLeaveReason(null);
       }
 
       if (cancelled) return;
@@ -1016,6 +1031,12 @@ export default function AddAppointment() {
                 ) : doctorUnavailable && slotsCancelled ? (
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
                     Doctor is unavailable on this date (marked as cancelled)
+                  </div>
+                ) : doctorOnLeave ? (
+                  <div className="col-span-full py-8 text-center text-sm text-gray-500 bg-gray-50 rounded-xl">
+                    Doctor is on leave
+                    {leaveReason ? ` (${leaveReason})` : ""} — no slots can be
+                    booked on this date
                   </div>
                 ) : doctorUnavailable ? (
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">

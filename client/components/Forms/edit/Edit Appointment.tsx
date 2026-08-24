@@ -81,9 +81,10 @@ async function findNearestAvailableDate(
       const res = await appointmentApi.getAvailableSlots(doctorId, branchId, dateStr);
       const slots = res.data?.data?.slots || [];
       const isCancelled = res.data?.data?.is_cancelled ?? false;
-      // Skip cancelled days when searching for nearest available date.
-      // On week-off/leave days (not cancelled) the form stays put with free-time entry.
-      if (isCancelled) {
+      // Skip cancelled and leave days when searching for nearest
+      // available date. On plain week-off days (not cancelled, not
+      // on leave) the form stays put with free-time entry.
+      if (isCancelled || (res.data?.data?.is_on_leave ?? false)) {
         continue;
       }
       // On normal scheduled days with available slots, jump to that date.
@@ -162,6 +163,8 @@ export default function EditAppointment() {
   const [findingNearestDate, setFindingNearestDate] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [isCancelled, setIsCancelled] = useState(false);
+  const [isOnLeave, setIsOnLeave] = useState(false);
+  const [leaveReason, setLeaveReason] = useState<string | null>(null);
 
   useEffect(() => {
     branchApi
@@ -280,6 +283,8 @@ export default function EditAppointment() {
   useEffect(() => {
     if (!formData.doctorId || !formData.branchId || !formData.selectDate) {
       setAvailableSlots([]);
+      setIsOnLeave(false);
+      setLeaveReason(null);
       return;
     }
 
@@ -292,10 +297,14 @@ appointmentApi
         const isCancelled = res.data.data?.is_cancelled ?? false;
         setAvailableSlots(slots.filter((s) => s.is_available));
         setIsCancelled(isCancelled);
+        setIsOnLeave(res.data.data?.is_on_leave ?? false);
+        setLeaveReason(res.data.data?.leave_reason ?? null);
       })
       .catch(() => {
         setAvailableSlots([]);
         setIsCancelled(false);
+        setIsOnLeave(false);
+        setLeaveReason(null);
       })
       .finally(() => setLoadingSlots(false));
   }, [formData.doctorId, formData.branchId, formData.selectDate]);
@@ -684,6 +693,12 @@ appointmentApi
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl flex items-center justify-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
                     Loading available slots...
+                  </div>
+                ) : slotsToShow.length === 0 && isOnLeave ? (
+                  <div className="col-span-full py-8 text-center text-sm text-gray-500 bg-gray-50 rounded-xl">
+                    Doctor is on leave
+                    {leaveReason ? ` (${leaveReason})` : ""} — no slots can be
+                    booked on this date
                   </div>
                 ) : slotsToShow.length === 0 && !isCancelled ? (
                   <div className="col-span-full py-8 text-center text-sm text-amber-500 bg-amber-50 rounded-xl">

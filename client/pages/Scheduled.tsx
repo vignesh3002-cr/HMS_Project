@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { format } from "date-fns";
-import { User, IdCard, Phone, Mail, MapPin, Cake, Droplet, VenusAndMars, Briefcase, X, Loader2 } from "lucide-react";
+import { User, IdCard, Phone, Mail, MapPin, Cake, Droplet, VenusAndMars, Briefcase, X, Loader2, CheckCircle2 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 import CalendarPicker from "@/components/hms/Calender";
 import ScheduleSlotModal, {
   type ScheduleSlotModalHandle,
@@ -25,6 +35,12 @@ import {
   type TransferAction,
 } from "@/api/doctorTransfer.api";
 import { getUser } from "@/utils/token";
+import type { DoctorLeaveRecord } from "@/api/doctorLeave.api";
+import {
+  findLeaveConflictingAppointments,
+  formatTimeOfDay,
+  type LeaveConflict,
+} from "@/utils/leaveConflicts";
 import { DepartmentPill } from "@/components/hms/DepartmentBadge";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 
@@ -82,6 +98,20 @@ function normalizeChangeDate(value: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value ?? "");
   if (m) return `${m[1]}-${m[2]}-${m[3]}`;
   return value ?? "";
+}
+
+// Shifts a "yyyy-mm-dd" string by N days using the local
+// calendar (used to expand approved-leave date ranges).
+function addIsoDays(isoDate: string, days: number): string {
+  const [year, month, day] = isoDate
+    .slice(0, 10)
+    .split("-")
+    .map(Number);
+  const shifted = new Date(year, month - 1, day + days);
+  const y = shifted.getFullYear();
+  const m = String(shifted.getMonth() + 1).padStart(2, "0");
+  const d = String(shifted.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 // Handles both "HH:mm" / "HH:mm:ss" strings and UTC-anchored Date/ISO values.
@@ -199,6 +229,23 @@ export default function DoctorProfile() {
   const slotModalRef = useRef<ScheduleSlotModalHandle>(null);
   const [fromDate, setFromDate] = useState(null);
   const [toDate, setToDate] = useState(null);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [leaveSuccessOpen, setLeaveSuccessOpen] = useState(false);
+  const [submittingLeave, setSubmittingLeave] = useState(false);
+  const [leaveSuccessInfo, setLeaveSuccessInfo] = useState<{
+    from: string;
+    to: string;
+    leaveId?: string;
+    queuedCount?: number;
+    queueFailed?: boolean;
+  } | null>(null);
+  const [leaveConflicts, setLeaveConflicts] = useState<
+    LeaveConflict[]
+  >([]);
+  const [leaveConflictsOpen, setLeaveConflictsOpen] =
+    useState(false);
+  const [processingLeave, setProcessingLeave] = useState(false);
+  const leaveFormRef = useRef<HTMLFormElement | null>(null);
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
   const [isToCalendarOpen, setIsToCalendarOpen] = useState(false);
   const [savingSlot, setSavingSlot] = useState(false);
@@ -221,6 +268,69 @@ export default function DoctorProfile() {
   // OVERRIDE / CANCEL records loaded for the Week tab.
   const [weekChanges, setWeekChanges] = useState<ScheduleChangeRecord[]>([]);
   const [weekChangesLoading, setWeekChangesLoading] = useState(false);
+
+  // APPROVED leaves for this doctor — week view marks covered
+  // days with a "Doctor Leave" banner.
+  const [approvedLeaves, setApprovedLeaves] = useState<
+    DoctorLeaveRecord[]
+  >([]);
+
+  const loadApprovedLeaves = useCallback(async () => {
+    if (!id) {
+      setApprovedLeaves([]);
+      return;
+    }
+
+    try {
+      const response = await doctorLeaveApi.getApprovedLeavesForDoctor(id);
+      setApprovedLeaves(response.data?.leaves ?? []);
+    } catch (err) {
+      console.error("[Doctor Profile] Failed to load approved leaves:", err);
+      setApprovedLeaves([]);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void loadApprovedLeaves();
+  }, [loadApprovedLeaves]);
+
+  /* =======================================================
+     APPROVED LEAVES BY DATE
+     ======================================================= */
+
+  // Expands each APPROVED leave into every calendar day it
+  // covers (yyyy-mm-dd keys, matching weekDateToISO output)
+  // so the week grid can flag covered columns directly.
+  const leaveByIso = useMemo(() => {
+    const map = new Map<string, DoctorLeaveRecord>();
+
+    for (const leave of approvedLeaves) {
+      const startIso = String(
+        leave.leave_start_date
+      ).slice(0, 10);
+      const endIso = String(
+        leave.leave_end_date
+      ).slice(0, 10);
+
+      if (!startIso || !endIso) {
+        continue;
+      }
+
+      let cursor = startIso;
+      let guard = 0;
+
+      while (
+        cursor <= endIso &&
+        guard < 732
+      ) {
+        map.set(cursor, leave);
+        cursor = addIsoDays(cursor, 1);
+        guard += 1;
+      }
+    }
+
+    return map;
+  }, [approvedLeaves]);
 
   useEffect(() => {
     departmentApi
@@ -904,15 +1014,18 @@ export default function DoctorProfile() {
     alert(message);
   };
 
-const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
+const submitLeave = (e: React.FormEvent<HTMLFormElement>) => {
   e.preventDefault();
+
+  const formEl = e.currentTarget;
+  leaveFormRef.current = formEl;
 
   if (!id) {
     alert("Doctor ID is missing.");
     return;
   }
 
-  const form = new FormData(e.currentTarget);
+  const form = new FormData(formEl);
   const reason = String(form.get("reason") || "").trim();
 
   if (!fromDate || !toDate || !reason) {
@@ -925,13 +1038,76 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
     return;
   }
 
+  setLeaveConfirmOpen(true);
+};
+
+const doApplyLeave = async () => {
+  if (!id) {
+    setLeaveConfirmOpen(false);
+    alert("Doctor ID is missing.");
+    return;
+  }
+
+  if (!fromDate || !toDate) {
+    setLeaveConfirmOpen(false);
+    return;
+  }
+
   try {
+    setProcessingLeave(true);
+
+    // Check for booked appointments inside the leave range
+    // before actually applying.
+    const conflicts = await findLeaveConflictingAppointments(
+      id,
+      format(fromDate, "yyyy-MM-dd"),
+      format(toDate, "yyyy-MM-dd")
+    );
+
+    setLeaveConfirmOpen(false);
+
+    if (conflicts.length > 0) {
+      setLeaveConflicts(conflicts);
+      setLeaveConflictsOpen(true);
+      return;
+    }
+
+    await applyLeaveNow(false);
+  } catch (error: any) {
+    console.error("Leave conflict check failed:", error);
+
+    alert(
+      error?.response?.data?.message ||
+        error?.message ||
+        "Failed to check appointments for this leave period."
+    );
+  } finally {
+    setProcessingLeave(false);
+  }
+};
+
+const applyLeaveNow = async (queueConflicts: boolean) => {
+  if (!id) {
+    setLeaveConflictsOpen(false);
+    alert("Doctor ID is missing.");
+    return;
+  }
+
+  try {
+    setSubmittingLeave(true);
+
     const loggedInUser = getUser();
 
     if (!loggedInUser?.user_id) {
+      setLeaveConflictsOpen(false);
       alert("Logged-in user information is missing. Please log in again.");
       return;
     }
+
+    const formEl = leaveFormRef.current;
+    const reason = formEl
+      ? String(new FormData(formEl).get("reason") || "").trim()
+      : "";
 
     const response = await doctorLeaveApi.apply(id, {
       leave_start_date: format(fromDate, "yyyy-MM-dd"),
@@ -940,34 +1116,62 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
       requested_by: loggedInUser.user_id,
     });
 
-    console.log("Leave application response:", response.data);
-
     if (response.data?.success === false) {
       throw new Error(response.data.message || "Failed to apply leave.");
     }
 
-    const leaveId = response.data?.leave?.leave_id;
+    let queuedCount: number | undefined;
+    let queueFailed = false;
 
-    alert(
-      leaveId
-        ? `Leave applied successfully!\nLeave ID: ${leaveId}`
-        : "Leave applied successfully!"
-    );
+    if (queueConflicts && fromDate && toDate) {
+      try {
+        const queueResponse = await doctorLeaveApi.queueReschedule(id, {
+          date_from: format(fromDate, "yyyy-MM-dd"),
+          date_to: format(toDate, "yyyy-MM-dd"),
+          reason,
+        });
+        queuedCount = queueResponse.data?.data?.queued;
+      } catch (queueError: any) {
+        console.error("Reschedule queueing failed:", queueError);
+        queueFailed = true;
+      }
+    }
 
-    e.currentTarget.reset();
+    setLeaveSuccessInfo({
+      from: format(fromDate, "dd/MM/yyyy"),
+      to: format(toDate, "dd/MM/yyyy"),
+      leaveId: response.data?.leave?.leave_id,
+      queuedCount,
+      queueFailed,
+    });
+
+    setLeaveConflictsOpen(false);
+    setLeaveSuccessOpen(true);
+
+    // Admin-submitted leaves auto-approve, so refresh the
+    // week grid's leave markers right away.
+    void loadApprovedLeaves();
+
+    formEl?.reset();
     setFromDate(null);
     setToDate(null);
   } catch (error: any) {
     console.error("Leave application failed:", error);
     console.error("Backend response:", error?.response?.data);
 
+    setLeaveConfirmOpen(false);
+    setLeaveConflictsOpen(false);
+
     alert(
       error?.response?.data?.message ||
         error?.message ||
         "Failed to apply for leave."
     );
+  } finally {
+    setSubmittingLeave(false);
   }
 };
+
   const previousWeek = () => {
     setWeekDates((prev) => prev.map((date) => shiftDate(date, -7)));
   };
@@ -1296,6 +1500,19 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                             </button>
                           </div>
                         )}
+                        {activeTab === "week" &&
+                          leaveByIso.has(
+                            weekDateToISO(weekDates[dayIdx])
+                          ) && (
+                            <div className="mt-[3px] flex justify-center">
+                              <span
+                                title="Approved leave covers this date"
+                                className="rounded bg-[#FDE8E8] px-1 py-0.5 text-[7px] font-bold uppercase tracking-wide text-[#9B1C1C]"
+                              >
+                                Doctor Leave
+                              </span>
+                            </div>
+                          )}
                       </div>
                     ))}
 
@@ -1385,9 +1602,30 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
 
                         const showDelete = canManageSchedule && (activeTab === "day" || changeId != null);
 
+                        const leaveForCell =
+                          activeTab === "week"
+                            ? leaveByIso.get(weekIso)
+                            : undefined;
+
                         return (
                           <div key={index} className="p-1 border-r border-[#b9bfcb] min-w-0">
-                            {isCancelled && (
+                            {leaveForCell && (
+                              <div
+                                title={leaveForCell.leave_reason ?? "Approved leave"}
+                                className="h-[54px] rounded-[3px] border border-dashed border-[#F5B7B7] bg-[#FDE8E8] flex flex-col items-center justify-center gap-[2px] text-center px-1 overflow-hidden"
+                              >
+                                <span className="text-[7px] font-bold uppercase tracking-wide text-[#9B1C1C]">
+                                  Doctor Leave
+                                </span>
+                                {leaveForCell.leave_reason && (
+                                  <span className="text-[6px] leading-[8px] text-[#9B1C1C]/80 line-clamp-2 px-0.5">
+                                    {leaveForCell.leave_reason}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
+                            {isCancelled && !leaveForCell && (
                               <div className="relative h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] bg-[#f3f4f6] text-[#6b7280] border-[#9ca3af]">
                                 {showDelete && (
                                   <button
@@ -1403,13 +1641,14 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                               </div>
                             )}
 
-                            {type === "off" && (
+                            {type === "off" && !leaveForCell && (
                               <div className="h-[54px] border border-dashed border-[#b9bfcb] rounded flex items-center justify-center text-[#657080] text-[8px]">
                                 Week Off
                               </div>
                             )}
 
                             {type === "empty" &&
+                              !leaveForCell &&
                               (canManageSchedule ? (
                                 <div
                                   onClick={() =>
@@ -1432,7 +1671,7 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                                 </div>
                               ))}
 
-                            {isColored && (
+                            {isColored && !leaveForCell && (
                               <div
                                 onClick={openBlockEdit}
                                 className={`relative cursor-pointer h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] ${
@@ -1906,6 +2145,175 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
           </div>
         </div>
       )}
+
+      {/* LEAVE CONFIRM DIALOG */}
+      <AlertDialog
+        open={leaveConfirmOpen}
+        onOpenChange={(open) => {
+          if (!submittingLeave) setLeaveConfirmOpen(open);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Do you want to proceed with the leave?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Leave date: {fromDate ? format(fromDate, "dd/MM/yyyy") : "-"} to{" "}
+              {toDate ? format(toDate, "dd/MM/yyyy") : "-"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={submittingLeave || processingLeave}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={submittingLeave || processingLeave}
+              onClick={(e) => {
+                e.preventDefault();
+                doApplyLeave();
+              }}
+            >
+              {processingLeave ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Checking...
+                </>
+              ) : submittingLeave ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                "Proceed"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* LEAVE SUCCESS DIALOG */}
+      <AlertDialog open={leaveSuccessOpen} onOpenChange={setLeaveSuccessOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-green-600">
+              <CheckCircle2 className="size-5" />
+              Leave applied successfully
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {leaveSuccessInfo && (
+                <>
+                  Leave date: {leaveSuccessInfo.from} to {leaveSuccessInfo.to}
+                  {leaveSuccessInfo.leaveId
+                    ? ` · Leave ID: ${leaveSuccessInfo.leaveId}`
+                    : ""}
+                  {typeof leaveSuccessInfo.queuedCount === "number" &&
+                  leaveSuccessInfo.queuedCount > 0
+                    ? ` · ${leaveSuccessInfo.queuedCount} patient(s) sent to the reschedule queue`
+                    : ""}
+                  {leaveSuccessInfo.queueFailed
+                    ? " · Could not add patients to the reschedule queue"
+                    : ""}
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setLeaveSuccessOpen(false)}>
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* LEAVE CONFLICTS DIALOG */}
+      <AlertDialog
+        open={leaveConflictsOpen}
+        onOpenChange={(open) => {
+          if (!submittingLeave) setLeaveConflictsOpen(open);
+        }}
+      >
+        <AlertDialogContent className="max-w-[460px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {leaveConflicts.length} appointment
+              {leaveConflicts.length === 1 ? "" : "s"} scheduled during this
+              leave
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You can send these patients to the reschedule queue so staff can
+              assign them new slots, or apply the leave without changes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="max-h-[220px] overflow-y-auto rounded-md border border-slate-200">
+            {leaveConflicts.map((conflict) => (
+              <div
+                key={conflict.appointment_id}
+                className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-[12px] last:border-b-0"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-slate-800">
+                    {conflict.patientName}
+                  </p>
+                  <p className="text-slate-500">
+                    {format(new Date(conflict.appointment_date), "dd/MM/yyyy")}
+                    {formatTimeOfDay(conflict.appointment_time)
+                      ? ` · ${formatTimeOfDay(conflict.appointment_time)}`
+                      : ""}
+                  </p>
+                </div>
+                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                  {conflict.status}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={submittingLeave}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={submittingLeave}
+              className="border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              onClick={(e) => {
+                e.preventDefault();
+                applyLeaveNow(false);
+              }}
+            >
+              {submittingLeave ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Applying...
+                </>
+              ) : (
+                "Apply leave anyway"
+              )}
+            </AlertDialogAction>
+            <AlertDialogAction
+              disabled={submittingLeave}
+              onClick={(e) => {
+                e.preventDefault();
+                applyLeaveNow(true);
+              }}
+            >
+              {submittingLeave ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Applying...
+                </>
+              ) : (
+                <>
+                  Apply leave &amp; queue{" "}
+                  {leaveConflicts.length} patient
+                  {leaveConflicts.length === 1 ? "" : "s"}
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <ScheduleSlotModal
         ref={slotModalRef}
