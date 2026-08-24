@@ -6046,7 +6046,8 @@ const TreatmentPlan: React.FC<{
 
       if (data.treatmentIntent) setTreatmentIntent(data.treatmentIntent);
       if (Array.isArray(data.treatmentTypes)) {
-        setTreatmentTypes(data.treatmentTypes);
+        /* Treatment Type is single-select - keep at most one entry. */
+        setTreatmentTypes(data.treatmentTypes.slice(0, 1));
       }
       if (data.lineOfTherapy) setLineOfTherapy(data.lineOfTherapy);
       if (data.plannedStartDate) {
@@ -6090,15 +6091,20 @@ const TreatmentPlan: React.FC<{
     "Targeted Therapy",
   ];
 
+  /* Single-select behaviour - only one treatment type can be
+     active at a time (clicking it again clears the selection). */
   const toggleTreatmentType = (
     type: TreatmentType
   ) => {
     setTreatmentTypes((current) =>
-      current.includes(type)
-        ? current.filter((item) => item !== type)
-        : [...current, type]
+      current.includes(type) ? [] : [type]
     );
   };
+
+  /* Chemo-specific inputs (Line of Therapy, Planned Start Date,
+     Protocol) stay hidden unless Chemotherapy is ticked above. */
+  const isChemotherapySelected =
+    treatmentTypes.includes("Chemotherapy");
 
   useEffect(() => {
     let cancelled = false;
@@ -6195,76 +6201,90 @@ const TreatmentPlan: React.FC<{
       return;
     }
 
-    if (!plannedStartDate) {
-      setSaveError(
-        "Please set a planned start date before continuing."
-      );
-      return;
-    }
+    /* Chemo-only requirements - these inputs are hidden when
+       Chemotherapy is not part of the selected treatment types. */
+    let treatmentStartDate = "";
 
-    if (!protocol) {
-      setSaveError("Please select a protocol before continuing.");
-      return;
-    }
-
-    const dateMatch = plannedStartDate
-      .trim()
-      .match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-    const treatmentStartDate = dateMatch
-      ? `${dateMatch[3]}-${dateMatch[2].padStart(2, "0")}-${dateMatch[1].padStart(2, "0")}`
-      : plannedStartDate.trim();
-
-    if (!/^\d{4}-\d{2}-\d{2}/.test(treatmentStartDate)) {
-      setSaveError(
-        "Planned start date is not a valid date (use DD-MM-YYYY or YYYY-MM-DD)."
-      );
-      return;
-    }
-
-    const saved = localStorage.getItem("hms_diagnosis_selection");
-    let stagingDetailId = "";
-    let diagnosisId = "";
-
-    if (saved) {
-      try {
-        const selection = JSON.parse(saved);
-        stagingDetailId = selection?.staging_detail_id ?? "";
-        diagnosisId = selection?.diagnosis_id ?? "";
-      } catch (error) {
-        console.error("Failed to parse diagnosis selection:", error);
+    if (isChemotherapySelected) {
+      if (!plannedStartDate) {
+        setSaveError(
+          "Please set a planned start date before continuing."
+        );
+        return;
       }
-    }
 
-    if (!stagingDetailId || !diagnosisId) {
-      try {
-        const stagingResponse = await API.get<{
-          success: boolean;
-          data: {
-            staging_detail_id: string;
-            diagnosis_id: string | null;
-          }[];
-        }>("/oncology/staging-details", {
-          params: { patient_id: resolvedPatientId, limit: 1 },
-        });
-        const latest = stagingResponse.data?.data?.[0];
-        stagingDetailId = latest?.staging_detail_id ?? "";
-        diagnosisId = latest?.diagnosis_id ?? "";
-      } catch (error) {
-        console.error("Failed to load staging details:", error);
+      if (!protocol) {
+        setSaveError("Please select a protocol before continuing.");
+        return;
       }
-    }
 
-    if (!stagingDetailId || !diagnosisId) {
-      setSaveError(
-        "Diagnosis has not been saved yet. Complete the Diagnosis step first."
-      );
-      return;
+      const dateMatch = plannedStartDate
+        .trim()
+        .match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+      treatmentStartDate = dateMatch
+        ? `${dateMatch[3]}-${dateMatch[2].padStart(2, "0")}-${dateMatch[1].padStart(2, "0")}`
+        : plannedStartDate.trim();
+
+      if (!/^\d{4}-\d{2}-\d{2}/.test(treatmentStartDate)) {
+        setSaveError(
+          "Planned start date is not a valid date (use DD-MM-YYYY or YYYY-MM-DD)."
+        );
+        return;
+      }
     }
 
     setSaving(true);
     setSaveError("");
 
     try {
+      /* A chemotherapy plan is only created when Chemotherapy is
+         ticked; other treatment types continue to the next step. */
+      if (!isChemotherapySelected) {
+        setActiveStep(3);
+        onNext?.();
+        return;
+      }
+
+      const saved = localStorage.getItem("hms_diagnosis_selection");
+      let stagingDetailId = "";
+      let diagnosisId = "";
+
+      if (saved) {
+        try {
+          const selection = JSON.parse(saved);
+          stagingDetailId = selection?.staging_detail_id ?? "";
+          diagnosisId = selection?.diagnosis_id ?? "";
+        } catch (error) {
+          console.error("Failed to parse diagnosis selection:", error);
+        }
+      }
+
+      if (!stagingDetailId || !diagnosisId) {
+        try {
+          const stagingResponse = await API.get<{
+            success: boolean;
+            data: {
+              staging_detail_id: string;
+              diagnosis_id: string | null;
+            }[];
+          }>("/oncology/staging-details", {
+            params: { patient_id: resolvedPatientId, limit: 1 },
+          });
+          const latest = stagingResponse.data?.data?.[0];
+          stagingDetailId = latest?.staging_detail_id ?? "";
+          diagnosisId = latest?.diagnosis_id ?? "";
+        } catch (error) {
+          console.error("Failed to load staging details:", error);
+        }
+      }
+
+      if (!stagingDetailId || !diagnosisId) {
+        setSaveError(
+          "Diagnosis has not been saved yet. Complete the Diagnosis step first."
+        );
+        return;
+      }
+
       let employeeId = getUser()?.employee_id ?? null;
 
       if (!employeeId) {
@@ -6527,13 +6547,27 @@ const TreatmentPlan: React.FC<{
               }
               className="block w-full appearance-none rounded-lg border border-slate-300 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             >
-              <option value="Curative">
-                Curative
+              <option value="">
+                Select Treatment Intent
               </option>
 
-              <option value="Palliative">
-                Palliative
-              </option>
+              {[
+                "Curative",
+                "Adjuvant",
+                "Neoadjuvant",
+                "Palliative",
+                "Definitive",
+                "Maintenance",
+                "Salvage",
+                "Supportive / Symptom Control",
+                "Prophylactic",
+                "Diagnostic",
+                "Other",
+              ].map((intent) => (
+                <option key={intent} value={intent}>
+                  {intent}
+                </option>
+              ))}
             </select>
 
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
@@ -6586,9 +6620,10 @@ const TreatmentPlan: React.FC<{
         </div>
 
         {/* ============================================
-            LINE + START DATE
+            LINE + START DATE  (chemotherapy only)
         ============================================= */}
 
+        {isChemotherapySelected && (
         <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
 
           {/* Line of Therapy */}
@@ -6685,11 +6720,13 @@ const TreatmentPlan: React.FC<{
             </Popover>
           </div>
         </div>
+        )}
 
         {/* ============================================
-            PROTOCOL
+            PROTOCOL  (chemotherapy only)
         ============================================= */}
 
+        {isChemotherapySelected && (
         <div>
 
           <div className="mb-2 flex items-center justify-between">
@@ -6762,6 +6799,7 @@ const TreatmentPlan: React.FC<{
             </div>
           )}
         </div>
+        )}
 
         {/* ============================================
             REMARKS
