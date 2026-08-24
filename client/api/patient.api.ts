@@ -118,6 +118,8 @@ export interface GetPatientsParams {
   patientType?: string;
   status?: string;
   search?: string;
+  dateFrom?: string; // YYYY-MM-DD
+  dateTo?: string;   // YYYY-MM-DD
   page?: number;
   limit?: number;
 }

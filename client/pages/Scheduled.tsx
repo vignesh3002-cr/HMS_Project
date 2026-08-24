@@ -1,19 +1,46 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { format, addDays, subDays } from "date-fns";
-import { User, IdCard, Phone, Mail, MapPin, Cake, Droplet, VenusAndMars, Briefcase } from "lucide-react";
+import { format } from "date-fns";
+import { User, IdCard, Phone, Mail, MapPin, Cake, Droplet, VenusAndMars, Briefcase, X, Loader2, CheckCircle2 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 import CalendarPicker from "@/components/hms/Calender";
 import ScheduleSlotModal, {
   type ScheduleSlotModalHandle,
   type ScheduleSlotAddPayload,
   type ScheduleSlotEditPayload,
+  type ScheduleSlotCancelPayload,
 } from "@/components/hms/ScheduleSlotModal";
 import { employeeApi, type EmployeeDetailResponse, type DoctorScheduleRecord } from "@/api/employee.api";
 import { appointmentApi, type AvailableSlotsResult } from "@/api/appointment.api";
 import { doctorLeaveApi } from "@/api/doctorLeave.api";
+import { departmentApi, type Department } from "@/api/department.api";
+import {
+  doctorScheduleApi,
+  type ScheduleChangeMode,
+  type ScheduleChangeRecord,
+} from "@/api/doctorSchedule.api";
+import {
+  doctorTransferApi,
+  type TransferAppointmentSummary,
+  type TransferAction,
+} from "@/api/doctorTransfer.api";
 import { getUser } from "@/utils/token";
+import type { DoctorLeaveRecord } from "@/api/doctorLeave.api";
+import {
+  findLeaveConflictingAppointments,
+  formatTimeOfDay,
+  type LeaveConflict,
+} from "@/utils/leaveConflicts";
 import { DepartmentPill } from "@/components/hms/DepartmentBadge";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 
@@ -37,27 +64,78 @@ function formatScheduleTime(time: string | null): string {
   return `${String(h12).padStart(2, "0")}:${minutes} ${period}`;
 }
 
-// Inverse of formatScheduleTime -- converts a stored schedule time back to
-// the "HH:MM" value the modal's <input type="time"> expects.
-function scheduleTimeToInput(time: string | null): string {
+function toTimeInputValue(time: string | null | undefined): string {
   if (!time) return "";
   const d = new Date(time);
   if (isNaN(d.getTime())) return "";
-  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
 }
 
-// effective_from/effective_to come back as UTC-anchored datetimes -- return
-// just the "YYYY-MM-DD" day part using UTC getters so no timezone shift.
-function scheduleDateToInput(time: string | null | undefined): string {
+function deriveShiftName(startTime: string): string {
+  const hour = Number(startTime.split(":")[0]);
+  return hour < 12 ? "Morning" : "Evening";
+}
+
+function toMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+// dd/mm/yy -> yyyy-mm-dd (used to match doctor_schedule_change.change_date).
+function weekDateToISO(dateStr: string): string {
+  const [dd, mm, yy] = dateStr.split("/").map(Number);
+  const date = new Date(2000 + yy, mm - 1, dd);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+// change_date arrives as an ISO/date string; keep only the yyyy-mm-dd part.
+function normalizeChangeDate(value: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value ?? "");
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  return value ?? "";
+}
+
+// Shifts a "yyyy-mm-dd" string by N days using the local
+// calendar (used to expand approved-leave date ranges).
+function addIsoDays(isoDate: string, days: number): string {
+  const [year, month, day] = isoDate
+    .slice(0, 10)
+    .split("-")
+    .map(Number);
+  const shifted = new Date(year, month - 1, day + days);
+  const y = shifted.getFullYear();
+  const m = String(shifted.getMonth() + 1).padStart(2, "0");
+  const d = String(shifted.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+// Handles both "HH:mm" / "HH:mm:ss" strings and UTC-anchored Date/ISO values.
+function formatChangeTime(time: string | null | undefined): string {
   if (!time) return "";
-  const d = new Date(time);
-  if (isNaN(d.getTime())) return "";
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  if (/^\d{1,2}:\d{2}/.test(time)) {
+    const [h, m] = time.split(":");
+    const hours = Number(h);
+    const minutes = String(Number(m)).padStart(2, "0");
+    const period = hours >= 12 ? "PM" : "AM";
+    const h12 = hours % 12 || 12;
+    return `${String(h12).padStart(2, "0")}:${minutes} ${period}`;
+  }
+  return formatScheduleTime(time);
 }
 
-// Is this a repeating weekly template row (no effective window)?
-function isWeeklySchedule(s: DoctorScheduleRecord): boolean {
-  return !s.effective_from && !s.effective_to;
+// Input-value variant (HH:mm) of formatChangeTime for the edit modal.
+function changeTimeInputValue(time: string | null | undefined): string {
+  if (!time) return "";
+  if (/^\d{1,2}:\d{2}/.test(time)) {
+    const [h, m] = time.split(":");
+    return `${String(Number(h)).padStart(2, "0")}:${String(Number(m)).padStart(2, "0")}`;
+  }
+  return toTimeInputValue(time);
 }
 
 const WEEK_DAYS = [
@@ -134,19 +212,14 @@ const MONTH_NAMES = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-const dmyToIso = (dateStr: string) => {
-  const [dd, mm, yy] = dateStr.split("/").map(Number);
-  return `${2000 + yy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
-};
-
 const getMonthYearLabel = (year, month) => `${MONTH_NAMES[month]} ${year}`;
 
 export default function DoctorProfile() {
   const navigate = useNavigate();
   const { id } = useParams();
   const location = useLocation();
-  // Entering via /doctor/day-view/:id opens on the Day tab, /doctor/view/:id/
-  // schedule opens on Week -- both routes render this same merged page, so the
+  // Entering via /doctor/day-view/:id opens on the Day tab, /doctor/view/:id
+  // opens on Week -- both routes render this same merged page now, so the
   // entry URL just decides the initial tab instead of navigating to a
   // separate page.
   const [activeTab, setActiveTab] = useState(() =>
@@ -154,44 +227,128 @@ export default function DoctorProfile() {
   );
   const [toggledDates, setToggledDates] = useState<Set<string>>(new Set());
   const slotModalRef = useRef<ScheduleSlotModalHandle>(null);
-  // The date shown on the Day tab -- weekly template rows are merged with
-  // any date-specific rows whose effective window covers this date.
-  const [dayViewDate, setDayViewDate] = useState(() => new Date());
-  const [isDayCalendarOpen, setIsDayCalendarOpen] = useState(false);
   const [fromDate, setFromDate] = useState(null);
   const [toDate, setToDate] = useState(null);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [leaveSuccessOpen, setLeaveSuccessOpen] = useState(false);
+  const [submittingLeave, setSubmittingLeave] = useState(false);
+  const [leaveSuccessInfo, setLeaveSuccessInfo] = useState<{
+    from: string;
+    to: string;
+    leaveId?: string;
+    queuedCount?: number;
+    queueFailed?: boolean;
+  } | null>(null);
+  const [leaveConflicts, setLeaveConflicts] = useState<
+    LeaveConflict[]
+  >([]);
+  const [leaveConflictsOpen, setLeaveConflictsOpen] =
+    useState(false);
+  const [processingLeave, setProcessingLeave] = useState(false);
+  const leaveFormRef = useRef<HTMLFormElement | null>(null);
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
   const [isToCalendarOpen, setIsToCalendarOpen] = useState(false);
-  const [clearScheduleConfirm, setClearScheduleConfirm] = useState(false);
+  const [savingSlot, setSavingSlot] = useState(false);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [pendingTransfer, setPendingTransfer] = useState<{
+    transferId: string;
+    appointments: TransferAppointmentSummary[];
+    message: string;
+  } | null>(null);
+  const [transferAction, setTransferAction] = useState<TransferAction | null>(null);
+  const [replacementDoctorId, setReplacementDoctorId] = useState("");
+  const [isConfirmingTransfer, setIsConfirmingTransfer] = useState(false);
   const [weekDates, setWeekDates] = useState(() => getWeekDates(new Date()));
   const [calendarViewYear, setCalendarViewYear] = useState(() => new Date().getFullYear());
   const [calendarViewMonth, setCalendarViewMonth] = useState(() => new Date().getMonth());
-  const gridWeekDates = weekDates;
 
   const [doctorDetail, setDoctorDetail] = useState<EmployeeDetailResponse | null>(null);
-  const [isLoadingDoctor, setIsLoadingDoctor] = useState(true);
-  const [doctorError, setDoctorError] = useState<string | null>(null);
+
+  // Date-specific (non-recurring) schedule changes for the doctor: ADD /
+  // OVERRIDE / CANCEL records loaded for the Week tab.
+  const [weekChanges, setWeekChanges] = useState<ScheduleChangeRecord[]>([]);
+  const [weekChangesLoading, setWeekChangesLoading] = useState(false);
+
+  // APPROVED leaves for this doctor — week view marks covered
+  // days with a "Doctor Leave" banner.
+  const [approvedLeaves, setApprovedLeaves] = useState<
+    DoctorLeaveRecord[]
+  >([]);
+
+  const loadApprovedLeaves = useCallback(async () => {
+    if (!id) {
+      setApprovedLeaves([]);
+      return;
+    }
+
+    try {
+      const response = await doctorLeaveApi.getApprovedLeavesForDoctor(id);
+      setApprovedLeaves(response.data?.leaves ?? []);
+    } catch (err) {
+      console.error("[Doctor Profile] Failed to load approved leaves:", err);
+      setApprovedLeaves([]);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void loadApprovedLeaves();
+  }, [loadApprovedLeaves]);
+
+  /* =======================================================
+     APPROVED LEAVES BY DATE
+     ======================================================= */
+
+  // Expands each APPROVED leave into every calendar day it
+  // covers (yyyy-mm-dd keys, matching weekDateToISO output)
+  // so the week grid can flag covered columns directly.
+  const leaveByIso = useMemo(() => {
+    const map = new Map<string, DoctorLeaveRecord>();
+
+    for (const leave of approvedLeaves) {
+      const startIso = String(
+        leave.leave_start_date
+      ).slice(0, 10);
+      const endIso = String(
+        leave.leave_end_date
+      ).slice(0, 10);
+
+      if (!startIso || !endIso) {
+        continue;
+      }
+
+      let cursor = startIso;
+      let guard = 0;
+
+      while (
+        cursor <= endIso &&
+        guard < 732
+      ) {
+        map.set(cursor, leave);
+        cursor = addIsoDays(cursor, 1);
+        guard += 1;
+      }
+    }
+
+    return map;
+  }, [approvedLeaves]);
+
+  useEffect(() => {
+    departmentApi
+      .getAll()
+      .then((res) => setDepartments(res.data?.data ?? []))
+      .catch((err) => console.error("[Doctor Profile] Failed to load departments:", err));
+  }, []);
 
   useEffect(() => {
     if (!id) return;
-    setIsLoadingDoctor(true);
-    setDoctorError(null);
     employeeApi
       .getOne(id)
       .then((res) => {
-        const data = res.data?.data ?? null;
-        console.log("[Doctor Profile] API response:", data);
-        console.log("[Doctor Profile] doctorSchedules:", data?.doctorSchedules);
-        console.log("[Doctor Profile] role_type:", data?.user?.role_type);
-        setDoctorDetail(data);
+        setDoctorDetail(res.data?.data ?? null);
       })
       .catch((err) => {
         console.error("[Doctor Profile] Error:", err);
-        setDoctorError(err?.response?.data?.message || err?.message || "Failed to load doctor");
         setDoctorDetail(null);
-      })
-      .finally(() => {
-        setIsLoadingDoctor(false);
       });
   }, [id]);
 
@@ -204,15 +361,12 @@ export default function DoctorProfile() {
   const doctorName = formatDoctorFullName(doctorEmployee);
   const doctorSpecialization = doctorDetail?.doctorProfile?.specialization || doctorEmployee?.specialization || "—";
   const doctorQualification = doctorDetail?.doctorProfile?.qualification || doctorEmployee?.qualification || "—";
-  // getEmployeeById returns every mapping this doctor ever had (status
-  // included) — only status 1 is a real, current assignment. Closed/historical
-  // mappings (status 0) must not show up here.
-  const activeBranches = (doctorDetail?.branches ?? []).filter((b) => b.status === 1);
-  const doctorBranchNames = activeBranches.length
-    ? activeBranches.map((b) => b.branch_name)
+  const doctorBranchNames = (doctorDetail?.branches?.length
+    ? doctorDetail.branches.map((b) => b.branch_name)
     : doctorEmployee?.branch?.branch_name
       ? [doctorEmployee.branch.branch_name]
-      : [];
+      : []
+  );
   const doctorIsAvailable = doctorEmployee?.emp_status === true || doctorDetail?.user?.user_status === 0;
   // Only a real photo URL from the backend is used -- no stock/fallback
   // image, so the avatar block simply doesn't render when the doctor has
@@ -230,12 +384,7 @@ export default function DoctorProfile() {
   const doctorGender = (doctorEmployee as any)?.gender || "—";
 
   useEffect(() => {
-    // Prefer an active assigned branch that actually has a schedule for
-    // the slots call — branches[0] is just the newest mapping, which may
-    // be a branch with no hours on it. Falls back to the newest mapping.
-    const mappedBranches = doctorDetail?.branches ?? [];
-    const scheduledBranch = mappedBranches.find((b) => b.status === 1 && b.has_schedule === true);
-    const branchId = scheduledBranch?.branch_id ?? mappedBranches[0]?.branch_id;
+    const branchId = doctorDetail?.branches?.[0]?.branch_id;
     if (!id || !branchId) return;
 
     setIsSlotsLoading(true);
@@ -263,71 +412,28 @@ export default function DoctorProfile() {
   // navigating weeks.
   const doctorSchedules: DoctorScheduleRecord[] = doctorDetail?.doctorSchedules ?? [];
 
-  // Week grid shows the repeating weekly template only -- date-specific rows
-  // (effective_from/effective_to set) are handled by the Day tab so they
-  // don't repeat on every single week.
-  const weeklySchedules = doctorSchedules.filter(isWeeklySchedule);
-
   const scheduleByDay = useMemo(() => {
-    const map: Record<string, { time: string; branch: string; scheduleId: string | number }[]> = {};
+    const map: Record<
+      string,
+      { time: string; branch: string; branchId: string; startTime: string; endTime: string; scheduleId: string | number }[]
+    > = {};
     WEEK_DAYS.forEach(([day]) => {
       map[day.toUpperCase()] = [];
     });
-    weeklySchedules.forEach((s) => {
+    doctorSchedules.forEach((s) => {
       const key = (s.day_of_week || "").toUpperCase();
       if (!(key in map)) return;
       map[key].push({
         time: `${formatScheduleTime(s.start_time)} - ${formatScheduleTime(s.end_time)}`,
         branch: s.branch?.branch_name || "",
+        branchId: s.branch_id,
+        startTime: toTimeInputValue(s.start_time),
+        endTime: toTimeInputValue(s.end_time),
         scheduleId: s.schedule_id,
       });
     });
     return map;
-  }, [weeklySchedules]);
-
-  // Day tab: every slot that applies on dayViewDate -- weekly template rows
-  // for that day-of-week, merged with any date-specific rows whose effective
-  // window covers the date.
-  const dayScheduleRows = useMemo(() => {
-    const dayOfWeek = format(dayViewDate, "EEEE").toUpperCase();
-    const dayKey = format(dayViewDate, "yyyy-MM-dd");
-    return doctorSchedules
-      .filter((s) => {
-        if ((s.day_of_week || "").trim().toUpperCase() !== dayOfWeek) return false;
-        if (isWeeklySchedule(s)) return true;
-        const from = scheduleDateToInput(s.effective_from);
-        const to = scheduleDateToInput(s.effective_to);
-        if (from && dayKey < from) return false;
-        if (to && dayKey > to) return false;
-        return true;
-      })
-      .sort((a, b) =>
-        scheduleTimeToInput(a.start_time).localeCompare(scheduleTimeToInput(b.start_time)),
-      );
-  }, [doctorSchedules, dayViewDate]);
-
-  const dayNameOf = (dayOfWeekKey: string | null | undefined): string => {
-    const key = (dayOfWeekKey || "").trim().toUpperCase();
-    const found = WEEK_DAYS.find(([day]) => day.toUpperCase() === key);
-    return found ? found[0] : "";
-  };
-
-  const openEditSlot = (s: DoctorScheduleRecord) => {
-    const dateSpecific = !isWeeklySchedule(s);
-    slotModalRef.current?.openEditSlot({
-      scheduleId: s.schedule_id,
-      day: dayNameOf(s.day_of_week),
-      date: dateSpecific
-        ? scheduleDateToInput(s.effective_from) || format(dayViewDate, "yyyy-MM-dd")
-        : format(dayViewDate, "yyyy-MM-dd"),
-      branchId: s.branch_id,
-      branchName: s.branch?.branch_name || "",
-      startTime: scheduleTimeToInput(s.start_time),
-      endTime: scheduleTimeToInput(s.end_time),
-      timeLabel: `${formatScheduleTime(s.start_time)} - ${formatScheduleTime(s.end_time)}`,
-      mode: dateSpecific ? "date" : "weekly",
-    });
-  };
+  }, [doctorSchedules]);
 
   const maxScheduleRows = Math.max(
     1,
@@ -338,36 +444,173 @@ export default function DoctorProfile() {
     WEEK_DAYS.map(([day]) => {
       const entry = scheduleByDay[day.toUpperCase()]?.[rowIndex];
       return entry
-        ? ([entry.time, "blue", entry.branch, entry.scheduleId] as [string, string, string, string | number])
+        ? ([
+            entry.time,
+            "blue",
+            entry.branch,
+            entry.scheduleId,
+            entry.branchId,
+            entry.startTime,
+            entry.endTime,
+          ] as [string, string, string, string | number, string, string, string])
         : (["+", "empty"] as [string, string]);
     }),
   );
 
-  // Build gridSchedule with full objects for JSX compatibility
-  const gridSchedule = Array.from({ length: maxScheduleRows }, (_, rowIndex) =>
-    WEEK_DAYS.map(([day], colIndex) => {
-      const entry = scheduleByDay[day.toUpperCase()]?.[rowIndex];
-      if (!entry) return null;
-      // Find original record by time and scheduleId
-      const original = doctorSchedules.find(
-        (s) =>
-          s.schedule_id === entry.scheduleId &&
-          (s.day_of_week || "").toUpperCase() === day.toUpperCase()
+  // Role-based permission: only the doctor themselves or an admin may modify
+  // the doctor's date-specific schedule changes. Everyone else views
+  // read-only (controls are hidden; the backend enforces this too).
+  const viewer = getUser();
+  const viewerEmployeeId = viewer?.employee_id ?? viewer?.id ?? null;
+  const viewerRole = String(viewer?.role_type ?? viewer?.role ?? "").toUpperCase();
+  const viewerIsAdmin = ["HEAD_ADMIN", "SUPER_ADMIN", "ADMIN", "BRANCH_ADMIN"].includes(viewerRole);
+  const viewerIsSelf = !!id && String(viewerEmployeeId) === String(id);
+  const canManageSchedule = viewerIsSelf || viewerIsAdmin;
+
+  const refetchWeekChanges = useCallback(async () => {
+    if (!id || activeTab !== "week") return;
+    setWeekChangesLoading(true);
+    try {
+      const res = await doctorScheduleApi.getChanges(id);
+      setWeekChanges(res.data?.data ?? []);
+    } catch (err) {
+      console.error("[Doctor Profile] Failed to load schedule changes:", err);
+      setWeekChanges([]);
+    } finally {
+      setWeekChangesLoading(false);
+    }
+  }, [id, activeTab]);
+
+  useEffect(() => {
+    refetchWeekChanges();
+  }, [refetchWeekChanges]);
+
+  const branchNameById = (branchId: string): string =>
+    doctorDetail?.branches?.find((b) => b.branch_id === branchId)?.branch_name ?? "";
+
+  // Effective per-day grid for the Week tab: the recurring weekly template
+  // merged with the doctor's date-specific changes. Uses the same rules the
+  // backend applies in getEffectiveSchedules - CANCEL wins for the whole
+  // day, OVERRIDE replaces the template, ADD appends extra blocks.
+  type WeekBlock = {
+    key: string;
+    type: "template" | "ADD" | "OVERRIDE" | "CANCEL";
+    time: string;
+    branch: string;
+    branchId: string;
+    scheduleId: string | number | null;
+    changeId?: string | number | null;
+    startTime: string;
+    endTime: string;
+  };
+
+  const weekSchedule = useMemo(() => {
+    if (activeTab !== "week") return [];
+
+    const perDay: WeekBlock[][] = WEEK_DAYS.map((_, dayIdx) => {
+      const iso = weekDateToISO(weekDates[dayIdx]);
+      const dayChanges = weekChanges.filter((c) => normalizeChangeDate(c.change_date) === iso);
+
+      const cancelChange = dayChanges.find((c) => c.mode === "CANCEL");
+      if (cancelChange) {
+        return [
+          {
+            key: `cancel-${iso}`,
+            type: "CANCEL",
+            time: "Day cancelled",
+            branch: "",
+            branchId: cancelChange.branch_id,
+            scheduleId: null,
+            changeId: cancelChange.change_id,
+            startTime: "",
+            endTime: "",
+          },
+        ];
+      }
+
+      const overrideChanges = dayChanges.filter(
+        (c) => c.mode === "OVERRIDE" && c.start_time && c.end_time,
       );
-      if (original) return original;
-      // Synthetic fallback to keep JSX happy if lookup misses
-      return {
-        schedule_id: entry.scheduleId,
-        start_time: "",
-        end_time: "",
-        day_of_week: day,
-        branch_id: null,
-        branch: { branch_name: entry.branch || "" },
-        effective_from: null,
-        effective_to: null,
-      } as DoctorScheduleRecord;
-    })
-  );
+      const addChanges = dayChanges.filter((c) => c.mode === "ADD" && c.start_time && c.end_time);
+
+      const templateBlocks: WeekBlock[] = (
+        scheduleByDay[WEEK_DAYS[dayIdx][0].toUpperCase()] ?? []
+      ).map((e) => ({
+        key: `tmpl-${e.scheduleId}`,
+        type: "template",
+        time: e.time,
+        branch: e.branch,
+        branchId: e.branchId,
+        scheduleId: e.scheduleId,
+        startTime: e.startTime,
+        endTime: e.endTime,
+      }));
+
+      let blocks: WeekBlock[] =
+        overrideChanges.length > 0
+          ? overrideChanges.map((c) => ({
+              key: `ovr-${c.change_id}`,
+              type: "OVERRIDE" as const,
+              time: `${formatChangeTime(c.start_time)} - ${formatChangeTime(c.end_time)}`,
+              branch: branchNameById(c.branch_id),
+              branchId: c.branch_id,
+              scheduleId: templateBlocks[0]?.scheduleId ?? null,
+              changeId: c.change_id,
+              startTime: changeTimeInputValue(c.start_time),
+              endTime: changeTimeInputValue(c.end_time),
+            }))
+          : templateBlocks;
+
+      for (const c of addChanges) {
+        blocks = [
+          ...blocks,
+          {
+            key: `add-${c.change_id}`,
+            type: "ADD" as const,
+            time: `${formatChangeTime(c.start_time)} - ${formatChangeTime(c.end_time)}`,
+            branch: branchNameById(c.branch_id),
+            branchId: c.branch_id,
+            scheduleId: blocks[0]?.scheduleId ?? null,
+            changeId: c.change_id,
+            startTime: changeTimeInputValue(c.start_time),
+            endTime: changeTimeInputValue(c.end_time),
+          },
+        ];
+      }
+
+      return blocks;
+    });
+
+    const rows = Math.max(1, ...perDay.map((d) => d.length));
+
+    return Array.from({ length: rows }, (_, r) =>
+      WEEK_DAYS.map((_, dayIdx) => {
+        const entry = perDay[dayIdx][r];
+        if (!entry) return ["+", "empty"] as [string, string];
+        return [
+          entry.time,
+          entry.type,
+          entry.branch,
+          entry.scheduleId,
+          entry.branchId,
+          entry.startTime,
+          entry.endTime,
+          entry.changeId ?? null,
+          entry.type,
+        ] as [
+          string,
+          string,
+          string,
+          string | number | null,
+          string,
+          string,
+          string,
+          string | number | null,
+          string,
+        ];
+      }),
+    );
+  }, [activeTab, weekDates, weekChanges, scheduleByDay, doctorDetail]);
 
   const refetchDoctor = () => {
     if (!id) return;
@@ -377,101 +620,203 @@ export default function DoctorProfile() {
       .catch((err) => console.error("[Doctor Profile] Failed to refresh schedule:", err));
   };
 
-  const handleAddSlot = async ({
+  const replacementDoctors = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const a of pendingTransfer?.appointments ?? []) {
+      for (const d of a.eligible_replacement_doctors ?? []) {
+        if (!map.has(d.employee_id)) map.set(d.employee_id, d.name);
+      }
+    }
+    return Array.from(map, ([employee_id, name]) => ({ employee_id, name }));
+  }, [pendingTransfer]);
+
+  // Creates or updates a date-specific (non-recurring) schedule change
+  // (ADD / OVERRIDE / CANCEL) via the doctor_schedule_change table. Used by
+  // the Week tab; the Day tab keeps its existing transfer-based flow.
+  const handleDateChange = async ({
     day,
     date,
     branchId,
-    branchName,
     startTime,
     endTime,
-    timeLabel,
-    mode,
-  }: ScheduleSlotAddPayload) => {
-    if (!id || !day || !branchId) {
-      showAlert("Please select a day and branch for the new slot.");
-      return;
+    changeMode,
+    changeId,
+    transferReason,
+  }: {
+    day: string;
+    date: string;
+    branchId: string;
+    startTime: string;
+    endTime: string;
+    changeMode?: ScheduleChangeMode;
+    changeId?: string | number | null;
+    transferReason?: string;
+  }): Promise<boolean> => {
+    if (!id || !branchId) {
+      showAlert("Please select a branch location.");
+      return false;
     }
-    // Prevent same exact time schedule for same day
-    const existing = doctorSchedules.find((s) => {
-      const sameDay = (s.day_of_week || "").trim().toUpperCase() === day.toUpperCase();
-      const sameTime = scheduleTimeToInput(s.start_time) === startTime && scheduleTimeToInput(s.end_time) === endTime;
-      const sameBranch = s.branch_id === branchId;
-      return sameDay && sameTime && sameBranch && (mode === "date" ? s.effective_from === date || s.effective_to === date : isWeeklySchedule(s));
-    });
-    if (existing) {
-      showAlert("A schedule with the same time already exists for this day/branch. Please choose a different time.");
-      return;
+    if (!date) {
+      showAlert("Date is required.");
+      return false;
     }
+    if (!changeMode) {
+      showAlert("Please choose a change type (Add / Override / Cancel).");
+      return false;
+    }
+    if (changeMode !== "CANCEL" && (!startTime || !endTime)) {
+      showAlert("Please select start time and end time.");
+      return false;
+    }
+
+    setSavingSlot(true);
     try {
-      // "date" mode creates a day-specific row (effective_from = effective_to
-      // = the chosen date); "weekly" mode creates a repeating template row.
-      const effective =
-        mode === "date" && date
-          ? { effective_from: date, effective_to: date }
-          : { effective_from: null, effective_to: null };
-      await employeeApi.addScheduleSlot(id, {
+      if (changeId != null) {
+        const res = await doctorScheduleApi.updateChange(String(changeId), {
+          mode: changeMode,
+          start_time: changeMode === "CANCEL" ? undefined : startTime,
+          end_time: changeMode === "CANCEL" ? undefined : endTime,
+        });
+        await refetchWeekChanges();
+        showAlert(res.data?.message || "Schedule change updated.");
+        return true;
+      }
+
+      const res = await doctorScheduleApi.createChange({
+        employee_id: id,
         branch_id: branchId,
-        day_of_week: day.toUpperCase() as any,
-        start_time: startTime,
-        end_time: endTime,
-        ...effective,
+        change_date: date,
+        mode: changeMode,
+        start_time: changeMode === "CANCEL" ? undefined : startTime,
+        end_time: changeMode === "CANCEL" ? undefined : endTime,
+        reason: transferReason?.trim() || undefined,
       });
-      refetchDoctor();
-      showAlert(
-        mode === "date"
-          ? `Slot added for ${day} ${date}: ${timeLabel} (${branchName})`
-          : `Slot added for ${day}: ${timeLabel} (${branchName})`,
-      );
+      await refetchWeekChanges();
+      showAlert(res.data?.message || `Schedule change saved for ${day}.`);
+      return true;
     } catch (err: any) {
-      showAlert(err?.response?.data?.message || "Failed to add slot.");
+      showAlert(err?.response?.data?.message || err?.message || "Failed to save schedule change.");
+      return false;
+    } finally {
+      setSavingSlot(false);
     }
   };
 
-  const handleUpdateSlot = async ({
-    scheduleId,
-    day,
-    date,
-    branchId,
-    branchName,
-    startTime,
-    endTime,
-    timeLabel,
-    mode,
-  }: ScheduleSlotEditPayload) => {
-    if (!id || scheduleId === null || scheduleId === undefined) {
-      showAlert("Unable to update this slot.");
-      return;
-    }
-    try {
-      const effective =
-        mode === "date" && date
-          ? { effective_from: date, effective_to: date }
-          : { effective_from: null, effective_to: null };
-      await employeeApi.updateScheduleSlot(id, scheduleId, {
-        branch_id: branchId,
-        day_of_week: day.toUpperCase() as any,
-        start_time: startTime,
-        end_time: endTime,
-        ...effective,
+  const handleAddSlot = async (payload: ScheduleSlotAddPayload) => {
+    if (payload.mode === "date" && payload.changeMode) {
+      return handleDateChange({
+        day: payload.day,
+        date: payload.date || payload.effectiveDate || "",
+        branchId: payload.branchId,
+        startTime: payload.startTime,
+        endTime: payload.endTime,
+        changeMode: payload.changeMode,
+        transferReason: payload.transferReason,
       });
+    }
+
+    const {
+      day,
+      branchId,
+      branchName,
+      startTime,
+      endTime,
+      timeLabel,
+      effectiveDate,
+      consultationMinutes,
+      transferReason,
+      departmentId,
+    } = payload;
+    if (!id || !day || !branchId || !startTime || !endTime) {
+      showAlert("Please select day, start time, end time and branch location.");
+      return false;
+    }
+    if (!effectiveDate) {
+      showAlert("Effective date is required.");
+      return false;
+    }
+    if (!transferReason?.trim()) {
+      showAlert("Transfer reason is required.");
+      return false;
+    }
+    if (!departmentId) {
+      showAlert("Please select a department.");
+      return false;
+    }
+
+    const consultationMinutesValue =
+      Number(consultationMinutes) || (doctorDetail?.doctorProfile?.consultation_minutes ?? 20);
+
+    setSavingSlot(true);
+    try {
+      const res = await doctorTransferApi.initiateTransfer(id, {
+        mode: "ADD_BRANCH",
+        new_branch_id: branchId,
+        new_department_id: departmentId,
+        effective_date: effectiveDate,
+        transfer_reason: transferReason.trim(),
+        consultation_minutes: consultationMinutesValue,
+        working_hours: [
+          {
+            branch_id: branchId,
+            day_of_week: day.toUpperCase() as any,
+            shift_name: deriveShiftName(startTime),
+            start_time: startTime,
+            end_time: endTime,
+          },
+        ],
+      });
+
+      const data = res.data?.data;
+      if (!data) {
+        showAlert(res.data?.message || "Failed to add slot.");
+        return false;
+      }
+
+      if (data.status === "PENDING_CONFIRMATION") {
+        setPendingTransfer({
+          transferId: data.transfer_id,
+          appointments: data.appointments ?? [],
+          message: data.message ?? "",
+        });
+        setTransferAction(null);
+        setReplacementDoctorId("");
+        return true;
+      }
+
       refetchDoctor();
-      showAlert(
-        mode === "date"
-          ? `Slot updated for ${day} ${date}: ${timeLabel} (${branchName})`
-          : `Slot updated for ${day}: ${timeLabel} (${branchName})`,
-      );
+      showAlert(data.message || `Slot added for ${day}: ${timeLabel} (${branchName})`);
+      return true;
     } catch (err: any) {
-      showAlert(err?.response?.data?.message || "Failed to update slot.");
+      showAlert(err?.response?.data?.message || err?.message || "Failed to add slot.");
+      return false;
+    } finally {
+      setSavingSlot(false);
     }
   };
 
   const handleCancelSlot = async ({
     scheduleId,
+    changeId,
+    changeMode,
     info,
-  }: {
-    scheduleId: string | number | null;
-    info: string;
-  }) => {
+  }: ScheduleSlotCancelPayload) => {
+    if (changeId != null && String(changeId).length > 0) {
+      setSavingSlot(true);
+      try {
+        const res = await doctorScheduleApi.cancelChange(String(changeId));
+        await refetchWeekChanges();
+        showAlert(res.data?.message || "Schedule change removed.");
+      } catch (err: any) {
+        showAlert(err?.response?.data?.message || "Failed to remove schedule change.");
+      } finally {
+        setSavingSlot(false);
+      }
+      return;
+    }
+
+    void changeMode;
+
     if (!id || scheduleId === null) {
       showAlert("Unable to cancel this slot.");
       return;
@@ -485,19 +830,202 @@ export default function DoctorProfile() {
     }
   };
 
+  const handleUpdateSlot = async (payload: ScheduleSlotEditPayload) => {
+    if (payload.mode === "date") {
+      return handleDateChange({
+        day: payload.day,
+        date: payload.date || payload.effectiveDate || "",
+        branchId: payload.branchId,
+        startTime: payload.startTime,
+        endTime: payload.endTime,
+        changeMode: payload.changeMode ?? "OVERRIDE",
+        changeId: payload.changeId ?? null,
+        transferReason: payload.transferReason,
+      });
+    }
+
+    const {
+      scheduleId,
+      day,
+      branchId,
+      startTime,
+      endTime,
+      effectiveDate,
+      consultationMinutes,
+      transferReason,
+      departmentId,
+    } = payload;
+
+    if (!id || scheduleId === null) {
+      showAlert("Unable to update this slot.");
+      return false;
+    }
+    if (!day || !branchId || !startTime || !endTime) {
+      showAlert("Please select day, start time, end time and branch location.");
+      return false;
+    }
+
+    const original = doctorSchedules.find((s) => String(s.schedule_id) === String(scheduleId));
+    if (!original) {
+      showAlert("The original slot was not found.");
+      return false;
+    }
+
+    const consultationMinutesValue =
+      Number(consultationMinutes) || (doctorDetail?.doctorProfile?.consultation_minutes ?? 20);
+
+    const originalBranch = original.branch_id;
+    const originalDay = (original.day_of_week ?? "").toUpperCase();
+    const originalStart = toTimeInputValue(original.start_time);
+    const originalEnd = toTimeInputValue(original.end_time);
+    const newDay = day.toUpperCase();
+
+    const branchChanged = originalBranch !== branchId;
+    const dayChanged = originalDay !== newDay;
+    const timeChanged = originalStart !== startTime || originalEnd !== endTime;
+    const minutesChanged = Number(original.consultation_minutes) !== consultationMinutesValue;
+    const changed = branchChanged || dayChanged || timeChanged || minutesChanged;
+
+    if (!changed) {
+      showAlert("No changes were made to this slot.");
+      return false;
+    }
+
+    // Same branch + same day + overlapping times (only when times actually
+    // changed — a consultation-minutes-only edit shares identical times):
+    // do not create the new slot.
+    if (!branchChanged && !dayChanged && timeChanged) {
+      const oldS = toMinutes(originalStart);
+      const oldE = toMinutes(originalEnd);
+      const newS = toMinutes(startTime);
+      const newE = toMinutes(endTime);
+      if (oldS < newE && newS < oldE) {
+        showAlert(
+          "Cannot change the slot to an overlapping time on the same day and branch. Choose a time that does not overlap the current slot.",
+        );
+        return false;
+      }
+    }
+
+    if (!effectiveDate) {
+      showAlert("Effective date is required.");
+      return false;
+    }
+    if (!transferReason?.trim()) {
+      showAlert("Transfer reason is required.");
+      return false;
+    }
+    if (!departmentId) {
+      showAlert("Please select a department.");
+      return false;
+    }
+
+    setSavingSlot(true);
+    try {
+      const res = await doctorTransferApi.initiateTransfer(id, {
+        // A single-slot branch move must NEVER use TRANSFER mode — that
+        // closes the whole old branch and every other slot there. Instead
+        // the new slot is added (ADD_BRANCH) and only the edited row is
+        // closed via close_schedule_ids. Everything else stays untouched.
+        mode: "ADD_BRANCH",
+        close_schedule_ids: [Number(scheduleId)],
+        new_branch_id: branchId,
+        new_department_id: departmentId,
+        effective_date: effectiveDate,
+        transfer_reason: transferReason.trim(),
+        consultation_minutes: consultationMinutesValue,
+        working_hours: [
+          {
+            branch_id: branchId,
+            day_of_week: newDay as any,
+            shift_name: deriveShiftName(startTime),
+            start_time: startTime,
+            end_time: endTime,
+          },
+        ],
+      });
+
+      const data = res.data?.data;
+      if (!data) {
+        showAlert(res.data?.message || "Failed to update slot.");
+        return false;
+      }
+
+      if (data.status === "PENDING_CONFIRMATION") {
+        setPendingTransfer({
+          transferId: data.transfer_id,
+          appointments: data.appointments ?? [],
+          message: data.message ?? "",
+        });
+        setTransferAction(null);
+        setReplacementDoctorId("");
+        return true;
+      }
+
+      refetchDoctor();
+      showAlert(data.message || "Slot updated.");
+      return true;
+    } catch (err: any) {
+      showAlert(err?.response?.data?.message || err?.message || "Failed to update slot.");
+      return false;
+    } finally {
+      setSavingSlot(false);
+    }
+  };
+
+  const confirmPendingTransfer = async (action: TransferAction) => {
+    if (!pendingTransfer || !id) return;
+    if (action === "TRANSFER" && !replacementDoctorId) {
+      showAlert("Choose a replacement doctor.");
+      return;
+    }
+
+    setIsConfirmingTransfer(true);
+    try {
+      const res = await doctorTransferApi.confirmTransfer(id, {
+        transfer_id: pendingTransfer.transferId,
+        action,
+        ...(action === "TRANSFER" ? { replacement_employee_id: replacementDoctorId } : {}),
+        ...(action === "CANCEL" ? { confirm: true } : {}),
+      });
+
+      const data = res.data?.data;
+      if (data) {
+        const s = data.summary;
+        showAlert(
+          `Transfer processed — total: ${s.total}, transferred: ${s.successful}, queued: ${s.queued}, cancelled: ${s.cancelled}, conflicts: ${s.conflicts}.`,
+        );
+      } else {
+        showAlert(res.data?.message || "Transfer action processed.");
+      }
+
+      setPendingTransfer(null);
+      setTransferAction(null);
+      setReplacementDoctorId("");
+      refetchDoctor();
+    } catch (err: any) {
+      showAlert(err?.response?.data?.message || err?.message || "Failed to process transfer action.");
+    } finally {
+      setIsConfirmingTransfer(false);
+    }
+  };
+
   const showAlert = (message) => {
     alert(message);
   };
 
-const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
+const submitLeave = (e: React.FormEvent<HTMLFormElement>) => {
   e.preventDefault();
+
+  const formEl = e.currentTarget;
+  leaveFormRef.current = formEl;
 
   if (!id) {
     alert("Doctor ID is missing.");
     return;
   }
 
-  const form = new FormData(e.currentTarget);
+  const form = new FormData(formEl);
   const reason = String(form.get("reason") || "").trim();
 
   if (!fromDate || !toDate || !reason) {
@@ -510,13 +1038,76 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
     return;
   }
 
+  setLeaveConfirmOpen(true);
+};
+
+const doApplyLeave = async () => {
+  if (!id) {
+    setLeaveConfirmOpen(false);
+    alert("Doctor ID is missing.");
+    return;
+  }
+
+  if (!fromDate || !toDate) {
+    setLeaveConfirmOpen(false);
+    return;
+  }
+
   try {
+    setProcessingLeave(true);
+
+    // Check for booked appointments inside the leave range
+    // before actually applying.
+    const conflicts = await findLeaveConflictingAppointments(
+      id,
+      format(fromDate, "yyyy-MM-dd"),
+      format(toDate, "yyyy-MM-dd")
+    );
+
+    setLeaveConfirmOpen(false);
+
+    if (conflicts.length > 0) {
+      setLeaveConflicts(conflicts);
+      setLeaveConflictsOpen(true);
+      return;
+    }
+
+    await applyLeaveNow(false);
+  } catch (error: any) {
+    console.error("Leave conflict check failed:", error);
+
+    alert(
+      error?.response?.data?.message ||
+        error?.message ||
+        "Failed to check appointments for this leave period."
+    );
+  } finally {
+    setProcessingLeave(false);
+  }
+};
+
+const applyLeaveNow = async (queueConflicts: boolean) => {
+  if (!id) {
+    setLeaveConflictsOpen(false);
+    alert("Doctor ID is missing.");
+    return;
+  }
+
+  try {
+    setSubmittingLeave(true);
+
     const loggedInUser = getUser();
 
     if (!loggedInUser?.user_id) {
+      setLeaveConflictsOpen(false);
       alert("Logged-in user information is missing. Please log in again.");
       return;
     }
+
+    const formEl = leaveFormRef.current;
+    const reason = formEl
+      ? String(new FormData(formEl).get("reason") || "").trim()
+      : "";
 
     const response = await doctorLeaveApi.apply(id, {
       leave_start_date: format(fromDate, "yyyy-MM-dd"),
@@ -525,42 +1116,61 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
       requested_by: loggedInUser.user_id,
     });
 
-    console.log("Leave application response:", response.data);
-
     if (response.data?.success === false) {
       throw new Error(response.data.message || "Failed to apply leave.");
     }
 
-    const leaveId = response.data?.leave?.leave_id;
+    let queuedCount: number | undefined;
+    let queueFailed = false;
 
-    alert(
-      leaveId
-        ? `Leave applied successfully!\nLeave ID: ${leaveId}`
-        : "Leave applied successfully!"
-    );
+    if (queueConflicts && fromDate && toDate) {
+      try {
+        const queueResponse = await doctorLeaveApi.queueReschedule(id, {
+          date_from: format(fromDate, "yyyy-MM-dd"),
+          date_to: format(toDate, "yyyy-MM-dd"),
+          reason,
+        });
+        queuedCount = queueResponse.data?.data?.queued;
+      } catch (queueError: any) {
+        console.error("Reschedule queueing failed:", queueError);
+        queueFailed = true;
+      }
+    }
 
-    e.currentTarget.reset();
+    setLeaveSuccessInfo({
+      from: format(fromDate, "dd/MM/yyyy"),
+      to: format(toDate, "dd/MM/yyyy"),
+      leaveId: response.data?.leave?.leave_id,
+      queuedCount,
+      queueFailed,
+    });
+
+    setLeaveConflictsOpen(false);
+    setLeaveSuccessOpen(true);
+
+    // Admin-submitted leaves auto-approve, so refresh the
+    // week grid's leave markers right away.
+    void loadApprovedLeaves();
+
+    formEl?.reset();
     setFromDate(null);
     setToDate(null);
   } catch (error: any) {
     console.error("Leave application failed:", error);
     console.error("Backend response:", error?.response?.data);
 
+    setLeaveConfirmOpen(false);
+    setLeaveConflictsOpen(false);
+
     alert(
       error?.response?.data?.message ||
         error?.message ||
         "Failed to apply for leave."
     );
+  } finally {
+    setSubmittingLeave(false);
   }
 };
-  const clearSchedule = () => {
-    setClearScheduleConfirm(true);
-  };
-
-  const handleConfirmClearSchedule = () => {
-    alert("Schedule cleared");
-    setClearScheduleConfirm(false);
-  };
 
   const previousWeek = () => {
     setWeekDates((prev) => prev.map((date) => shiftDate(date, -7)));
@@ -670,18 +1280,6 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
         </section>
 
 
-        {doctorError && (
-          <section className="bg-white border border-[#ff453a] rounded-[10px] p-4 mb-4 text-[#ff453a] text-sm">
-            Error loading doctor: {doctorError}
-          </section>
-        )}
-
-        {isLoadingDoctor && (
-          <section className="bg-white border border-[#edf0f4] rounded-[10px] p-4 mb-4 text-[#555] text-sm">
-            Loading doctor profile...
-          </section>
-        )}
-
         {/* ABOUT */}
         <section className="bg-white border border-[#edf0f4] rounded-[10px] p-[21px] mb-4">
 
@@ -790,59 +1388,37 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                     <>
                       <button
                         onClick={previousWeek}
-                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer hover:text-[#004a91] transition-colors"
+                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
                       >
                         ‹ Previous week
                       </button>
 
                       <button
                         onClick={nextWeek}
-                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer hover:text-[#004a91] transition-colors"
+                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
                       >
                         Next week ›
                       </button>
                     </>
                   )}
 
-                  {activeTab === "day" && (
-                    <>
-                      <button
-                        onClick={() => setDayViewDate((d) => subDays(d, 1))}
-                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
-                      >
-                        ‹ Previous day
-                      </button>
-
-                      <button
-                        onClick={() => setDayViewDate((d) => addDays(d, 1))}
-                        className="border-0 bg-transparent text-[#555e6c] text-xs cursor-pointer"
-                      >
-                        Next day ›
-                      </button>
-
-                      <button
-                        onClick={() => setDayViewDate(new Date())}
-                        className="border-0 bg-transparent text-[#004a91] text-xs cursor-pointer"
-                      >
-                        Today
-                      </button>
-                    </>
+                  {canManageSchedule && (
+                    <button
+                      onClick={() =>
+                        slotModalRef.current?.openAddSlot(
+                          "",
+                          null,
+                          null,
+                          activeTab === "week" ? "date" : "weekly",
+                          undefined,
+                          activeTab === "week" ? "ADD" : undefined,
+                        )
+                      }
+                      className="bg-[#004a91] text-white px-[14px] py-2 rounded-md text-xs font-semibold border-0 cursor-pointer"
+                    >
+                      + Add slot
+                    </button>
                   )}
-
-                  <button
-                    onClick={() =>
-                      slotModalRef.current?.openAddSlot(
-                        activeTab === "day" ? format(dayViewDate, "EEEE") : "",
-                        null,
-                        null,
-                        activeTab === "day" ? "date" : "weekly",
-                        activeTab === "day" ? format(dayViewDate, "yyyy-MM-dd") : undefined,
-                      )
-                    }
-                    className="bg-[#004a91] text-white px-[14px] py-2 rounded-md text-xs font-semibold border-0 cursor-pointer"
-                  >
-                    + Add slot
-                  </button>
 
                 </div>
 
@@ -853,32 +1429,89 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
 
                 <div className="min-w-[610px]">
 
-                  {/* ── UNIFIED GRID for both Day & Week tabs ── */}
                   {/* HEADER */}
                   <div className="grid grid-cols-7 bg-[#f1f3f5] border-b border-[#b9bfcb]">
 
                     {WEEK_DAYS.map(([day], dayIdx) => (
                       <div
                         key={day}
-                        className={`min-h-[43px] p-[7px_3px] border-r border-[#b9bfcb] text-center text-[#003b80] text-[8px] font-bold ${activeTab === "day" ? "cursor-pointer" : ""}`}
-                        onClick={activeTab === "day" ? () => setIsDayCalendarOpen(true) : undefined}
+                        className={`min-h-[43px] p-[7px_3px] border-r border-[#b9bfcb] text-center text-[#003b80] text-[8px] font-bold ${
+                          activeTab === "day" ? "flex items-center justify-center" : ""
+                        }`}
                       >
-                        <div className="flex items-center justify-center gap-1">
-                          {day}
-                          {activeTab === "day" && (
-                            <span className="block mt-[3px] text-[7px]">
-                              {gridWeekDates[dayIdx]}
-                            </span>
-                          )}
-                          {activeTab === "week" && (
-                            <small className="block mt-[3px] text-[7px]">
-                              {weekDates[dayIdx]}
-                            </small>
-                          )}
-                        </div>
-                        {/* Highlight selected day on Day tab */}
-                            {activeTab === "day" && gridWeekDates[dayIdx] === format(dayViewDate, "dd/MM/yy") && (
-                            <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#004a91]" />
+                        {day}
+                        {activeTab === "week" && (
+                          <small className="block mt-[3px] text-[7px]">
+                            {weekDates[dayIdx]}
+                          </small>
+                        )}
+                        {activeTab === "week" && canManageSchedule && (
+                          <div className="flex items-center justify-center gap-[3px] mt-[3px]">
+                            <button
+                              type="button"
+                              title="Add a shift for this date"
+                              onClick={() =>
+                                slotModalRef.current?.openAddSlot(
+                                  WEEK_DAYS[dayIdx][0],
+                                  null,
+                                  null,
+                                  "date",
+                                  weekDateToISO(weekDates[dayIdx]),
+                                  "ADD",
+                                )
+                              }
+                              className="w-[15px] h-[15px] rounded border border-[#b9bfcb] bg-white text-[#004a91] text-[9px] leading-none cursor-pointer hover:border-[#004a91]"
+                            >
+                              +
+                            </button>
+                            <button
+                              type="button"
+                              title="Override this date's schedule"
+                              onClick={() =>
+                                slotModalRef.current?.openAddSlot(
+                                  WEEK_DAYS[dayIdx][0],
+                                  null,
+                                  null,
+                                  "date",
+                                  weekDateToISO(weekDates[dayIdx]),
+                                  "OVERRIDE",
+                                )
+                              }
+                              className="w-[15px] h-[15px] rounded border border-[#b9bfcb] bg-white text-[#b45309] text-[9px] leading-none cursor-pointer hover:border-[#b45309]"
+                            >
+                              ↺
+                            </button>
+                            <button
+                              type="button"
+                              title="Cancel this date"
+                              onClick={() =>
+                                slotModalRef.current?.openAddSlot(
+                                  WEEK_DAYS[dayIdx][0],
+                                  null,
+                                  null,
+                                  "date",
+                                  weekDateToISO(weekDates[dayIdx]),
+                                  "CANCEL",
+                                )
+                              }
+                              className="w-[15px] h-[15px] rounded border border-[#b9bfcb] bg-white text-[#ff453a] text-[9px] leading-none cursor-pointer hover:border-[#ff453a]"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        )}
+                        {activeTab === "week" &&
+                          leaveByIso.has(
+                            weekDateToISO(weekDates[dayIdx])
+                          ) && (
+                            <div className="mt-[3px] flex justify-center">
+                              <span
+                                title="Approved leave covers this date"
+                                className="rounded bg-[#FDE8E8] px-1 py-0.5 text-[7px] font-bold uppercase tracking-wide text-[#9B1C1C]"
+                              >
+                                Doctor Leave
+                              </span>
+                            </div>
                           )}
                       </div>
                     ))}
@@ -886,122 +1519,202 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                   </div>
 
                   {/* ROWS */}
-                  {gridSchedule.map((row, rowIndex) => (
+                  {(activeTab === "week" ? weekSchedule : schedule).map((row, rowIndex) => (
                     <div
                       key={rowIndex}
                       className="grid grid-cols-7 min-h-[64px] border-b border-[#b9bfcb] last:border-b-0"
                     >
-                      {row.map((cell, index) => (
+                      {row.map((cell, index) => {
+                        const [text, type, branch, scheduleId, branchId, startTime, endTime, changeId, changeMode] =
+                          cell as any[];
+                        const colorType =
+                          type === "template" ? "blue" : type === "ADD" ? "green" : type === "OVERRIDE" ? "orange" : type;
+                        const isColored = ["green", "blue", "orange"].includes(colorType);
+                        const isCancelled = type === "CANCEL";
+                        const weekIso = activeTab === "week" ? weekDateToISO(weekDates[index]) : "";
 
-                        <div
-                          key={index}
-                          className="p-1 border-r border-[#b9bfcb] min-w-0"
-                        >
+                        const openBlockEdit = () => {
+                          if (!canManageSchedule) return;
+                          if (activeTab === "week") {
+                            slotModalRef.current?.openEditSlot({
+                              scheduleId: scheduleId ?? 0,
+                              day: WEEK_DAYS[index][0],
+                              date: weekIso,
+                              branchId: branchId || "",
+                              branchName: branch,
+                              startTime: startTime || "",
+                              endTime: endTime || "",
+                              timeLabel: text,
+                              mode: "date",
+                              changeMode: (changeMode as ScheduleChangeMode) || "OVERRIDE",
+                              changeId: changeId ?? null,
+                              departmentId: doctorEmployee?.department_id || "",
+                              consultationMinutes:
+                                doctorSchedules.find((s) => String(s.schedule_id) === String(scheduleId))
+                                  ?.consultation_minutes,
+                            });
+                            return;
+                          }
+                          slotModalRef.current?.openEditSlot({
+                            scheduleId: scheduleId ?? 0,
+                            day: WEEK_DAYS[index][0],
+                            date: "",
+                            branchId: branchId || "",
+                            branchName: branch,
+                            startTime: startTime || "",
+                            endTime: endTime || "",
+                            timeLabel: text,
+                            mode: "weekly",
+                            departmentId: doctorEmployee?.department_id || "",
+                            consultationMinutes:
+                              doctorSchedules.find((s) => String(s.schedule_id) === String(scheduleId))
+                                ?.consultation_minutes,
+                          });
+                        };
 
-                          {cell ? (
-                            activeTab === "day" ? (
-                              /* Day tab: slot with Edit + Cancel buttons */
+                        const openBlockCancel = (e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          if (!canManageSchedule) return;
+                          if (activeTab === "week") {
+                            if (changeId != null) {
+                              slotModalRef.current?.openCancelSlot(
+                                WEEK_DAYS[index][0],
+                                rowIndex,
+                                index,
+                                text,
+                                branch,
+                                null,
+                                changeId,
+                                (changeMode as ScheduleChangeMode) || undefined,
+                              );
+                            }
+                            return;
+                          }
+                          slotModalRef.current?.openCancelSlot(
+                            WEEK_DAYS[index][0],
+                            rowIndex,
+                            index,
+                            text,
+                            branch,
+                            scheduleId ?? null,
+                          );
+                        };
+
+                        const showDelete = canManageSchedule && (activeTab === "day" || changeId != null);
+
+                        const leaveForCell =
+                          activeTab === "week"
+                            ? leaveByIso.get(weekIso)
+                            : undefined;
+
+                        return (
+                          <div key={index} className="p-1 border-r border-[#b9bfcb] min-w-0">
+                            {leaveForCell && (
                               <div
-                                className={`cursor-pointer h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] ${
-                                  isWeeklySchedule(cell)
-                                    ? "bg-[#f1f6ff] text-[#1e5fc7] border-[#1e5fc7]"
-                                    : "bg-[#fff7ef] text-[#ed741b] border-[#ed741b]"
-                                }`}
+                                title={leaveForCell.leave_reason ?? "Approved leave"}
+                                className="h-[54px] rounded-[3px] border border-dashed border-[#F5B7B7] bg-[#FDE8E8] flex flex-col items-center justify-center gap-[2px] text-center px-1 overflow-hidden"
                               >
-                                <strong className="text-[6px] whitespace-nowrap pl-1">
-                                  {formatScheduleTime(cell.start_time)} - {formatScheduleTime(cell.end_time)}
-                                </strong>
+                                <span className="text-[7px] font-bold uppercase tracking-wide text-[#9B1C1C]">
+                                  Doctor Leave
+                                </span>
+                                {leaveForCell.leave_reason && (
+                                  <span className="text-[6px] leading-[8px] text-[#9B1C1C]/80 line-clamp-2 px-0.5">
+                                    {leaveForCell.leave_reason}
+                                  </span>
+                                )}
+                              </div>
+                            )}
 
-                                <small className="text-[6px] leading-[8px]">
-                                  {cell.branch?.branch_name || "Central Hospital"}
-                                  {isWeeklySchedule(cell) ? " · Weekly" : ""}
-                                </small>
+                            {isCancelled && !leaveForCell && (
+                              <div className="relative h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] bg-[#f3f4f6] text-[#6b7280] border-[#9ca3af]">
+                                {showDelete && (
+                                  <button
+                                    type="button"
+                                    title="Restore this date"
+                                    onClick={(e) => openBlockCancel(e)}
+                                    className="absolute top-[2px] right-[2px] p-[1px] rounded-full text-[#9aa3b0] hover:text-[#ff453a] hover:bg-[#ffebea] transition-colors cursor-pointer"
+                                  >
+                                    <X className="size-3" />
+                                  </button>
+                                )}
+                                <strong className="text-[6px] whitespace-nowrap pl-1">{text}</strong>
+                              </div>
+                            )}
 
-                                <div className="flex items-center justify-between gap-1 mt-[3px] pt-[2px] border-t border-current/20">
-                                  <button
-                                    onClick={() => openEditSlot(cell)}
-                                    className="flex-1 px-1.5 py-1 rounded-md border border-[#004a91] text-[#004a91] text-[8px] font-semibold bg-white cursor-pointer hover:bg-[#eef4ff]"
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    onClick={() =>
-                                      slotModalRef.current?.openCancelSlot(
-                                        dayNameOf(cell.day_of_week) || "",
-                                        rowIndex,
-                                        index,
-                                        `${formatScheduleTime(cell.start_time)} - ${formatScheduleTime(cell.end_time)}`,
-                                        cell.branch?.branch_name || "",
-                                        cell.schedule_id,
-                                      )
-                                    }
-                                    className="flex-1 px-1.5 py-1 rounded-md border border-[#ff453a] text-[#ff453a] text-[8px] font-semibold bg-white cursor-pointer hover:bg-[#fff1f0]"
-                                  >
-                                    Cancel
-                                  </button>
+                            {type === "off" && !leaveForCell && (
+                              <div className="h-[54px] border border-dashed border-[#b9bfcb] rounded flex items-center justify-center text-[#657080] text-[8px]">
+                                Week Off
+                              </div>
+                            )}
+
+                            {type === "empty" &&
+                              !leaveForCell &&
+                              (canManageSchedule ? (
+                                <div
+                                  onClick={() =>
+                                    slotModalRef.current?.openAddSlot(
+                                      WEEK_DAYS[index][0],
+                                      rowIndex,
+                                      index,
+                                      activeTab === "week" ? "date" : "weekly",
+                                      activeTab === "week" ? weekIso : undefined,
+                                      activeTab === "week" ? "ADD" : undefined,
+                                    )
+                                  }
+                                  className="h-[54px] border border-dashed border-[#b9bfcb] rounded flex items-center justify-center text-[#7d8794] text-lg cursor-pointer hover:border-[#004a91] hover:text-[#004a91]"
+                                >
+                                  +
                                 </div>
-                              </div>
-                            ) : (
-                              /* Week tab: click slot to cancel */
+                              ) : (
+                                <div className="h-[54px] border border-dashed border-[#e5e7eb] rounded flex items-center justify-center text-[#c8ced7] text-lg">
+                                  +
+                                </div>
+                              ))}
+
+                            {isColored && !leaveForCell && (
                               <div
-                                onClick={() =>
-                                  slotModalRef.current?.openCancelSlot(
-                                    WEEK_DAYS[index][0],
-                                    rowIndex,
-                                    index,
-                                    `${formatScheduleTime(cell.start_time)} - ${formatScheduleTime(cell.end_time)}`,
-                                    cell.branch?.branch_name || "",
-                                    cell.schedule_id,
-                                  )
-                                }
-                                className={`cursor-pointer h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] ${
-                                  isWeeklySchedule(cell)
+                                onClick={openBlockEdit}
+                                className={`relative cursor-pointer h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] ${
+                                  colorType === "green"
+                                    ? "bg-[#f0faf6] text-[#087d53] border-[#087d53]"
+                                    : colorType === "blue"
                                     ? "bg-[#f1f6ff] text-[#1e5fc7] border-[#1e5fc7]"
                                     : "bg-[#fff7ef] text-[#ed741b] border-[#ed741b]"
                                 }`}
                               >
-                                <strong className="text-[6px] whitespace-nowrap pl-1">
-                                  {formatScheduleTime(cell.start_time)} - {formatScheduleTime(cell.end_time)}
-                                </strong>
+                                {showDelete && (
+                                  <button
+                                    type="button"
+                                    title={activeTab === "week" && changeId != null ? "Remove this date change" : "Delete slot"}
+                                    onClick={(e) => openBlockCancel(e)}
+                                    className="absolute top-[2px] right-[2px] p-[1px] rounded-full text-[#9aa3b0] hover:text-[#ff453a] hover:bg-[#ffebea] transition-colors cursor-pointer"
+                                  >
+                                    <X className="size-3" />
+                                  </button>
+                                )}
+
+                                <strong className="text-[6px] whitespace-nowrap pl-1">{text}</strong>
 
                                 <small className="text-[6px] leading-[8px]">
-                                  {cell.branch?.branch_name || "Central Hospital"}
+                                  {branch || "Central Hospital"}
                                 </small>
+
+                                {activeTab === "week" && changeId != null && (
+                                  <small className="text-[5px] leading-[7px] uppercase tracking-wide text-[#9aa3b0]">
+                                    {colorType === "green" ? "Added" : colorType === "orange" ? "Override" : "Template"}
+                                  </small>
+                                )}
                               </div>
-                            )
-                          ) : (
-                            /* Empty cell: + to add */
-                            <div
-                              onClick={() =>
-                                slotModalRef.current?.openAddSlot(
-                                  WEEK_DAYS[index][0],
-                                  rowIndex,
-                                  index,
-                                  activeTab === "day" ? "date" : "weekly",
-                                  activeTab === "day" ? dmyToIso(gridWeekDates[index]) : undefined,
-                                )
-                              }
-                              className="h-[54px] border border-dashed border-[#b9bfcb] rounded flex items-center justify-center text-[#7d8794] text-lg cursor-pointer hover:border-[#004a91] hover:text-[#004a91]"
-                            >
-                              +
-                            </div>
-                          )}
-
-                        </div>
-
-                      ))}
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   ))}
 
                 </div>
 
               </div>
-              <button
-                onClick={clearSchedule}
-                className="block ml-auto mt-[9px] border-0 bg-transparent text-[#666d76] text-[11px] cursor-pointer"
-              >
-                Clear
-              </button>
 
             </section>
 
@@ -1125,8 +1838,8 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
           {/* RIGHT COLUMN */}
           <aside className="min-w-0 max-[900px]:grid max-[900px]:grid-cols-2 max-[900px]:gap-5 max-[700px]:block">
 
-            {/* CALENDAR (both Day & Week tabs) */}
-            {(activeTab === "week" || activeTab === "day") && (
+            {/* CALENDAR (Week tab only -- the Day tab's simpler layout never had a month calendar) */}
+            {activeTab === "week" && (
             <section className="bg-white border border-[#edf0f4] rounded-[10px] p-[25px] mb-6 max-[900px]:mb-0 max-[700px]:mb-5">
 
               <div className="flex items-center justify-between mb-[22px]">
@@ -1169,47 +1882,21 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                 {calendarDays.map((cell, index) => {
                   const isInActiveWeek =
                     cell.inMonth && weekDates.some((d) => isSameDay(parseDate(d), cell.date));
-                  const isSelectedDay = activeTab === "day" && isSameDay(cell.date, dayViewDate);
                   const key = dateKey(cell.date);
                   const isToggled = toggledDates.has(key);
-                  const isHighlighted = activeTab === "day"
-                    ? (isToggled ? !isSelectedDay : isSelectedDay)
-                    : (isToggled ? !isInActiveWeek : isInActiveWeek);
+                  const isHighlighted = isToggled ? !isInActiveWeek : isInActiveWeek;
 
                   return (
                     <button
                       key={index}
-                      onClick={(e) => {
-                        if (e.shiftKey) {
-                          setToggledDates((prev) => {
-                            const next = new Set(prev);
-                            const key = dateKey(cell.date);
-                            if (next.has(key)) next.delete(key);
-                            else next.add(key);
-                            return next;
-                          });
-                          return;
-                        }
-                        if (activeTab === "day") {
-                          setDayViewDate(cell.date);
-                        } else {
-                          setToggledDates((prev) => {
-                            const next = new Set(prev);
-                            const key = dateKey(cell.date);
-                            if (next.has(key)) next.delete(key);
-                            else next.add(key);
-                            return next;
-                          });
-                        }
-                      }}
-                      onDoubleClick={() => {
+                      onClick={() =>
                         setToggledDates((prev) => {
                           const next = new Set(prev);
-                          const key = dateKey(cell.date);
-                          next.add(key);
+                          if (next.has(key)) next.delete(key);
+                          else next.add(key);
                           return next;
-                        });
-                      }}
+                        })
+                      }
                       className={`w-[31px] h-[31px] flex items-center justify-center rounded-full text-[11px] mx-auto border-0 cursor-pointer ${
                         !cell.inMonth
                           ? "text-[#c8ced7] bg-transparent"
@@ -1224,35 +1911,6 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
                 })}
 
               </div>
-
-              {/* Selected dates scroll (max 7 visible, rest scrollable horizontally) */}
-              {toggledDates.size > 0 && (
-                <div className="mt-4 overflow-x-auto">
-                  <div className="flex gap-2 min-w-max">
-                    {Array.from(toggledDates).slice(0, 7).map((key) => (
-                      <span key={key} className="px-2 py-1 rounded bg-[#2167d5] text-white text-[10px] whitespace-nowrap">
-                      {(() => {
-                        const [year, month, day] = key.split("-");
-                        return new Date(
-                          Number(year),
-                          Number(month) - 1,
-                          Number(day)
-                        ).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        });
-                      })()}
-                      </span>
-                    ))}
-                    {toggledDates.size > 7 && (
-                      <span className="px-2 py-1 rounded bg-[#f1f3f5] text-[#555] text-[10px] whitespace-nowrap">
-                        +{toggledDates.size - 7} more
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
 
             </section>
             )}
@@ -1347,22 +2005,326 @@ const submitLeave = async (e: React.FormEvent<HTMLFormElement>) => {
 
       </main>
 
+      {pendingTransfer && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-[10px] p-6 w-[440px] max-h-[90vh] overflow-y-auto shadow-lg">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-[16px] font-semibold text-[#172033]">
+                Affected Appointments
+              </h3>
+
+              <button
+                onClick={() => setPendingTransfer(null)}
+                title="Close (the slot change is not applied)"
+                className="p-1 rounded-full text-[#9aa3b0] hover:text-[#374151] hover:bg-[#f1f3f5] transition-colors cursor-pointer"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <p className="text-[#5f6672] text-[13px] mb-2">{pendingTransfer.message}</p>
+
+            <p className="text-[#5f6672] text-[13px] mb-3">
+              {pendingTransfer.appointments.length} future appointment(s) need handling before the slot change is applied.
+            </p>
+
+            <div className="border border-[#dfe4ea] rounded-[7px] max-h-[180px] overflow-y-auto divide-y divide-[#eef1f4] mb-4">
+              {pendingTransfer.appointments.map((a) => (
+                <div key={a.appointment_id} className="px-3 py-2">
+                  <div className="text-xs font-semibold text-[#172033]">
+                    {a.patient_name || a.patient_id}
+                  </div>
+                  <div className="text-[11px] text-[#5f6672]">
+                    {a.appointment_date} · {a.appointment_time} ·{" "}
+                    {a.branch_id
+                      ? doctorDetail?.branches?.find((b) => b.branch_id === a.branch_id)?.branch_name ?? a.branch_id
+                      : "—"}
+                  </div>
+                </div>
+              ))}
+              {pendingTransfer.appointments.length === 0 && (
+                <div className="px-3 py-3 text-xs text-[#5f6672]">No affected appointments.</div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2 mb-4">
+              <button
+                onClick={() => {
+                  setTransferAction("TRANSFER");
+                  setReplacementDoctorId(replacementDoctors[0]?.employee_id ?? "");
+                }}
+                className={`text-left px-3 py-2 rounded-[7px] border text-xs font-semibold cursor-pointer transition-colors ${
+                  transferAction === "TRANSFER"
+                    ? "border-[#004a91] bg-[#eef4ff] text-[#004a91]"
+                    : "border-[#dfe4ea] bg-white text-[#374151] hover:border-[#b8cce8]"
+                }`}
+              >
+                Transfer to replacement doctor
+              </button>
+
+              <button
+                onClick={() => setTransferAction("RESCHEDULE")}
+                className={`text-left px-3 py-2 rounded-[7px] border text-xs font-semibold cursor-pointer transition-colors ${
+                  transferAction === "RESCHEDULE"
+                    ? "border-[#b45309] bg-[#fff7ed] text-[#b45309]"
+                    : "border-[#dfe4ea] bg-white text-[#374151] hover:border-[#f2c9a0]"
+                }`}
+              >
+                Reschedule queue
+              </button>
+
+              <button
+                onClick={() => setTransferAction("CANCEL")}
+                className={`text-left px-3 py-2 rounded-[7px] border text-xs font-semibold cursor-pointer transition-colors ${
+                  transferAction === "CANCEL"
+                    ? "border-[#ff453a] bg-[#fff1f0] text-[#ff453a]"
+                    : "border-[#dfe4ea] bg-white text-[#374151] hover:border-[#ffc9c5]"
+                }`}
+              >
+                Cancel appointments
+              </button>
+            </div>
+
+            {transferAction === "TRANSFER" && (
+              <div className="mb-4">
+                <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
+                  REPLACEMENT DOCTOR
+                </label>
+
+                <select
+                  value={replacementDoctorId}
+                  onChange={(e) => setReplacementDoctorId(e.target.value)}
+                  className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
+                >
+                  <option value="">Select replacement doctor</option>
+                  {replacementDoctors.map((d) => (
+                    <option key={d.employee_id} value={d.employee_id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+
+                {replacementDoctors.length === 0 && (
+                  <p className="text-[11px] text-[#c2410c] mt-1">
+                    No eligible replacement doctors were found for these appointments.
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setPendingTransfer(null)}
+                disabled={isConfirmingTransfer}
+                className="h-9 px-4 rounded-[7px] text-[13px] font-semibold cursor-pointer bg-white text-[#555e6c] border border-[#dfe4ea] disabled:opacity-70 disabled:cursor-not-allowed"
+              >
+                Back
+              </button>
+
+              <button
+                onClick={() => transferAction && confirmPendingTransfer(transferAction)}
+                disabled={!transferAction || isConfirmingTransfer}
+                className={`h-9 px-4 rounded-[7px] text-[13px] font-semibold cursor-pointer inline-flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed ${
+                  transferAction === "CANCEL" ? "bg-[#ff453a] text-white border-0" : "bg-[#004a91] text-white border-0"
+                }`}
+              >
+                {isConfirmingTransfer ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Processing...
+                  </>
+                ) : transferAction === "TRANSFER" ? (
+                  "Transfer appointments"
+                ) : transferAction === "RESCHEDULE" ? (
+                  "Add to reschedule queue"
+                ) : (
+                  "Confirm cancel"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LEAVE CONFIRM DIALOG */}
+      <AlertDialog
+        open={leaveConfirmOpen}
+        onOpenChange={(open) => {
+          if (!submittingLeave) setLeaveConfirmOpen(open);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Do you want to proceed with the leave?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Leave date: {fromDate ? format(fromDate, "dd/MM/yyyy") : "-"} to{" "}
+              {toDate ? format(toDate, "dd/MM/yyyy") : "-"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={submittingLeave || processingLeave}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={submittingLeave || processingLeave}
+              onClick={(e) => {
+                e.preventDefault();
+                doApplyLeave();
+              }}
+            >
+              {processingLeave ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Checking...
+                </>
+              ) : submittingLeave ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                "Proceed"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* LEAVE SUCCESS DIALOG */}
+      <AlertDialog open={leaveSuccessOpen} onOpenChange={setLeaveSuccessOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-green-600">
+              <CheckCircle2 className="size-5" />
+              Leave applied successfully
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {leaveSuccessInfo && (
+                <>
+                  Leave date: {leaveSuccessInfo.from} to {leaveSuccessInfo.to}
+                  {leaveSuccessInfo.leaveId
+                    ? ` · Leave ID: ${leaveSuccessInfo.leaveId}`
+                    : ""}
+                  {typeof leaveSuccessInfo.queuedCount === "number" &&
+                  leaveSuccessInfo.queuedCount > 0
+                    ? ` · ${leaveSuccessInfo.queuedCount} patient(s) sent to the reschedule queue`
+                    : ""}
+                  {leaveSuccessInfo.queueFailed
+                    ? " · Could not add patients to the reschedule queue"
+                    : ""}
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setLeaveSuccessOpen(false)}>
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* LEAVE CONFLICTS DIALOG */}
+      <AlertDialog
+        open={leaveConflictsOpen}
+        onOpenChange={(open) => {
+          if (!submittingLeave) setLeaveConflictsOpen(open);
+        }}
+      >
+        <AlertDialogContent className="max-w-[460px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {leaveConflicts.length} appointment
+              {leaveConflicts.length === 1 ? "" : "s"} scheduled during this
+              leave
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You can send these patients to the reschedule queue so staff can
+              assign them new slots, or apply the leave without changes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="max-h-[220px] overflow-y-auto rounded-md border border-slate-200">
+            {leaveConflicts.map((conflict) => (
+              <div
+                key={conflict.appointment_id}
+                className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-[12px] last:border-b-0"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-slate-800">
+                    {conflict.patientName}
+                  </p>
+                  <p className="text-slate-500">
+                    {format(new Date(conflict.appointment_date), "dd/MM/yyyy")}
+                    {formatTimeOfDay(conflict.appointment_time)
+                      ? ` · ${formatTimeOfDay(conflict.appointment_time)}`
+                      : ""}
+                  </p>
+                </div>
+                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                  {conflict.status}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={submittingLeave}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={submittingLeave}
+              className="border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              onClick={(e) => {
+                e.preventDefault();
+                applyLeaveNow(false);
+              }}
+            >
+              {submittingLeave ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Applying...
+                </>
+              ) : (
+                "Apply leave anyway"
+              )}
+            </AlertDialogAction>
+            <AlertDialogAction
+              disabled={submittingLeave}
+              onClick={(e) => {
+                e.preventDefault();
+                applyLeaveNow(true);
+              }}
+            >
+              {submittingLeave ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Applying...
+                </>
+              ) : (
+                <>
+                  Apply leave &amp; queue{" "}
+                  {leaveConflicts.length} patient
+                  {leaveConflicts.length === 1 ? "" : "s"}
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <ScheduleSlotModal
         ref={slotModalRef}
-        branches={doctorDetail?.branches ?? []}
+        branches={doctorDetail?.branches?.filter((b) => b.status === 1) ?? []}
+        departments={departments}
+        defaultConsultationMinutes={doctorDetail?.doctorProfile?.consultation_minutes ?? 20}
+        defaultDepartmentId={doctorEmployee?.department_id ?? ""}
         onAddSlot={handleAddSlot}
         onUpdateSlot={handleUpdateSlot}
         onCancelSlot={handleCancelSlot}
-      />
-      <ConfirmationDialog
-        open={clearScheduleConfirm}
-        onConfirm={handleConfirmClearSchedule}
-        onCancel={() => setClearScheduleConfirm(false)}
-        type="warning"
-        title="Clear Schedule?"
-        description="Are you sure you want to clear the schedule? This action cannot be undone."
-        confirmText="Clear"
-        cancelText="Cancel"
+        isSubmitting={savingSlot}
       />
     </div>
   );

@@ -11,6 +11,7 @@ import { departmentApi, Department } from "@/api/department.api";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { appointmentApi, type AvailableSlot } from "@/api/appointment.api";
 import { validateRequiredFields, type RequiredField } from "@/lib/validation";
+import { activeBranches } from "@/lib/utils";
 
 interface AppointmentFormData {
   patientId: string;
@@ -79,6 +80,14 @@ async function findNearestAvailableDate(
     try {
       const res = await appointmentApi.getAvailableSlots(doctorId, branchId, dateStr);
       const slots = res.data?.data?.slots || [];
+      const isCancelled = res.data?.data?.is_cancelled ?? false;
+      // Skip cancelled and leave days when searching for nearest
+      // available date. On plain week-off days (not cancelled, not
+      // on leave) the form stays put with free-time entry.
+      if (isCancelled || (res.data?.data?.is_on_leave ?? false)) {
+        continue;
+      }
+      // On normal scheduled days with available slots, jump to that date.
       if (slots.some((s) => s.is_available)) {
         return dateStr;
       }
@@ -108,7 +117,7 @@ const requiredStar = <span className="text-red-600 ml-0.5">*</span>;
 // Terminal statuses can't be edited on the backend (see
 // TERMINAL_APPOINTMENT_STATUSES in appointment.constants.ts) -- checked here
 // too so the user gets a clear message instead of a failed submit.
-const TERMINAL_STATUSES = ["COMPLETED", "CANCELLED", "NO_SHOW"];
+const TERMINAL_STATUSES = ["COMPLETED", "CANCELLED", "NO_SHOW", "NOT_CHECKED_IN"];
 
 export default function EditAppointment() {
   const navigate = useNavigate();
@@ -153,6 +162,9 @@ export default function EditAppointment() {
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [findingNearestDate, setFindingNearestDate] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [isCancelled, setIsCancelled] = useState(false);
+  const [isOnLeave, setIsOnLeave] = useState(false);
+  const [leaveReason, setLeaveReason] = useState<string | null>(null);
 
   useEffect(() => {
     branchApi
@@ -251,7 +263,7 @@ export default function EditAppointment() {
         if (record.employee_id) {
           employeeApi
             .getOne(record.employee_id)
-            .then((res) => setDoctorBranches(res.data?.data?.branches || []))
+            .then((res) => setDoctorBranches(activeBranches(res.data?.data?.branches || [])))
             .catch(() => {});
         }
       })
@@ -271,19 +283,28 @@ export default function EditAppointment() {
   useEffect(() => {
     if (!formData.doctorId || !formData.branchId || !formData.selectDate) {
       setAvailableSlots([]);
+      setIsOnLeave(false);
+      setLeaveReason(null);
       return;
     }
 
     setLoadingSlots(true);
 
-    appointmentApi
+appointmentApi
       .getAvailableSlots(formData.doctorId, formData.branchId, formData.selectDate)
       .then((res) => {
         const slots = res.data.data?.slots || [];
+        const isCancelled = res.data.data?.is_cancelled ?? false;
         setAvailableSlots(slots.filter((s) => s.is_available));
+        setIsCancelled(isCancelled);
+        setIsOnLeave(res.data.data?.is_on_leave ?? false);
+        setLeaveReason(res.data.data?.leave_reason ?? null);
       })
       .catch(() => {
         setAvailableSlots([]);
+        setIsCancelled(false);
+        setIsOnLeave(false);
+        setLeaveReason(null);
       })
       .finally(() => setLoadingSlots(false));
   }, [formData.doctorId, formData.branchId, formData.selectDate]);
@@ -597,12 +618,11 @@ export default function EditAppointment() {
                     employeeApi
                       .getOne(val)
                       .then((res) => {
-                        const mappedBranches = res.data?.data?.branches || [];
+                        const mappedBranches = activeBranches(res.data?.data?.branches || []);
                         setDoctorBranches(mappedBranches);
                         const nextBranchId =
                           mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
                           mappedBranches[0]?.branch_id ||
-                          selectedDoctor?.branch_id ||
                           formData.branchId;
 
                         if (!nextBranchId) return null;
@@ -674,9 +694,23 @@ export default function EditAppointment() {
                     <Loader2 className="w-4 h-4 animate-spin" />
                     Loading available slots...
                   </div>
-                ) : slotsToShow.length === 0 ? (
+                ) : slotsToShow.length === 0 && isOnLeave ? (
+                  <div className="col-span-full py-8 text-center text-sm text-gray-500 bg-gray-50 rounded-xl">
+                    Doctor is on leave
+                    {leaveReason ? ` (${leaveReason})` : ""} — no slots can be
+                    booked on this date
+                  </div>
+                ) : slotsToShow.length === 0 && !isCancelled ? (
                   <div className="col-span-full py-8 text-center text-sm text-amber-500 bg-amber-50 rounded-xl">
-                    No available slots for this doctor on the selected date
+                    <input
+                      type="time"
+                      className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                      placeholder="Select a time"
+                    />
+                  </div>
+                ) : slotsToShow.length === 0 && isCancelled ? (
+                  <div className="col-span-full py-8 text-center text-sm text-gray-800 bg-gray-100 rounded-xl">
+                    Doctor is unavailable on this date (marked as cancelled)
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 md:grid-cols-6 gap-2">

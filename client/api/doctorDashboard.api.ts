@@ -94,6 +94,43 @@ export interface DashboardAppointmentsResponse {
   };
 }
 
+export interface PatientsCheckedInTodayResponse {
+  success: boolean;
+  message: string;
+  data: {
+    totalPatients: number;
+  };
+}
+
+export interface DoctorNotificationItem {
+  notification_id: string;
+  appointment_id: string;
+  channel: string;
+  notification_type: string;
+  recipient?: string | null;
+  status: string;
+  created_at: string;
+  appointment_history: {
+    appointment_date: string;
+    appointment_time: string;
+    status?: string | null;
+    patient_bio_data: {
+      patient_first_name?: string | null;
+      patient_middle_name?: string | null;
+      patient_last_name?: string | null;
+    } | null;
+  } | null;
+}
+
+export interface DoctorNotificationsResponse {
+  success: boolean;
+  message: string;
+  data: {
+    notifications: DoctorNotificationItem[];
+    unreadCount: number;
+  };
+}
+
 export const doctorDashboardApi = {
   getCurrentUser() {
     return API.get<DashboardAuthResponse>("/auth/me");
@@ -114,5 +151,26 @@ export const doctorDashboardApi = {
     return API.get<DashboardAppointmentsResponse>("/appointments", {
       params,
     });
+  },
+
+  getPatientsCheckedInToday(params: { employeeId: string; branchId?: string }) {
+    return API.get<PatientsCheckedInTodayResponse>(
+      "/encounters/stats/patients-today",
+      { params }
+    );
+  },
+
+  getNotifications(employeeId: string) {
+    return API.get<DoctorNotificationsResponse>("/notifications", {
+      params: { employeeId },
+    });
+  },
+
+  markNotificationsRead(employeeId: string) {
+    return API.put<{ success: boolean; message: string }>(
+      "/notifications/read-all",
+      null,
+      { params: { employeeId } }
+    );
   },
 };

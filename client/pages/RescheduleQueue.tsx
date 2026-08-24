@@ -82,6 +82,15 @@ function todayISODate(): string {
   ).padStart(2, "0")}`;
 }
 
+// Today's date in UTC -- appointment dates are stored UTC-anchored, so
+// "has the appointment's date passed" must be decided in UTC too.
+function todayUTCISODate(): string {
+  const now = new Date();
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    now.getUTCDate(),
+  ).padStart(2, "0")}`;
+}
+
 const DAY_OF_WEEK_NAMES = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"] as const;
 
 function dayOfWeekOf(dateStr: string): string {
@@ -118,6 +127,14 @@ export default function RescheduleQueue() {
   const [search, setSearch] = useState("");
   const [branches, setBranches] = useState<Branch[]>([]);
   const [doctors, setDoctors] = useState<EmployeeRecord[]>([]);
+  // Backend-computed doctor_status ("ACTIVE" | "LEAVE" | "INACTIVE") for the
+  // assign dialog's selected branch + date -- the source of truth for which
+  // doctors are eligible to take the slot (see employee.repository.ts
+  // computeDoctorStatuses: ACTIVE = has an active schedule that weekday).
+  const [doctorStatusMap, setDoctorStatusMap] = useState<Record<string, "ACTIVE" | "LEAVE" | "INACTIVE">>({});
+  const [statusesLoading, setStatusesLoading] = useState(false);
+  const [statusesLoaded, setStatusesLoaded] = useState(false);
+  const [statusesFailed, setStatusesFailed] = useState(false);
 
   // Action dialogs
   const [assignTarget, setAssignTarget] = useState<RescheduleQueueEntry | null>(null);
@@ -143,6 +160,7 @@ export default function RescheduleQueue() {
   const [cancelReason, setCancelReason] = useState("");
 
   const [processing, setProcessing] = useState(false);
+  const [autoCancelling, setAutoCancelling] = useState(false);
 
   useEffect(() => {
     const user = getUser();
@@ -166,6 +184,60 @@ export default function RescheduleQueue() {
     };
     initial();
   }, [roleOk]);
+
+  // Fetch each doctor's backend-computed status for the assign dialog's
+  // branch + date. Only "ACTIVE" doctors (active schedule on that weekday
+  // at that branch) are offered in the dropdown once both are chosen.
+  useEffect(() => {
+    if (!assignBranchId || !assignDate) {
+      setDoctorStatusMap({});
+      setStatusesLoading(false);
+      setStatusesLoaded(false);
+      setStatusesFailed(false);
+      return;
+    }
+    let cancelled = false;
+    setStatusesLoading(true);
+    setStatusesLoaded(false);
+    setStatusesFailed(false);
+    employeeApi
+      .getAll({
+        roleType: "DOCTOR",
+        branchId: assignBranchId,
+        date: assignDate,
+        limit: 500,
+      })
+      .then((res) => {
+        if (cancelled) return;
+        const map: Record<string, "ACTIVE" | "LEAVE" | "INACTIVE"> = {};
+        const fetched = res.data?.data?.employees || [];
+        fetched.forEach((e) => {
+          map[e.employee_id] = e.doctor_status || "INACTIVE";
+        });
+        setDoctorStatusMap(map);
+        setStatusesLoaded(true);
+        // Union freshly-fetched doctors into the list so a doctor created
+        // after the page loaded still appears in the dropdown.
+        setDoctors((prev) => {
+          const byId = new Map(prev.map((d) => [d.employee_id, d]));
+          fetched.forEach((e) => {
+            if (!byId.has(e.employee_id)) byId.set(e.employee_id, e);
+          });
+          return Array.from(byId.values());
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setDoctorStatusMap({});
+        setStatusesFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled) setStatusesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [assignBranchId, assignDate]);
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -193,6 +265,57 @@ export default function RescheduleQueue() {
   useEffect(() => {
     if (roleOk) fetchQueue();
   }, [roleOk, fetchQueue]);
+
+  // Auto-cancel queue entries whose appointment date has already passed
+  // (the original date for PENDING, the assigned date for ASSIGNED) -- a
+  // reschedule is no longer actionable once the appointment's own date is
+  // in the past, so the appointment is cancelled instead of sitting in the
+  // queue forever.
+  const autoCancelExpired = useCallback(async () => {
+    if (!roleOk || autoCancelling) return;
+    const today = todayUTCISODate();
+    const expired = entries.filter((e) => {
+      if (e.status !== "PENDING" && e.status !== "ASSIGNED") return false;
+      const effectiveDate =
+        e.status === "ASSIGNED" && e.assigned_date
+          ? toDateInputValue(e.assigned_date)
+          : toDateInputValue(e.old_appointment_date);
+      return Boolean(effectiveDate) && effectiveDate < today;
+    });
+    if (expired.length === 0) return;
+    setAutoCancelling(true);
+    let cancelled = 0;
+    try {
+      for (const entry of expired) {
+        try {
+          await doctorTransferApi.processRescheduleAction(entry.appointment_id, {
+            action: "CANCEL",
+            reason: "Auto-cancelled: appointment date has passed",
+          });
+          cancelled += 1;
+        } catch (err) {
+          console.error(
+            "[RescheduleQueue] Auto-cancel failed for",
+            entry.appointment_id,
+            err,
+          );
+        }
+      }
+      if (cancelled > 0) {
+        toast({
+          title: `Auto-cancelled ${cancelled} expired appointment${cancelled === 1 ? "" : "s"}`,
+          description: "Their appointment date had already passed.",
+        });
+        fetchQueue();
+      }
+    } finally {
+      setAutoCancelling(false);
+    }
+  }, [roleOk, autoCancelling, entries, fetchQueue, toast]);
+
+  useEffect(() => {
+    if (roleOk && entries.length > 0) autoCancelExpired();
+  }, [roleOk, entries, autoCancelExpired]);
 
   const doctorNameById = useCallback(
     (id?: string | null) => {
@@ -242,7 +365,11 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
     if (!assignBranchId) return [];
     const deptMap = new Map<string, string>();
     doctors
-      .filter((d) => d.emp_status !== false && d.branch_id === assignBranchId)
+      .filter(
+        (d) =>
+          d.emp_status !== false &&
+          (d.branches?.some((b) => b.branch_id === assignBranchId) ?? false),
+      )
       .forEach((d) => {
         if (d.department_id && !deptMap.has(d.department_id)) {
           const deptName = d.department_master?.department_name || d.department_id;
@@ -307,10 +434,25 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
     // Base filter: always apply branch + department when selected
     let eligible = active;
     if (assignBranchId) {
-      eligible = eligible.filter((d) => d.branch_id === assignBranchId);
+      eligible = eligible.filter(
+        (d) => d.branches?.some((b) => b.branch_id === assignBranchId) ?? false,
+      );
     }
     if (assignDepartmentId) {
       eligible = eligible.filter((d) => d.department_id === assignDepartmentId);
+    }
+
+    // Status gate: once branch + date are chosen, only doctors the backend
+    // computed as ACTIVE for that exact branch + date are offered. The
+    // currently selected doctor is always kept visible so a date change can
+    // never blank the dropdown. If the status fetch failed, fall back to
+    // branch + department filtering instead of silently emptying the list.
+    if (assignBranchId && assignDate && statusesLoaded) {
+      eligible = eligible.filter(
+        (d) =>
+          doctorStatusMap[d.employee_id] === "ACTIVE" ||
+          d.employee_id === assignDoctorId,
+      );
     }
 
     // Time/schedule filter when branch + department + day are ready
@@ -339,6 +481,10 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
     assignDay,
     assignTimeOfDay,
     assignDepartmentId,
+    assignDate,
+    assignDoctorId,
+    doctorStatusMap,
+    statusesLoaded,
   ]);
 
   const openAssign = (entry: RescheduleQueueEntry) => {
@@ -587,6 +733,12 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
           <span className="text-xs font-bold text-gray-600 uppercase tracking-wide">
             Queue ({total} total)
           </span>
+          {autoCancelling && (
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-red-600">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Auto-cancelling expired appointments…
+            </span>
+          )}
         </div>
 
         {loading ? (
@@ -813,7 +965,7 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
               options={assignDoctorOptions}
               value={assignDoctorId}
               onValueChange={setAssignDoctorId}
-              disabled={schedulesLoading}
+              disabled={schedulesLoading || statusesLoading}
               placeholder={
                 assignDoctorFiltering && assignDoctorOptions.length === 0
                   ? "No doctors available"
@@ -821,10 +973,18 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
               }
               emptyMessage="No doctors available"
             />
-            {schedulesLoading ? (
+            {schedulesLoading || statusesLoading ? (
               <p className="text-[11px] text-[#94A3B8] mt-1">
                 <Loader2 className="inline h-3 w-3 animate-spin mr-1" />
                 Checking doctor availability…
+              </p>
+            ) : statusesFailed && assignBranchId && assignDate ? (
+              <p className="text-[11px] text-amber-600 mt-1">
+                Couldn't verify doctor availability — showing all doctors at this branch (unfiltered).
+              </p>
+            ) : assignBranchId && assignDate && assignDoctorOptions.length === 0 && !assignDoctorFiltering ? (
+              <p className="text-[11px] text-[#94A3B8] mt-1">
+                No doctor is active at {branchLabelOf(assignBranchId)} on {dayLabelOf(assignDay)} for this department.
               </p>
             ) : assignDoctorFiltering && assignDoctorOptions.length === 0 ? (
               <p className="text-[11px] text-[#94A3B8] mt-1">
@@ -833,13 +993,13 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
               </p>
             ) : assignDoctorFiltering ? (
               <p className="text-[11px] text-[#94A3B8] mt-1">
-                Showing {assignDoctorOptions.length} doctor(s) working at {branchLabelOf(assignBranchId)} on{" "}
+                Showing {assignDoctorOptions.length} doctor(s) active at {branchLabelOf(assignBranchId)} on{" "}
                 {dayLabelOf(assignDay)}
                 {assignTimeOfDay ? ` at ${assignTimeOfDay}` : ""} — sorted by queue load (lowest first).
               </p>
             ) : assignTarget?.department_id ? (
               <p className="text-[11px] text-[#94A3B8] mt-1">
-                Showing all active doctor(s) — pick a date first to filter by working days.
+                Showing all active doctor(s) — pick a date first to filter to those working that day.
               </p>
             ) : null}
           </div>

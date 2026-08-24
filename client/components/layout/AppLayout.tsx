@@ -51,7 +51,7 @@ const bottomNavIcon: Record<string, React.ReactNode> = {
   Support: <HelpCircle size={16} />,
 };
 
-export function AppLayout() {
+export function AppLayout({ children }: { children?: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -402,7 +402,7 @@ export function AppLayout() {
 
           {/* CONTENT */}
           <main className="flex-1 overflow-y-auto p-6">
-            <Outlet />
+            {children ?? <Outlet />}
           </main>
         </div>
 

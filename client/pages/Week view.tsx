@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useMemo } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
@@ -8,41 +8,31 @@ import {
   Search,
   Check,
   Loader2,
+  TriangleAlert,
 } from "lucide-react";
-import { format, addDays, subDays, startOfWeek, isSameWeek, startOfDay, endOfDay } from "date-fns";
+import { format, addDays, subDays, startOfWeek, isSameWeek } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
 import ExportReport from "@/components/ui/ExportReport";
 import { downloadExportCsv, exportErrorMessage } from "@/api/export.api";
-import { downloadExportPdf } from "@/lib/exportPdf";
-import { formatPatientName, formatDoctorName, formatAppointmentDate, formatAppointmentTime } from "@/lib/appointmentFormat";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { employeeApi } from "@/api/employee.api";
-import { useFilterPanel, useScheduleFilters } from "@/components/Filter";
-import { ToolbarFilter } from "@/components/ui/toolbar-filter";
+import { FilterPopover, useFilterPanel, useScheduleFilters } from "@/components/Filter";
 import { usePermission } from "@/context/PermissionContext";
 import { useToast } from "@/hooks/use-toast";
+import { RefreshButton } from "@/components/hms/RefreshButton";
+import { cn } from "@/lib/utils";
 
 interface Schedule {
   patients: number;
   progress: number;
   color: "blue" | "green" | "red" | "gray";
   off?: boolean;
-  // Present only on an open ("New slot available") cell -- carries what
-  // AddAppointment needs to open pre-filled with just the patient left to pick.
-  booking?: {
-    doctorId: string;
-    branchId: string;
-    departmentId: string;
-    date: string;
-  };
 }
 
 interface Doctor {
   name: string;
   department: string;
-  departmentId: string;
-  employeeIds: string[];
   schedule: Schedule[];
 }
 
@@ -67,9 +57,9 @@ function utcDateKey(dateStr: string): string {
 const colorStyles = {
   blue: {
     bg: "bg-[rgba(0,74,198,0.05)]",
-    border: "border-l-[#004ac6]",
-    text: "text-[#004ac6]",
-    fill: "bg-[#004ac6]",
+    border: "border-l-clinical-blue",
+    text: "text-clinical-blue",
+    fill: "bg-clinical-blue",
   },
   green: {
     bg: "bg-[rgba(0,125,85,0.05)]",
@@ -84,12 +74,17 @@ const colorStyles = {
     fill: "bg-[#fb923c]",
   },
   gray: {
-    bg: "bg-gray-100",
-    border: "border-l-gray-500",
-    text: "text-gray-600",
-    fill: "bg-gray-500",
+    bg: "bg-[#F8FAFC]",
+    border: "border-l-[#94A3B8]",
+    text: "text-[#64748B]",
+    fill: "bg-[#94A3B8]",
   },
 };
+
+// Successful available-slots responses are cached per employee|date|branch so
+// revisiting a week (or re-running after a date change) doesn't re-hit the API.
+type AvailabilityResult = boolean | null; // null = request failed
+const availabilityCacheRef = new Map<string, boolean>();
 
 const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) => {
   const navigate = useNavigate();
@@ -104,6 +99,8 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
+  const [viewType, setViewType] = useState<ScheduleViewType>("week");
+  const [dataVersion, setDataVersion] = useState(0);
 
   // Multi-doctor filter -- same FilterPopover used on the other pages.
   // Selecting doctors here narrows the grid down to exactly those doctors,
@@ -128,14 +125,15 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const viewOptions: { key: ScheduleViewType; label: string }[] = [
-    { key: "week", label: "Week View" },
-    { key: "day", label: "Day View" },
+  const viewTypeOptions: { key: ScheduleViewType; label: string }[] = [
     { key: "list", label: "List View" },
+    { key: "day", label: "Day View" },
+    { key: "week", label: "Week View" },
   ];
 
   const handleViewSelect = (view: ScheduleViewType) => {
     setIsViewMenuOpen(false);
+    setViewType(view);
     if (view === "day") {
       navigate("/appointments/day-view");
     } else if (view === "list") {
@@ -151,62 +149,106 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
   const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 });
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const weekDateFrom = format(weekStart, "yyyy-MM-dd");
+  const weekDateTo = format(addDays(weekStart, 6), "yyyy-MM-dd");
 
   // Real appointments for the selected week, fetched from GET /appointments
   // -- the doctor rows and per-day patient counts below are both derived
-  // from this instead of dummy data.
+  // from this instead of dummy data. All pages are pulled (totalPages loop),
+  // so a busy week of more than 100 appointments is never truncated.
   const [weekAppointments, setWeekAppointments] = useState<AppointmentRecord[]>([]);
   const [isLoadingWeek, setIsLoadingWeek] = useState(true);
-
-  // Filter: hide cancelled appointments for today, show cancelled for yesterday and before
-  const filteredWeekAppointments = useMemo(() => {
-    const now = new Date();
-    const todayStart = startOfDay(now).getTime();
-    const todayEnd = endOfDay(now).getTime();
-
-    return weekAppointments.filter((appt) => {
-      const isCancelled = appt.status === "CANCELLED";
-      if (!isCancelled) return true;
-
-      const apptDate = new Date(appt.appointment_date).getTime();
-      return apptDate < todayStart || apptDate > todayEnd;
-    });
-  }, [weekAppointments]);
+  const [weekLoadFailed, setWeekLoadFailed] = useState(false);
 
   useEffect(() => {
-    setIsLoadingWeek(true);
-    appointmentApi
-      .getAll({
-        dateFrom: format(weekStart, "yyyy-MM-dd"),
-        dateTo: format(addDays(weekStart, 6), "yyyy-MM-dd"),
-        limit: 100,
-      })
-      .then((res) => {
-        setWeekAppointments(res.data?.data?.appointments || []);
-      })
-      .catch((err) => {
+    let cancelled = false;
+
+    const loadWeekAppointments = async () => {
+      setIsLoadingWeek(true);
+      setWeekLoadFailed(false);
+
+      try {
+        const firstPage = await appointmentApi.getAll({
+          dateFrom: weekDateFrom,
+          dateTo: weekDateTo,
+          page: 1,
+          limit: 100,
+        });
+        const firstData = firstPage.data?.data;
+        const remainingPages = Array.from(
+          { length: Math.max(0, (firstData?.totalPages ?? 1) - 1) },
+          (_, index) =>
+            appointmentApi.getAll({
+              dateFrom: weekDateFrom,
+              dateTo: weekDateTo,
+              page: index + 2,
+              limit: 100,
+            }),
+        );
+        const remainingResults = await Promise.all(remainingPages);
+        const appointments = [
+          ...(firstData?.appointments ?? []),
+          ...remainingResults.flatMap((res) => res.data?.data?.appointments ?? []),
+        ];
+
+        if (!cancelled) setWeekAppointments(appointments);
+      } catch (err) {
         console.error("[Week View] Error:", err);
-        setWeekAppointments([]);
-      })
-      .finally(() => setIsLoadingWeek(false));
-  }, [selectedDate]);
+        if (!cancelled) {
+          setWeekAppointments([]);
+          setWeekLoadFailed(true);
+          toast({
+            title: "Failed to load appointments",
+            description: "Couldn't reach the appointments API.",
+            variant: "destructive",
+          });
+        }
+      } finally {
+        if (!cancelled) setIsLoadingWeek(false);
+      }
+    };
+
+    void loadWeekAppointments();
+    return () => {
+      cancelled = true;
+    };
+  }, [weekDateFrom, weekDateTo, toast, dataVersion]);
 
   // All doctors (not just ones with an appointment this week), so every
-  // doctor gets a row -- same approach as Day view.tsx.
+  // doctor gets a row -- same approach as Day view.tsx. Paginated like the
+  // Day view, and only DOCTORs are requested.
   const [allDoctors, setAllDoctors] = useState<
-    { employeeId: string; branchId: string; departmentId: string; name: string; department: string }[]
+    { employeeId: string; branchId: string; name: string; department: string }[]
   >([]);
+  const [doctorsFailed, setDoctorsFailed] = useState(false);
 
   useEffect(() => {
-    employeeApi
-      .getAll({ roleType: "DOCTOR", limit: 1000 })
-      .then((res) => {
-        const employees = res.data?.data?.employees || [];
+    let cancelled = false;
+
+    const loadAllDoctors = async () => {
+      const firstPage = await employeeApi.getAll({ roleType: "DOCTOR", page: 1, limit: 1000 });
+      const firstData = firstPage.data?.data;
+      const remainingPages = Array.from(
+        { length: Math.max(0, (firstData?.totalPages ?? 1) - 1) },
+        (_, index) => employeeApi.getAll({ roleType: "DOCTOR", page: index + 2, limit: 1000 }),
+      );
+      const remainingResults = await Promise.all(remainingPages);
+      return [
+        ...(firstData?.employees ?? []),
+        ...remainingResults.flatMap((res) => res.data?.data?.employees ?? []),
+      ];
+    };
+
+    loadAllDoctors()
+      .then((employees) => {
+        // Only an explicit emp_status === true counts as active -- a null
+        // status would otherwise leak deactivated doctors into the grid.
+        const activeDoctors = employees.filter((emp) => emp.emp_status === true);
+        if (cancelled) return;
         setAllDoctors(
-          employees.map((emp) => ({
+          activeDoctors.map((emp) => ({
             employeeId: emp.employee_id,
             branchId: emp.branch_id,
-            departmentId: emp.department_id,
             name: `Dr. ${[emp.first_name, emp.middle_name, emp.last_name].filter(Boolean).join(" ")}`,
             department: (emp.department_master?.department_name || emp.specialization || "General").toUpperCase(),
           })),
@@ -214,9 +256,20 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
       })
       .catch((err) => {
         console.error("[Week View] Failed to load doctors:", err);
-        setAllDoctors([]);
+        if (!cancelled) {
+          setAllDoctors([]);
+          setDoctorsFailed(true);
+          toast({
+            title: "Failed to load doctors",
+            description: "Couldn't reach the employees API.",
+            variant: "destructive",
+          });
+        }
       });
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [toast, dataVersion]);
 
   // A doctor's real mapped branches (via user_branch_mapping) -- their
   // doctor_schedule rows can be tied to any of these, not just the single
@@ -228,10 +281,11 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   // Real per-doctor available slots for each day of the selected week, from
   // GET /appointments/available-slots -- lets an unbooked-but-scheduled day
   // show "New slot available" instead of "OFF" (same distinction Day
-  // view.tsx makes). Keyed by `${employeeId}|${yyyy-MM-dd}`; the value is
-  // the branch id that has an open slot (null = none), so a clicked cell can
-  // hand AddAppointment the exact doctor/branch the availability is real on.
-  const [availableByDoctorDay, setAvailableByDoctorDay] = useState<Record<string, string | null>>({});
+  // view.tsx makes). Keyed by `${employeeId}|${yyyy-MM-dd}`.
+  const [availableByDoctorDay, setAvailableByDoctorDay] = useState<Record<string, boolean>>({});
+  // True when every availability request for the week failed -- the "OFF"
+  // cells would be misleading then, so a warning is shown above the grid.
+  const [availabilityWarning, setAvailabilityWarning] = useState(false);
 
   useEffect(() => {
     const byIdForSlots = new Map<string, { employeeId: string; branchId: string }>();
@@ -246,55 +300,96 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     if (pairs.length === 0) {
       setDoctorBranchIds({});
       setAvailableByDoctorDay({});
+      setAvailabilityWarning(false);
       return;
     }
 
-    Promise.all(
-      pairs.map((doc) =>
-        employeeApi
-          .getOne(doc.employeeId)
-          .then((res) => {
-            const mapped = (res.data?.data?.branches ?? []).map((b) => b.branch_id);
-            return [doc.employeeId, mapped.length ? mapped : [doc.branchId]] as const;
-          })
-          .catch(() => [doc.employeeId, [doc.branchId]] as const),
-      ),
-    ).then((branchEntries) => {
+    let cancelled = false;
+
+    const fetchAvailability = async () => {
+      const branchEntries = await Promise.all(
+        pairs.map((doc) =>
+          employeeApi
+            .getOne(doc.employeeId)
+            .then((res) => {
+              const mapped = (res.data?.data?.branches ?? []).map((b) => b.branch_id);
+              return [doc.employeeId, mapped.length ? mapped : [doc.branchId]] as const;
+            })
+            .catch(() => [doc.employeeId, [doc.branchId]] as const),
+        ),
+      );
+      if (cancelled) return;
+
       const branchMap = Object.fromEntries(branchEntries);
       setDoctorBranchIds(branchMap);
 
       const dayKeys = weekDays.map((d) => format(d, "yyyy-MM-dd"));
 
-      return Promise.all(
-        pairs.flatMap((doc) => {
-          const branchIds = branchMap[doc.employeeId] ?? [doc.branchId];
-          return dayKeys.map((dateStr) =>
-            Promise.all(
-              branchIds.map((branchId) =>
-                appointmentApi
+      // Chunk the requests (5 at a time) so a large doctor roster doesn't
+      // fire hundreds of parallel calls at the backend at once.
+      const jobs: (() => Promise<readonly [string, boolean | null]>)[] = [];
+      for (const doc of pairs) {
+        const branchIds = branchMap[doc.employeeId] ?? [doc.branchId];
+        for (const dateStr of dayKeys) {
+          jobs.push(async () => {
+            const results: AvailabilityResult[] = await Promise.all(
+              branchIds.map((branchId) => {
+                const cacheKey = `${doc.employeeId}|${dateStr}|${branchId}`;
+                const cached = availabilityCacheRef.get(cacheKey);
+                if (cached !== undefined) return Promise.resolve(cached);
+                return appointmentApi
                   .getAvailableSlots(doc.employeeId, branchId, dateStr)
-                  .then((res) => (res.data?.data?.slots ?? []).some((s) => s.is_available))
-                  .catch(() => false),
-              ),
-            ).then((results) => {
-              const openIndex = results.findIndex(Boolean);
-              return [
-                `${doc.employeeId}|${dateStr}`,
-                openIndex >= 0 ? branchIds[openIndex] : null,
-              ] as const;
-            }),
-          );
-        }),
-      );
-    }).then((entries) => {
-      if (entries) setAvailableByDoctorDay(Object.fromEntries(entries));
-    });
+                  .then((res) => {
+                    const available = (res.data?.data?.slots ?? []).some((s) => s.is_available);
+                    availabilityCacheRef.set(cacheKey, available);
+                    return available as boolean;
+                  })
+                  .catch(() => null);
+              }),
+            );
+            if (results.some((r) => r === true)) return [doc.employeeId + "|" + dateStr, true] as const;
+            if (results.every((r) => r === null)) return [doc.employeeId + "|" + dateStr, null] as const;
+            return [doc.employeeId + "|" + dateStr, false] as const;
+          });
+        }
+      }
+
+      const entries = new Map<string, boolean | null>();
+      for (let i = 0; i < jobs.length; i += 5) {
+        const chunk = jobs.slice(i, i + 5);
+        const results = await Promise.all(chunk.map((job) => job()));
+        if (cancelled) return;
+        results.forEach(([key, value]) => entries.set(key, value));
+      }
+
+      const confirmed = new Map<string, boolean>();
+      let failures = 0;
+      let successes = 0;
+      entries.forEach((value, key) => {
+        if (value === null) {
+          failures++;
+        } else {
+          successes++;
+          confirmed.set(key, value);
+        }
+      });
+
+      if (!cancelled) {
+        setAvailableByDoctorDay(Object.fromEntries(confirmed));
+        setAvailabilityWarning(failures > 0 && successes === 0);
+      }
+    };
+
+    void fetchAvailability();
+    return () => {
+      cancelled = true;
+    };
   }, [allDoctors, weekAppointments, selectedDate]);
 
   useEffect(() => {
     const dayKeys = weekDays.map((d) => format(d, "yyyy-MM-dd"));
 
-    const byId = new Map<string, { employeeId: string; name: string; department: string; departmentId: string }>();
+    const byId = new Map<string, { employeeId: string; name: string; department: string }>();
     allDoctors.forEach((doc) => byId.set(doc.employeeId, doc));
     weekAppointments.forEach((appt) => {
       const emp = appt.employees;
@@ -303,7 +398,6 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
         employeeId: emp.employee_id,
         name: `Dr. ${[emp.first_name, emp.middle_name, emp.last_name].filter(Boolean).join(" ")}`,
         department: (emp.specialization || "General").toUpperCase(),
-        departmentId: appt.department_id || "",
       });
     });
 
@@ -311,59 +405,31 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     // multi-branch mappings) -- group by name so they render as one row
     // instead of repeating, while still counting appointments from every
     // employee_id that maps to that name.
-    const byName = new Map<
-      string,
-      { employeeIds: string[]; name: string; department: string; departmentId: string }
-    >();
+    const byName = new Map<string, { employeeIds: string[]; name: string; department: string }>();
     byId.forEach((doc) => {
       const existing = byName.get(doc.name);
       if (existing) {
         existing.employeeIds.push(doc.employeeId);
       } else {
-        byName.set(doc.name, {
-          employeeIds: [doc.employeeId],
-          name: doc.name,
-          department: doc.department,
-          departmentId: doc.departmentId,
-        });
+        byName.set(doc.name, { employeeIds: [doc.employeeId], name: doc.name, department: doc.department });
       }
     });
 
     const derivedDoctors: Doctor[] = Array.from(byName.values()).map((doc) => ({
       name: doc.name,
       department: doc.department,
-      departmentId: doc.departmentId,
-      employeeIds: doc.employeeIds,
       schedule: dayKeys.map((key) => {
-        const count = filteredWeekAppointments.filter(
+        const count = weekAppointments.filter(
           (appt) =>
             appt.employees && doc.employeeIds.includes(appt.employees.employee_id) &&
             utcDateKey(appt.appointment_date) === key,
         ).length;
 
         if (count === 0) {
-          // Pick the employee_id (and its branch) that actually has an open
-          // slot on this day, so the clicked cell hands AddAppointment a
-          // doctor/branch combination the backend really accepts.
-          const openEntry = doc.employeeIds
-            .map((id) => ({ id, branchId: availableByDoctorDay[`${id}|${key}`] }))
-            .find((entry) => entry.branchId != null);
-
-          if (openEntry) {
-            return {
-              patients: 0,
-              progress: 0,
-              color: "blue",
-              off: false,
-              booking: {
-                doctorId: openEntry.id,
-                branchId: openEntry.branchId as string,
-                departmentId: doc.departmentId,
-                date: key,
-              },
-            };
-          }
-          return { patients: 0, progress: 0, color: "gray", off: true };
+          const hasOpenSlot = doc.employeeIds.some((id) => availableByDoctorDay[`${id}|${key}`]);
+          return hasOpenSlot
+            ? { patients: 0, progress: 0, color: "blue", off: false }
+            : { patients: 0, progress: 0, color: "gray", off: true };
         }
 
         const progress = Math.min(100, count * 10);
@@ -398,35 +464,15 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
     return true;
   });
 
-  const totalAppointments = filteredWeekAppointments.length;
+  const totalAppointments = weekAppointments.length;
 
   // ---- EXPORT ----
   const handleExport = async (exportFormat: string) => {
-    if (exportFormat === "pdf") {
-      downloadExportPdf({
-        title: "Appointment Schedule - Week",
-        subtitle: `${format(weekStart, "dd MMM yyyy")} to ${format(addDays(weekStart, 6), "dd MMM yyyy")} - ${filteredWeekAppointments.length} appointment${filteredWeekAppointments.length === 1 ? "" : "s"}`,
-        filename: `appointments-week-${format(weekStart, "yyyy-MM-dd")}.pdf`,
-        columns: [
-          { header: "Appointment No", cell: (r: AppointmentRecord) => r.appointment_id },
-          { header: "Token", cell: (r: AppointmentRecord) => (r.token_number != null ? String(r.token_number) : "—") },
-          { header: "Patient", cell: (r: AppointmentRecord) => formatPatientName(r.patient_bio_data) },
-          { header: "Branch", cell: (r: AppointmentRecord) => r.branch?.branch_name ?? "—" },
-          { header: "Doctor", cell: (r: AppointmentRecord) => formatDoctorName(r.employees) },
-          { header: "Date", cell: (r: AppointmentRecord) => formatAppointmentDate(r.appointment_date) },
-          { header: "Time", cell: (r: AppointmentRecord) => formatAppointmentTime(r.appointment_time) },
-          { header: "Status", cell: (r: AppointmentRecord) => r.status ?? "—" },
-        ],
-        rows: filteredWeekAppointments,
-      });
-      toast({ title: "Export complete", description: "The PDF file has been downloaded." });
-      return;
-    }
     if (exportFormat !== "csv") return;
     try {
       await downloadExportCsv("appointments", {
-        from: format(weekStart, "yyyy-MM-dd"),
-        to: format(addDays(weekStart, 6), "yyyy-MM-dd"),
+        from: weekDateFrom,
+        to: weekDateTo,
       });
       toast({ title: "Export complete", description: "The CSV file has been downloaded." });
     } catch (err: any) {
@@ -439,7 +485,7 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
   };
 
   return (
-    <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
+    <div className="flex w-full font-manrope bg-clinical-page-bg min-h-screen">
       <div className="flex flex-col flex-1 min-w-0">
         <main className="flex flex-col gap-6">
 
@@ -447,287 +493,310 @@ const AppointmentSchedule = ({ onViewChange }: AppointmentScheduleProps = {}) =>
 
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
 
-        <div>
-          <h1 className="hms-heading">
-            Appointment Schedule
-          </h1>
+            <div>
+              <h1 className="hms-heading">
+                Appointment Schedule
+              </h1>
 
-          <p className="hms-subheading mt-1">
-            Total Appointments: {totalAppointments}
-          </p>
+              <p className="hms-subheading mt-1">
+                Total Appointments: {totalAppointments}
+              </p>
 
-        </div>
-
-
-        <div className="flex items-center gap-3">
-          {can("report.export") && <ExportReport onExport={handleExport} />}
+            </div>
 
 
+            <div className="flex items-center gap-3">
+              {can("report.export") && <ExportReport onExport={handleExport} />}
 
-          {can("appointment.create") && (
-          <button
-            onClick={() => navigate("/appointments/add")}
-            className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
-          >
+              {can("appointment.create") && (
+                <button
+                  onClick={() => navigate("/appointments/add")}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-clinical-blue rounded-lg text-white text-xs font-semibold shadow-sm shadow-clinical-blue/20 transition-colors hover:bg-clinical-blue-mid"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Appointment
+                </button>
+              )}
 
-            <Plus className="w-4 h-4" />
-            Add Appointment
-
-          </button>
-          )}
-
-
-        </div>
-
+            </div>
 
           </div>
 
           {/* ==================== MAIN CARD ==================== */}
 
-          <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col min-h-[500px] transition-all duration-300 hover:shadow-md">
+          <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm flex flex-col min-h-[500px] transition-all duration-300 hover:shadow-md">
 
-          {/* Toolbar */}
+            {/* ==================== TOOLBAR ==================== */}
 
-          <div
-            role="toolbar"
-            aria-label="Schedule filters and actions"
-            className="px-5 py-4 border-b border-[#E5E7EB] flex flex-nowrap items-center gap-2 md:gap-2.5"
-          >
+            <div className="px-5 py-4 border-b border-[#E5E7EB] flex flex-wrap items-center justify-between gap-4">
 
-        {/* View Type - Week View */}
-        <div className="relative flex flex-col items-start gap-1.5" ref={viewMenuRef}>
 
-          <button
-            type="button"
-            onClick={() => setIsViewMenuOpen((o) => !o)}
-            className="flex items-center gap-2 px-3 py-1.5 border border-[#e5e7eb] rounded-md text-xs font-semibold text-[#374151] hover:border-[#00488D] transition-colors"
-          >
+              <div className="flex flex-wrap items-center gap-3">
 
-            <span>Week View</span>
-            <ChevronDown
-              className={`w-3 h-3 flex-none text-[#6b7280] transition-transform duration-200 ${isViewMenuOpen ? "rotate-180" : ""}`}
-            />
-          </button>
 
-          <div
-            className={`absolute left-0 top-full mt-1 w-32 bg-white border border-[#e5e7eb] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
-              isViewMenuOpen ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
-            }`}
-          >
-            {viewOptions.map((opt) => (
-              <button
-                key={opt.key}
-                type="button"
-                onClick={() => handleViewSelect(opt.key)}
-                className={`flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors ${
-                  opt.key === "week" ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
-                }`}
-              >
-                {opt.label}
-                {opt.key === "week" && <Check className="w-3 h-3" />}
-              </button>
-            ))}
-          </div>
-        </div>
+                <div className="relative" ref={viewMenuRef}>
 
-        {/* Search doctors */}
-        <div className="relative">
-          <input
-            type="text"
-            placeholder="Search"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            aria-label="Search doctors in schedule"
-            className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:w-[200px] sm:focus:w-[250px]"
-          />
-          <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#424752]" />
-        </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsViewMenuOpen((o) => !o)}
+                    className="flex items-center gap-2 px-3 py-1.5 border border-[#E5E7EB] rounded-md text-xs font-semibold text-[#374151] hover:border-[#00488D] transition-colors"
+                  >
 
-        {/* Filter doctors */}
-        <ToolbarFilter
-          title="Filter Doctors"
-          fields={doctorFilterFields}
-          values={filterValues}
-          onChange={handleFilterChange}
-          onApply={handleApplyFilter}
-          onClear={handleClearFilter}
-          open={isFilterOpen}
-          onOpenChange={setIsFilterOpen}
-        />
+                    {viewTypeOptions.find((opt) => opt.key === viewType)?.label}
 
-        {/* Week navigation */}
-        <div role="group" aria-label="Week navigation" className="flex items-center">
-          <button
-            type="button"
-            aria-label="Previous week"
-            onClick={() => setSelectedDate((prev) => subDays(prev, 7))}
-            className="flex h-[34px] w-[25px] items-center justify-center rounded-l-lg border border-[#e5e7eb] bg-white"
-          >
-            <ChevronLeft className="h-4 w-4 text-[#6b7280]" />
-          </button>
+                    <ChevronDown className={`w-3 h-3 text-[#6B7280] transition-transform duration-200 ${isViewMenuOpen ? "rotate-180" : ""}`} />
 
-          <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="h-[34px] w-[110px] whitespace-nowrap border-y border-[#e5e7eb] bg-white px-[10px] py-[9px] text-center font-['Inter',sans-serif] text-[10px] font-medium leading-4 shadow-[0_1px_1px_rgba(0,0,0,0.05)]"
-              >
-                {dateLabel}
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0 border-[#e5e7eb] shadow-lg">
-              <CalendarPicker
-                selected={selectedDate}
-                hideThemePicker
-                onSelect={(date) => {
-                  setSelectedDate(date);
-                  setIsCalendarOpen(false);
-                }}
-              />
-            </PopoverContent>
-          </Popover>
+                  </button>
 
-          <button
-            type="button"
-            aria-label="Next week"
-            onClick={() => setSelectedDate((prev) => addDays(prev, 7))}
-            className="flex h-[34px] w-[25px] items-center justify-center rounded-r-lg border border-[#e5e7eb] bg-white"
-          >
-            <ChevronRight className="h-4 w-4 text-[#6b7280]" />
-          </button>
-        </div>
-      </div>
-
-          {/* Content */}
-          <div className="p-5 flex flex-col items-start gap-[29px] lg:flex-row">
-          <section
-            aria-label="Doctor weekly appointment schedule grid"
-            className="w-full overflow-x-auto rounded-xl border border-[#E5E7EB] bg-white shadow-sm"
-          >
-
-            {isLoadingWeek ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-16 text-[#6B7280] text-sm">
-                <Loader2 size={24} className="animate-spin text-[#00488D]" />
-                Loading schedule...
-              </div>
-            ) : doctors.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-[#6B7280] text-sm">
-                No appointments found for this week.
-              </div>
-            ) : visibleDoctors.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-[#6B7280] text-sm">
-                No doctors match your search or filters.
-              </div>
-            ) : (
-            <table className="w-full min-w-[1070px] table-fixed border-collapse">
-
-          <thead>
-
-            <tr className="bg-white border-b border-[#c3c6d7]">
-
-              <th className="sticky left-0 z-10 w-[160px] border-r border-[#c3c6d7] bg-white px-4 py-3 text-left font-['Manrope',sans-serif] text-[10px] font-bold uppercase leading-[15px] text-[#515f74]">
-                Specialist
-              </th>
-
-              {weekDays.map((day) => (
-                <th
-                  key={day.toISOString()}
-                  className="w-[130px] border-r border-[#c3c6d7] last:border-r-0 px-4 py-3 text-center font-['Manrope',sans-serif] text-[10px] font-bold uppercase leading-[15px] text-[#515f74]"
-                >
-                  {format(day, "EEE d")}
-                </th>
-              ))}
-
-            </tr>
-
-          </thead>
-
-          <tbody>
-
-            {visibleDoctors.map((doctor) => (
-              <tr
-                key={doctor.name}
-                className="border-b border-[#c3c6d7] last:border-b-0"
-              >
-                <td className="sticky left-0 z-10 w-[160px] border-r border-[#c3c6d7] bg-[#f2f4f6] px-4 py-3 align-top">
-
-                  <h3 className="font-['Manrope',sans-serif] text-[10px] font-bold leading-[15px] text-[#004ac6]">
-                    {doctor.name}
-                  </h3>
-
-                  <p className="mt-1 font-['Manrope',sans-serif] text-[8px] font-bold uppercase leading-3 tracking-wide text-[#515f74]">
-                    {doctor.department}
-                  </p>
-
-                </td>
-
-                {doctor.schedule.map((item, index) => {
-                  if (item.off) {
-                    return (
-                      <td
-                        key={index}
-                        className="border-r border-[#c3c6d7] last:border-r-0 p-1 align-middle"
+                  <div
+                    className={`absolute left-0 top-full mt-1 w-32 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-40 transition-all duration-150 ${
+                      isViewMenuOpen ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
+                    }`}
+                  >
+                    {viewTypeOptions.map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => { handleViewSelect(opt.key); }}
+                        className={`flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors ${
+                          viewType === opt.key ? "bg-[#D6E3FF] text-[#00488D]" : "text-[#374151] hover:bg-[#F2F4F6]"
+                        }`}
                       >
-                        <div className="flex h-[52px] w-full items-center justify-center rounded border border-dashed border-[#c3c6d7]">
-                          <span className="font-['Manrope',sans-serif] text-[9px] font-bold uppercase tracking-wide text-[#9aa1ad]">
-                            OFF
-                          </span>
-                        </div>
-                      </td>
-                    );
-                  }
+                        {opt.label}
+                        {viewType === opt.key && <Check className="w-3 h-3" />}
+                      </button>
+                    ))}
+                  </div>
 
-                  if (item.patients === 0) {
-                    return (
-                      <td key={index} className="border-r border-[#c3c6d7] last:border-r-0 p-1">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            item.booking &&
-                            navigate("/appointments/add", { state: { slot: item.booking } })
-                          }
-                          className="flex h-[52px] w-full items-center justify-center rounded-[2px] border-l-2 border-l-[#004ac6] bg-[rgba(0,74,198,0.05)] p-1 text-center transition-opacity hover:opacity-80"
-                        >
-                          <span className="font-['Manrope',sans-serif] text-[9px] font-bold leading-[13px] text-[#004ac6]">
-                            New slot available
-                          </span>
-                        </button>
-                      </td>
-                    );
-                  }
+                </div>
 
-                  const style = colorStyles[item.color];
 
-                  return (
-                    <td key={index} className="border-r border-[#c3c6d7] last:border-r-0 p-1">
-                      <div
-                        className={`flex h-[52px] w-full flex-col justify-between rounded-[2px] border-l-2 p-1 pl-1.5 ${style.bg} ${style.border}`}
-                      >
-                        <p className={`font-['Manrope',sans-serif] text-[10px] font-bold leading-[15px] ${style.text}`}>
-                          {item.patients} Patients
-                        </p>
+              </div>
 
-                        <div className="relative block h-1 w-full overflow-hidden rounded-xl bg-[#e0e3e5]">
-                          <div
-                            className={`absolute inset-0 rounded-xl ${style.fill}`}
-                            style={{ width: `${item.progress}%` }}
-                          />
-                        </div>
+
+              <div className="flex items-center gap-3 flex-wrap">
+
+                {/* Search doctors */}
+
+                <div className="relative">
+
+                  <input
+                    type="text"
+                    placeholder="Search"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    aria-label="Search doctors in schedule"
+                    className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[250px]"
+                  />
+
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
+
+                </div>
+
+                {/* Week navigation */}
+
+                <div className="flex items-center">
+
+                  <button
+                    onClick={() => setSelectedDate((prev) => subDays(prev, 7))}
+                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                  >
+                    <ChevronLeft className="w-3 h-3 text-[#424752]" />
+                  </button>
+
+
+                  <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                    <PopoverTrigger asChild>
+                      <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
+                        {dateLabel}
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
+                      <CalendarPicker
+                        selected={selectedDate}
+                        hideThemePicker
+                        onSelect={(date) => {
+                          if (date instanceof Date) setSelectedDate(date);
+                          setIsCalendarOpen(false);
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
+
+
+                  <button
+                    onClick={() => setSelectedDate((prev) => addDays(prev, 7))}
+                    className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                  >
+                    <ChevronRight className="w-3 h-3 text-[#424752]" />
+                  </button>
+
+                </div>
+
+
+
+                {/* Filter doctors */}
+
+                <FilterPopover
+                  title="Filter Doctors"
+                  fields={doctorFilterFields}
+                  values={filterValues}
+                  onChange={handleFilterChange}
+                  onApply={handleApplyFilter}
+                  onClear={handleClearFilter}
+                  open={isFilterOpen}
+                  onOpenChange={setIsFilterOpen}
+                />
+
+                <RefreshButton onClick={() => setDataVersion((v) => v + 1)} isLoading={isLoadingWeek} />
+
+              </div>
+
+            </div>
+
+            {/* Content */}
+            <div className="p-5 flex flex-col items-start gap-[29px] lg:flex-row">
+              <section
+                aria-label="Doctor weekly appointment schedule grid"
+                className="w-full overflow-x-auto rounded-xl border border-[#E2E8F0] bg-white shadow-sm"
+              >
+
+                {isLoadingWeek ? (
+                  <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-clinical-label">
+                    <Loader2 size={24} className="animate-spin text-clinical-blue" />
+                    Loading schedule...
+                  </div>
+                ) : weekLoadFailed ? (
+                  <div className="flex items-center justify-center py-16 text-sm text-clinical-label">
+                    Couldn't load appointments. Check the connection and try again.
+                  </div>
+                ) : doctorsFailed ? (
+                  <div className="flex items-center justify-center py-16 text-sm text-clinical-label">
+                    Couldn't load doctors. Check the connection and try again.
+                  </div>
+                ) : doctors.length === 0 ? (
+                  <div className="flex items-center justify-center py-16 text-sm text-clinical-label">
+                    No appointments found for this week.
+                  </div>
+                ) : visibleDoctors.length === 0 ? (
+                  <div className="flex items-center justify-center py-16 text-sm text-clinical-label">
+                    No doctors match your search or filters.
+                  </div>
+                ) : (
+                  <>
+                    {availabilityWarning && (
+                      <div className="flex items-center gap-2 border-b border-[#E2E8F0] bg-amber-50 px-4 py-2.5 text-[11px] font-medium text-amber-700">
+                        <TriangleAlert className="h-3.5 w-3.5 flex-none" />
+                        Couldn't verify slot availability — days without bookings may show as OFF.
                       </div>
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
+                    )}
+                    <table className="w-full min-w-[1070px] table-fixed border-collapse">
 
-          </tbody>
+                      <thead>
 
-        </table>
-            )}
+                        <tr className="bg-[#F8FAFC] border-b border-[#E2E8F0]">
 
-      </section>
+                          <th className="sticky left-0 z-10 w-[160px] border-r border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wide text-clinical-label">
+                            Specialist
+                          </th>
 
-          </div>
+                          {weekDays.map((day) => (
+                            <th
+                              key={day.toISOString()}
+                              className="w-[130px] border-r border-[#E2E8F0] last:border-r-0 px-4 py-3 text-center text-[11px] font-bold uppercase tracking-wide text-clinical-label"
+                            >
+                              {format(day, "EEE d")}
+                            </th>
+                          ))}
+
+                        </tr>
+
+                      </thead>
+
+                      <tbody>
+
+                        {visibleDoctors.map((doctor) => (
+                          <tr
+                            key={doctor.name}
+                            className="border-b border-[#E2E8F0] last:border-b-0"
+                          >
+                            <td className="sticky left-0 z-10 w-[160px] border-r border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 align-top">
+
+                              <h3 className="text-[12px] font-bold leading-[15px] text-clinical-blue">
+                                {doctor.name}
+                              </h3>
+
+                              <p className="mt-1 text-[10px] font-bold uppercase leading-3 tracking-wide text-clinical-label">
+                                {doctor.department}
+                              </p>
+
+                            </td>
+
+                            {doctor.schedule.map((item, index) => {
+                              if (item.off) {
+                                return (
+                                  <td
+                                    key={index}
+                                    className="border-r border-[#E2E8F0] last:border-r-0 p-1.5 align-middle"
+                                  >
+                                    <div className="flex h-[52px] w-full items-center justify-center rounded-md border border-dashed border-clinical-blue/30">
+                                      <span className="text-[10px] font-bold uppercase tracking-wide text-clinical-label">
+                                        OFF
+                                      </span>
+                                    </div>
+                                  </td>
+                                );
+                              }
+
+                              if (item.patients === 0) {
+                                return (
+                                  <td key={index} className="border-r border-[#E2E8F0] last:border-r-0 p-1.5">
+                                    <div className="flex h-[52px] w-full items-center justify-center rounded-md border-l-2 border-l-clinical-blue bg-clinical-blue/5 p-1 text-center">
+                                      <span className="text-[10px] font-bold leading-[13px] text-clinical-blue">
+                                        New slot available
+                                      </span>
+                                    </div>
+                                  </td>
+                                );
+                              }
+
+                              const style = colorStyles[item.color];
+
+                              return (
+                                <td key={index} className="border-r border-[#E2E8F0] last:border-r-0 p-1.5">
+                                  <div
+                                    className={cn(
+                                      "flex h-[52px] w-full flex-col justify-between rounded-md border-l-2 p-1.5 pl-2",
+                                      style.bg,
+                                      style.border,
+                                    )}
+                                  >
+                                    <p className={cn("text-[11px] font-bold leading-[15px]", style.text)}>
+                                      {item.patients} Patients
+                                    </p>
+
+                                    <div className="relative block h-1 w-full overflow-hidden rounded-full bg-[#E2E8F0]">
+                                      <div
+                                        className={cn("absolute inset-y-0 left-0 rounded-full", style.fill)}
+                                        style={{ width: `${item.progress}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+
+                      </tbody>
+
+                    </table>
+                  </>
+                )}
+
+              </section>
+
+            </div>
           </div>
         </main>
       </div>

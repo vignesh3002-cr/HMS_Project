@@ -117,6 +117,10 @@ export interface EmployeeRecord {
   gender?: string | null;
   dob?: string | null;
   deleted_at?: string | null;
+  // Backend-computed fields when `date` query param is provided
+  doctor_status?: "ACTIVE" | "LEAVE" | "INACTIVE";
+  total_slots?: number;
+  booked_count?: number;
 }
 
 export interface EmployeeDetailResponse {
@@ -131,7 +135,6 @@ export interface EmployeeDetailResponse {
     branch_id: string;
     branch_name: string;
     status?: number;
-    is_primary_branch?: boolean;
     has_schedule?: boolean;
     assigned_date?: string | null;
   }[];
@@ -154,10 +157,15 @@ export interface DoctorScheduleRecord {
   start_time: string | null;
   end_time: string | null;
   consultation_minutes: number | null;
-  is_active: boolean | null;
-  effective_from?: string | null;
-  effective_to?: string | null;
-  branch?: { branch_name: string } | null;
+  is_active: boolean;
+  effective_from: string | null;
+  effective_to: string | null;
+  deleted_by: string | null;
+  branch?: {
+    branch_id: string;
+    branch_name: string;
+    branch_area: string | null;
+  } | null;
 }
 
 export interface CreateEmployeeResponse {
@@ -215,6 +223,7 @@ export interface GetEmployeesParams {
   search?: string;
   page?: number;
   limit?: number;
+  date?: string;
 }
 
 export interface UpdateEmployeePayload {
@@ -233,6 +242,16 @@ export interface UpdateEmployeePayload {
   passport_no?: string;
   permanent_address?: string;
   current_address?: string;
+  employee_photo_URL?: string;
+  employee_state?: string;
+  employee_district?: string;
+  employee_area?: string;
+  employee_pincode?: number;
+  permanent_employee_state?: string;
+  permanent_employee_district?: string;
+  permanent_employee_area?: string;
+  permanent_employee_pincode?: number;
+  employee_no_experence?: number;
   emergency_contact_name?: string;
   emergency_contact_relationship?: string;
   emergency_contact_number?: string;
@@ -243,19 +262,9 @@ export interface UpdateEmployeePayload {
   license_no?: string;
   joining_date?: string;
   emp_status?: boolean;
-  employee_photo_URL?: string;
-  employee_state?: string;
-  employee_district?: string;
-  employee_area?: string;
-  employee_pincode?: number;
-  permanent_employee_state?: string;
-  permanent_employee_district?: string;
-  permanent_employee_area?: string;
-  permanent_employee_pincode?: number;
   gender?: string;
   dob?: string;
   age?: number;
-  employee_no_experence?: number;
   branch_ids?: string[];
   consultation_minutes?: number;
   doctor_bio?: string;
@@ -294,7 +303,7 @@ export const employeeApi = {
     API.post<{ success: boolean; message: string }>(`/employees/${employeeId}/restore`),
 
   addScheduleSlot: (employeeId: string, data: AddScheduleSlotPayload) =>
-    API.post<AddScheduleSlotResponse>(`/employees/${employeeId}/schedules`, data),
+    API.post<AddScheduleSlotResponse>(`/doctor-schedule/recurring/slot/${employeeId}`, data),
 
   updateScheduleSlot: (employeeId: string, scheduleId: string | number, data: UpdateScheduleSlotPayload) =>
     API.put<AddScheduleSlotResponse>(`/employees/${employeeId}/schedules/${scheduleId}`, data),

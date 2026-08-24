@@ -1,6 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { ChevronLeft, ChevronRight, Sun, Moon, Leaf, Wind, Palette } from "lucide-react";
- 
+
 /**
  * Themeable Calendar
  * ---------------------------------------------------------
@@ -16,15 +16,15 @@ import { ChevronLeft, ChevronRight, Sun, Moon, Leaf, Wind, Palette } from "lucid
  * the rest of the palette (borders, hover states, muted text) is
  * derived automatically with color-mix() so it still looks cohesive.
  */
- 
+
 type ThemeName = "light" | "dark" | "forest" | "breeze" | "custom";
- 
+
 interface Theme {
   label: string;
   icon: React.ComponentType<{ size?: number | string }>;
   vars: Record<string, string>;
 }
- 
+
 const THEMES: Record<ThemeName, Theme> = {
   light: {
     label: "Light",
@@ -39,6 +39,8 @@ const THEMES: Record<ThemeName, Theme> = {
       "--cal-accent-text": "#ffffff",
       "--cal-today-ring": "#00488D",
       "--cal-hover": "#D6E3FF",
+      "--cal-range-bg": "rgba(0, 72, 141, 0.1)",
+      "--cal-range-border": "#00488D",
       "--cal-shadow": "0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06)",
     },
   },
@@ -55,6 +57,8 @@ const THEMES: Record<ThemeName, Theme> = {
       "--cal-accent-text": "#0b0b0d",
       "--cal-today-ring": "#818cf8",
       "--cal-hover": "#26262e",
+      "--cal-range-bg": "rgba(129, 140, 248, 0.2)",
+      "--cal-range-border": "#818cf8",
       "--cal-shadow": "0 1px 2px rgba(0,0,0,0.3), 0 12px 28px rgba(0,0,0,0.45)",
     },
   },
@@ -71,6 +75,8 @@ const THEMES: Record<ThemeName, Theme> = {
       "--cal-accent-text": "#f4f7f1",
       "--cal-today-ring": "#65a30d",
       "--cal-hover": "#dde8d3",
+      "--cal-range-bg": "rgba(63, 98, 18, 0.15)",
+      "--cal-range-border": "#3f6212",
       "--cal-shadow": "0 1px 2px rgba(38,51,30,0.06), 0 10px 24px rgba(38,51,30,0.10)",
     },
   },
@@ -87,6 +93,8 @@ const THEMES: Record<ThemeName, Theme> = {
       "--cal-accent-text": "#f2f9fb",
       "--cal-today-ring": "#0ea5b7",
       "--cal-hover": "#dcf0f4",
+      "--cal-range-bg": "rgba(14, 165, 183, 0.15)",
+      "--cal-range-border": "#0ea5b7",
       "--cal-shadow": "0 1px 2px rgba(14,110,125,0.05), 0 10px 24px rgba(14,110,125,0.10)",
     },
   },
@@ -103,11 +111,13 @@ const THEMES: Record<ThemeName, Theme> = {
       "--cal-accent-text": "#ffffff",
       "--cal-today-ring": "#e0703f",
       "--cal-hover": "#fde7d8",
+      "--cal-range-bg": "rgba(224, 112, 63, 0.15)",
+      "--cal-range-border": "#e0703f",
       "--cal-shadow": "0 1px 2px rgba(0,0,0,0.05), 0 10px 24px rgba(0,0,0,0.08)",
     },
   },
 };
- 
+
 /** Pick a readable foreground (near-black or near-white) for a given hex background. */
 function contrastFor(hex: string): string {
   const clean = hex.replace("#", "");
@@ -118,7 +128,7 @@ function contrastFor(hex: string): string {
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   return luminance > 0.6 ? "#111827" : "#ffffff";
 }
- 
+
 /** Build a full theme palette from just three user-picked colors. */
 function buildCustomVars(bg: string, accent: string, text: string): Record<string, string> {
   return {
@@ -131,31 +141,37 @@ function buildCustomVars(bg: string, accent: string, text: string): Record<strin
     "--cal-accent-text": contrastFor(accent),
     "--cal-today-ring": accent,
     "--cal-hover": `color-mix(in srgb, ${bg}, ${accent} 14%)`,
+    "--cal-range-bg": `color-mix(in srgb, ${bg}, ${accent} 12%)`,
+    "--cal-range-border": accent,
     "--cal-shadow": "0 1px 2px rgba(0,0,0,0.05), 0 10px 24px rgba(0,0,0,0.08)",
   };
 }
- 
+
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
- 
+
 interface CustomColors {
   bg: string;
   accent: string;
   text: string;
 }
- 
+
 const DEFAULT_CUSTOM: CustomColors = { bg: "#fdf6ec", accent: "#e0703f", text: "#2b2118" };
- 
+
+export type DateRange = { from: Date; to: Date };
+
 interface CalendarProps {
   /** Controlled theme. If omitted, the calendar manages its own theme with the picker. */
   theme?: ThemeName;
-  /** Controlled selected date. If omitted, the calendar manages its own selection. */
-  selected?: Date | null;
-  /** Called when the user picks a date. */
-  onSelect?: (date: Date) => void;
+  /** Selection mode: "single" (default) or "range" */
+  mode?: "single" | "range";
+  /** Controlled selected date(s). Single mode: Date | null. Range mode: DateRange | null. */
+  selected?: Date | DateRange | null;
+  /** Called when the user picks a date or range. */
+  onSelect?: (date: Date | DateRange | null) => void;
   /** Hide the built-in theme picker (useful if you control theme externally). */
   hideThemePicker?: boolean;
   /** Starting colors for the "Custom" theme (background, accent, text). */
@@ -174,6 +190,7 @@ interface CalendarProps {
 
 export default function Calendar({
   theme,
+  mode = "single",
   selected: controlledSelected,
   onSelect,
   hideThemePicker,
@@ -194,20 +211,29 @@ export default function Calendar({
     activeTheme === "custom"
       ? buildCustomVars(customColors.bg, customColors.accent, customColors.text)
       : THEMES[activeTheme].vars;
- 
+
   const [cursor, setCursor] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
-  const [internalSelected, setInternalSelected] = useState<Date | null>(null);
+
+  // Internal selection state - supports both single date and range
+  const [internalSelected, setInternalSelected] = useState<Date | DateRange | null>(null);
   const selected = controlledSelected ?? internalSelected;
- 
+
+  // Range selection state
+  const [rangeStart, setRangeStart] = useState<Date | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [hoverDate, setHoverDate] = useState<Date | null>(null);
+
+  const gridRef = useRef<HTMLDivElement>(null);
+
   const today = new Date();
   const isSameDay = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate();
- 
+
   const days = useMemo(() => {
     const year = cursor.getFullYear();
     const month = cursor.getMonth();
@@ -215,9 +241,9 @@ export default function Calendar({
     const startOffset = firstDay.getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const daysInPrevMonth = new Date(year, month, 0).getDate();
- 
+
     const cells: { date: Date; inMonth: boolean }[] = [];
- 
+
     for (let i = startOffset - 1; i >= 0; i--) {
       cells.push({ date: new Date(year, month - 1, daysInPrevMonth - i), inMonth: false });
     }
@@ -230,10 +256,10 @@ export default function Calendar({
     }
     return cells;
   }, [cursor]);
- 
+
   const goToMonth = (delta: number) =>
     setCursor((c) => new Date(c.getFullYear(), c.getMonth() + delta, 1));
- 
+
   const currentYear = today.getFullYear();
   const yearOptions = useMemo(() => {
     const start = minYear ?? currentYear - 80;
@@ -242,29 +268,156 @@ export default function Calendar({
     for (let y = start; y <= end; y++) years.push(y);
     return years;
   }, [minYear, maxYear, currentYear]);
- 
+
   const handleMonthChange = (monthIndex: number) =>
     setCursor((c) => new Date(c.getFullYear(), monthIndex, 1));
- 
+
   const handleYearChange = (year: number) =>
     setCursor((c) => new Date(year, c.getMonth(), 1));
- 
-  const handlePick = (date: Date) => {
-    if (isDisabled(date)) return;
-    setInternalSelected(date);
-    onSelect?.(date);
-  };
 
   const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const isDisabled = (date: Date) =>
     (minDate && dayStart(date) < dayStart(minDate)) ||
     (maxDate && dayStart(date) > dayStart(maxDate)) ||
     (isDateDisabled ? isDateDisabled(date) : false);
- 
+
+  // Range helpers
+  const getRange = (start: Date, end: Date): DateRange => ({
+    from: start < end ? start : end,
+    to: start > end ? start : end,
+  });
+
+  const isInRange = (date: Date): boolean => {
+    if (mode !== "range") return false;
+    if (!rangeStart || !hoverDate) return false;
+    const { from, to } = getRange(rangeStart, hoverDate);
+    return dayStart(date) >= dayStart(from) && dayStart(date) <= dayStart(to);
+  };
+
+  const isRangeStart = (date: Date): boolean => {
+    if (mode !== "range") return false;
+    if (!rangeStart || !hoverDate) return false;
+    const { from } = getRange(rangeStart, hoverDate);
+    return isSameDay(date, from);
+  };
+
+  const isRangeEnd = (date: Date): boolean => {
+    if (mode !== "range") return false;
+    if (!rangeStart || !hoverDate) return false;
+    const { to } = getRange(rangeStart, hoverDate);
+    return isSameDay(date, to);
+  };
+
+  const isSelectedSingle = (date: Date): boolean => {
+    if (mode !== "single") return false;
+    return selected && isSameDay(date, selected as Date);
+  };
+
+  const isSelectedRange = (date: Date): boolean => {
+    if (mode !== "range") return false;
+    if (!selected || typeof selected === "object" && "from" in selected === false) return false;
+    const range = selected as DateRange;
+    return dayStart(date) >= dayStart(range.from) && dayStart(date) <= dayStart(range.to);
+  };
+
+  // Handle mouse events for drag selection
+  const handleMouseDown = (date: Date) => {
+    if (isDisabled(date) || mode !== "range") return;
+    setRangeStart(date);
+    setHoverDate(date);
+    setIsDragging(true);
+  };
+
+  const handleMouseEnter = (date: Date) => {
+    if (isDisabled(date)) return;
+    setHoverDate(date);
+    if (isDragging && mode === "range" && rangeStart) {
+      // Preview range during drag
+      const range = getRange(rangeStart, date);
+      setInternalSelected(range);
+    }
+  };
+
+  const handleMouseUp = () => {
+    if (isDragging && mode === "range" && rangeStart && hoverDate) {
+      const range = getRange(rangeStart, hoverDate);
+      setInternalSelected(range);
+      onSelect?.(range);
+    }
+    setIsDragging(false);
+    setRangeStart(null);
+    setHoverDate(null);
+  };
+
+  // Handle click (single or shift+click for range)
+  const handleClick = (date: Date, shiftKey: boolean) => {
+    if (isDisabled(date)) return;
+
+    if (mode === "single") {
+      setInternalSelected(date);
+      onSelect?.(date);
+      return;
+    }
+
+    // Range mode
+    if (shiftKey && rangeStart) {
+      // Shift+click: create range from rangeStart to clicked date
+      const range = getRange(rangeStart, date);
+      setInternalSelected(range);
+      onSelect?.(range);
+      setRangeStart(null);
+    } else if (!isDragging) {
+      // First click: set range start
+      setRangeStart(date);
+      setHoverDate(date);
+    }
+  };
+
+  // Handle keyboard for accessibility
+  const handleKeyDown = (e: React.KeyboardEvent, date: Date) => {
+    if (isDisabled(date)) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleClick(date, e.shiftKey);
+    }
+  };
+
+  // Cleanup on mouse leave
+  useEffect(() => {
+    const handleMouseLeave = () => {
+      if (isDragging) {
+        handleMouseUp();
+      }
+      setHoverDate(null);
+    };
+
+    const grid = gridRef.current;
+    if (grid) {
+      grid.addEventListener("mouseleave", handleMouseLeave);
+    }
+    return () => {
+      if (grid) {
+        grid.removeEventListener("mouseleave", handleMouseLeave);
+      }
+    };
+  }, [isDragging, rangeStart, hoverDate]);
+
+  // Sync internal selection when controlled prop changes
+  useEffect(() => {
+    if (controlledSelected !== undefined) {
+      setInternalSelected(controlledSelected);
+      setRangeStart(null);
+      setHoverDate(null);
+      setIsDragging(false);
+    }
+  }, [controlledSelected]);
+
   return (
     <div
       style={themeVars as React.CSSProperties}
       className="cal-root"
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
     >
       <div className="cal-card">
         <div className="cal-header">
@@ -305,35 +458,47 @@ export default function Calendar({
             <ChevronRight size={18} />
           </button>
         </div>
- 
+
         <div className="cal-weekdays">
           {WEEKDAYS.map((w) => (
             <div key={w} className="cal-weekday">{w}</div>
           ))}
         </div>
- 
-        <div className="cal-grid">
+
+        <div className="cal-grid" ref={gridRef}>
           {days.map(({ date, inMonth }, i) => {
             const isToday = isSameDay(date, today);
-            const isSelected = selected && isSameDay(date, selected);
             const disabled = isDisabled(date);
+            const selectedSingle = isSelectedSingle(date);
+            const selectedRange = isSelectedRange(date);
+            const inRange = isInRange(date);
+            const rangeStart = isRangeStart(date);
+            const rangeEnd = isRangeEnd(date);
+
             return (
               <button
                 key={i}
-                onClick={() => handlePick(date)}
+                onClick={(e) => handleClick(date, e.shiftKey)}
+                onMouseDown={() => handleMouseDown(date)}
+                onMouseEnter={() => handleMouseEnter(date)}
+                onKeyDown={(e) => handleKeyDown(e, date)}
                 disabled={disabled}
                 className="cal-day"
                 data-in-month={inMonth}
                 data-today={isToday}
-                data-selected={isSelected}
+                data-selected={selectedSingle || selectedRange}
+                data-range-start={rangeStart}
+                data-range-end={rangeEnd}
+                data-in-range={inRange}
                 data-disabled={disabled}
+                tabIndex={disabled ? -1 : 0}
               >
                 {date.getDate()}
               </button>
             );
           })}
         </div>
- 
+
         {!hideThemePicker && (
           <>
             <div className="cal-theme-picker">
@@ -370,7 +535,7 @@ export default function Calendar({
                 <Palette size={14} />
               </button>
             </div>
- 
+
             {activeTheme === "custom" && pickerOpen && (
               <div className="cal-custom-panel">
                 <label className="cal-custom-row">
@@ -402,7 +567,7 @@ export default function Calendar({
           </>
         )}
       </div>
- 
+
       <style>{`
         .cal-root {
           --radius: 14px;
@@ -504,21 +669,43 @@ export default function Calendar({
           color: var(--cal-text-muted);
           opacity: 0.5;
         }
-        .cal-day:hover {
+        .cal-day:hover:not([data-disabled="true"]) {
           background: var(--cal-hover);
         }
-        .cal-day:active {
+        .cal-day:active:not([data-disabled="true"]) {
           transform: scale(0.94);
         }
         .cal-day[data-today="true"] {
           box-shadow: inset 0 0 0 1.5px var(--cal-today-ring);
           font-weight: 600;
         }
-        .cal-day[data-selected="true"] {
+        /* Single selection */
+        .cal-day[data-selected="true"]:not([data-in-range="true"]):not([data-range-start="true"]):not([data-range-end="true"]) {
           background: var(--cal-accent);
           color: var(--cal-accent-text);
           font-weight: 600;
         }
+        /* Range selection */
+        .cal-day[data-in-range="true"] {
+          background: var(--cal-range-bg);
+          border-radius: 0;
+        }
+        .cal-day[data-range-start="true"] {
+          border-radius: 8px 0 0 8px;
+          background: var(--cal-accent);
+          color: var(--cal-accent-text);
+          font-weight: 600;
+        }
+        .cal-day[data-range-end="true"] {
+          border-radius: 0 8px 8px 0;
+          background: var(--cal-accent);
+          color: var(--cal-accent-text);
+          font-weight: 600;
+        }
+        .cal-day[data-range-start="true"][data-range-end="true"] {
+          border-radius: 8px;
+        }
+        /* Disabled state */
         .cal-day[data-disabled="true"] {
           opacity: 0.35;
           cursor: not-allowed;

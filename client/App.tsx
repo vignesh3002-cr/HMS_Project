@@ -14,6 +14,7 @@ import {
   BrowserRouter,
   Routes,
   Route,
+  Navigate,
 } from "react-router-dom";
 
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -45,7 +46,6 @@ import Security from "@/components/Forms/view/Security";
 // ============================================================
 
 import Appointments from "./pages/Appointments";
-import Dashboard from "./pages/Dashboard";
 import Departments from "./pages/Departments";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
@@ -78,12 +78,14 @@ import AccessDenied from "./pages/AccessDenied";
 // DOCTOR PORTAL
 // ============================================================
 
-import DoctorDashboard from "./pages/doctor/Dashboard";
 import DoctorAppointments from "./pages/doctor/AppointmentPage";
+import DashboardRedirect from "./pages/DashboardRedirect";
 import DoctorLeave from "./pages/doctor/LeavePage";
 import DoctorSchedule from "./pages/doctor/MySchedulePage";
 import DoctorReviews from "./pages/doctor/ReviewPage";
+import DoctorProfile from "./pages/doctor/Profile";
 import Consultation from "./pages/doctor/Patientconsut";
+import DoctorPatientProfile from "./pages/doctor/notes and doc"; 
 
 // ============================================================
 // HOOKS / AUTH
@@ -117,10 +119,6 @@ const queryClient = new QueryClient({
 
 const doctorRoutes = [
   {
-    path: "/doctor-dashboard",
-    element: <DoctorDashboard />,
-  },
-  {
     path: "/doctor/appointments",
     element: <DoctorAppointments />,
   },
@@ -136,10 +134,10 @@ const doctorRoutes = [
     path: "/doctor/reviews",
     element: <DoctorReviews />,
   },
-  {
-    path: "/doctor/patient-consultation",
-    element: <Consultation />,
-  },
+{
+    path: "/doctor/profile",
+    element: <DoctorProfile />,
+},
 ];
 
 // ============================================================
@@ -147,15 +145,6 @@ const doctorRoutes = [
 // ============================================================
 
 const protectedRoutes = [
-  // ----------------------------------------------------------
-  // Main Dashboard
-  // ----------------------------------------------------------
-
-  {
-    path: "/dashboard",
-    element: <Dashboard />,
-  },
-
   // ----------------------------------------------------------
   // Profile & Security
   // ----------------------------------------------------------
@@ -421,7 +410,7 @@ const RememberMeCheck = () => {
     // --------------------------------------------------------
 
     if (roleType === "DOCTOR") {
-      navigate("/doctor-dashboard", {
+      navigate("/dashboard", {
         replace: true,
       });
 
@@ -485,6 +474,39 @@ const App = () => (
             />
 
             {/* ==================================================
+                ROLE-AWARE DASHBOARD
+
+                Renders the doctor dashboard (inside DoctorLayout)
+                for DOCTOR role and the admin dashboard (inside
+                AppLayout) for every other role.
+            ================================================== */}
+
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <DashboardRedirect />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ==================================================
+                LEGACY DOCTOR DASHBOARD URL
+
+                Kept so old bookmarks/links that point to
+                /doctor-dashboard still land on the right page.
+            ================================================== */}
+
+            <Route
+              path="/doctor-dashboard"
+              element={
+                <ProtectedRoute>
+                  <Navigate to="/dashboard" replace />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ==================================================
                 DOCTOR PORTAL
 
                 DoctorLayout contains:
@@ -511,6 +533,31 @@ const App = () => (
               )}
 
             </Route>
+
+            {/* ==================================================
+                DOCTOR PORTAL - PATIENT CONSULTATION
+
+                Full-screen page WITHOUT the DoctorSidebar
+                nav (renders edge to edge, no nav bar).
+            ================================================== */}
+
+            <Route
+              path="/doctor/patient-consultation"
+              element={
+                <ProtectedRoute>
+                  <Consultation />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/doctor/profile-patient"
+              element={
+                <ProtectedRoute>
+                  <DoctorPatientProfile />
+                </ProtectedRoute>
+              }
+            />
 
             {/* ==================================================
                 MAIN HMS / ADMIN PORTAL

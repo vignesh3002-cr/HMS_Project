@@ -1,6 +1,18 @@
 import axios from "axios";
 import { getToken, remove } from "../utils/token";
 
+declare module "axios" {
+  export interface AxiosRequestConfig {
+    /**
+     * Per-request opt-out of the x-branch-id header. Used by encounter
+     * lookups that must resolve across branches: without it the sticky
+     * header would force branchScope to filter/403 on whatever branch
+     * happens to be selected instead of letting the backend auto-scope.
+     */
+    skipBranchScope?: boolean;
+  }
+}
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_BACKEND_URL,
   withCredentials: true,
@@ -27,7 +39,7 @@ api.interceptors.request.use((config) => {
   }
 
   const branchId = getActiveBranchId();
-  if (branchId) {
+  if (branchId && !config.skipBranchScope) {
     config.headers["x-branch-id"] = branchId;
   }
 

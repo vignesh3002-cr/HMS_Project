@@ -43,7 +43,7 @@ const statusToneMap: Record<string, StatusTone> = {
   confirmed: "green",
   cancelled: "red",
   rescheduled: "amber",
-  "checked in": "indigo",
+  "checked in": "emerald",
   "in consultation": "purple",
   completed: "emerald",
   "no show": "gray",

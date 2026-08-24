@@ -4,7 +4,7 @@ export const DEFAULT_CONSULTATION_MINUTES = 20;
 
 // Appointments already closed for modification keep their real status no
 // matter how long ago their consultation slot was.
-export const TERMINAL_STATUSES = new Set(["COMPLETED", "CANCELLED", "NO_SHOW"]);
+export const TERMINAL_STATUSES = new Set(["COMPLETED", "CANCELLED", "NO_SHOW", "NOT_CHECKED_IN"]);
 
 // Builds the appointment's start instant as LOCAL wall-clock time. The
 // backend stores appointment_time as UTC such that its UTC time-of-day is the
@@ -25,10 +25,12 @@ function consultationStartMs(record: AppointmentRecord): number | null {
   ).getTime();
 }
 
-// Returns "CANCELLED" when the doctor's consultation window for the
+// Returns "NOT_CHECKED_IN" when the doctor's consultation window for the
 // appointment has fully elapsed (appointment_time + consultation_minutes),
 // otherwise returns the appointment's real status unchanged. Only
-// non-terminal appointments are overridden.
+// non-terminal appointments are overridden. The backend job
+// (appointment-status.job.ts) persists this transition within minutes, so
+// this is just the instant display fallback.
 export function getEffectiveAppointmentStatus(
   record: AppointmentRecord,
   now: Date = new Date(),
@@ -43,5 +45,5 @@ export function getEffectiveAppointmentStatus(
     record.doctor_schedule?.consultation_minutes ?? DEFAULT_CONSULTATION_MINUTES;
   if (minutes <= 0) return status;
 
-  return now.getTime() >= startMs + minutes * 60000 ? "CANCELLED" : status;
+  return now.getTime() >= startMs + minutes * 60000 ? "NOT_CHECKED_IN" : status;
 }
