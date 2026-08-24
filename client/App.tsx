@@ -123,6 +123,14 @@ const doctorRoutes = [
     element: <DoctorAppointments />,
   },
   {
+    path: "/doctor/appointments/add",
+    element: <AddAppointment />,
+  },
+  {
+    path: "/doctor/appointments/edit/:id",
+    element: <EditAppointment />,
+  },
+  {
     path: "/doctor/schedule",
     element: <DoctorSchedule />,
   },
