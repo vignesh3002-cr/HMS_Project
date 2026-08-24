@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Loader2, X } from "lucide-react";
+import {
+  CalendarPlus,
+  Loader2,
+  MoreVertical,
+  PencilLine,
+  Plus,
+  X,
+  XCircle,
+} from "lucide-react";
 import {
   appointmentApi,
   type AppointmentRecord,
@@ -15,6 +23,14 @@ import API, { getActiveBranchId } from "../../api/axios";
 import { getUser } from "../../utils/token";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useToast } from "@/hooks/use-toast";
 import CalendarPicker from "@/components/hms/Calender";
 
 type AppointmentStatus =
@@ -466,6 +482,8 @@ function PatientCard({
   onCheckIn,
   onProceed,
   onCancelRequest,
+  onReschedule,
+  onBookFollowUp,
 }: { patient: Patient } & PatientActionProps) {
   const canCheckIn = CHECKIN_STATUSES.includes(patient.originalStatus);
   const canProceed = PROCEED_STATUSES.includes(patient.originalStatus);
@@ -498,13 +516,12 @@ function PatientCard({
             {patient.name}
           </h3>
 
-          <button
-            type="button"
-            aria-label="More options"
-            className="text-gray-400 hover:text-gray-600 -mt-1 -mr-1 px-1"
-          >
-            ⋮
-          </button>
+          <AppointmentRowMenu
+            patient={patient}
+            onCancelRequest={onCancelRequest}
+            onReschedule={onReschedule}
+            onBookFollowUp={onBookFollowUp}
+          />
         </div>
 
         <p className="text-xs font-medium text-blue-600">
@@ -527,6 +544,8 @@ function PatientCard({
           <button
             type="button"
             aria-label={`Schedule appointment for ${patient.name}`}
+            title="Book a follow-up appointment for this patient"
+            onClick={() => onBookFollowUp(patient)}
             className="w-7 h-7 flex items-center justify-center rounded-md bg-gray-50 text-gray-400 hover:bg-blue-50 hover:text-blue-600"
           >
             <svg
@@ -587,16 +606,24 @@ const COLUMNS: { key: string; label: string }[] = [
   { key: "status", label: "Status" },
 ];
 
-function SortIcon() {
+function SortIcon({ direction }: { direction?: "asc" | "desc" | null }) {
   return (
     <svg
-      className="w-3 h-3 inline ml-1 text-gray-300"
+      className={`w-3 h-3 inline ml-1 ${
+        direction ? "text-blue-600" : "text-gray-300"
+      }`}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
       strokeWidth="2"
     >
-      <path d="M8 9l4-4 4 4M8 15l4 4 4-4" />
+      {direction === "asc" ? (
+        <path d="M8 15l4-6 4 6" />
+      ) : direction === "desc" ? (
+        <path d="M8 9l4 6 4-6" />
+      ) : (
+        <path d="M8 9l4-4 4 4M8 15l4 4 4-4" />
+      )}
     </svg>
   );
 }
@@ -607,12 +634,92 @@ const CHECKIN_STATUSES = ["SCHEDULED", "RESCHEDULED", "NOT_CHECKED_IN"];
 const PROCEED_STATUSES = ["CHECKED_IN", "IN_CONSULTATION"];
 // Statuses that can no longer be cancelled.
 const NON_CANCELABLE_STATUSES = ["COMPLETED", "CANCELLED", "NO_SHOW"];
+// Statuses the backend refuses to modify (TERMINAL_APPOINTMENT_STATUSES) --
+// reschedule/edit is hidden for these.
+const NON_EDITABLE_STATUSES = [
+  "COMPLETED",
+  "CANCELLED",
+  "NO_SHOW",
+  "NOT_CHECKED_IN",
+];
 
 interface PatientActionProps {
   actionBusyId: string | null;
   onCheckIn: (patient: Patient) => void;
   onProceed: (patient: Patient) => void;
   onCancelRequest: (patient: Patient) => void;
+  onReschedule: (patient: Patient) => void;
+  onBookFollowUp: (patient: Patient) => void;
+}
+
+// Shared "⋮" menu for grid cards and table rows. Every lifecycle action
+// lives here: book a follow-up for this patient, reschedule this
+// appointment, or cancel it. Items disappear once the backend would
+// refuse the transition (terminal statuses).
+function AppointmentRowMenu({
+  patient,
+  onReschedule,
+  onBookFollowUp,
+  onCancelRequest,
+}: {
+  patient: Patient;
+} & Pick<
+  PatientActionProps,
+  "onReschedule" | "onBookFollowUp" | "onCancelRequest"
+>) {
+  const canReschedule = !NON_EDITABLE_STATUSES.includes(
+    patient.originalStatus,
+  );
+  const canCancel = !NON_CANCELABLE_STATUSES.includes(
+    patient.originalStatus,
+  );
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={`More options for ${patient.name}`}
+          className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+        >
+          <MoreVertical className="w-4 h-4" />
+        </button>
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuItem
+          className="gap-2"
+          onSelect={() => onBookFollowUp(patient)}
+        >
+          <CalendarPlus className="w-4 h-4 text-gray-500" />
+          Book Follow-up
+        </DropdownMenuItem>
+
+        {canReschedule && (
+          <DropdownMenuItem
+            className="gap-2"
+            onSelect={() => onReschedule(patient)}
+          >
+            <PencilLine className="w-4 h-4 text-gray-500" />
+            Reschedule
+          </DropdownMenuItem>
+        )}
+
+        {canCancel && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="gap-2 text-red-600 focus:text-red-600 focus:bg-red-50"
+              onSelect={() => onCancelRequest(patient)}
+            >
+              <XCircle className="w-4 h-4" />
+              Cancel Appointment
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 function PatientActions({ patient, actionBusyId, onCheckIn, onProceed, onCancelRequest }: PatientActionProps & { patient: Patient }) {
@@ -674,8 +781,16 @@ function PatientTable({
   onCheckIn,
   onProceed,
   onCancelRequest,
+  onReschedule,
+  onBookFollowUp,
+  sortKey,
+  sortDir,
+  onSort,
 }: {
   patients: Patient[];
+  sortKey: string | null;
+  sortDir: "asc" | "desc";
+  onSort: (key: string) => void;
 } & PatientActionProps) {
   return (
     <div className="overflow-x-auto px-5">
@@ -685,10 +800,23 @@ function PatientTable({
             {COLUMNS.map((col) => (
               <th
                 key={col.key}
-                className="font-medium py-3 px-3 whitespace-nowrap select-none cursor-pointer"
+                aria-sort={
+                  sortKey === col.key
+                    ? sortDir === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : undefined
+                }
+                onClick={() => onSort(col.key)}
+                title={`Sort by ${col.label}`}
+                className="font-medium py-3 px-3 whitespace-nowrap select-none cursor-pointer hover:text-gray-600 transition-colors"
               >
                 {col.label}
-                <SortIcon />
+                <SortIcon
+                  direction={
+                    sortKey === col.key ? sortDir : null
+                  }
+                />
               </th>
             ))}
 
@@ -760,13 +888,23 @@ function PatientTable({
                 </td>
 
                 <td className="py-3 px-3">
-                  <PatientActions
-                    patient={patient}
-                    actionBusyId={actionBusyId}
-                    onCheckIn={onCheckIn}
-                    onProceed={onProceed}
-                    onCancelRequest={onCancelRequest}
-                  />
+                  <div className="flex items-center justify-end gap-1">
+                    <PatientActions
+                      patient={patient}
+                      actionBusyId={actionBusyId}
+                      onCheckIn={onCheckIn}
+                      onProceed={onProceed}
+                      onCancelRequest={onCancelRequest}
+                      onReschedule={onReschedule}
+                      onBookFollowUp={onBookFollowUp}
+                    />
+                    <AppointmentRowMenu
+                      patient={patient}
+                      onCancelRequest={onCancelRequest}
+                      onReschedule={onReschedule}
+                      onBookFollowUp={onBookFollowUp}
+                    />
+                  </div>
                 </td>
               </tr>
             );
@@ -839,9 +977,25 @@ function Pagination({
 }
 
 export default function AppointmentPage() {
+  const { toast } = useToast();
   const [view, setView] = useState<"grid" | "list">("grid");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+
+  // Column sorting (list view headers). null = unsorted, which keeps
+  // the fetch order (newest appointment date first).
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const handleSort = (key: string): void => {
+    setPage(1);
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
 
   // Optional date filter — seeded from ?date=YYYY-MM-DD (the
   // dashboard's "View All" links here with today's date).
@@ -878,6 +1032,9 @@ export default function AppointmentPage() {
   const [ownEmployeeIds, setOwnEmployeeIds] = useState<string[]>([]);
   const [resolved, setResolved] = useState(false);
   const [branchIds, setBranchIds] = useState<string[] | null>(null);
+  // Display name for the Proceed hand-off ("consultedBy") and the
+  // booking form's locked doctor context.
+  const [doctorName, setDoctorName] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -909,6 +1066,16 @@ export default function AppointmentPage() {
           .filter((b): b is string => Boolean(b));
         resolvedBranches =
           branches.length > 0 ? [...new Set(branches)] : null;
+
+        const meData = me.data?.data?.employee;
+        const nameParts = [
+          meData?.first_name,
+          meData?.middle_name,
+          meData?.last_name,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        if (nameParts) setDoctorName(`Dr. ${nameParts}`);
       } catch (err) {
         console.error("[AppointmentPage] Failed to resolve branches:", err);
       }
@@ -1116,11 +1283,14 @@ export default function AppointmentPage() {
       });
       await fetchAppointments();
     } catch (err: any) {
-      alert(
-        err?.response?.data?.message ||
+      toast({
+        title: "Failed to check in patient",
+        description:
+          err?.response?.data?.message ||
           err?.message ||
-          "Failed to check in patient."
-      );
+          "Something went wrong.",
+        variant: "destructive",
+      });
     } finally {
       setActionBusyId(null);
     }
@@ -1135,7 +1305,7 @@ export default function AppointmentPage() {
           getActiveBranchId() ?? getUser()?.branch_id ?? undefined,
         appointmentDate: patient.appointmentDateRaw,
         appointmentTime: patient.appointmentTimeRaw,
-        consultedBy: "",
+        consultedBy: doctorName || getUser()?.name || "",
       },
     });
   };
@@ -1150,16 +1320,81 @@ export default function AppointmentPage() {
         "Cancelled by doctor from appointments page",
       );
       setCancelTarget(null);
+      toast({
+        title: "Appointment cancelled",
+        description: "The slot has been released.",
+      });
       await fetchAppointments();
     } catch (err: any) {
-      alert(
-        err?.response?.data?.message ||
+      toast({
+        title: "Failed to cancel appointment",
+        description:
+          err?.response?.data?.message ||
           err?.message ||
-          "Failed to cancel appointment."
-      );
+          "Something went wrong.",
+        variant: "destructive",
+      });
     } finally {
       setCancelling(false);
     }
+  };
+
+  /* =======================================================
+     BOOK / RESCHEDULE NAVIGATION
+     ======================================================= */
+
+  // The logged-in doctor's identity for the booking form, which locks
+  // the doctor field to whoever is signed in.
+  const primaryDoctorId =
+    ownEmployeeIds[0] ??
+    targetDoctorId ??
+    getUser()?.employee_id ??
+    undefined;
+
+  const buildBookingState = (patient?: Patient) => ({
+    doctorBooking: primaryDoctorId
+      ? {
+          doctorId: primaryDoctorId,
+          branchId:
+            getActiveBranchId() ??
+            getUser()?.branch_id ??
+            branchIds?.[0],
+        }
+      : undefined,
+    ...(patient
+      ? {
+          patient: {
+            patient_id: patient.patientId,
+            patient_first_name: patient.name.split(" ")[0] || patient.name,
+            patient_middle_name:
+              patient.name.split(" ").length > 2
+                ? patient.name.split(" ").slice(1, -1).join(" ")
+                : null,
+            patient_last_name:
+              patient.name.split(" ").length > 1
+                ? patient.name.split(" ").slice(-1)[0]
+                : null,
+            patient_primary_mobile:
+              patient.phone && patient.phone !== "—" ? patient.phone : null,
+          },
+        }
+      : {}),
+  });
+
+  const handleBookNew = (): void => {
+    navigate("/doctor/appointments/add", {
+      state: buildBookingState(),
+    });
+  };
+
+  const handleBookFollowUp = (patient: Patient): void => {
+    navigate("/doctor/appointments/add", {
+      state: buildBookingState(patient),
+    });
+  };
+
+  const handleReschedule = (patient: Patient): void => {
+    navigate(`/doctor/appointments/edit/${patient.id}`);
   };
 
   /* =======================================================
@@ -1272,20 +1507,42 @@ export default function AppointmentPage() {
     handleSelectDate(todayIso());
   };
 
-  const filtered = useMemo(
-    () =>
-      patients.filter((p) => {
-        const matchesSearch = `${p.name} ${p.patientCode}`
-          .toLowerCase()
-          .includes(search.toLowerCase());
-        const matchesDate =
-          !selectedDateKey || p.appointmentDateRaw === selectedDateKey;
-        const matchesStatus =
-          !statusFilter || p.originalStatus === statusFilter;
-        return matchesSearch && matchesDate && matchesStatus;
-      }),
-    [patients, search, selectedDateKey, statusFilter]
-  );
+  const filtered = useMemo(() => {
+    const matches = patients.filter((p) => {
+      const matchesSearch = `${p.name} ${p.patientCode}`
+        .toLowerCase()
+        .includes(search.toLowerCase());
+      const matchesDate =
+        !selectedDateKey || p.appointmentDateRaw === selectedDateKey;
+      const matchesStatus =
+        !statusFilter || p.originalStatus === statusFilter;
+      return matchesSearch && matchesDate && matchesStatus;
+    });
+
+    if (!sortKey) return matches;
+
+    // Unsorted state keeps the fetch order (newest date first); every
+    // column sort runs client-side on the already-fetched list.
+    const factor = sortDir === "asc" ? 1 : -1;
+    const compare = (a: Patient, b: Patient): number => {
+      switch (sortKey) {
+        case "age":
+          return (a.age ?? -1) - (b.age ?? -1);
+        case "appointmentDate":
+          return `${a.appointmentDateRaw} ${a.appointmentTimeRaw}`.localeCompare(
+            `${b.appointmentDateRaw} ${b.appointmentTimeRaw}`,
+          );
+        case "status":
+          return a.originalStatus.localeCompare(b.originalStatus);
+        default: {
+          const key = sortKey as keyof Patient;
+          return String(a[key] ?? "").localeCompare(String(b[key] ?? ""));
+        }
+      }
+    };
+
+    return [...matches].sort((a, b) => compare(a, b) * factor);
+  }, [patients, search, selectedDateKey, statusFilter, sortKey, sortDir]);
 
   const totalPages = Math.max(
     1,
@@ -1312,6 +1569,15 @@ export default function AppointmentPage() {
         </div>
 
         <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={handleBookNew}
+            className="flex items-center gap-1.5 h-[27px] px-3 rounded-lg bg-[#00488D] text-white text-xs font-semibold hover:bg-[#003a72] transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Book Appointment
+          </button>
+
           <div className="relative" ref={notificationRef}>
             <button
               type="button"
@@ -1546,6 +1812,8 @@ export default function AppointmentPage() {
                   onCheckIn={handleCheckIn}
                   onProceed={handleProceed}
                   onCancelRequest={setCancelTarget}
+                  onReschedule={handleReschedule}
+                  onBookFollowUp={handleBookFollowUp}
                 />
               ))}
             </div>
@@ -1556,6 +1824,11 @@ export default function AppointmentPage() {
               onCheckIn={handleCheckIn}
               onProceed={handleProceed}
               onCancelRequest={setCancelTarget}
+              onReschedule={handleReschedule}
+              onBookFollowUp={handleBookFollowUp}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
             />
           )
         ) : (

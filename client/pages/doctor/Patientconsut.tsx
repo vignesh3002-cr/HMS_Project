@@ -117,6 +117,10 @@ const findActiveEncounter = async (
   branchId?: string,
 ): Promise<{ encounter: EncounterRecord | null; scopeError?: string }> => {
   const scopeErrors: string[] = [];
+  /* Real reason encounter creation failed (400-class backend messages).
+     Preferred over scopeErrors when present: a failed POST /encounters is
+     the actionable root cause, while scoped-list 403s are just fallout. */
+  const createErrors: string[] = [];
   const crossBranchConfig = { skipBranchScope: true };
 
   /* 0. Precise hit - dedicated endpoint resolves by appointment_id with
@@ -145,8 +149,12 @@ const findActiveEncounter = async (
     if (missing) {
       try {
         await encounterApi.create({ appointment_id: appointmentId });
-      } catch {
+      } catch (error: any) {
         // "Encounter already exists" or not creatable - verify decides.
+        const message = error?.response?.data?.message;
+        if (message && !/already exists/i.test(message)) {
+          createErrors.push(message);
+        }
       }
       try {
         const response = await encounterApi.getByAppointment(appointmentId);
@@ -249,8 +257,12 @@ const findActiveEncounter = async (
     for (const appt of candidates) {
       try {
         await encounterApi.create({ appointment_id: appt.appointment_id });
-      } catch {
+      } catch (error: any) {
         // "Encounter already exists" or not creatable - verify decides.
+        const message = error?.response?.data?.message;
+        if (message && !/already exists/i.test(message)) {
+          createErrors.push(message);
+        }
       }
       try {
         const response = await encounterApi.getByAppointment(
@@ -266,13 +278,16 @@ const findActiveEncounter = async (
     }
   }
 
-  const scopeMessage = scopeErrors[0];
+  /* Prefer the real creation-failure reason over scope fallout: if POST
+     /encounters told us why it refused, that beats "Please select a branch
+     first." produced by the fallback list queries. */
+  const primaryMessage = createErrors[0] ?? scopeErrors[0];
 
   return {
     encounter: null,
-    scopeError: scopeMessage
-      ? `${scopeMessage}${
-          /select a branch/i.test(scopeMessage) ? BRANCH_HINT : ""
+    scopeError: primaryMessage
+      ? `${primaryMessage}${
+          /select a branch/i.test(primaryMessage) ? BRANCH_HINT : ""
         }`
       : undefined,
   };

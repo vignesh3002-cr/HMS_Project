@@ -132,7 +132,21 @@ export default function AddAppointment() {
   // Arriving from Patients grid view's schedule icon carries the chosen
   // patient in nav state so the form opens with the patient locked in and
   // the user only needs to pick a doctor.
-  const preselectedPatient = (location.state as { patient?: PatientRecord } | null)?.patient;
+  const preselectedPatient = (
+    location.state as
+      | { patient?: Pick<PatientRecord, "patient_id" | "patient_first_name" | "patient_middle_name" | "patient_last_name" | "patient_primary_mobile"> }
+      | null
+  )?.patient;
+
+  // Arriving from the doctor portal (/doctor/appointments) carries the
+  // logged-in doctor's identity so the form opens with themselves locked in
+  // as the doctor -- they can only pick the patient/date/time.
+  const doctorBooking = (
+    location.state as
+      | { doctorBooking?: { doctorId: string; branchId?: string; departmentId?: string } }
+      | null
+  )?.doctorBooking;
+  const isDoctorBooking = Boolean(doctorBooking);
 
   // Arriving from a doctor's profile (Scheduled.tsx, shared by both the
   // /doctor/view and /doctor/day-view routes) "Book Appointment" button
@@ -182,6 +196,17 @@ export default function AddAppointment() {
         selectDate: preselectedSlot.date,
       };
     }
+    // Doctor portal booking: the logged-in doctor books for themselves --
+    // their identity (and active branch/department) arrives locked in and
+    // wins over everything except an explicit Day View slot above.
+    if (doctorBooking) {
+      base = {
+        ...base,
+        doctorId: doctorBooking.doctorId,
+        ...(doctorBooking.branchId ? { branchId: doctorBooking.branchId } : {}),
+        ...(doctorBooking.departmentId ? { departmentId: doctorBooking.departmentId } : {}),
+      };
+    }
     return base;
   });
 
@@ -211,8 +236,11 @@ export default function AddAppointment() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Patient dropdown options
-  const [patients, setPatients] = useState<PatientRecord[]>(
+  // Patient dropdown options. Entries are full records from the API, or the
+  // minimal preselected shape arriving via nav state (doctor portal
+  // follow-up booking) -- every read below only touches the Pick'd fields.
+  type PatientOption = PatientRecord | typeof preselectedPatient;
+  const [patients, setPatients] = useState<PatientOption[]>(
     preselectedPatient ? [preselectedPatient] : [],
   );
 
@@ -576,7 +604,7 @@ export default function AddAppointment() {
 
   const handleBookingDone = () => {
     setBookingResult(null);
-    navigate("/appointments");
+    navigate(isDoctorBooking ? "/doctor/appointments" : "/appointments");
   };
 
   const handleCancel = () => {
@@ -725,11 +753,14 @@ export default function AddAppointment() {
   // Arrived from a doctor's profile page with a doctor already chosen --
   // run the same selection logic as picking them from the dropdown, once
   // the doctor list has loaded (needed to resolve their specialization).
+  // The doctor portal's locked self-booking reuses this so their department
+  // auto-fills and the nearest open date gets located.
   useEffect(() => {
-    if (!preselectedDoctorId || doctors.length === 0) return;
-    applyDoctorSelection(preselectedDoctorId);
+    const doctorId = preselectedDoctorId || doctorBooking?.doctorId;
+    if (!doctorId || doctors.length === 0) return;
+    applyDoctorSelection(doctorId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preselectedDoctorId, doctors]);
+  }, [preselectedDoctorId, doctorBooking?.doctorId, doctors]);
 
   // Arrived from a Day View grid slot with doctor/branch/department/date all
   // already decided -- only the doctor's schedules still need loading so the
@@ -844,6 +875,9 @@ export default function AddAppointment() {
                   value={formData.branchId}
                   onValueChange={(val) => {
                     if (!val) {
+                      // Doctor portal booking keeps the logged-in doctor's
+                      // identity locked -- never let a branch clear wipe it.
+                      if (isDoctorBooking) return;
                       setFormData((prev) => ({
                         ...prev,
                         branchId: "",
@@ -882,6 +916,7 @@ export default function AddAppointment() {
                 <label className={labelClass}>Department {requiredStar}</label>
                 <FormDropdown
                   className={inputClass}
+                  disabled={isDoctorBooking}
                   options={[
                     { label: "None", value: "" },
                     ...departmentsForDropdown.map((d) => ({
@@ -891,7 +926,12 @@ export default function AddAppointment() {
                   ]}
                   value={formData.departmentId}
                   onValueChange={(val) =>
-                    setFormData((prev) => ({ ...prev, departmentId: val, doctorId: "", timeSlot: "" }))
+                    setFormData((prev) => ({
+                      ...prev,
+                      departmentId: val,
+                      doctorId: isDoctorBooking ? prev.doctorId : "",
+                      timeSlot: "",
+                    }))
                   }
                   placeholder={
                     branchDoctorsLoading
@@ -905,9 +945,17 @@ export default function AddAppointment() {
                 />
               </div>
               <div>
-                <label className={labelClass}>Doctor Name {requiredStar}</label>
+                <label className={labelClass}>
+                  Doctor Name {requiredStar}
+                  {isDoctorBooking && (
+                    <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-blue-600">
+                      (you)
+                    </span>
+                  )}
+                </label>
                 <FormDropdown
                   className={inputClass}
+                  disabled={isDoctorBooking}
                   options={[
                     { label: "None", value: "" },
                     ...doctorsForDropdown.map((doc) => {

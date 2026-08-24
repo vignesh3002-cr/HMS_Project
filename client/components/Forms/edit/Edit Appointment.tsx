@@ -1,6 +1,7 @@
 import { useState, useEffect, ChangeEvent, FormEvent } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { startOfWeek, endOfWeek, addWeeks, format } from "date-fns";
+
 import { ArrowLeft, CalendarPlus, Loader2, Check, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
@@ -121,8 +122,17 @@ const TERMINAL_STATUSES = ["COMPLETED", "CANCELLED", "NO_SHOW", "NOT_CHECKED_IN"
 
 export default function EditAppointment() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { id } = useParams();
   const { toast } = useToast();
+
+  // Doctors reach this form from /doctor/appointments -- send them back
+  // there instead of the admin appointments list. Role-based so a page
+  // refresh (which drops location.state) still exits to the right place.
+  const exitDestination =
+    String(getUser()?.role_type || getUser()?.role || "").toUpperCase() === "DOCTOR"
+      ? "/doctor/appointments"
+      : "/appointments";
 
   const [formData, setFormData] = useState<AppointmentFormData>(emptyFormData);
   const [loadingAppointment, setLoadingAppointment] = useState(true);
@@ -199,7 +209,7 @@ export default function EditAppointment() {
   // Load the appointment being edited and prefill the form from it.
   useEffect(() => {
     if (!id) {
-      navigate("/appointments");
+      navigate(exitDestination);
       return;
     }
 
@@ -218,7 +228,7 @@ export default function EditAppointment() {
             description: `It is already ${record.status?.toLowerCase()}.`,
             variant: "destructive",
           });
-          navigate("/appointments");
+          navigate(exitDestination);
           return;
         }
 
@@ -274,7 +284,7 @@ export default function EditAppointment() {
           description: err.response?.data?.message || "Couldn't reach the appointments API.",
           variant: "destructive",
         });
-        navigate("/appointments");
+        navigate(exitDestination);
       })
       .finally(() => setLoadingAppointment(false));
   }, [id]);
@@ -378,7 +388,7 @@ appointmentApi
         description: `Appointment ${id} has been rescheduled.`,
       });
       setShowConfirm(false);
-      navigate("/appointments");
+      navigate(exitDestination);
     } catch (error: any) {
       toast({
         title: "Failed to reschedule appointment",
@@ -414,7 +424,7 @@ appointmentApi
     setShowCancelConfirm(true);
   };
 
-  const handleConfirmCancelAppointment = () => {
+  const handleConfirmCancelAppointment = async () => {
     if (!id) return;
 
     if (!cancelReason.trim()) {
@@ -422,11 +432,26 @@ appointmentApi
       return;
     }
 
-    toast({
-      title: "Appointment cancelled",
-      description: `Appointment ${id} has been cancelled.`,
-    });
-    navigate("/appointments");
+    setCancelling(true);
+    try {
+      await appointmentApi.cancel(id, cancelReason.trim());
+
+      toast({
+        title: "Appointment cancelled",
+        description: `Appointment ${id} has been cancelled.`,
+      });
+      setShowCancelConfirm(false);
+      navigate(exitDestination);
+    } catch (error: any) {
+      toast({
+        title: "Failed to cancel appointment",
+        description: error?.response?.data?.message || error.message || "Something went wrong",
+        variant: "destructive",
+      });
+      setShowCancelConfirm(false);
+    } finally {
+      setCancelling(false);
+    }
   };
 
   // Appointment Date is bookable only within the current week through the
@@ -748,7 +773,14 @@ appointmentApi
 
             {/* Actions Footer */}
             <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-4 mt-10 pt-6 border-t border-gray-100">
-              
+              <button
+                type="button"
+                onClick={handleCancelAppointment}
+                disabled={submitting || cancelling}
+                className="w-full sm:w-auto px-8 py-2.5 bg-white border border-red-200 text-red-600 text-sm font-bold rounded-xl hover:bg-red-50 hover:border-red-300 transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {cancelling ? "Cancelling..." : "Cancel Appointment"}
+              </button>
               <button
                 type="button"
                 onClick={handleCancel}

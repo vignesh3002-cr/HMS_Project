@@ -10,7 +10,6 @@ import {
   type DoctorNotificationItem,
 } from "../../api/doctorDashboard.api";
 import { activeBranches } from "../../lib/utils";
-import { appointmentApi } from "../../api/appointment.api";
 import { encounterApi } from "../../api/encounter.api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -251,8 +250,17 @@ export default function DoctorDashboard() {
   const handleCheckIn = async (appointmentId: string) => {
     setCheckInLoading(appointmentId);
     try {
-      await appointmentApi.updateStatus(appointmentId, "IN_CONSULTATION");
-      await encounterApi.create({ appointment_id: appointmentId });
+      // createEncounter flips the appointment to IN_CONSULTATION inside its
+      // transaction; updating status separately first would strand an
+      // in-progress appointment with no encounter when creation fails.
+      try {
+        await encounterApi.create({ appointment_id: appointmentId });
+      } catch (error: any) {
+        const message = error?.response?.data?.message;
+        if (!message || !/already exists/i.test(message)) {
+          throw error;
+        }
+      }
       // Trigger reload by calling loadDashboard
       window.dispatchEvent(new CustomEvent("refreshDoctorDashboard"));
       toast({ title: "Patient checked in", description: "Encounter created successfully." });
@@ -265,8 +273,10 @@ export default function DoctorDashboard() {
 
   const handleCheckOut = async (appointmentId: string) => {
     try {
-      const encounters = await encounterApi.getAll({ appointmentId });
-      const encounter = encounters.data?.data?.encounters?.[0];
+      // Branch-independent lookup: the scoped list query can 403 a
+      // multi-branch doctor with no branch selected.
+      const response = await encounterApi.getByAppointment(appointmentId);
+      const encounter = response.data?.data;
       if (encounter) {
         await encounterApi.close(encounter.encounter_no, "DOCTOR");
       }
