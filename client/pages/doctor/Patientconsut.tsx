@@ -2913,6 +2913,28 @@ type DischargeMedicationItem = {
   duration: string;
 };
 
+/* Row shape returned by
+   GET /chemotherapy/regimen-protocols/:protocolId/discharge-medicines */
+type DischargeMedicineRecord = {
+  discharge_instruction_id?: string;
+  protocol_id?: string;
+  drug_sequence?: number | null;
+  drug_from?: string | null;
+  frequency?: string | null;
+  composition?: string | null;
+  duration?: string | null;
+  patient_dose?: number | string | null;
+  patient_dose_unit?: string | null;
+  administration_detail?: string | null;
+  comment?: string | null;
+  medicine_master?: {
+    medicine_name: string | null;
+    generic_name?: string | null;
+    dosage_form?: string | null;
+    unit?: string | null;
+  } | null;
+};
+
 const ArrowLeftIcon = () => (
   <svg
     className="h-6 w-6"
@@ -2999,6 +3021,8 @@ const DischargeMedication: React.FC<{
   encounterNo,
   onNext,
 }) => {
+  const resolvedPatientId = patientId || "";
+
   const [medications, setMedications] = useState<DischargeMedicationItem[]>(
     []
   );
@@ -3006,19 +3030,118 @@ const DischargeMedication: React.FC<{
   const [activeStep, setActiveStep] = useState(1);
   const [savingMeds, setSavingMeds] = useState(false);
   const [medsError, setMedsError] = useState("");
+  const [medsLoading, setMedsLoading] = useState(false);
 
-  const handleAddDrug = () => {
-    const newMedication: DischargeMedicationItem = {
-      id: Date.now(),
-      drugName: "",
-      dosage: "",
-      frequency: "",
-      instruction: "",
-      duration: "",
+  /* ============================================================
+     LOAD DISCHARGE MEDICINES
+     Real take-home rows from
+     GET /chemotherapy/regimen-protocols/:protocolId/discharge-medicines.
+     The protocol is the one selected in the Treatment Plan step
+     (localStorage), falling back to the patient's chemotherapy plan.
+     ============================================================ */
+
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+
+    let cancelled = false;
+
+    const mapRecord = (
+      item: DischargeMedicineRecord,
+      index: number,
+    ): DischargeMedicationItem => ({
+      id: index,
+      drugName:
+        item.medicine_master?.medicine_name ||
+        item.medicine_master?.generic_name ||
+        "",
+      dosage:
+        item.patient_dose != null && item.patient_dose !== ""
+          ? `${item.patient_dose} ${
+              item.patient_dose_unit ?? item.medicine_master?.unit ?? ""
+            }`.trim()
+          : "",
+      frequency: item.frequency || "",
+      instruction:
+        item.administration_detail || item.comment || item.composition || "",
+      duration: item.duration || "",
+    });
+
+    setMedsLoading(true);
+    setMedsError("");
+
+    const resolveProtocolId = async (): Promise<string> => {
+      const savedProtocolId = localStorage.getItem(
+        `hms_selected_protocol_id_${resolvedPatientId}`
+      );
+      if (savedProtocolId) return savedProtocolId;
+
+      try {
+        const draft = JSON.parse(
+          localStorage.getItem(`hms_treatment_plan_${resolvedPatientId}`) ??
+            ""
+        ) as { protocol?: string } | null;
+        if (draft?.protocol) return draft.protocol;
+      } catch {
+        // Malformed draft - continue with the plan lookup.
+      }
+
+      const response = await API.get<{
+        success: boolean;
+        data: {
+          chemotherapy_regimen_protocol?: {
+            protocol_id?: string;
+          } | null;
+        }[];
+      }>("/chemotherapy/plans", {
+        params: {
+          patient_id: resolvedPatientId,
+          branchId:
+            getActiveBranchId() ?? getUser()?.branch_id ?? undefined,
+        },
+      });
+      const plan = response.data.data?.[0];
+      return plan?.chemotherapy_regimen_protocol?.protocol_id ?? "";
     };
 
-    setMedications((current) => [...current, newMedication]);
-  };
+    resolveProtocolId()
+      .then(async (protocolId) => {
+        if (!protocolId) return [];
+
+        const response = await API.get<{
+          success: boolean;
+          data: DischargeMedicineRecord[];
+        }>(
+          `/chemotherapy/regimen-protocols/${encodeURIComponent(
+            protocolId
+          )}/discharge-medicines`
+        );
+
+        return [...(response.data.data ?? [])].sort(
+          (a, b) => (a.drug_sequence ?? 0) - (b.drug_sequence ?? 0)
+        );
+      })
+      .then((records) => {
+        if (cancelled) return;
+        setMedications(records.map(mapRecord));
+      })
+      .catch((error: any) => {
+        console.error("Failed to load discharge medicines:", error);
+        if (cancelled) return;
+        setMedications([]);
+        setMedsError(
+          error?.response?.data?.message ||
+            error?.message ||
+            "Failed to load discharge medicines."
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setMedsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId]);
 
   const resolveEncounterNo = async () => {
     if (encounterNo) return encounterNo;
@@ -3140,6 +3263,39 @@ if (embedded) {
             </thead>
 
             <tbody className="text-sm text-gray-500">
+              {medsLoading && (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-8 py-8 text-center text-sm text-gray-500"
+                  >
+                    Loading discharge medicines...
+                  </td>
+                </tr>
+              )}
+
+              {!medsLoading && !medsError && medications.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-8 py-8 text-center text-sm text-gray-500"
+                  >
+                    No discharge medicines found for this patient's protocol.
+                  </td>
+                </tr>
+              )}
+
+              {medsError && (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-8 py-8 text-center text-sm text-red-500"
+                  >
+                    {medsError}
+                  </td>
+                </tr>
+              )}
+
               {medications.map((medication) => (
                 <tr
                   key={medication.id}
@@ -3386,6 +3542,39 @@ if (embedded) {
                   </thead>
 
                   <tbody className="text-sm text-gray-500">
+                    {medsLoading && (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-8 py-8 text-center text-sm text-gray-500"
+                        >
+                          Loading discharge medicines...
+                        </td>
+                      </tr>
+                    )}
+
+                    {!medsLoading && !medsError && medications.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-8 py-8 text-center text-sm text-gray-500"
+                        >
+                          No discharge medicines found for this patient's protocol.
+                        </td>
+                      </tr>
+                    )}
+
+                    {medsError && (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-8 py-8 text-center text-sm text-red-500"
+                        >
+                          {medsError}
+                        </td>
+                      </tr>
+                    )}
+
                     {medications.map((medication) => (
                       <tr
                         key={medication.id}

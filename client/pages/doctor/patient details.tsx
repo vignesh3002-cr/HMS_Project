@@ -46,6 +46,7 @@ type SummaryPlan = {
   protocol_name: string | null;
   regimen_name: string | null;
   regimen_code: string | null;
+  source_protocol_id?: string | null;
   treatment_intent: string | null;
   treatment_goal: string | null;
   treatment_status: string | null;
@@ -185,6 +186,15 @@ const MedicationPortal: React.FC<{
     d.setDate(d.getDate() + (cycle - 1) * interval);
     return { cycle, date: medFmtDate(d.toISOString()) };
   })();
+
+  /* Discharge medication table: REAL rows from
+     GET /chemotherapy/regimen-protocols/:protocolId/discharge-medicines,
+     resolved through the plan's source protocol. */
+  const {
+    rows: portalDischargeMeds,
+    loading: portalDischargeMedsLoading,
+    error: portalDischargeMedsError,
+  } = useDischargeMedicines(plan?.source_protocol_id || "");
 
   if (showDischargeDashboard) {
     return (
@@ -458,23 +468,44 @@ const MedicationPortal: React.FC<{
 
                     {/* Discharge */}
                     <section className="mb-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                      <SectionHeader icon="fa-solid fa-chevron-down" title="Discharge Medication" badge="0 Prescribed" />
+                      <SectionHeader icon="fa-solid fa-chevron-down" title="Discharge Medication" badge={`${portalDischargeMeds.length} Prescribed`} />
                       <div className="overflow-x-auto">
                         <table className="w-full min-w-[750px] text-left text-sm">
                           <thead className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
                             <tr>
-                              <th className="w-12 px-6 py-4 text-center">#</th>
-                              <th className="px-6 py-4">MEDICATION</th>
-                              <th className="px-6 py-4">DOSE</th>
-                              <th className="px-6 py-4">FREQUENCY</th>
-                              <th className="px-6 py-4">INSTRUCTION</th>
-                              <th className="px-6 py-4">DURATION</th>
+                              <th className="w-12 px-6 py-4 text-center font-semibold">#</th>
+                              <th className="px-6 py-4 font-semibold">MEDICATION</th>
+                              <th className="px-6 py-4 font-semibold">DOSE</th>
+                              <th className="px-6 py-4 font-semibold">FREQUENCY</th>
+                              <th className="px-6 py-4 font-semibold">INSTRUCTION</th>
+                              <th className="px-6 py-4 font-semibold">DURATION</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
-                            <tr>
-                              <td colSpan={6} className="px-6 py-6 text-center text-xs text-slate-400">No discharge medications found for this patient yet.</td>
-                            </tr>
+                            {portalDischargeMedsLoading ? (
+                              <tr>
+                                <td colSpan={6} className="px-6 py-6 text-center text-xs text-slate-400"><i className="fa-solid fa-circle-notch fa-spin mr-2" />Loading discharge medicines…</td>
+                              </tr>
+                            ) : portalDischargeMedsError ? (
+                              <tr>
+                                <td colSpan={6} className="px-6 py-6 text-center text-xs text-red-500"><i className="fa-solid fa-triangle-exclamation mr-2" />{portalDischargeMedsError}</td>
+                              </tr>
+                            ) : portalDischargeMeds.length === 0 ? (
+                              <tr>
+                                <td colSpan={6} className="px-6 py-6 text-center text-xs text-slate-400">{plan?.source_protocol_id ? "No discharge medicines recorded on this patient's regimen protocol yet." : "No regimen protocol linked to this patient's plan yet."}</td>
+                              </tr>
+                            ) : (
+                              portalDischargeMeds.map((item, index) => (
+                                <tr key={item.discharge_instruction_id ?? `${item.protocol_id}-${item.drug_sequence ?? index}`} className="transition-colors hover:bg-slate-50">
+                                  <td className="px-6 py-4 text-center text-slate-400">{index + 1}</td>
+                                  <td className="px-6 py-4 font-bold text-slate-800">{item.medicine_master?.medicine_name ?? "—"}</td>
+                                  <td className="px-6 py-4 text-slate-700">{item.patient_dose != null && item.patient_dose !== "" ? `${item.patient_dose} ${item.patient_dose_unit ?? item.medicine_master?.unit ?? ""}`.trim() : "—"}</td>
+                                  <td className="px-6 py-4 text-slate-700">{item.frequency || "—"}</td>
+                                  <td className="px-6 py-4 text-xs text-slate-500">{item.administration_detail || item.comment || "—"}</td>
+                                  <td className="px-6 py-4 text-slate-700">{item.duration || "—"}</td>
+                                </tr>
+                              ))
+                            )}
                           </tbody>
                         </table>
                       </div>
@@ -517,9 +548,9 @@ const MedicationPortal: React.FC<{
                 </div>
               </>
             ) : activeTab === "History" ? (
-              <HistoryDashboard embedded />
+              <HistoryDashboard embedded patientId={patientId} />
             ) : activeTab === "Notes & Documents" ? (
-              <PatientNotesDocuments embedded />
+              <PatientNotesDocuments embedded patientId={patientId} />
             ) : (
               <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-sm">
                 <i className="fa-solid fa-file-medical mb-4 text-3xl text-[#0052cc]" />
@@ -886,6 +917,7 @@ interface ChemoVitalsEntry extends ChemotherapyVitalsRecord {
   vital_id?: string;
   recorded_at?: string | null;
   vital_stage?: string | null;
+  oxygen_support?: boolean | null;
 }
 
 interface ChemoAdverseEventEntry extends ChemotherapyAdverseEventRecord {
@@ -901,13 +933,19 @@ interface ChemoAdverseEventEntry extends ChemotherapyAdverseEventRecord {
   hospitalization_required?: boolean | null;
 }
 
-interface ChemoCycleDetail extends ChemotherapyCycleRecord {
+interface ChemoCycleDetail
+  extends Omit<
+    ChemotherapyCycleRecord,
+    "chemotherapy_vitals" | "chemotherapy_adverse_event"
+  > {
   planned_date?: string | null;
   actual_date?: string | null;
   next_cycle_date?: string | null;
   cycle_status?: string | null;
   completion_status?: string | null;
   remarks?: string | null;
+  chemotherapy_vitals?: ChemoVitalsEntry[];
+  chemotherapy_adverse_event?: ChemoAdverseEventEntry[];
 }
 
 const loadCycleDetail = async (
@@ -918,6 +956,88 @@ const loadCycleDetail = async (
   );
   return response.data?.data ?? null;
 };
+
+/* ============================================================
+   DISCHARGE (TAKE-HOME) MEDICINES LOADER
+   GET /chemotherapy/regimen-protocols/:protocolId/discharge-medicines
+   - real take-home rows saved on the patient's regimen protocol.
+   ============================================================ */
+
+interface DischargeMedicineRecord {
+  discharge_instruction_id?: string;
+  protocol_id: string;
+  medicine_id?: string | null;
+  drug_sequence?: number | null;
+  drug_from?: string | null;
+  frequency?: string | null;
+  composition?: string | null;
+  duration?: string | null;
+  patient_dose?: number | string | null;
+  patient_dose_unit?: string | null;
+  administration_detail?: string | null;
+  dose_change?: number | string | null;
+  comment?: string | null;
+  medicine_master?: {
+    medicine_name: string | null;
+    generic_name?: string | null;
+    dosage_form?: string | null;
+    unit?: string | null;
+  } | null;
+}
+
+const loadDischargeMedicines = async (
+  protocolId: string
+): Promise<DischargeMedicineRecord[]> => {
+  const response = await API.get<{
+    success: boolean;
+    data: DischargeMedicineRecord[];
+  }>(
+    `/chemotherapy/regimen-protocols/${encodeURIComponent(
+      protocolId
+    )}/discharge-medicines`
+  );
+  return response.data?.data ?? [];
+};
+
+function useDischargeMedicines(protocolId: string) {
+  const [rows, setRows] = useState<DischargeMedicineRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!protocolId) {
+      setRows([]);
+      setLoading(false);
+      setError("");
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    loadDischargeMedicines(protocolId)
+      .then((data) => {
+        if (!cancelled) setRows(data);
+      })
+      .catch((err: any) => {
+        if (!cancelled) {
+          setRows([]);
+          setError(
+            err?.response?.data?.message ||
+              err?.message ||
+              "Failed to load discharge medicines."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [protocolId]);
+
+  return { rows, loading, error };
+}
 
 function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [activeTab, setActiveTab] = useState("Order Summary");
@@ -1362,6 +1482,15 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   /* Embedded staging snapshot comes straight from the plan response. */
   const osd = savedPlan?.oncology_staging_detail ?? null;
 
+  /* Discharge medication card: REAL rows from
+     GET /chemotherapy/regimen-protocols/:protocolId/discharge-medicines,
+     resolved through the saved plan's source protocol. */
+  const {
+    rows: orderDischargeMeds,
+    loading: orderDischargeMedsLoading,
+    error: orderDischargeMedsError,
+  } = useDischargeMedicines(savedPlan?.source_protocol_id || "");
+
   const diagnosisOrderEntries = buildOrderEntries([
     ["Cancer Type", osd?.cancer_types?.cancer_type ?? savedPlan?.cancer_type],
     ["Subtype", osd?.cancer_subtypes?.subtype_name ?? savedPlan?.cancer_subtype],
@@ -1600,9 +1729,9 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </div>
 {/* END: Tabs */}
 {activeTab === "History" ? (
-<HistoryDashboard embedded />
+<HistoryDashboard embedded patientId={consultationState?.patientId} />
 ) : activeTab === "Notes & Documents" ? (
-<PatientNotesDocuments embedded />
+<PatientNotesDocuments embedded patientId={consultationState?.patientId} />
 ) : (
 <>
 {planNotice && (
@@ -1949,14 +2078,35 @@ primaryChemoItems.map((item, index) => (
 <th className="pb-2 font-semibold">DRUG</th>
 <th className="pb-2 font-semibold">DOSE</th>
 <th className="pb-2 font-semibold">FREQUENCY</th>
-<th className="pb-2 font-semibold">DILUENT</th>
-<th className="pb-2 font-semibold text-right">STATUS</th>
+<th className="pb-2 font-semibold">INSTRUCTION</th>
+<th className="pb-2 font-semibold text-right">DURATION</th>
 </tr>
 </thead>
 <tbody>
+{orderDischargeMedsLoading ? (
 <tr>
-<td colSpan={6} className="py-6 text-center text-xs text-[#64748b]">No discharge medications found.</td>
+<td colSpan={6} className="py-6 text-center text-xs text-[#64748b]"><i className="fa-solid fa-circle-notch fa-spin mr-2"></i>Loading discharge medicines…</td>
 </tr>
+) : orderDischargeMedsError ? (
+<tr>
+<td colSpan={6} className="py-6 text-center text-xs text-red-500"><i className="fa-solid fa-triangle-exclamation mr-2"></i>{orderDischargeMedsError}</td>
+</tr>
+) : orderDischargeMeds.length === 0 ? (
+<tr>
+<td colSpan={6} className="py-6 text-center text-xs text-[#64748b]">{savedPlan?.source_protocol_id ? "No discharge medicines recorded on this patient's regimen protocol yet." : "No regimen protocol linked to this patient's plan yet."}</td>
+</tr>
+) : (
+orderDischargeMeds.map((item, index) => (
+<tr key={item.discharge_instruction_id ?? `${item.protocol_id}-${item.drug_sequence ?? index}`} className="border-b border-slate-50 last:border-0">
+<td className="py-2">{index + 1}</td>
+<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.patient_dose != null && item.patient_dose !== "" ? `${item.patient_dose} ${item.patient_dose_unit ?? item.medicine_master?.unit ?? ""}`.trim() : "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.frequency || "—"}</td>
+<td className="py-2 text-xs text-[#64748b]">{item.administration_detail || item.comment || "—"}</td>
+<td className="py-2 whitespace-nowrap text-right">{item.duration || "—"}</td>
+</tr>
+))
+)}
 </tbody>
 </table>
 </div>
@@ -2204,10 +2354,9 @@ const HistoryDashboard: React.FC<{
         date: fmtHistoryDate(event.event_date),
         event: event.adverse_event_name || "—",
         grade:
-          event.ctcae_grade ||
-          event.reaction_grade ||
-          event.severity ||
-          "—",
+          String(
+            event.ctcae_grade || event.reaction_grade || event.severity || "—"
+          ),
         action:
           event.doctor_action ||
           event.nursing_action ||
@@ -3223,20 +3372,36 @@ function DischargeDetailsPortal({
     "";
   const intentLabel = dischargePlan?.treatment_intent || "";
 
-  /* Take-home medications: real rows come from the saved plan's
-     medication items; without a plan the table shows its empty state. */
-  const medications = (dischargePlan?.chemotherapy_plan_items ?? []).map(
-    (item) => ({
-      medication: item.medicine_master?.medicine_name ?? "—",
-      purpose: item.drug_role || "Prescribed",
-      dose:
-        item.protocol_dose != null
-          ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim()
-          : item.formulation || "—",
-      frequency: item.frequency || item.remarks || "—",
-      duration: item.remarks || "As directed",
-    })
-  );
+  /* Take-home medications: REAL rows fetched from
+     GET /chemotherapy/regimen-protocols/:protocolId/discharge-medicines -
+     the protocol is the saved plan's source protocol, falling back to
+     the first matching protocol of the diagnosis preview. */
+  const dischargeProtocolId =
+    dischargePlan?.source_protocol_id ||
+    planPreview?.matching_protocols?.[0]?.protocol_id ||
+    "";
+  const {
+    rows: dischargeMedicineRows,
+    loading: dischargeMedsLoading,
+    error: dischargeMedsError,
+  } = useDischargeMedicines(dischargeProtocolId);
+
+  const medications = dischargeMedicineRows.map((item) => ({
+    id:
+      item.discharge_instruction_id ??
+      `${item.protocol_id}-${item.drug_sequence ?? ""}`,
+    medication: item.medicine_master?.medicine_name ?? "—",
+    composition:
+      item.composition || item.medicine_master?.generic_name || "—",
+    dose:
+      item.patient_dose != null && item.patient_dose !== ""
+        ? `${item.patient_dose} ${
+            item.patient_dose_unit ?? item.medicine_master?.unit ?? ""
+          }`.trim()
+        : "—",
+    frequency: item.frequency || "—",
+    duration: item.duration || "—",
+  }));
 
   /* Final vital signs from the most recent cycle's recorded vitals. */
   const vitals = [
@@ -3461,9 +3626,9 @@ return (
               MAIN GRID
           ====================================================== */}
           {showHistory ? (
-            <HistoryDashboard embedded />
+            <HistoryDashboard embedded patientId={patientId} />
           ) : showNotesDocs ? (
-            <PatientNotesDocuments embedded />
+            <PatientNotesDocuments embedded patientId={patientId} />
           ) : showOrderSummary ? (
           /* =================================================
               ORDER SUMMARY - ALL recent details of the selected
@@ -3665,7 +3830,12 @@ return (
                 {/* Header */}
                 <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
                   <h3 className="text-lg font-medium text-gray-900">
-                    Take-Home Medications
+                    Take-Home Medications{" "}
+                    {!dischargeMedsLoading && medications.length > 0 && (
+                      <span className="ml-1 rounded-full bg-blue-100 px-2 py-0.5 align-middle text-xs font-bold text-blue-700">
+                        {medications.length}
+                      </span>
+                    )}
                   </h3>
 
                   <button
@@ -3688,7 +3858,7 @@ return (
                         </th>
 
                         <th className="whitespace-nowrap px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                          Purpose
+                          Composition
                         </th>
 
                         <th className="whitespace-nowrap px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
@@ -3706,21 +3876,35 @@ return (
                     </thead>
 
                     <tbody className="divide-y divide-gray-200 bg-white">
-                      {medications.length === 0 ? (
+                      {dischargeMedsLoading ? (
                         <tr>
                           <td colSpan={5} className="px-6 py-6 text-center text-xs text-slate-400">
-                            No medications prescribed for this patient yet.
+                            <i className="fa-solid fa-circle-notch fa-spin mr-2" /> Loading discharge medicines…
+                          </td>
+                        </tr>
+                      ) : dischargeMedsError ? (
+                        <tr>
+                          <td colSpan={5} className="px-6 py-6 text-center text-xs text-red-500">
+                            <i className="fa-solid fa-triangle-exclamation mr-2" /> {dischargeMedsError}
+                          </td>
+                        </tr>
+                      ) : medications.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-6 py-6 text-center text-xs text-slate-400">
+                            {dischargeProtocolId
+                              ? "No discharge medicines recorded on this patient's regimen protocol yet."
+                              : "No regimen protocol linked to this patient's plan yet."}
                           </td>
                         </tr>
                       ) : (
-                        medications.map((medication, index) => (
-                        <tr key={index}>
+                        medications.map((medication) => (
+                        <tr key={medication.id}>
                           <td className="whitespace-nowrap px-6 py-4 font-medium text-gray-900">
                             {medication.medication}
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
-                            {medication.purpose}
+                            {medication.composition}
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
@@ -3835,58 +4019,64 @@ return (
     untouched)
 ============================================================ */
 
-const PatientNotesDocuments: React.FC<{ embedded?: boolean }> = ({
-  embedded = false,
-}) => {
+const PatientNotesDocuments: React.FC<{
+  embedded?: boolean;
+  patientId?: string;
+}> = ({ embedded = false, patientId }) => {
   const [activeTab, setActiveTab] = useState("Notes & Documents");
   const [labTab, setLabTab] = useState("Chemistry");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [notesPlan, setNotesPlan] = useState<SummaryPlan | null>(null);
+  const [notesAllergies, setNotesAllergies] = useState<PatientAllergyRecord[]>(
+    []
+  );
+  const documents: {
+    name: string;
+    info: string;
+    icon: string;
+    color: string;
+    hover: string;
+  }[] = [];
 
-  const documents = [
-    {
-      name: "Treatment Summary_Q1",
-      info: "PDF • 2.4 MB • 12 May 2026",
-      icon: "fa-file-lines",
-      color: "text-blue-500",
-      hover: "hover:border-blue-300",
-    },
-    {
-      name: "Biopsy Report_Initial",
-      info: "PDF • 1.1 MB • 05 Apr 2026",
-      icon: "fa-file-waveform",
-      color: "text-green-500",
-      hover: "hover:border-green-300",
-    },
-    {
-      name: "Prescription_Cycle_5",
-      info: "PDF • 450 KB • 28 May 2026",
-      icon: "fa-prescription",
-      color: "text-purple-500",
-      hover: "hover:border-purple-300",
-    },
-  ];
+  /* Real data for the selected patient: saved plan (prescription
+     counts) + recorded allergies (Important Flags). */
+  useEffect(() => {
+    if (!patientId) {
+      setNotesPlan(null);
+      setNotesAllergies([]);
+      return;
+    }
+    let cancelled = false;
+    loadLatestChemoPlan(patientId)
+      .then((loaded) => {
+        if (!cancelled) setNotesPlan(loaded);
+      })
+      .catch(() => {
+        if (!cancelled) setNotesPlan(null);
+      });
+    API.get<{ success: boolean; data: PatientAllergyRecord[] }>(
+      `/clinical-details/patients/${patientId}/allergies`
+    )
+      .then((response) => {
+        if (!cancelled) setNotesAllergies(response.data?.data ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setNotesAllergies([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
 
-  const activities = [
-    {
-      title: "New Note Added",
-      description: "Dr. Naveen added 'Treatment Assessment'",
-      time: "15 MINS AGO",
-      dot: "bg-blue-500",
-    },
-    {
-      title: "Report Uploaded",
-      description: "Nurse Rani uploaded 'CBC_05Jun26'",
-      time: "1 HOUR AGO",
-      dot: "bg-green-500",
-    },
-    {
-      title: "Prescription Updated",
-      description: "New medication orders for Taxol cycle 6",
-      time: "3 HOURS AGO",
-      dot: "bg-purple-500",
-    },
-  ];
+  /* Live counts derived from fetched records (no hardcoded values). */
+  const prescriptionsCount = (notesPlan?.chemotherapy_plan_items ?? []).length;
+  const activities: {
+    title: string;
+    description: string;
+    time: string;
+    dot: string;
+  }[] = [];
 
   const handleFileChange = (
     event: React.ChangeEvent<HTMLInputElement>
@@ -3979,7 +4169,7 @@ const PatientNotesDocuments: React.FC<{ embedded?: boolean }> = ({
                   Total Notes
                 </p>
                 <p className="text-xl font-bold text-slate-900">
-                  18
+                  0
                 </p>
               </div>
             </div>
@@ -3995,7 +4185,7 @@ const PatientNotesDocuments: React.FC<{ embedded?: boolean }> = ({
                   Documents
                 </p>
                 <p className="text-xl font-bold text-slate-900">
-                  32
+                  {documents.length}
                 </p>
               </div>
             </div>
@@ -4011,7 +4201,7 @@ const PatientNotesDocuments: React.FC<{ embedded?: boolean }> = ({
                   Reports
                 </p>
                 <p className="text-xl font-bold text-slate-900">
-                  12
+                  0
                 </p>
               </div>
             </div>
@@ -4027,7 +4217,7 @@ const PatientNotesDocuments: React.FC<{ embedded?: boolean }> = ({
                   Prescriptions
                 </p>
                 <p className="text-xl font-bold text-slate-900">
-                  6
+                  {prescriptionsCount}
                 </p>
               </div>
             </div>
@@ -4056,67 +4246,14 @@ const PatientNotesDocuments: React.FC<{ embedded?: boolean }> = ({
 
             {/* Timeline */}
             <div className="p-6">
-              <div className="relative">
-
-                {/* Note 1 */}
-                <div className="relative mb-8 pl-12">
-                  {/* Timeline Line */}
-                  <div className="absolute left-5 top-10 bottom-[-2rem] w-0.5 bg-slate-200" />
-
-                  {/* Avatar */}
-                  <div className="absolute left-0 top-0 z-10 flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-blue-100 text-sm font-bold text-blue-700">
-                    DN
-                  </div>
-
-                  <div className="mb-2 flex items-start justify-between gap-4">
-                    <div>
-                      <h4 className="text-base font-bold text-slate-900">
-                        Treatment Assessment
-                      </h4>
-
-                      <p className="text-sm text-slate-500">
-                        Dr. Naveen • Oncologist • Today, 09:15 AM
-                      </p>
-                    </div>
-
-                    <span className="rounded border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
-                      E-Signed
-                    </span>
-                  </div>
-
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-slate-700">
-                    Patient reporting mild fatigue following the
-                    previous cycle. CBC shows ANC within acceptable
-                    limits for Cycle 6 Day 1. Protocol TAXOL - WEEKLY
-                    to continue as planned. Encouraged increased
-                    fluid intake and moderate walking.
-                  </div>
-                </div>
-
-                {/* Note 2 */}
-                <div className="relative pl-12">
-                  {/* Avatar */}
-                  <div className="absolute left-0 top-0 z-10 flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-sm font-bold text-slate-700">
-                    RR
-                  </div>
-
-                  <div className="mb-2">
-                    <h4 className="text-base font-bold text-slate-900">
-                      Nursing Observation
-                    </h4>
-
-                    <p className="text-sm text-slate-500">
-                      Nurse Rani • Oncology Nurse • Today, 08:30 AM
-                    </p>
-                  </div>
-
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-slate-700">
-                    Vitals stable. BP: 120/80, Temp: 98.4F. Central
-                    line patency confirmed. Patient appears
-                    well-rested. Provided orientation for today's
-                    medication administration schedule.
-                  </div>
-                </div>
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                <i className="fa-regular fa-file-lines mb-2 text-2xl text-slate-300" />
+                <p className="text-sm font-medium text-slate-500">
+                  No clinical notes recorded for this patient yet.
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Notes added from consultations will appear here.
+                </p>
               </div>
             </div>
           </section>
@@ -4141,7 +4278,13 @@ const PatientNotesDocuments: React.FC<{ embedded?: boolean }> = ({
             </div>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              {documents.map((document) => (
+              {documents.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-400 md:col-span-3">
+                  No documents uploaded for this patient yet. Use the upload
+                  panel to add files.
+                </div>
+              ) : (
+                documents.map((document) => (
                 <div
                   key={document.name}
                   className={`group relative rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors ${document.hover}`}
@@ -4195,7 +4338,8 @@ const PatientNotesDocuments: React.FC<{ embedded?: boolean }> = ({
                     </button>
                   </div>
                 </div>
-              ))}
+              ))
+              )}
             </div>
           </section>
 
@@ -4260,91 +4404,13 @@ const PatientNotesDocuments: React.FC<{ embedded?: boolean }> = ({
                 </thead>
 
                 <tbody className="divide-y divide-slate-100 text-sm text-slate-700">
-
-                  {/* Creatinine */}
-                  <tr className="transition-colors hover:bg-slate-50">
-                    <td className="p-4 pl-6 font-semibold text-slate-900">
-                      Serum Creatinine
-                    </td>
-
-                    <td className="p-4">
-                      05 Jun 2026
-                    </td>
-
-                    <td className="p-4">
-                      0.48 mg/dL
-                    </td>
-
-                    <td className="p-4">
-                      <div className="flex h-6 w-24 items-end">
-                        <div className="group relative mx-px h-[30%] w-1/4 bg-blue-300">
-                          <span className="absolute -top-5 left-0 hidden rounded bg-black px-1 text-[10px] text-white group-hover:block">
-                            0.85
-                          </span>
-                        </div>
-
-                        <div className="group relative mx-px h-[40%] w-1/4 bg-blue-300">
-                          <span className="absolute -top-5 left-0 hidden rounded bg-black px-1 text-[10px] text-white group-hover:block">
-                            0.95
-                          </span>
-                        </div>
-
-                        <div className="group relative mx-px h-[20%] w-1/4 bg-blue-800">
-                          <span className="absolute -top-5 left-0 hidden rounded bg-black px-1 text-[10px] text-white group-hover:block">
-                            0.25
-                          </span>
-                        </div>
-
-                        <div className="group relative mx-px h-[25%] w-1/4 bg-blue-600">
-                          <span className="absolute -top-5 left-0 hidden rounded bg-black px-1 text-[10px] text-white group-hover:block">
-                            0.48
-                          </span>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="p-4 pr-6 text-center">
-                      <button
-                        type="button"
-                        className="text-blue-600 hover:text-blue-800"
-                        aria-label="View Serum Creatinine"
-                      >
-                        <i className="fa-regular fa-eye" />
-                      </button>
-                    </td>
-                  </tr>
-
-                  {/* Hemoglobin */}
-                  <tr className="transition-colors hover:bg-slate-50">
-                    <td className="p-4 pl-6 font-semibold text-slate-900">
-                      Hemoglobin (Hb)
-                    </td>
-
-                    <td className="p-4">
-                      05 Jun 2026
-                    </td>
-
-                    <td className="p-4">
-                      11.2 g/dL
-                    </td>
-
-                    <td className="p-4">
-                      <div className="flex h-6 w-24 items-end">
-                        <div className="mx-px h-[90%] w-1/4 bg-blue-300" />
-                        <div className="mx-px h-[70%] w-1/4 bg-blue-300" />
-                        <div className="mx-px h-[80%] w-1/4 bg-blue-600" />
-                        <div className="mx-px h-[40%] w-1/4 bg-blue-800" />
-                      </div>
-                    </td>
-
-                    <td className="p-4 pr-6 text-center">
-                      <button
-                        type="button"
-                        className="text-blue-600 hover:text-blue-800"
-                        aria-label="View Hemoglobin"
-                      >
-                        <i className="fa-regular fa-eye" />
-                      </button>
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="p-6 pl-6 text-center text-xs text-slate-400"
+                    >
+                      No lab or diagnostic reports available for this patient
+                      yet.
                     </td>
                   </tr>
                 </tbody>
@@ -4416,7 +4482,12 @@ const PatientNotesDocuments: React.FC<{ embedded?: boolean }> = ({
               <div className="absolute bottom-0 left-5 top-0 w-0.5 bg-gradient-to-b from-transparent via-slate-200 to-transparent" />
 
               <div className="space-y-6">
-                {activities.map((activity) => (
+                {activities.length === 0 ? (
+                  <p className="py-2 text-xs text-slate-400">
+                    No recent activity recorded for this patient yet.
+                  </p>
+                ) : (
+                  activities.map((activity) => (
                   <div
                     key={activity.title}
                     className="group relative flex items-start gap-4"
@@ -4440,13 +4511,14 @@ const PatientNotesDocuments: React.FC<{ embedded?: boolean }> = ({
                       </span>
                     </div>
                   </div>
-                ))}
+                ))
+                )}
               </div>
             </div>
           </section>
 
           {/* =================================================
-              IMPORTANT FLAGS
+              IMPORTANT FLAGS (real allergies from the API)
           ================================================== */}
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
@@ -4458,30 +4530,57 @@ const PatientNotesDocuments: React.FC<{ embedded?: boolean }> = ({
             </div>
 
             <div className="space-y-3">
-
-              {/* Allergy */}
-              <div className="rounded-r-lg border-l-4 border-red-500 bg-red-50 p-3">
-                <h4 className="mb-1 text-sm font-bold text-red-800">
-                  Allergy Warning
-                </h4>
-
-                <p className="text-xs leading-snug text-red-700">
-                  Patient is highly sensitive to Penicillin-based
-                  antibiotics.
+              {notesAllergies.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-xs text-slate-400">
+                  No allergy alerts recorded for this patient.
                 </p>
-              </div>
+              ) : (
+                notesAllergies.map((allergy) => {
+                  const severe =
+                    (allergy.severity ?? "").toUpperCase() === "SEVERE" ||
+                    (allergy.allergy_master?.severity_level ?? "")
+                      .toUpperCase()
+                      .startsWith("SEVERE");
+                  return (
+                    <div
+                      key={allergy.id}
+                      className={`rounded-r-lg border-l-4 p-3 ${
+                        severe
+                          ? "border-red-500 bg-red-50"
+                          : "border-orange-500 bg-orange-50"
+                      }`}
+                    >
+                      <h4
+                        className={`mb-1 text-sm font-bold ${
+                          severe ? "text-red-800" : "text-orange-800"
+                        }`}
+                      >
+                        Allergy Warning
+                      </h4>
 
-              {/* Neutropenia */}
-              <div className="rounded-r-lg border-l-4 border-orange-500 bg-orange-50 p-3">
-                <h4 className="mb-1 text-sm font-bold text-orange-800">
-                  Neutropenia History
-                </h4>
-
-                <p className="text-xs leading-snug text-orange-700">
-                  Previous cycle was delayed due to Grade 2
-                  Neutropenia (ANC &lt; 1500).
-                </p>
-              </div>
+                      <p
+                        className={`text-xs leading-snug ${
+                          severe ? "text-red-700" : "text-orange-700"
+                        }`}
+                      >
+                        {[allergy.allergy_master?.substance_name, allergy.reaction]
+                          .filter(Boolean)
+                          .join(" — ") || "Recorded allergy"}
+                        {allergy.allergy_master?.severity_level ||
+                        allergy.severity
+                          ? ` (Severity: ${
+                              allergy.allergy_master?.severity_level ??
+                              allergy.severity
+                            })`
+                          : ""}
+                        {allergy.status
+                          ? ` · Status: ${allergy.status}`
+                          : ""}
+                      </p>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </section>
         </aside>
@@ -4563,7 +4662,7 @@ const PatientNotesDocuments: React.FC<{ embedded?: boolean }> = ({
         <div className="absolute bottom-0 left-0 right-0 z-20 flex h-16 flex-shrink-0 items-center justify-between border-t border-slate-200 bg-white px-6 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
 
           <div className="text-sm text-slate-500">
-            Showing 18 of 56 total records
+            Showing {documents.length} of {documents.length} total records
           </div>
 
           <div className="flex space-x-3">
