@@ -65,8 +65,15 @@ type SummaryPlan = {
     last_name?: string | null;
   } | null;
   chemotherapy_cycle: {
+    chemotherapy_cycle_id?: string;
     cycle_number: number;
-    cycle_day: number | null;
+    cycle_day?: number | null;
+    planned_date?: string | null;
+    actual_date?: string | null;
+    next_cycle_date?: string | null;
+    cycle_status?: string | null;
+    completion_status?: string | null;
+    remarks?: string | null;
   }[] | null;
   chemotherapy_plan_items: SummaryPlanItem[] | null;
   oncology_staging_detail: StagingDetailRecord | null;
@@ -825,6 +832,91 @@ const loadLatestPlanPreview = async (
   }
 
   return { preview: null, staging: null, error: lastError };
+};
+
+/* ============================================================
+   SHARED REAL-DATA LOADERS (used by the History / Discharge /
+   Notes & Documents tabs so every table shows live records)
+
+   - loadLatestChemoPlan: GET /chemotherapy/plans?patient_id=
+     (branch filter first, retry without it - same fallback as
+     the Order Summary loader above).
+   - loadCycleDetail: GET /chemotherapy/cycles/:id - returns a
+     cycle WITH its recorded chemotherapy_vitals and
+     chemotherapy_adverse_event rows.
+   ============================================================ */
+
+const loadLatestChemoPlan = async (
+  patientId: string
+): Promise<SummaryPlan | null> => {
+  const fetchPlans = async (branchId?: string) => {
+    const response = await API.get<{
+      success: boolean;
+      data: SummaryPlan[];
+    }>("/chemotherapy/plans", {
+      params: {
+        patient_id: patientId,
+        page: 1,
+        limit: 1,
+        ...(branchId ? { branchId } : {}),
+      },
+    });
+    return response.data?.data ?? [];
+  };
+
+  const branchId = getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+
+  let plans: SummaryPlan[] = [];
+  try {
+    plans = await fetchPlans(branchId);
+  } catch {
+    plans = [];
+  }
+  if (plans.length === 0) {
+    try {
+      plans = await fetchPlans();
+    } catch {
+      plans = [];
+    }
+  }
+  return plans[0] ?? null;
+};
+
+interface ChemoVitalsEntry extends ChemotherapyVitalsRecord {
+  vital_id?: string;
+  recorded_at?: string | null;
+  vital_stage?: string | null;
+}
+
+interface ChemoAdverseEventEntry extends ChemotherapyAdverseEventRecord {
+  adverse_event_id?: string;
+  reaction_grade?: string | null;
+  severity?: string | null;
+  doctor_action?: string | null;
+  nursing_action?: string | null;
+  dose_reduced?: boolean | null;
+  dose_delayed?: boolean | null;
+  treatment_interrupted?: boolean | null;
+  treatment_stopped?: boolean | null;
+  hospitalization_required?: boolean | null;
+}
+
+interface ChemoCycleDetail extends ChemotherapyCycleRecord {
+  planned_date?: string | null;
+  actual_date?: string | null;
+  next_cycle_date?: string | null;
+  cycle_status?: string | null;
+  completion_status?: string | null;
+  remarks?: string | null;
+}
+
+const loadCycleDetail = async (
+  cycleId: string
+): Promise<ChemoCycleDetail | null> => {
+  const response = await API.get<{ success: boolean; data: ChemoCycleDetail }>(
+    `/chemotherapy/cycles/${encodeURIComponent(cycleId)}`
+  );
+  return response.data?.data ?? null;
 };
 
 function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
@@ -1935,100 +2027,243 @@ primaryChemoItems.map((item, index) => (
     original history.tsx file left untouched)
 ============================================================ */
 
-const HistoryDashboard: React.FC<{ embedded?: boolean }> = ({
-  embedded = false,
-}) => {
-  const vitals = [
-    ["Height", "154 cm"],
-    ["Weight", "52 kg"],
-    ["BSA", "1.49 m²"],
-    ["BMI", "21.93"],
-    ["BP", "118/74"],
-    ["Pulse", "78 bpm"],
-    ["Temp", "36.8 °C"],
-    ["SPO2", "99%"],
-  ];
+const HistoryDashboard: React.FC<{
+  embedded?: boolean;
+  patientId?: string;
+}> = ({ embedded = false, patientId }) => {
+  const [plan, setPlan] = useState<SummaryPlan | null>(null);
+  const [cycleDetails, setCycleDetails] = useState<ChemoCycleDetail[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
 
-  const cycles = [
-    {
-      cycle: "CYCLE 06 (FINAL)",
-      date: "16 Feb 2026 - 19 Feb 2026",
-      description:
-        "Protocol completed. Patient shows excellent clinical response with 80% tumor reduction.",
-        final: true,
-    },
-    {
-      cycle: "CYCLE 05",
-      date: "09 Feb 2026 - 12 Feb 2026",
-      description:
-        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
-        final: false,
-    },
-    {
-      cycle: "CYCLE 04",
-      date: "05 Feb 2026 - 07 Feb 2026",
-      description:
-        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
-        final: false,
-    },
-    {
-      cycle: "CYCLE 03",
-      date: "01 Feb 2026 - 03 Feb 2026",
-      description:
-        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
-        final: false,
-    },
-    {
-      cycle: "CYCLE 02",
-      date: "24 Jan 2026 - 28 Jan 2026",
-      description:
-        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
-        final: false,
-    },
-    {
-      cycle: "CYCLE 01",
-      date: "18 Jan 2026 - 21 Jan 2026",
-      description:
-        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
-        final: false,
-    },
-  ];
+  /* Real treatment history for THIS selected patient:
+     latest chemo plan (GET /chemotherapy/plans?patient_id=) plus
+     each cycle's recorded vitals + adverse events
+     (GET /chemotherapy/cycles/:id). */
+  useEffect(() => {
+    if (!patientId) {
+      setPlan(null);
+      setCycleDetails([]);
+      setHistoryError(
+        "No patient selected. Open this page from a patient consultation to load history."
+      );
+      return;
+    }
+    let cancelled = false;
+    setHistoryLoading(true);
+    setHistoryError("");
+    loadLatestChemoPlan(patientId)
+      .then(async (loaded) => {
+        if (cancelled) return;
+        setPlan(loaded);
+        const cycles = (loaded?.chemotherapy_cycle ?? []).filter(
+          (cycle) => cycle.chemotherapy_cycle_id
+        );
+        const details = await Promise.all(
+          cycles.map((cycle) =>
+            loadCycleDetail(cycle.chemotherapy_cycle_id as string).catch(
+              () => null
+            )
+          )
+        );
+        if (!cancelled) {
+          setCycleDetails(
+            details.filter(
+              (detail): detail is ChemoCycleDetail => detail !== null
+            )
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setHistoryError("Failed to load treatment history.");
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
 
-  const cycleHistory = [
-    ["CYCLE 06", "16 Feb 2026 - 19 Feb 2026"],
-    ["CYCLE 05", "09 Feb 2026 - 12 Feb 2026"],
-    ["CYCLE 04", "05 Feb 2026 - 07 Feb 2026"],
-    ["CYCLE 03", "01 Feb 2026 - 03 Feb 2026"],
-    ["CYCLE 02", "24 Jan 2026 - 28 Jan 2026"],
-    ["CYCLE 01", "18 Jan 2026 - 21 Jan 2026"],
-  ];
+  const fmtHistoryDate = (value?: string | null) => {
+    if (!value) return "";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return `${String(d.getDate()).padStart(2, "0")}-${String(
+      d.getMonth() + 1
+    ).padStart(2, "0")}-${d.getFullYear()}`;
+  };
 
-  const medications = [
-    {
-      medication: "Ondansetron",
-      start: "18 Jan 2026",
-      end: "Present",
-      dosage: "8 mg",
-      route: "Oral",
-      status: "ACTIVE",
-    },
-    {
-      medication: "Dexamethasone",
-      start: "18 Jan 2026",
-      end: "19 Feb 2026",
-      dosage: "20 mg",
-      route: "IV",
-      status: "COMPLETED",
-    },
-    {
-      medication: "Filgrastim",
-      start: "19 Jan 2026",
-      end: "24 Jan 2026",
-      dosage: "300 mcg",
-      route: "Subcutaneous",
-      status: "COMPLETED",
-    },
-  ];
+  const planCyclesSorted = [...(plan?.chemotherapy_cycle ?? [])].sort(
+    (a, b) =>
+      (b.planned_date ?? "").localeCompare(a.planned_date ?? "") ||
+      b.cycle_number - a.cycle_number
+  );
+
+  /* Timeline entries straight from the saved cycles. */
+  const timelineItems = planCyclesSorted.map((cycle, index) => {
+    const start = fmtHistoryDate(cycle.planned_date);
+    const end =
+      fmtHistoryDate(cycle.actual_date) || fmtHistoryDate(cycle.next_cycle_date);
+    const status = (cycle.cycle_status ?? "PLANNED").toUpperCase();
+    return {
+      cycle: `CYCLE ${String(cycle.cycle_number).padStart(2, "0")}${
+        index === 0 && status === "COMPLETED" ? " (LATEST)" : ""
+      }`,
+      date: end && start !== end ? `${start} - ${end}` : start,
+      description:
+        cycle.remarks?.trim() ||
+        `Status: ${status}${
+          cycle.completion_status
+            ? ` · Completion: ${cycle.completion_status}`
+            : ""
+        }`,
+      final: index === 0,
+      status,
+    };
+  });
+
+  /* Cycle-history table rows: agent/dose come from the plan's
+     PRIMARY items; outcome is the real cycle_status. */
+  const primaryPlanItems = (plan?.chemotherapy_plan_items ?? []).filter(
+    (item) => (item.drug_role ?? "").toUpperCase() === "PRIMARY"
+  );
+  const cycleHistoryRows = planCyclesSorted
+    .slice()
+    .reverse()
+    .map((cycle) => {
+      const detail = cycleDetails.find(
+        (entry) =>
+          entry.chemotherapy_cycle_id === cycle.chemotherapy_cycle_id
+      );
+      const status = (
+        detail?.cycle_status ??
+        cycle.cycle_status ??
+        "PLANNED"
+      ).toUpperCase();
+      return {
+        cycle: `CYCLE ${String(cycle.cycle_number).padStart(2, "0")}`,
+        dates: [
+          fmtHistoryDate(cycle.planned_date),
+          fmtHistoryDate(cycle.actual_date) ||
+            fmtHistoryDate(cycle.next_cycle_date),
+        ]
+          .filter(Boolean)
+          .join(" - "),
+        agent:
+          primaryPlanItems
+            .map((item) => item.medicine_master?.medicine_name)
+            .filter(Boolean)
+            .join(", ") || "—",
+        plannedDose: primaryPlanItems[0]?.protocol_dose != null
+          ? `${primaryPlanItems[0].protocol_dose} ${
+              primaryPlanItems[0].protocol_dose_unit ?? ""
+            }`.trim()
+          : "—",
+        actualDose: primaryPlanItems[0]?.calculated_dose ?? "—",
+        status,
+      };
+    });
+
+  /* Medication history rows from the plan's saved items. */
+  const medicationRows = (plan?.chemotherapy_plan_items ?? []).map((item) => ({
+    medication: item.medicine_master?.medicine_name ?? "—",
+    start: fmtHistoryDate(plan?.treatment_start_date),
+    end:
+      (plan?.treatment_status ?? "").toUpperCase() === "COMPLETED"
+        ? fmtHistoryDate(plan?.expected_end_date) || "—"
+        : "Ongoing",
+    dosage:
+      item.protocol_dose != null
+        ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim()
+        : item.formulation || "—",
+    route: item.administration_route || "—",
+    active:
+      (plan?.treatment_status ?? "").toUpperCase() === "COMPLETED"
+        ? false
+        : true,
+  }));
+
+  /* Adverse events aggregated across the fetched cycles. */
+  interface AdverseEventRow {
+    id: string;
+    date: string;
+    event: string;
+    grade: string;
+    action: string;
+    outcome: string;
+  }
+  const adverseEventRows: AdverseEventRow[] = [];
+  planCyclesSorted.forEach((cycle) => {
+    const detail = cycleDetails.find(
+      (entry) => entry.chemotherapy_cycle_id === cycle.chemotherapy_cycle_id
+    );
+    (detail?.chemotherapy_adverse_event ?? []).forEach((event, idx) => {
+      adverseEventRows.push({
+        id: event.adverse_event_id ?? `${cycle.chemotherapy_cycle_id}-${idx}`,
+        date: fmtHistoryDate(event.event_date),
+        event: event.adverse_event_name || "—",
+        grade:
+          event.ctcae_grade ||
+          event.reaction_grade ||
+          event.severity ||
+          "—",
+        action:
+          event.doctor_action ||
+          event.nursing_action ||
+          (event.dose_reduced
+            ? "Dose reduced"
+            : event.dose_delayed
+            ? "Dose delayed"
+            : event.treatment_interrupted
+            ? "Treatment interrupted"
+            : "None recorded"),
+        outcome: event.treatment_stopped
+          ? "STOPPED"
+          : event.hospitalization_required
+          ? "HOSPITALIZED"
+          : "ONGOING",
+      });
+    });
+  });
+  adverseEventRows.sort((a, b) => b.date.localeCompare(a.date));
+
+  /* Per-cycle average weight for the vitals trend chart. */
+  const weightTrend = planCyclesSorted
+    .map((cycle) => {
+      const detail = cycleDetails.find(
+        (entry) => entry.chemotherapy_cycle_id === cycle.chemotherapy_cycle_id
+      );
+      const weights = (detail?.chemotherapy_vitals ?? [])
+        .map((vital) => Number(vital.weight))
+        .filter((value) => !Number.isNaN(value) && value > 0);
+      const avg =
+        weights.length > 0
+          ? weights.reduce((sum, value) => sum + value, 0) / weights.length
+          : null;
+      return {
+        cycleNumber: cycle.cycle_number,
+        weight: avg,
+      };
+    })
+    .filter((entry) => entry.weight != null);
+  const weightTrendMax = Math.max(...weightTrend.map((e) => e.weight ?? 0), 1);
+  const weightTrendAvg =
+    weightTrend.length > 0
+      ? weightTrend.reduce((sum, entry) => sum + (entry.weight ?? 0), 0) /
+        weightTrend.length
+      : null;
+
+  const historyTimelineRange = (() => {
+    const dates = planCyclesSorted
+      .map((cycle) => cycle.planned_date)
+      .filter(Boolean)
+      .sort();
+    if (dates.length === 0) return "";
+    const first = fmtHistoryDate(dates[0]);
+    const last = fmtHistoryDate(dates[dates.length - 1]);
+    return first === last ? first : `${first} - ${last}`;
+  })();
 
   /* =========================================================
      CONTENT (PATIENT HEADER + HISTORY SECTIONS + ACTIONS)
@@ -2036,6 +2271,24 @@ const HistoryDashboard: React.FC<{ embedded?: boolean }> = ({
 
   const content = (
     <>
+      {/* LIVE DATA STATUS */}
+      {(historyLoading || historyError) && (
+        <div className="p-6 pb-0">
+          {historyLoading && (
+            <div className="flex items-center rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+              <i className="fa-solid fa-circle-notch fa-spin mr-2" /> Loading
+              treatment history…
+            </div>
+          )}
+          {!historyLoading && historyError && (
+            <div className="flex items-center rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              <i className="fa-solid fa-triangle-exclamation mr-2" />{" "}
+              {historyError}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* TIMELINE + RIGHT COLUMN */}
       <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6 bg-slate-50/50">
         {/* LEFT */}
@@ -2051,52 +2304,69 @@ const HistoryDashboard: React.FC<{ embedded?: boolean }> = ({
               </div>
 
               <span className="text-sm font-medium text-gray-500">
-                Aug 2026 - Present
+                {historyTimelineRange || "No treatment dates recorded"}
               </span>
             </div>
 
             {/* Timeline */}
             <div className="relative pl-4 space-y-6">
-              <div className="absolute left-[21px] top-4 bottom-4 w-px bg-gray-200" />
+              {timelineItems.length > 0 && (
+                <div className="absolute left-[21px] top-4 bottom-4 w-px bg-gray-200" />
+              )}
 
-              {cycles.map((item) => (
-                <div
-                  key={item.cycle}
-                  className="relative flex items-start"
-                >
-                  <div className="absolute left-[-4px] top-3 w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center ring-4 ring-white z-10">
-                    <i className="fa-solid fa-check text-white text-[10px]" />
-                  </div>
-
+              {timelineItems.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-gray-300 bg-white p-6 text-sm text-gray-500">
+                  No chemotherapy cycles found for this patient yet. Save a
+                  Treatment Plan and record cycles to build the timeline.
+                </div>
+              ) : (
+                timelineItems.map((item) => (
                   <div
-                    className={`ml-8 w-full rounded-lg p-4 transition hover:shadow-md ${
-                      item.final
-                        ? "bg-blue-50/40 border border-blue-100"
-                        : "bg-white border border-gray-200"
-                    }`}
+                    key={item.cycle}
+                    className="relative flex items-start"
                   >
-                    <div className="flex justify-between items-start mb-2">
-                      <h3
-                        className={`font-bold text-sm ${
-                          item.final
-                            ? "text-blue-700"
-                            : "text-gray-800"
-                        }`}
-                      >
-                        {item.cycle}
-                      </h3>
-
-                      <span className="text-sm text-gray-500">
-                        {item.date}
-                      </span>
+                    <div className={`absolute left-[-4px] top-3 w-5 h-5 rounded-full flex items-center justify-center ring-4 ring-white z-10 ${
+                      item.status === "COMPLETED"
+                        ? "bg-blue-600"
+                        : "bg-slate-400"
+                    }`}>
+                      <i className={`fa-solid ${
+                        item.status === "COMPLETED"
+                          ? "fa-check text-white text-[10px]"
+                          : "fa-clock text-white text-[10px]"
+                      }`} />
                     </div>
 
-                    <p className="text-sm text-gray-700">
-                      {item.description}
-                    </p>
+                    <div
+                      className={`ml-8 w-full rounded-lg p-4 transition hover:shadow-md ${
+                        item.final
+                          ? "bg-blue-50/40 border border-blue-100"
+                          : "bg-white border border-gray-200"
+                      }`}
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <h3
+                          className={`font-bold text-sm ${
+                            item.final
+                              ? "text-blue-700"
+                              : "text-gray-800"
+                          }`}
+                        >
+                          {item.cycle}
+                        </h3>
+
+                        <span className="text-sm text-gray-500">
+                          {item.date || "—"}
+                        </span>
+                      </div>
+
+                      <p className="text-sm text-gray-700">
+                        {item.description}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -2112,16 +2382,35 @@ const HistoryDashboard: React.FC<{ embedded?: boolean }> = ({
             <div className="mb-4">
               <div className="flex justify-between text-xs text-gray-500 uppercase font-semibold mb-2">
                 <span>WEIGHT (KG)</span>
-                <span>Avg 51.8</span>
+                <span>
+                  {weightTrendAvg != null
+                    ? `Avg ${weightTrendAvg.toFixed(1)}`
+                    : "No data"}
+                </span>
               </div>
 
               <div className="flex items-end h-12 gap-1">
-                <div className="w-full bg-blue-100 rounded-t h-[60%]" />
-                <div className="w-full bg-blue-200 rounded-t h-[65%]" />
-                <div className="w-full bg-blue-200 rounded-t h-[62%]" />
-                <div className="w-full bg-blue-200 rounded-t h-[68%]" />
-                <div className="w-full bg-blue-200 rounded-t h-[64%]" />
-                <div className="w-full bg-blue-700 rounded-t h-[70%]" />
+                {weightTrend.length === 0 ? (
+                  <p className="text-xs text-gray-400">
+                    No vitals recorded for any cycle yet.
+                  </p>
+                ) : (
+                  weightTrend.map((entry) => (
+                    <div
+                      key={entry.cycleNumber}
+                      title={`Cycle ${entry.cycleNumber}: ${(
+                        entry.weight ?? 0
+                      ).toFixed(1)} kg`}
+                      className="w-full bg-blue-600 rounded-t"
+                      style={{
+                        height: `${Math.max(
+                          8,
+                          Math.round(((entry.weight ?? 0) / weightTrendMax) * 100)
+                        )}%`,
+                      }}
+                    />
+                  ))
+                )}
               </div>
             </div>
 
@@ -2155,50 +2444,8 @@ const HistoryDashboard: React.FC<{ embedded?: boolean }> = ({
             </div>
 
             <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50/50 hover:bg-gray-50 transition">
-                <div className="flex items-center gap-3">
-                  <i className="fa-regular fa-file-pdf text-red-500 text-lg" />
-
-                  <div>
-                    <div className="text-sm font-semibold text-gray-800">
-                      Final_Summary.pdf
-                    </div>
-
-                    <div className="text-xs text-gray-500">
-                      19 Feb 2026
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <i className="fa-solid fa-download" />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50/50 hover:bg-gray-50 transition">
-                <div className="flex items-center gap-3">
-                  <i className="fa-regular fa-file-pdf text-red-500 text-lg" />
-
-                  <div>
-                    <div className="text-sm font-semibold text-gray-800">
-                      Cycle_6_Report.pdf
-                    </div>
-
-                    <div className="text-xs text-gray-500">
-                      16 Feb 2026
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <i className="fa-solid fa-download" />
-                </button>
+              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-4 text-center text-xs text-gray-400">
+                No documents uploaded for this patient yet.
               </div>
             </div>
           </div>
@@ -2252,38 +2499,60 @@ const HistoryDashboard: React.FC<{ embedded?: boolean }> = ({
               </thead>
 
               <tbody className="divide-y divide-gray-100">
-                {cycleHistory.map(([cycle, dates]) => (
-                  <tr
-                    key={cycle}
-                    className="hover:bg-gray-50"
-                  >
-                    <td className="px-6 py-4 font-medium text-gray-900">
-                      {cycle}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-500">
-                      {dates}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-700">
-                      Paclitaxel
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-700">
-                      80 mg/m²
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-700">
-                      80 mg/m²
-                    </td>
-
-                    <td className="px-6 py-4 text-right">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                        SUCCESSFUL
-                      </span>
+                {cycleHistoryRows.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-6 py-6 text-center text-xs text-gray-400"
+                    >
+                      No chemotherapy cycles recorded for this patient yet.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  cycleHistoryRows.map((row) => (
+                    <tr
+                      key={row.cycle}
+                      className="hover:bg-gray-50"
+                    >
+                      <td className="px-6 py-4 font-medium text-gray-900">
+                        {row.cycle}
+                      </td>
+
+                      <td className="px-6 py-4 text-gray-500">
+                        {row.dates || "—"}
+                      </td>
+
+                      <td className="px-6 py-4 text-gray-700">
+                        {row.agent}
+                      </td>
+
+                      <td className="px-6 py-4 text-gray-700">
+                        {row.plannedDose}
+                      </td>
+
+                      <td className="px-6 py-4 text-gray-700">
+                        {row.actualDose}
+                      </td>
+
+                      <td className="px-6 py-4 text-right">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                            row.status === "COMPLETED"
+                              ? "bg-green-100 text-green-800"
+                              : row.status === "IN_PROGRESS" ||
+                                row.status === "ADMINISTERED"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : "bg-gray-100 text-gray-600"
+                          }`}
+                        >
+                          {row.status === "COMPLETED"
+                            ? "SUCCESSFUL"
+                            : row.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -2330,44 +2599,55 @@ const HistoryDashboard: React.FC<{ embedded?: boolean }> = ({
               </thead>
 
               <tbody className="divide-y divide-gray-100">
-                {medications.map((medication) => (
-                  <tr
-                    key={medication.medication}
-                    className="hover:bg-gray-50"
-                  >
-                    <td className="px-6 py-4 font-medium text-gray-900">
-                      {medication.medication}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-500">
-                      {medication.start}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-500">
-                      {medication.end}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-700">
-                      {medication.dosage}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-700">
-                      {medication.route}
-                    </td>
-
-                    <td className="px-6 py-4 text-right">
-                      {medication.status === "ACTIVE" ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                          ACTIVE
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
-                          COMPLETED
-                        </span>
-                      )}
+                {medicationRows.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-6 py-6 text-center text-xs text-gray-400"
+                    >
+                      No medications prescribed for this patient yet.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  medicationRows.map((medication) => (
+                    <tr
+                      key={medication.medication}
+                      className="hover:bg-gray-50"
+                    >
+                      <td className="px-6 py-4 font-medium text-gray-900">
+                        {medication.medication}
+                      </td>
+
+                      <td className="px-6 py-4 text-gray-500">
+                        {medication.start || "—"}
+                      </td>
+
+                      <td className="px-6 py-4 text-gray-500">
+                        {medication.end}
+                      </td>
+
+                      <td className="px-6 py-4 text-gray-700">
+                        {medication.dosage}
+                      </td>
+
+                      <td className="px-6 py-4 text-gray-700">
+                        {medication.route}
+                      </td>
+
+                      <td className="px-6 py-4 text-right">
+                        {medication.active ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                            ACTIVE
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                            COMPLETED
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -2410,29 +2690,48 @@ const HistoryDashboard: React.FC<{ embedded?: boolean }> = ({
               </thead>
 
               <tbody className="divide-y divide-gray-100">
-                <tr className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-gray-500">
-                    12 Feb 2026
-                  </td>
+                {adverseEventRows.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-6 py-6 text-center text-xs text-gray-400"
+                    >
+                      No adverse events recorded for this patient yet.
+                    </td>
+                  </tr>
+                ) : (
+                  adverseEventRows.map((event) => (
+                    <tr key={event.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 text-gray-500">
+                        {event.date || "—"}
+                      </td>
 
-                  <td className="px-6 py-4 font-medium text-gray-900">
-                    Peripheral Neuropathy
-                  </td>
+                      <td className="px-6 py-4 font-medium text-gray-900">
+                        {event.event}
+                      </td>
 
-                  <td className="px-6 py-4 text-gray-700">
-                    Grade 1
-                  </td>
+                      <td className="px-6 py-4 text-gray-700">
+                        {event.grade}
+                      </td>
 
-                  <td className="px-6 py-4 text-gray-700">
-                    Dose maintained
-                  </td>
+                      <td className="px-6 py-4 text-gray-700">
+                        {event.action}
+                      </td>
 
-                  <td className="px-6 py-4 text-right">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
-                      ONGOING
-                    </span>
-                  </td>
-                </tr>
+                      <td className="px-6 py-4 text-right">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                            event.outcome === "ONGOING"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : "bg-red-100 text-red-800"
+                          }`}
+                        >
+                          {event.outcome}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -2574,13 +2873,26 @@ function DischargeDetailsPortal({
     useState<StagingDetailRecord | null>(null);
   const [planPreviewLoading, setPlanPreviewLoading] = useState(false);
   const [planPreviewError, setPlanPreviewError] = useState("");
+  const [patient, setPatient] = useState<PatientRecord | null>(null);
+  const [dischargePlan, setDischargePlan] = useState<SummaryPlan | null>(null);
+  const [latestVitals, setLatestVitals] = useState<ChemoVitalsEntry | null>(
+    null
+  );
+  const [reactionCount, setReactionCount] = useState(0);
 
   // Recent details for THIS selected patient via
   // /chemotherapy/plans/preview?staging_detail_id=<latest staging detail>.
+  // Also loads the live patient record (api/patient.api), the saved
+  // chemotherapy plan and the most recent cycle's recorded vitals +
+  // adverse events so every panel shows REAL data.
   useEffect(() => {
     if (!patientId) {
       setPlanPreview(null);
       setStagingDetail(null);
+      setPatient(null);
+      setDischargePlan(null);
+      setLatestVitals(null);
+      setReactionCount(0);
       setPlanPreviewLoading(false);
       setPlanPreviewError(
         "No patient selected. Open this page from a patient consultation to load recent details."
@@ -2590,6 +2902,53 @@ function DischargeDetailsPortal({
     let cancelled = false;
     setPlanPreviewLoading(true);
     setPlanPreviewError("");
+
+    /* Live patient identity via GET /patients/:id (api/patient.api). */
+    patientApi
+      .getById(patientId)
+      .then((response) => {
+        if (!cancelled) setPatient(response.data?.data ?? null);
+      })
+      .catch(() => {
+        /* Header falls back to staging/patient bio when unavailable. */
+      });
+
+    /* Saved plan + latest cycle vitals/adverse events. */
+    loadLatestChemoPlan(patientId)
+      .then(async (loaded) => {
+        if (cancelled) return;
+        setDischargePlan(loaded);
+        const sortedCycles = [...(loaded?.chemotherapy_cycle ?? [])].sort(
+          (a, b) =>
+            (b.actual_date ?? b.planned_date ?? "").localeCompare(
+              a.actual_date ?? a.planned_date ?? ""
+            ) || b.cycle_number - a.cycle_number
+        );
+        const newestWithId = sortedCycles.find(
+          (cycle) => cycle.chemotherapy_cycle_id
+        );
+        if (!newestWithId?.chemotherapy_cycle_id) return;
+        try {
+          const detail = await loadCycleDetail(
+            newestWithId.chemotherapy_cycle_id as string
+          );
+          if (cancelled || !detail) return;
+          const vitalsRows = (detail.chemotherapy_vitals ?? []).slice();
+          vitalsRows.sort((a, b) =>
+            (b.recorded_at ?? "").localeCompare(a.recorded_at ?? "")
+          );
+          setLatestVitals(vitalsRows[0] ?? null);
+          setReactionCount(
+            (detail.chemotherapy_adverse_event ?? []).length
+          );
+        } catch {
+          /* Vitals stay empty - panels show placeholders. */
+        }
+      })
+      .catch(() => {
+        /* Plan-dependent panels fall back to their empty states. */
+      });
+
     loadLatestPlanPreview(patientId)
       .then(({ preview, staging, error }) => {
         if (cancelled) return;
@@ -2796,48 +3155,166 @@ function DischargeDetailsPortal({
     "Notes & Documents",
   ];
 
-  const medications = [
-    {
-      medication: "Ondansetron",
-      purpose: "Anti-nausea",
-      dose: "1 Tablet",
-      frequency: "TID (Every 8 Hours)",
-      duration: "3 Days",
-    },
-  ];
+  /* =========================================================
+     REAL DATA DERIVATIONS (patient record, saved plan, latest
+     recorded vitals, staging details)
+  ========================================================= */
 
+  const dischargeName = patient
+    ? [
+        patient.patient_first_name,
+        patient.patient_middle_name,
+        patient.patient_last_name,
+      ]
+        .filter(Boolean)
+        .join(" ") || patient.patient_id
+    : sd?.patient_bio_data
+    ? [
+        sd.patient_bio_data.patient_first_name,
+        sd.patient_bio_data.patient_last_name,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : "";
+
+  const dischargeAgeSex = patient
+    ? `${patient.patient_age ?? "—"}Y / ${patient.patient_gender ?? ""}`
+    : sd?.patient_bio_data
+    ? `${sd.patient_bio_data.patient_age ?? "—"}Y / ${
+        sd.patient_bio_data.patient_gender ?? ""
+      }`
+    : "";
+
+  const dischargePhoto = patient?.patient_photo_url || "";
+
+  const dischargeDiagnosis =
+    [
+      orderSummaryDiagnosis,
+      stagingDetail?.clinical_stage || planPreview?.clinical_stage,
+    ]
+      .filter(Boolean)
+      .join(" • ") || "";
+
+  const num = (value?: string | number | null) => {
+    if (value === null || value === undefined || value === "") return null;
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  const bpSystolic = num(latestVitals?.blood_pressure_systolic);
+  const bpDiastolic = num(latestVitals?.blood_pressure_diastolic);
+  const headerVitalEntries: [string, string][] = [
+    ["HEIGHT", latestVitals?.height != null ? `${latestVitals.height} cm` : ""],
+    ["BP", bpSystolic != null && bpDiastolic != null ? `${bpSystolic}/${bpDiastolic}` : ""],
+    ["WEIGHT", latestVitals?.weight != null ? `${latestVitals.weight} kg` : ""],
+    ["PULSE", latestVitals?.pulse_rate != null ? `${latestVitals.pulse_rate} bpm` : ""],
+    ["BSA", latestVitals?.body_surface_area != null ? `${latestVitals.body_surface_area} m²` : ""],
+    ["TEMP", latestVitals?.body_temperature != null ? `${latestVitals.body_temperature} °C` : ""],
+    ["BMI", latestVitals?.bmi != null ? `${latestVitals.bmi}` : ""],
+    ["SPO2", latestVitals?.spo2 != null ? `${latestVitals.spo2}%` : ""],
+  ];
+  const headerVitals = (label: string) =>
+    headerVitalEntries.find(([key]) => key === label)?.[1] || "—";
+
+  const intentTherapy =
+    dischargePlan?.regimen_name ||
+    planPreview?.matching_protocols?.[0]?.regimen_name ||
+    planPreview?.suggested_therapy ||
+    "";
+  const intentLabel = dischargePlan?.treatment_intent || "";
+
+  /* Take-home medications: real rows come from the saved plan's
+     medication items; without a plan the table shows its empty state. */
+  const medications = (dischargePlan?.chemotherapy_plan_items ?? []).map(
+    (item) => ({
+      medication: item.medicine_master?.medicine_name ?? "—",
+      purpose: item.drug_role || "Prescribed",
+      dose:
+        item.protocol_dose != null
+          ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim()
+          : item.formulation || "—",
+      frequency: item.frequency || item.remarks || "—",
+      duration: item.remarks || "As directed",
+    })
+  );
+
+  /* Final vital signs from the most recent cycle's recorded vitals. */
   const vitals = [
     {
       label: "BP",
-      value: "118/76",
-      status: "Stable",
+      value:
+        bpSystolic != null && bpDiastolic != null
+          ? `${bpSystolic}/${bpDiastolic}`
+          : "—",
+      status: latestVitals?.vital_stage || "Not recorded",
     },
     {
       label: "Pulse",
-      value: "74 bpm",
-      status: "Normal",
+      value:
+        latestVitals?.pulse_rate != null
+          ? `${latestVitals.pulse_rate} bpm`
+          : "—",
+      status: "Recorded",
     },
     {
       label: "Temp",
-      value: "98.6°F",
-      status: "Apyrexic",
+      value:
+        latestVitals?.body_temperature != null
+          ? `${latestVitals.body_temperature} °C`
+          : "—",
+      status: "Recorded",
     },
     {
       label: "SpO2",
-      value: "99%",
-      status: "Room Air",
+      value: latestVitals?.spo2 != null ? `${latestVitals.spo2}%` : "—",
+      status: latestVitals?.oxygen_support ? "On Support" : "Room Air",
     },
   ];
 
-  const checklist = [
-    "Infusion protocol complete",
-    "Vitals stable for 30 mins",
-    "Allergy status verified",
-    "Discharge instructions provided",
-    "Medications reviewed",
-    "Follow-up appointment scheduled",
-    "Patient education completed",
-  ];
+  const lastCheckedLabel = (() => {
+    if (!latestVitals?.recorded_at) return "";
+    const d = new Date(latestVitals.recorded_at);
+    if (Number.isNaN(d.getTime())) return "";
+    let hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const meridiem = hours >= 12 ? "PM" : "AM";
+    hours = hours % 12 || 12;
+    return `Last checked: ${String(hours).padStart(2, "0")}:${minutes} ${meridiem}`;
+  })();
+
+  /* Cycle stats computed from the saved plan + its cycles. */
+  const allDischargeCycles = dischargePlan?.chemotherapy_cycle ?? [];
+  const administeredCount = allDischargeCycles.filter((cycle) =>
+    ((cycle.cycle_status ?? "")).toUpperCase() === "COMPLETED"
+  ).length;
+  const treatmentDurationLabel = (() => {
+    const start = dischargePlan?.treatment_start_date
+      ? new Date(dischargePlan.treatment_start_date)
+      : null;
+    const endCandidates = allDischargeCycles
+      .map((cycle) => cycle.actual_date ?? cycle.planned_date)
+      .filter(Boolean)
+      .sort();
+    const end = endCandidates.length
+      ? new Date(endCandidates[endCandidates.length - 1])
+      : dischargePlan?.expected_end_date
+      ? new Date(dischargePlan.expected_end_date)
+      : null;
+    if (
+      !start ||
+      !end ||
+      Number.isNaN(start.getTime()) ||
+      Number.isNaN(end.getTime())
+    ) {
+      return "";
+    }
+    const days = Math.max(
+      0,
+      Math.round((end.getTime() - start.getTime()) / 86400000)
+    );
+    return `${days} day${days === 1 ? "" : "s"}`;
+  })();
+  const checklist: string[] = [];
 
   return (
     <>
@@ -2889,16 +3366,22 @@ function DischargeDetailsPortal({
 {/* BEGIN: Patient Header Card */}
 <div className="bg-white rounded-[16px] border border-[#e2e8f0] p-6 shadow-sm mb-6 flex justify-between items-center">
 <div className="flex items-center">
-<img alt="Vijaya Nallusamy" className="w-20 h-20 rounded-full border-4 border-white shadow-sm object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCVmv5vhpN6g6IwvwVBONWYZS06j9iELGi3guKAqt6M68HTL3HxSslWkIMAEQjWeTlKNOdnc-Pipmecvq47y_J4JkJpXBa7ODMic8izxEnar0D-CTbCOUggEhRCTr29jfsIrqPw9jJJRvmghxFC8vXF6U5zjzrn_8ajoH2ovseUywhLI0FurjCqa2DjfMMM3yvISAkY7jN2EjygmPh_WvJa_vc06-pRUGw2Xu4pFrWdOcPdAl4HggI"/>
+{dischargePhoto ? (
+<img alt={dischargeName} className="w-20 h-20 rounded-full border-4 border-white shadow-sm object-cover" src={dischargePhoto}/>
+) : (
+<div className="w-20 h-20 rounded-full border-4 border-white shadow-sm bg-slate-100 flex items-center justify-center text-slate-500">
+<i className="fa-solid fa-user text-2xl"></i>
+</div>
+)}
 <div className="ml-6">
 <div className="flex items-center space-x-3 mb-1">
-<h2 className="text-xl font-bold text-[#1e293b]">Vijaya Nallusamy</h2>
-<span className="bg-slate-100 text-[#64748b] px-3 py-1 rounded-full text-xs font-semibold">ONC-2026-10025</span>
+<h2 className="text-xl font-bold text-[#1e293b]">{dischargeName || "—"}</h2>
+<span className="bg-slate-100 text-[#64748b] px-3 py-1 rounded-full text-xs font-semibold">{patientId || sd?.patient_id || ""}</span>
 </div>
 <div className="text-sm text-[#64748b] flex items-center space-x-3">
-<span>51Y / Female</span>
+<span>{dischargeAgeSex || "—"}</span>
 <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-<span className="text-[#1d4ed8] font-semibold">Ductal Carcinoma Stage II</span>
+<span className="text-[#1d4ed8] font-semibold">{dischargeDiagnosis || "No diagnosis saved yet"}</span>
 </div>
 </div>
 </div>
@@ -2907,50 +3390,50 @@ function DischargeDetailsPortal({
 <div className="space-y-4">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">HEIGHT</div>
-<div className="font-bold text-sm">154 cm</div>
+<div className="font-bold text-sm">{headerVitals("HEIGHT")}</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BP</div>
-<div className="font-bold text-sm">118/74</div>
+<div className="font-bold text-sm">{headerVitals("BP")}</div>
 </div>
 </div>
 <div className="space-y-4">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">WEIGHT</div>
-<div className="font-bold text-sm">52 kg</div>
+<div className="font-bold text-sm">{headerVitals("WEIGHT")}</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">PULSE</div>
-<div className="font-bold text-sm">78 bpm</div>
+<div className="font-bold text-sm">{headerVitals("PULSE")}</div>
 </div>
 </div>
 <div className="space-y-4">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BSA</div>
-<div className="font-bold text-sm">1.49 m²</div>
+<div className="font-bold text-sm">{headerVitals("BSA")}</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">TEMP</div>
-<div className="font-bold text-sm">36.8 °C</div>
+<div className="font-bold text-sm">{headerVitals("TEMP")}</div>
 </div>
 </div>
 <div className="space-y-4">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BMI</div>
-<div className="font-bold text-sm">21.93</div>
+<div className="font-bold text-sm">{headerVitals("BMI")}</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">SPO2</div>
-<div className="font-bold text-sm">99%</div>
+<div className="font-bold text-sm">{headerVitals("SPO2")}</div>
 </div>
 </div>
 </div>
 <div className="pl-8">
 <div className="bg-blue-50/50 border border-blue-100 rounded-[12px] p-4 w-[220px]">
-<div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: NEOADJUVANT</div>
-<div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">TAXOL - WEEKLY</div>
+<div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: {intentLabel || "NOT RECORDED"}</div>
+<div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">{intentTherapy || "—"}</div>
 <div className="flex items-center text-xs text-[#64748b] font-medium">
-<span className="w-2 h-2 rounded-full bg-[#10b981] mr-2"></span> Active Protocol
+<span className={`w-2 h-2 rounded-full mr-2 ${((dischargePlan?.treatment_status ?? "")).toUpperCase() === "COMPLETED" ? "bg-[#10b981]" : "bg-[#f59e0b]"}`}></span> {((dischargePlan?.treatment_status ?? "").toUpperCase() === "COMPLETED" ? "Protocol Completed" : dischargePlan ? "Active Protocol" : "No Plan Saved")}
                     </div>
 </div>
 </div>
@@ -3045,10 +3528,17 @@ return (
                     Discharge Status Summary
                   </h3>
 
-                  <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-700">
-                    <i className="fa-regular fa-circle-check mr-1.5" />
-                    Ready for Discharge
-                  </span>
+                  {((dischargePlan?.treatment_status ?? "").toUpperCase() === "COMPLETED") ? (
+                    <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-700">
+                      <i className="fa-regular fa-circle-check mr-1.5" />
+                      Protocol Completed
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-700">
+                      <i className="fa-regular fa-clock mr-1.5" />
+                      {dischargePlan ? "Treatment In Progress" : "Not Recorded"}
+                    </span>
+                  )}
                 </div>
 
                 {/* Section Body */}
@@ -3063,10 +3553,8 @@ return (
                         Outcome
                       </div>
 
-                      <div className="col-span-2 text-lg font-semibold text-green-700">
-                        Completed
-                        <br />
-                        Successfully
+                      <div className={`col-span-2 text-lg font-semibold ${((dischargePlan?.treatment_status ?? "").toUpperCase() === "COMPLETED") ? "text-green-700" : "text-gray-500"}`}>
+                        {dischargePlan?.treatment_status || "Not recorded"}
                       </div>
                     </div>
 
@@ -3076,8 +3564,8 @@ return (
                         Discharge Date
                       </div>
 
-                      <div className="col-span-2 flex items-center font-semibold text-gray-900">
-                        05 Jun 2026
+                      <div className="col-span-2 flex items-center font-semibold text-gray-500">
+                        Not recorded
                       </div>
                     </div>
 
@@ -3087,8 +3575,8 @@ return (
                         Discharge Time
                       </div>
 
-                      <div className="col-span-2 flex items-center font-semibold text-gray-900">
-                        04:30 PM
+                      <div className="col-span-2 flex items-center font-semibold text-gray-500">
+                        Not recorded
                       </div>
                     </div>
 
@@ -3099,7 +3587,24 @@ return (
                       </div>
 
                       <div className="col-span-2 flex items-center font-semibold text-gray-900">
-                        Dr. Naveen
+                        {sd?.consulting_oncologist ||
+                          (sd?.employees
+                            ? [
+                                sd.employees.first_name,
+                                sd.employees.last_name,
+                              ]
+                                .filter(Boolean)
+                                .join(" ")
+                            : "") ||
+                          (dischargePlan?.employees
+                            ? [
+                                dischargePlan.employees.first_name,
+                                dischargePlan.employees.last_name,
+                              ]
+                                .filter(Boolean)
+                                .join(" ")
+                            : "") ||
+                          "—"}
                       </div>
                     </div>
                   </div>
@@ -3117,7 +3622,7 @@ return (
                           Cycles Planned
                         </p>
                         <p className="text-xl font-medium text-gray-900">
-                          5
+                          {dischargePlan?.planned_cycles ?? 0}
                         </p>
                       </div>
 
@@ -3127,7 +3632,7 @@ return (
                           Cycles Administered
                         </p>
                         <p className="text-xl font-medium text-blue-800">
-                          5
+                          {administeredCount}
                         </p>
                       </div>
 
@@ -3136,16 +3641,16 @@ return (
                         <p className="mb-1 text-xs text-gray-500">
                           Total Duration
                         </p>
-                        <p className="text-base text-gray-900">4 Hours</p>
+                        <p className="text-base text-gray-900">{treatmentDurationLabel || "—"}</p>
                       </div>
 
                       {/* Reactions */}
                       <div>
                         <p className="mb-1 text-xs text-gray-500">
-                          Infusion Reactions
+                          Adverse Reactions
                         </p>
-                        <p className="text-base font-medium text-green-700">
-                          None
+                        <p className={`text-base font-medium ${reactionCount > 0 ? "text-red-600" : "text-green-700"}`}>
+                          {reactionCount > 0 ? reactionCount : "None"}
                         </p>
                       </div>
                     </div>
@@ -3201,7 +3706,14 @@ return (
                     </thead>
 
                     <tbody className="divide-y divide-gray-200 bg-white">
-                      {medications.map((medication, index) => (
+                      {medications.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-6 py-6 text-center text-xs text-slate-400">
+                            No medications prescribed for this patient yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        medications.map((medication, index) => (
                         <tr key={index}>
                           <td className="whitespace-nowrap px-6 py-4 font-medium text-gray-900">
                             {medication.medication}
@@ -3223,7 +3735,8 @@ return (
                             {medication.duration}
                           </td>
                         </tr>
-                      ))}
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -3244,7 +3757,7 @@ return (
                   </h3>
 
                   <span className="text-xs text-gray-500">
-                    Last checked: 04:15 PM
+                    {lastCheckedLabel || "No vitals recorded"}
                   </span>
                 </div>
 
@@ -3285,13 +3798,19 @@ return (
                 </div>
 
                 <ul className="space-y-4">
-                  {checklist.map((item, index) => (
-                    <li key={index} className="flex items-start">
-                      <i className="fa-solid fa-circle-check mr-3 mt-0.5 text-lg text-green-500" />
-
-                      <span className="text-sm text-gray-700">{item}</span>
+                  {checklist.length === 0 ? (
+                    <li className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-xs text-slate-400">
+                      No discharge checklist recorded for this patient yet.
                     </li>
-                  ))}
+                  ) : (
+                    checklist.map((item, index) => (
+                      <li key={index} className="flex items-start">
+                        <i className="fa-solid fa-circle-check mr-3 mt-0.5 text-lg text-green-500" />
+
+                        <span className="text-sm text-gray-700">{item}</span>
+                      </li>
+                    ))
+                  )}
                 </ul>
               </section>
             </div>
