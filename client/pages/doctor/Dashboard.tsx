@@ -10,12 +10,10 @@ import {
   type DoctorNotificationItem,
 } from "../../api/doctorDashboard.api";
 import { activeBranches } from "../../lib/utils";
-import { appointmentApi } from "../../api/appointment.api";
 import { encounterApi } from "../../api/encounter.api";
 import { useToast } from "@/hooks/use-toast";
 
-
-type AppointmentStatus = "Check Out" | "Check In" | "Cancelled" | "Not Checked In";
+type AppointmentStatus = "Check Out" | "Check In" | "Cancelled";
 
 interface Appointment {
   patientId: string;
@@ -252,8 +250,17 @@ export default function DoctorDashboard() {
   const handleCheckIn = async (appointmentId: string) => {
     setCheckInLoading(appointmentId);
     try {
-      await appointmentApi.updateStatus(appointmentId, "IN_CONSULTATION");
-      await encounterApi.create({ appointment_id: appointmentId });
+      // createEncounter flips the appointment to IN_CONSULTATION inside its
+      // transaction; updating status separately first would strand an
+      // in-progress appointment with no encounter when creation fails.
+      try {
+        await encounterApi.create({ appointment_id: appointmentId });
+      } catch (error: any) {
+        const message = error?.response?.data?.message;
+        if (!message || !/already exists/i.test(message)) {
+          throw error;
+        }
+      }
       // Trigger reload by calling loadDashboard
       window.dispatchEvent(new CustomEvent("refreshDoctorDashboard"));
       toast({ title: "Patient checked in", description: "Encounter created successfully." });
@@ -266,8 +273,10 @@ export default function DoctorDashboard() {
 
   const handleCheckOut = async (appointmentId: string) => {
     try {
-      const encounters = await encounterApi.getAll({ appointmentId });
-      const encounter = encounters.data?.data?.encounters?.[0];
+      // Branch-independent lookup: the scoped list query can 403 a
+      // multi-branch doctor with no branch selected.
+      const response = await encounterApi.getByAppointment(appointmentId);
+      const encounter = response.data?.data;
       if (encounter) {
         await encounterApi.close(encounter.encounter_no, "DOCTOR");
       }
@@ -383,7 +392,7 @@ export default function DoctorDashboard() {
             appointmentDate: item.appointment_date,
             appointmentTime: item.appointment_time,
             phone: item.patient_bio_data?.patient_primary_mobile || "-",
-            status: (item.status === "NOT_CHECKED_IN" ? "Not Checked In" : item.status) as AppointmentStatus,
+            status: item.status as AppointmentStatus,
             appointmentId: item.appointment_id,
             originalStatus: item.status,
             visit_type: item.Patient_visit_type || "",
@@ -950,16 +959,16 @@ export default function DoctorDashboard() {
     className="inline-flex items-center justify-center px-2 py-1 text-xs font-medium text-white bg-green-600 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700"
   >
                          {checkInLoading === appointment.appointmentId ? (
-      <>
-        <svg className="animate-spin -ml-1 mr-1 h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-        </svg>
-        Checking...
-      </>
-    ) : (
-      "Check In"
-    )}
+                            <>
+                              <svg className="animate-spin -ml-1 mr-1 h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                              </svg>
+                              Checking...
+                            </>
+                          ) : (
+                            "Check In"
+                          )}
                           </button>
                         )}
                         {(appointment.originalStatus === "IN_CONSULTATION" || appointment.originalStatus==="CHECKED_IN") && (

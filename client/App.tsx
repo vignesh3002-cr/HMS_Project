@@ -30,7 +30,6 @@ import AddEmployee from "@/components/Forms/Addemployee";
 import PatientRegistrationForm from "@/components/Forms/PatientRegistrationForm";
 import EditPatientForm from "@/components/Forms/edit/EditPatientForm";
 import AddAppointment from "@/components/Forms/AddAppointment";
-import EditAppointment from "@/components/Forms/edit/Edit Appointment";
 
 // ============================================================
 // VIEW FORMS
@@ -50,6 +49,8 @@ import Departments from "./pages/Departments";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import Patients from "./pages/Patients";
+import ProtocolMaster from "./pages/ProtocolMaster";
+import CreateProtocol from "@/components/Forms/CreateProtocol";
 import ProtectedRoute from "./routes/ProtectedRoute";
 
 // ============================================================
@@ -85,7 +86,8 @@ import DoctorSchedule from "./pages/doctor/MySchedulePage";
 import DoctorReviews from "./pages/doctor/ReviewPage";
 import DoctorProfile from "./pages/doctor/Profile";
 import Consultation from "./pages/doctor/Patientconsut";
-import DoctorPatientProfile from "./pages/doctor/notes and doc"; 
+import DoctorPatientProfile from "./pages/doctor/notes and doc";
+import PatientDetails from "./pages/doctor/patient details";
 
 // ============================================================
 // HOOKS / AUTH
@@ -98,6 +100,7 @@ import {
 } from "react-router-dom";
 
 import { getToken, getUser } from "./utils/token";
+import { LoadingScreen } from "./components/skeletons/LoadingScreen";
 
 // ============================================================
 // QUERY CLIENT
@@ -121,6 +124,10 @@ const doctorRoutes = [
   {
     path: "/doctor/appointments",
     element: <DoctorAppointments />,
+  },
+  {
+    path: "/doctor/appointments/add",
+    element: <AddAppointment />,
   },
   {
     path: "/doctor/schedule",
@@ -281,7 +288,7 @@ const protectedRoutes = [
 
   {
     path: "/appointments/edit/:id",
-    element: <EditAppointment />,
+    element: <AddAppointment />,
     permission: "appointment.update",
   },
 
@@ -366,6 +373,33 @@ const protectedRoutes = [
     element: <AddBranch />,
     permission: "branch.update",
   },
+
+  // ----------------------------------------------------------
+  // Chemotherapy Protocols
+  // ----------------------------------------------------------
+
+  {
+    path: "/protocol",
+    element: <ProtocolMaster />,
+  },
+
+  {
+    path: "/protocol/cancer",
+    element: <ProtocolMaster />,  
+  },
+  {
+    path: "/protocol/create",
+    element: <CreateProtocol />,
+  },
+  {
+    path: "/protocol/view/:protocolId",
+    element: <CreateProtocol />,
+  },
+  {
+    path: "/protocol/edit/:protocolId",
+    element: <CreateProtocol />,
+  },
+
 ];
 
 // ============================================================
@@ -373,76 +407,26 @@ const protectedRoutes = [
 // ============================================================
 
 const RememberMeCheck = () => {
-  const navigate = useNavigate();
   const location = useLocation();
 
-  useEffect(() => {
-    // Only perform this check on the login page.
-    if (location.pathname !== "/") {
-      return;
-    }
+  // This gate only concerns the login route.
+  if (location.pathname !== "/") return null;
 
-    const token = getToken();
+  // Synchronous session check (sessionStorage/localStorage) - no async wait,
+  // so the decision happens during render instead of after first paint.
+  if (!getToken()) return null;
+  if (!getUser()) return null; // token without a usable session -> Login handles cleanup
 
-    if (!token) {
-      return;
-    }
-
-    // --------------------------------------------------------
-    // Check the saved user's role
-    // --------------------------------------------------------
-
-    const user = getUser();
-
-    const roleType = String(
-      user?.role_type ?? ""
-    )
-      .trim()
-      .toUpperCase();
-
-    console.log(
-      "RememberMeCheck - saved role:",
-      roleType
-    );
-
-    // --------------------------------------------------------
-    // Doctor
-    // --------------------------------------------------------
-
-    if (roleType === "DOCTOR") {
-      navigate("/dashboard", {
-        replace: true,
-      });
-
-      return;
-    }
-
-    // --------------------------------------------------------
-    // Admin
-    // --------------------------------------------------------
-
-    if (
-      roleType === "ADMIN" ||
-      roleType === "SUPER_ADMIN" ||
-      roleType === "SYSTEM_ADMIN"
-    ) {
-      navigate("/dashboard", {
-        replace: true,
-      });
-
-      return;
-    }
-
-    // --------------------------------------------------------
-    // Unknown role
-    // --------------------------------------------------------
-
-    navigate("/dashboard", {
-      replace: true,
-    });
-  }, [navigate, location.pathname]);
-
-  return null;
+  // Logged-in user landed on the login route: NEVER paint the Login form.
+  // It used to render fully for one frame before the redirect effect fired,
+  // which glitched the login page on every visit while logged in. Show the
+  // branded loading screen for that single frame until /dashboard commits.
+  return (
+    <>
+      <LoadingScreen message="Preparing your workspace..." />
+      <Navigate to="/dashboard" replace />
+    </>
+  );
 };
 
 // ============================================================
@@ -555,6 +539,22 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <DoctorPatientProfile />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ==================================================
+                DOCTOR PORTAL - PATIENT FULL PROFILE
+
+                Opens the HMSPatientPortal (Order Summary tab by
+                default) for the patient passed via location.state.
+            ================================================== */}
+
+            <Route
+              path="/doctor/patient-details"
+              element={
+                <ProtectedRoute>
+                  <PatientDetails />
                 </ProtectedRoute>
               }
             />

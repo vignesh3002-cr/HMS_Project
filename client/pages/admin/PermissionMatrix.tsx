@@ -47,6 +47,8 @@ interface AuditLog {
   changed_at: string;
 }
 
+const EXCLUDED_ROLES = ["STAFF", "PATIENT", "RECEPTIONIST"];
+
 const CATEGORY_ORDER = [
   "employee",
   "patient",
@@ -59,6 +61,9 @@ const CATEGORY_ORDER = [
   "system",
   "lab",
   "pharmacy",
+  "oncology",
+  "chemo",
+  "audit",
 ];
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -73,6 +78,9 @@ const CATEGORY_COLORS: Record<string, string> = {
   system: "bg-slate-100 text-slate-700",
   lab: "bg-indigo-50 text-indigo-700",
   pharmacy: "bg-rose-50 text-rose-700",
+  oncology: "bg-purple-50 text-purple-700",
+  chemo: "bg-lime-50 text-lime-700",
+  audit: "bg-stone-100 text-stone-700",
 };
 
 export default function PermissionMatrix() {
@@ -186,7 +194,9 @@ export default function PermissionMatrix() {
     return <MatrixSkeleton />;
   }
 
-  const roles = matrix?.roles ?? [];
+  const roles = (matrix?.roles ?? []).filter(
+    (r) => !EXCLUDED_ROLES.includes(r.role_type)
+  );
   const filteredRoles = selectedRole === "all" ? roles : roles.filter((r) => r.role_type === selectedRole);
 
   const categories = CATEGORY_ORDER.filter((cat) => searchedPermissions[cat]?.length);
