@@ -30,7 +30,6 @@ import AddEmployee from "@/components/Forms/Addemployee";
 import PatientRegistrationForm from "@/components/Forms/PatientRegistrationForm";
 import EditPatientForm from "@/components/Forms/edit/EditPatientForm";
 import AddAppointment from "@/components/Forms/AddAppointment";
-import EditAppointment from "@/components/Forms/edit/Edit Appointment";
 
 // ============================================================
 // VIEW FORMS
@@ -86,6 +85,7 @@ import DoctorLeave from "./pages/doctor/LeavePage";
 import DoctorSchedule from "./pages/doctor/MySchedulePage";
 import DoctorReviews from "./pages/doctor/ReviewPage";
 import Consultation from "./pages/doctor/Patientconsut";
+import DoctorPatientProfile from "./pages/doctor/notes and doc"; 
 
 // ============================================================
 // HOOKS / AUTH
@@ -278,7 +278,7 @@ const protectedRoutes = [
 
   {
     path: "/appointments/edit/:id",
-    element: <EditAppointment />,
+    element: <AddAppointment />,
     permission: "appointment.update",
   },
 
@@ -520,6 +520,15 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <Consultation />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/doctor/profile-patient"
+              element={
+                <ProtectedRoute>
+                  <DoctorPatientProfile />
                 </ProtectedRoute>
               }
             />

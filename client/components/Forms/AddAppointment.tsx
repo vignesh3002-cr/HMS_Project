@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, ChangeEvent, FormEvent } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { addDays, format, parseISO } from "date-fns";
 import { ArrowLeft, CalendarPlus, Calendar as CalendarIcon, Plus, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -7,6 +7,14 @@ import { FormDropdown } from "@/components/ui/form-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import CalendarPicker from "@/components/hms/Calender";
 import { branchApi, Branch } from "@/api/branch.api";
+
+interface DoctorAssignedBranch {
+  branch_id: string;
+  branch_name: string | null;
+  status?: number;
+  has_schedule?: boolean;
+  assigned_date?: string | null;
+}
 import { getUser } from "@/utils/token";
 import { departmentApi, Department } from "@/api/department.api";
 import { employeeApi, type EmployeeRecord, type DoctorScheduleRecord } from "@/api/employee.api";
@@ -25,6 +33,8 @@ interface AppointmentFormData {
   patientName: string;
   patientNumber: string;
   patientType: string;
+  patientVisitType: string;
+  referredBy: string;
   branchId: string;
   departmentId: string;
   doctorId: string;
@@ -33,11 +43,23 @@ interface AppointmentFormData {
   patientComment: string;
 }
 
+const VISIT_TYPES_BY_PATIENT_TYPE: Record<string, string[]> = {
+  "Outpatient (OPD)": ["New visit", "Follow-up", "Review visit", "Routine visit", "Emergency Visit", "Referral Visit"],
+  "Inpatient (IPD)": ["New visit", "Follow-up", "Review visit", "Routine visit", "Emergency Visit", "Referral Visit"],
+  "Emergency": ["Emergency Visit"],
+  "Day-care": ["New visit", "Follow-up", "Review visit", "Routine visit", "Emergency Visit", "Referral Visit"],
+  "Referral": ["Referral Visit"],
+  "Corporate": ["New visit", "Follow-up", "Review visit", "Routine visit", "Emergency Visit", "Referral Visit"],
+  "Insurance": ["New visit", "Follow-up", "Review visit", "Routine visit", "Emergency Visit", "Referral Visit"],
+};
+
 const emptyFormData: AppointmentFormData = {
   patientId: "",
   patientName: "",
   patientNumber: "",
-  patientType: "",
+  patientType: "Outpatient (OPD)",
+  patientVisitType: "New visit",
+  referredBy: "",
   branchId: "",
   departmentId: "",
   doctorId: "",
@@ -68,6 +90,13 @@ async function findNearestAvailableDate(
     try {
       const res = await appointmentApi.getAvailableSlots(doctorId, branchId, dateStr);
       const slots = res.data?.data?.slots || [];
+      const isCancelled = res.data?.data?.is_cancelled ?? false;
+      // Skip cancelled days when searching for nearest available date.
+      // On week-off/leave days (not cancelled) the form stays put with free-time entry.
+      if (isCancelled) {
+        continue;
+      }
+      // On normal scheduled days with available slots, jump to that date.
       if (slots.some((s) => s.is_available)) {
         return dateStr;
       }
@@ -126,6 +155,19 @@ const getNowMinutesInIST = () => {
   return d.getUTCHours() * 60 + d.getUTCMinutes();
 };
 
+// doctor_schedule.start_time/end_time and appointment_time come back as
+// UTC-anchored values — read with UTC getters (same convention as
+// formatScheduleTime/toTimeInputValue in Scheduled.tsx) so HH:mm doesn't
+// shift with browser timezone.
+function toTimeInputValue(time: string | null | undefined): string {
+  if (!time) return "";
+  const d = new Date(time);
+  if (isNaN(d.getTime())) return "";
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
 const inputClass =
   "w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200";
 const labelClass = "block text-sm font-semibold text-gray-800 mb-1.5";
@@ -134,6 +176,8 @@ const requiredStar = <span className="text-red-600 ml-0.5">*</span>;
 export default function AddAppointment() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { id: appointmentId } = useParams<{ id: string }>();
+  const isEditMode = Boolean(appointmentId);
   const { toast } = useToast();
 
   // Arriving from Patients grid view's schedule icon carries the chosen
@@ -192,6 +236,85 @@ export default function AddAppointment() {
     return base;
   });
 
+  // Edit mode - load appointment data
+  const [loadingAppointment, setLoadingAppointment] = useState(isEditMode);
+  const [appointmentStatus, setAppointmentStatus] = useState("");
+
+  useEffect(() => {
+    if (!isEditMode || !appointmentId) {
+      setLoadingAppointment(false);
+      return;
+    }
+
+    appointmentApi
+      .getOne(appointmentId)
+      .then((res) => {
+        const record = res.data?.data;
+
+        if (!record) {
+          throw new Error("Appointment not found");
+        }
+
+        // Terminal statuses can't be edited
+        const TERMINAL_STATUSES = ["COMPLETED", "CANCELLED", "NO_SHOW"];
+        if (TERMINAL_STATUSES.includes(record.status ?? "")) {
+          toast({
+            title: "This appointment can't be edited",
+            description: `It is already ${record.status?.toLowerCase()}.`,
+            variant: "destructive",
+          });
+          navigate("/appointments");
+          return;
+        }
+
+        const patient = record.patient_bio_data;
+        const date = record.appointment_date ? format(new Date(record.appointment_date), "yyyy-MM-dd") : "";
+        // Use UTC time to match the backend storage format (UTC-based)
+        const time = record.appointment_time ? toTimeInputValue(record.appointment_time) : "";
+
+        setAppointmentStatus(record.status ?? "");
+
+        // Store original appointment slot for edit mode reference
+        const originalSlot = {
+          doctorId: record.employee_id || "",
+          branchId: record.branch_id || "",
+          selectDate: date,
+          timeSlot: time,
+        };
+        originalSlotRef.current = originalSlot;
+
+        setFormData((prev) => ({
+          ...prev,
+          patientId: record.patient_id,
+          patientName: patient
+            ? [patient.patient_first_name, patient.patient_middle_name, patient.patient_last_name]
+                .filter(Boolean)
+                .join(" ")
+            : "",
+          patientNumber: patient?.patient_primary_mobile || "",
+          branchId: record.branch_id || "",
+          departmentId: record.department_id || "",
+          doctorId: record.employee_id || "",
+          selectDate: date,
+          timeSlot: time,
+          patientComment: record.reason_for_visit || "",
+          patientType: record.patient_type || "Outpatient (OPD)",
+          patientVisitType: record.patient_visit_type || "New visit",
+          referredBy: record.referred_by || "",
+        }));
+      })
+      .catch((err) => {
+        console.error("[AddAppointment] Load error:", err);
+        toast({
+          title: "Failed to load appointment",
+          description: err.response?.data?.message || "Couldn't reach the appointments API.",
+          variant: "destructive",
+        });
+        navigate("/appointments");
+      })
+      .finally(() => setLoadingAppointment(false));
+  }, [isEditMode, appointmentId, navigate, toast]);
+
   // The clicked grid cell only knows its hour ("10:00"), not the doctor's
   // real consultation-slot boundaries -- once availableSlots loads for this
   // doctor/branch/date, pick the closest real slot at/after that hour so
@@ -201,6 +324,25 @@ export default function AddAppointment() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [bookingResult, setBookingResult] = useState<AppointmentResponse | null>(null);
+
+  // Edit mode: store original appointment slot to prevent it from being cleared
+  const originalSlotRef = useRef<{
+    doctorId: string;
+    branchId: string;
+    selectDate: string;
+    timeSlot: string;
+  } | null>(null);
+
+  // Check if current form state matches the original appointment slot
+  const isUnchangedSlot = (currentDoctorId: string, currentBranchId: string, currentDate: string, currentTimeSlot: string) => {
+    if (!originalSlotRef.current) return false;
+    return (
+      currentDoctorId === originalSlotRef.current.doctorId &&
+      currentBranchId === originalSlotRef.current.branchId &&
+      currentDate === originalSlotRef.current.selectDate &&
+      currentTimeSlot === originalSlotRef.current.timeSlot
+    );
+  };
 
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const calendarWrapperRef = useRef<HTMLDivElement>(null);
@@ -236,6 +378,10 @@ export default function AddAppointment() {
   // selected branch (backend returns an empty slots array in that case) or the
   // slots request itself failed - shown as "Doctor is not assigned for this day".
   const [doctorUnavailable, setDoctorUnavailable] = useState(false);
+  const [slotsCancelled, setSlotsCancelled] = useState(false);
+
+  // Branches assigned to the currently selected doctor (for filtered dropdown)
+  const [doctorAssignedBranches, setDoctorAssignedBranches] = useState<DoctorAssignedBranch[]>([]);
 
   // The selected doctor's active weekly schedules (from employeeApi.getOne) -
   // used to derive which weekdays they actually work at the selected branch,
@@ -359,15 +505,16 @@ export default function AddAppointment() {
       return;
     }
 
+    // In edit mode, don't clear timeSlot if it's the unchanged original slot
+    if (!isEditMode || !isUnchangedSlot(formData.doctorId, formData.branchId, formData.selectDate, formData.timeSlot)) {
+      setFormData((prev) => ({ ...prev, timeSlot: "" }));
+    }
+
     setLoadingSlots(true);
     setDoctorUnavailable(false);
-    setFormData((prev) => ({ ...prev, timeSlot: "" }));
     let cancelled = false;
 
     (async () => {
-      setLoadingSlots(true);
-      setFormData((prev) => ({ ...prev, timeSlot: "" }));
-
       let openSlots: AvailableSlot[] = [];
       let fetchError: any = null;
 
@@ -378,6 +525,7 @@ export default function AddAppointment() {
           formData.selectDate,
         );
         const slots = res.data.data?.slots || [];
+
 
         // Defensive client-side filter: for today (in IST) drop any slot whose
         // time is at or before the current IST time. The backend is the source
@@ -394,10 +542,20 @@ export default function AddAppointment() {
         // doctor/branch/date (a fully-booked day still returns slot entries).
         setDoctorUnavailable(slots.length === 0);
         openSlots = futureSlots;
+
+        const isCancelled = res.data.data?.is_cancelled ?? false;
+        setSlotsCancelled(isCancelled);
+        setAvailableSlots(slots.filter((s) => s.is_available));
+        // Empty slots array = the backend found no active schedule for this
+        // doctor/branch/date (a fully-booked day still returns slot entries).
+        setDoctorUnavailable(slots.length === 0 && !isCancelled);
+        openSlots = slots.filter((s) => s.is_available);
+
       } catch (error) {
         fetchError = error;
         setAvailableSlots([]);
         setDoctorUnavailable(true);
+        setSlotsCancelled(false);
       }
 
       if (cancelled) return;
@@ -453,6 +611,37 @@ export default function AddAppointment() {
       }
 
       setAvailableSlots(openSlots);
+
+      // In edit mode, inject the original appointment slot back if it was filtered out
+      // (e.g., because it was marked as booked/unavailable by the backend)
+      if (isEditMode && originalSlotRef.current) {
+        const original = originalSlotRef.current;
+        const isOriginalSlot = isUnchangedSlot(
+          formData.doctorId,
+          formData.branchId,
+          formData.selectDate,
+          formData.timeSlot
+        );
+        if (isOriginalSlot) {
+          // Check if the original slot time exists in available slots
+          const originalTime = originalSlotRef.current.timeSlot;
+          const hasOriginalSlot = openSlots.some((s) => timeStringToMinutes(s.time) === timeStringToMinutes(originalTime));
+          if (!hasOriginalSlot) {
+            // Inject the original slot back so it remains selectable
+            setAvailableSlots((prev) => [
+              ...prev,
+              {
+                schedule_id: "ORIGINAL_SLOT",
+                shift_name: "Current",
+                time: originalTime,
+                is_available: true,
+              },
+            ]);
+            // Ensure timeSlot is set to the original time
+            setFormData((prev) => ({ ...prev, timeSlot: originalTime }));
+          }
+        }
+      }
 
       if (preferredTime && openSlots.length > 0) {
         // Prefer an exact match to the clicked hour. Day View's grid can
@@ -542,9 +731,16 @@ export default function AddAppointment() {
       { key: "departmentId", label: "Department" },
       { key: "doctorId", label: "Doctor Name" },
       { key: "patientType", label: "Patient Type" },
+      { key: "patientVisitType", label: "Patient Visit Type" },
       { key: "selectDate", label: "Appointment Date" },
       { key: "timeSlot", label: "Available Time Slots" },
     ];
+
+    // Conditionally require referredBy for Referral patient type with Referral Visit
+    if (formData.patientType === "Referral" && formData.patientVisitType === "Referral Visit") {
+      required.push({ key: "referredBy", label: "Referred By" });
+    }
+
     if (!validateRequiredFields(required, formData, toast)) return;
 
     setShowConfirm(true);
@@ -553,24 +749,50 @@ export default function AddAppointment() {
   const handleConfirmCreate = async () => {
     setSubmitting(true);
     try {
-      const res = await appointmentApi.create({
-        patient_id: formData.patientId,
-        patient_name: formData.patientName,
-        patient_number: formData.patientNumber,
-        branch_id: formData.branchId,
-        department_id: formData.departmentId,
-        employee_id: formData.doctorId,
-        appointment_date: formData.selectDate,
-        appointment_time: formData.timeSlot,
-        reason_for_visit: formData.patientComment || undefined,
-        patient_type: formData.patientType || undefined,
-      });
+      if (isEditMode && appointmentId) {
+        // Edit mode
+        await appointmentApi.update(appointmentId, {
+          employee_id: formData.doctorId,
+          branch_id: formData.branchId,
+          department_id: formData.departmentId || undefined,
+          appointment_date: formData.selectDate,
+          appointment_time: formData.timeSlot,
+          reason_for_visit: formData.patientComment || undefined,
+          patient_type: formData.patientType || undefined,
+          patient_visit_type: formData.patientVisitType || undefined,
+          referred_by: (formData.patientType === "Referral" && formData.patientVisitType === "Referral Visit") ? formData.referredBy || undefined : undefined,
+        });
+
+        await appointmentApi.updateStatus(appointmentId, "RESCHEDULED");
+
+        toast({
+          title: "Appointment rescheduled",
+          description: `Appointment ${appointmentId} has been rescheduled.`,
+        });
+      } else {
+        // Create mode
+        const res = await appointmentApi.create({
+          patient_id: formData.patientId,
+          patient_name: formData.patientName,
+          patient_number: formData.patientNumber,
+          branch_id: formData.branchId,
+          department_id: formData.departmentId,
+          employee_id: formData.doctorId,
+          appointment_date: formData.selectDate,
+          appointment_time: formData.timeSlot,
+          reason_for_visit: formData.patientComment || undefined,
+          patient_type: formData.patientType || undefined,
+          patient_visit_type: formData.patientVisitType || undefined,
+          referred_by: (formData.patientType === "Referral" && formData.patientVisitType === "Referral Visit") ? formData.referredBy || undefined : undefined,
+        });
+
+        setBookingResult(res.data.data);
+      }
 
       setShowConfirm(false);
-      setBookingResult(res.data.data);
     } catch (error: any) {
       toast({
-        title: "Failed to create appointment",
+        title: isEditMode ? "Failed to reschedule appointment" : "Failed to create appointment",
         description: error?.response?.data?.message || error.message || "Something went wrong",
         variant: "destructive",
       });
@@ -593,7 +815,7 @@ export default function AddAppointment() {
     navigate(-1);
   };
 
-  const isDirty = Boolean(
+const isDirty = Boolean(
     formData.patientId ||
       formData.patientName ||
       formData.branchId ||
@@ -601,8 +823,10 @@ export default function AddAppointment() {
       formData.doctorId ||
       formData.timeSlot ||
       formData.patientType ||
+      formData.patientVisitType ||
+      formData.referredBy ||
       formData.patientComment
-);
+  );
   
   // Once a branch is selected, only show departments that branch's (date-aware)
   // doctor list actually belongs to; otherwise fall back to the full list.
@@ -611,6 +835,13 @@ export default function AddAppointment() {
         branchDoctors.some((doc) => doc.department_id === d.department_id),
       )
     : departments;
+
+// Once a doctor is selected, show only their assigned branches;
+// otherwise show all branches.
+  const branchesForDropdown = useMemo(() => {
+    if (formData.doctorId && doctorAssignedBranches.length > 0) return doctorAssignedBranches;
+    return branches;
+  }, [formData.doctorId, doctorAssignedBranches, branches]);
 
   // Once a branch is selected, only show that branch's doctors; either way,
   // further narrow down to the selected department, if one is chosen. With a
@@ -621,7 +852,7 @@ export default function AddAppointment() {
     (doc) =>
       (!formData.departmentId || doc.department_id === formData.departmentId) &&
       (formData.branchId && formData.selectDate
-        ? doc.doctor_status === "ACTIVE" || doc.employee_id === formData.doctorId
+        ? true
         : true),
   );
 
@@ -734,6 +965,7 @@ export default function AddAppointment() {
 
     if (!val) {
       setDoctorChanges([]);
+      setDoctorAssignedBranches([]);
       return;
     }
 
@@ -744,6 +976,7 @@ export default function AddAppointment() {
       .then((res) => {
         const mappedBranches = activeBranches(res.data?.data?.branches || []);
         setDoctorSchedules(res.data?.data?.doctorSchedules || []);
+        setDoctorAssignedBranches(mappedBranches);
         void loadDoctorChanges(val);
         const nextBranchId =
           mappedBranches.find((b) => b.branch_id === formData.branchId)?.branch_id ||
@@ -768,6 +1001,7 @@ export default function AddAppointment() {
         const fallbackBranchId = selectedDoctor?.branch_id || formData.branchId;
         if (!fallbackBranchId) return null;
         setFormData((prev) => ({ ...prev, branchId: fallbackBranchId }));
+        setDoctorAssignedBranches([]);
         return findNearestAvailableDate(val, fallbackBranchId, formData.selectDate, maxSelectableDate);
       })
       .then((date) => {
@@ -802,7 +1036,10 @@ export default function AddAppointment() {
     if (!preselectedSlot) return;
     employeeApi
       .getOne(preselectedSlot.doctorId)
-      .then((res) => setDoctorSchedules(res.data?.data?.doctorSchedules || []))
+      .then((res) => {
+        setDoctorSchedules(res.data?.data?.doctorSchedules || []);
+        setDoctorAssignedBranches(activeBranches(res.data?.data?.branches || []));
+      })
       .catch(() => {});
     void loadDoctorChanges(preselectedSlot.doctorId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -826,61 +1063,67 @@ export default function AddAppointment() {
               <CalendarPlus className="w-5 h-5 text-blue-600" />
             </div>
             <h4 className="hms-heading text-gray-900 tracking-tight">
-              Create Appointment
+              {isEditMode ? "Edit Appointment" : "Create Appointment"}
             </h4>
           </div>
 
-          {isLoadingMasterData ? (
+{isLoadingMasterData ? (
             <div className="flex flex-col items-center justify-center gap-2 py-24 text-gray-400 text-sm">
               <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
               Loading branches, departments and doctors...
             </div>
+          ) : loadingAppointment ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-24 text-gray-400 text-sm">
+              <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+              Loading appointment...
+            </div>
           ) : (
-          <form onSubmit={handleSubmit} className="p-8">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-6 gap-y-6">
-              {/* Patient Select */}
-              <div className="lg:col-span-3">
-                <label className={labelClass}>Select Patient {requiredStar}</label>
-                <FormDropdown
-                  className={inputClass}
-                  options={patients.map((p) => ({
-                    label: `${p.patient_id} - ${p.patient_first_name}${p.patient_middle_name ? ` ${p.patient_middle_name}` : ""}${p.patient_last_name ? ` ${p.patient_last_name}` : ""}${p.patient_primary_mobile ? ` (${p.patient_primary_mobile})` : ""}`,
-                    value: p.patient_id,
-                  }))}
-                  value={formData.patientId}
-                  onValueChange={selectPatient}
-                  placeholder={patients.length ? "Search and select a patient" : "Loading patients..."}
-                />
-              </div>
+            <form onSubmit={handleSubmit} className="p-8">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-6 gap-y-6">
+                {/* Patient Select */}
+                <div className="lg:col-span-3">
+                  <label className={labelClass}>Select Patient {requiredStar}</label>
+                  <FormDropdown
+                    className={inputClass}
+                    options={patients.map((p) => ({
+                      label: `${p.patient_id} - ${p.patient_first_name}${p.patient_middle_name ? ` ${p.patient_middle_name}` : ""}${p.patient_last_name ? ` ${p.patient_last_name}` : ""}${p.patient_primary_mobile ? ` (${p.patient_primary_mobile})` : ""}`,
+                      value: p.patient_id,
+                    }))}
+                    value={formData.patientId}
+                    onValueChange={selectPatient}
+                    placeholder={patients.length ? "Search and select a patient" : "Loading patients..."}
+                    disabled={isEditMode}
+                  />
+                </div>
 
-              {/* Patient ID (read-only after selection) */}
-              <div>
-                <label className={labelClass}>Patient ID {requiredStar}</label>
-                <input
-                  type="text"
-                  className={inputClass + " bg-gray-50 text-gray-500"}
-                  value={formData.patientId}
-                  readOnly
-                  placeholder="Search and select a patient"
-                />
-              </div>
+                {/* Patient ID (read-only after selection) */}
+                <div>
+                  <label className={labelClass}>Patient ID {requiredStar}</label>
+                  <input
+                    type="text"
+                    className={inputClass + " bg-gray-50 text-gray-500"}
+                    value={formData.patientId}
+                    readOnly
+                    placeholder="Search and select a patient"
+                  />
+                </div>
 
-              {/* Patient Name (read-only after selection) */}
-              <div>
-                <label className={labelClass}>Patient Name {requiredStar}</label>
-                <input
-                  type="text"
-                  className={inputClass + " bg-gray-50 text-gray-500"}
-                  value={formData.patientName}
-                  readOnly
-                  placeholder="Auto-filled from selection"
-                />
-              </div>
+                {/* Patient Name (read-only after selection) */}
+                <div>
+                  <label className={labelClass}>Patient Name {requiredStar}</label>
+                  <input
+                    type="text"
+                    className={inputClass + " bg-gray-50 text-gray-500"}
+                    value={formData.patientName}
+                    readOnly
+                    placeholder="Auto-filled from selection"
+                  />
+                </div>
 
-              {/* Patient Number (read-only after selection) */}
-              <div>
-                <label className={labelClass}>Patient Number</label>
-                <input
+                {/* Patient Number (read-only after selection) */}
+                <div>
+                  <label className={labelClass}>Patient Number</label>
+                  <input
                   type="text"
                   className={inputClass + " bg-gray-50 text-gray-500"}
                   value={formData.patientNumber}
@@ -896,7 +1139,7 @@ export default function AddAppointment() {
                   className={inputClass}
                   options={[
                     { label: "None", value: "" },
-                    ...branches.map((b) => ({
+                    ...branchesForDropdown.map((b) => ({
                       label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
                       value: b.branch_id,
                       highlight: currentBranchId ? b.branch_id === currentBranchId : false,
@@ -935,7 +1178,7 @@ export default function AddAppointment() {
                     if (!val || !doctorLocked) return;
                   }}
                   placeholder={
-                    branches.length
+                    branchesForDropdown.length
                       ? "Select Branch"
                       : "Loading branches..."
                   }
@@ -976,8 +1219,10 @@ export default function AddAppointment() {
                     ...doctorsForDropdown.map((doc) => {
                       const fullName = `Dr. ${doc.first_name}${doc.middle_name ? ` ${doc.middle_name}` : ""} ${doc.last_name}`;
                       const specialty = doc.specialization || doc.department_master?.department_name;
+                      const statusLabel =
+                        doc.doctor_status === "LEAVE" ? " (On Leave)" : "";
                       return {
-                        label: specialty ? `${fullName} (${specialty})` : fullName,
+                        label: `${fullName}${statusLabel}${specialty ? ` (${specialty})` : ""}`,
                         value: doc.employee_id,
                       };
                     }),
@@ -986,12 +1231,8 @@ export default function AddAppointment() {
                   onValueChange={applyDoctorSelection}
                   placeholder={
                     formData.branchId && doctorsForDropdown.length === 0
-                      ? formData.selectDate
-                        ? "No doctors active on this date for this branch/department"
-                        : "No doctors match this branch/department"
-                      : doctors.length
-                        ? "Select Doctor"
-                        : "Loading doctors..."
+                      ? "No doctors available for this date (including on leave)"
+                      : "No doctors match this branch/department"
                   }
                 />
               </div>
@@ -1011,10 +1252,44 @@ export default function AddAppointment() {
                     "Referral",
                   ]}
                   value={formData.patientType}
-                  onValueChange={(val) => setFormData((prev) => ({ ...prev, patientType: val }))}
+                  onValueChange={(val) => {
+                    const allowedVisitTypes = VISIT_TYPES_BY_PATIENT_TYPE[val] || [];
+                    const currentVisitType = formData.patientVisitType;
+                    // Only clear visit type if current one is not valid for new patient type
+                    const newVisitType = allowedVisitTypes.includes(currentVisitType) ? currentVisitType : (allowedVisitTypes[0] || "");
+                    setFormData((prev) => ({ ...prev, patientType: val, patientVisitType: newVisitType }));
+                  }}
                   placeholder="Select patient type"
                 />
               </div>
+
+              {/* Patient Visit Type */}
+              <div>
+                <label className={labelClass}>Patient Visit Type {requiredStar}</label>
+                <FormDropdown
+                  className={inputClass}
+                  options={VISIT_TYPES_BY_PATIENT_TYPE[formData.patientType] || []}
+                  value={formData.patientVisitType}
+                  onValueChange={(val) => setFormData((prev) => ({ ...prev, patientVisitType: val }))}
+                  placeholder="Select visit type"
+                  disabled={!formData.patientType}
+                />
+              </div>
+
+              {/* Referred By (only for Referral patient type with Referral Visit) */}
+              {(formData.patientType === "Referral" && formData.patientVisitType === "Referral Visit") && (
+                <div>
+                  <label className={labelClass}>Referred By {requiredStar}</label>
+                  <input
+                    type="text"
+                    name="referredBy"
+                    className={inputClass}
+                    placeholder="Referred by (Doctor/Hospital name)"
+                    value={formData.referredBy}
+                    onChange={handleInputChange}
+                  />
+                </div>
+              )}
 
               {/* Select Date */}
               <div>
@@ -1093,13 +1368,27 @@ export default function AddAppointment() {
                     <Loader2 className="w-4 h-4 animate-spin" />
                     Loading available slots...
                   </div>
+                ) : doctorUnavailable && slotsCancelled ? (
+                  <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
+                    Doctor is unavailable on this date (marked as cancelled)
+                  </div>
                 ) : doctorUnavailable ? (
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
                     Doctor is not assigned for this day
                   </div>
                 ) : availableSlots.length === 0 ? (
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
-                    No available time slots for this doctor on the selected date
+                    <input
+                      type="time"
+                      className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          timeSlot: e.target.value,
+                        }))
+                      }
+                      placeholder="Select a time"
+                    />
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 md:grid-cols-6 gap-2">

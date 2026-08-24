@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2, MoreVertical } from "lucide-react";
+import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2 } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays, startOfWeek, endOfWeek, subWeeks, startOfMonth, endOfMonth, subMonths } from "date-fns";
@@ -17,6 +17,7 @@ import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { branchApi } from "@/api/branch.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
+import { AppointmentActionMenu } from "@/components/hms/AppointmentActionMenu";
 import { DepartmentPill, DepartmentAvatarText } from "@/components/hms/DepartmentBadge";
 import { DoctorBranchDisplay } from "@/components/hms/DoctorBranchDisplay";
 import { useBranchFilter } from "@/context/BranchFilterContext";
@@ -284,106 +285,6 @@ function CountUp({ target, duration = 1800 }: { target: number; duration?: numbe
   }, [target, duration]);
 
   return <>{formatStatValue(count)}</>;
-}
-
-function AppointmentActionMenu({
-  status,
-  onView,
-  onEdit,
-  onCancel,
-  onCheckIn,
-  onCheckOut,
-}: {
-  status: string;
-  onView: () => void;
-  onEdit: () => void;
-  onCancel: () => void;
-  onCheckIn: () => void;
-  onCheckOut: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const { can } = usePermission();
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  if (!can("appointment.read") && !can("appointment.update") && !can("appointment.cancel")) return null;
-
-  const isCancelled = status.toLowerCase() === "cancelled";
-  const isScheduled = status.toLowerCase() === "scheduled";
-  const isCheckIn = status.toLowerCase() === "check in" || status.toLowerCase() === "in consultation";
-
-  return (
-    <div className="relative inline-block text-left" ref={wrapperRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center justify-center p-1.5 border border-[#E5E7EB] rounded-md hover:border-[#00488D] transition-colors"
-      >
-        <MoreVertical className="w-4 h-4 text-[#6B7280]" />
-      </button>
-
-      <div
-        className={`absolute right-0 top-full mt-1 w-44 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-40 transition-all duration-150 ${
-          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
-        }`}
-      >
-        {can("appointment.read") && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onView(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
-          >
-            View Appointment
-          </button>
-        )}
-        {can("appointment.update") && !isCancelled && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onEdit(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
-          >
-            Edit Appointment
-          </button>
-        )}
-        {can("appointment.update") && isScheduled && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onCheckIn(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-green-600 hover:bg-green-50"
-          >
-            Check In
-          </button>
-        )}
-        {can("appointment.update") && isCheckIn && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onCheckOut(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-blue-600 hover:bg-blue-50"
-          >
-            Check Out
-          </button>
-        )}
-        {can("appointment.cancel") && !isCancelled && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onCancel(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-red-600 hover:bg-red-50"
-          >
-            Cancel Appointment
-          </button>
-        )}
-      </div>
-    </div>
-  );
 }
 
 export default function Dashboard() {
@@ -914,6 +815,7 @@ export default function Dashboard() {
   const [cancelTarget, setCancelTarget] = useState<Record<string, unknown> | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [isCancelling, setIsCancelling] = useState(false);
+  const [vitalsOpen, setVitalsOpen] = useState(false);
 
   const handleCancelAppointment = (target: Record<string, unknown>) => {
     setCancelReason("");
@@ -1221,6 +1123,10 @@ export default function Dashboard() {
                       onCancel={() => handleCancelAppointment(r)}
                       onCheckIn={() => handleCheckIn(r)}
                       onCheckOut={() => handleCheckOut(r)}
+                      vitalsOpen={vitalsOpen}
+                      onVitalsOpenChange={setVitalsOpen}
+                      appointmentId={r.id}
+                      patientId={r.patientId}
                     />
                   )},
                 ] : [

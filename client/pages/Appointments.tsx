@@ -9,7 +9,6 @@ import {
   ChevronDown,
   Check,
   Loader2,
-  MoreVertical,
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
@@ -26,6 +25,8 @@ import { StatusBadge } from "@/components/hms/StatusBadge";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
+import { getUser } from "@/utils/token";
+import { AppointmentActionMenu } from "@/components/hms/AppointmentActionMenu";
 
 import DayView from "./Day view";
 import WeekView from "./Week view";
@@ -51,7 +52,6 @@ interface Appointment {
   sortDate: number;
   status: string;
 }
-
 
 
 // Mirrors APPOINTMENT_STATUS in appointment.constants.ts exactly -- keep
@@ -157,107 +157,6 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
   };
 }
 
-
-function ActionMenu({
-  status,
-  onView,
-  onEdit,
-  onCancel,
-  onCheckIn,
-  onCheckOut,
-}: {
-  status: string;
-  onView: () => void;
-  onEdit: () => void;
-  onCancel: () => void;
-  onCheckIn: () => void;
-  onCheckOut: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const { can } = usePermission();
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  if (!can("appointment.read") && !can("appointment.update") && !can("appointment.cancel")) return null;
-
-  const isCancelled = status.toLowerCase() === "cancelled";
-  const isScheduled = status.toLowerCase() === "scheduled";
-  const isCheckIn = status.toLowerCase() === "checked in" || status.toLowerCase() === "in consultation";
-
-  return (
-    <div className="relative inline-block text-left" ref={wrapperRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center justify-center p-1.5 border border-[#E5E7EB] rounded-md hover:border-[#00488D] transition-colors"
-      >
-        <MoreVertical className="w-4 h-4 text-[#6B7280]" />
-      </button>
-
-      <div
-        className={`absolute right-0 top-full mt-1 w-44 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-40 transition-all duration-150 ${
-          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
-        }`}
-      >
-        {can("appointment.read") && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onView(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
-          >
-            View Appointment
-          </button>
-        )}
-        {can("appointment.update") && !isCancelled && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onEdit(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
-          >
-            Edit Appointment
-          </button>
-        )}
-        {can("appointment.update") && isScheduled && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onCheckIn(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-green-600 hover:bg-green-50"
-          >
-            Check In
-          </button>
-        )}
-        {can("appointment.update") && isCheckIn && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onCheckOut(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-blue-600 hover:bg-blue-50"
-          >
-            Check Out
-          </button>
-        )}
-        {can("appointment.cancel") && !isCancelled && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onCancel(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-red-600 hover:bg-red-50"
-          >
-            Cancel Appointment
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 const AppointmentSchedule: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -306,10 +205,14 @@ const AppointmentSchedule: React.FC = () => {
 
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+  const currentUser = getUser();
+  const [cancelledBy, setCancelledBy] = useState(currentUser?.employee_id || "");
   const [isCancelling, setIsCancelling] = useState(false);
+  const [vitalsOpen, setVitalsOpen] = useState(false);
 
   const handleCancelAppointment = (target: Appointment) => {
     setCancelReason("");
+    setCancelledBy(currentUser?.employee_id || "");
     setCancelTarget(target);
   };
 
@@ -321,9 +224,14 @@ const AppointmentSchedule: React.FC = () => {
       return;
     }
 
+    if (!cancelledBy.trim()) {
+      toast({ title: "Cancelled by (Employee ID) is required", variant: "destructive" });
+      return;
+    }
+
     setIsCancelling(true);
     try {
-      const res = await appointmentApi.cancel(cancelTarget.id, cancelReason.trim());
+      const res = await appointmentApi.cancel(cancelTarget.id, cancelReason.trim(), cancelledBy.trim());
       const cancelled = res.data?.data;
       setAppointments((prev) =>
         prev.map((appt) =>
@@ -340,6 +248,7 @@ const AppointmentSchedule: React.FC = () => {
       });
       setCancelTarget(null);
       setCancelReason("");
+      setCancelledBy(currentUser?.employee_id || "");
     } catch (err: any) {
       console.error("[Appointments Page] Cancel error:", err);
       toast({
@@ -601,10 +510,10 @@ const AppointmentSchedule: React.FC = () => {
 
               <div className="flex flex-wrap items-center gap-3">
 
-
                 
-
-
+                
+                
+                
 
                 <div className="relative" ref={viewMenuRef}>
 
@@ -677,7 +586,6 @@ const AppointmentSchedule: React.FC = () => {
                 </div>
 
 
-
                 {/* Date nav */}
 
                 <div className="flex items-center">
@@ -727,8 +635,7 @@ const AppointmentSchedule: React.FC = () => {
                 </div>
 
 
-
-{/* Filters */}
+                {/* Filters */}
 
                 <ToolbarFilter
                   title="Filters"
@@ -760,7 +667,7 @@ const AppointmentSchedule: React.FC = () => {
             ) : (
               <HmsTable
                 scrollable={false}
-                columns={[
+                                columns={[
                   { key: "id", label: "AppointmentNo", className: "!whitespace-normal", render: (r: Appointment) => (
                     <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.id}</span>
                   )},
@@ -787,13 +694,17 @@ const AppointmentSchedule: React.FC = () => {
                     <StatusBadge status={r.status} />
                   )},
                   { key: "actions", label: "Action", sortable: false, className: "w-px !whitespace-normal !pl-3", headerClassName: "w-px !pl-3", render: (r: Appointment) => (
-                    <ActionMenu
+                    <AppointmentActionMenu
                       status={r.status}
                       onView={() => navigate(`/appointments/view/${r.id}`)}
                       onEdit={() => navigate(`/appointments/edit/${r.id}`)}
                       onCancel={() => handleCancelAppointment(r)}
                       onCheckIn={() => handleCheckIn(r)}
                       onCheckOut={() => handleCheckOut(r)}
+                      vitalsOpen={vitalsOpen}
+                      onVitalsOpenChange={setVitalsOpen}
+                      appointmentId={r.id}
+                      patientId={r.patientId}
                     />
                   )},
                 ]}
@@ -824,7 +735,7 @@ const AppointmentSchedule: React.FC = () => {
         title="Cancel Appointment?"
         description={
           cancelTarget
-            ? `Appointment ${cancelTarget.id} for ${cancelTarget.patient} will be cancelled. Please enter a reason for cancellation.`
+            ? `Appointment ${cancelTarget.id} for ${cancelTarget.patient} will be cancelled. Please enter a reason for cancellation and your employee ID.`
             : ""
         }
         confirmText="Cancel Appointment"
@@ -833,18 +744,29 @@ const AppointmentSchedule: React.FC = () => {
         onConfirm={handleConfirmCancelAppointment}
         onCancel={() => setCancelTarget(null)}
       >
-        <textarea
-          value={cancelReason}
-          onChange={(e) => setCancelReason(e.target.value)}
-          placeholder="Reason for cancellation (required)"
-          rows={3}
-          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        />
+        <div className="space-y-3">
+          <textarea
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            placeholder="Reason for cancellation (required)"
+            rows={3}
+            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Cancelled By (Employee ID) *</label>
+            <input
+              type="text"
+              value={cancelledBy}
+              onChange={(e) => setCancelledBy(e.target.value)}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder="Enter your Employee ID"
+            />
+          </div>
+        </div>
       </ConfirmationDialog>
     </div>
 
   );
-
 };
 
 export default AppointmentSchedule;

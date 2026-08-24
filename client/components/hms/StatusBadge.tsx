@@ -43,7 +43,6 @@ const statusToneMap: Record<string, StatusTone> = {
   confirmed: "green",
   cancelled: "red",
   rescheduled: "amber",
-  "checked in": "emerald",
   "in consultation": "purple",
   completed: "emerald",
   "no show": "gray",
@@ -53,10 +52,17 @@ const statusToneMap: Record<string, StatusTone> = {
   assigned: "blue",
 };
 
+// CHECKED_IN is no longer surfaced as its own state anywhere in the UI --
+// badges render it as IN_CONSULTATION instead.
+function normalizeStatusKey(status?: string): string {
+  const key = status?.toLowerCase().replace(/_/g, " ").trim() ?? "";
+  return key === "checked in" || key === "check in" ? "in consultation" : key;
+}
+
 function resolveTone(status?: string, tone?: StatusTone): StatusTone {
   if (tone) return tone;
   if (status) {
-    const key = status.toLowerCase().trim();
+    const key = normalizeStatusKey(status);
     return statusToneMap[key] || "slate";
   }
   return "slate";
@@ -72,7 +78,8 @@ function toTitleCase(str: string): string {
 export function StatusBadge({ children, status, tone }: StatusBadgeProps) {
   const resolvedTone = resolveTone(status, tone);
   const { container, dot } = toneClasses[resolvedTone];
-  const label = children || (status ? toTitleCase(status) : "");
+  const normalized = normalizeStatusKey(status);
+  const label = children || (status ? toTitleCase(normalized) : "");
 
   return (
     <span className={cn("inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold", container)}>
