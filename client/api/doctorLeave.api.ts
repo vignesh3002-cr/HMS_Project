@@ -28,8 +28,25 @@ remarks?: string;
 }
 
 export interface RejectDoctorLeavePayload {
-rejected_by: string;
-remarks: string;
+  rejected_by: string;
+  remarks: string;
+}
+
+export interface QueueReschedulePayload {
+  date_from: string;
+  date_to: string;
+  reason?: string;
+  priority?: "LOW" | "NORMAL" | "HIGH";
+}
+
+export interface LeaveConflictDto {
+  appointment_id: string;
+  patient_first_name: string | null;
+  patient_middle_name: string | null;
+  patient_last_name: string | null;
+  appointment_date: string;
+  appointment_time: string;
+  status: string;
 }
 
 export interface DoctorLeaveRecord {
@@ -183,4 +200,43 @@ export const doctorLeaveApi = {
   },
   },
   ),
+
+/**
+* Queue a doctor's active appointments (inside a date
+* range) for reschedule — used when applying leave that
+* conflicts with booked appointments.
+*
+* POST /api/doctor-leave/:employeeId/queue-reschedule
+*/
+queueReschedule: (
+employeeId: string,
+data: QueueReschedulePayload,
+) =>
+API.post<{
+success?: boolean;
+message: string;
+data: { total: number; queued: number };
+}>(
+`/doctor-leave/${employeeId}/queue-reschedule`,
+data,
+),
+
+/**
+* Active appointments for the doctor inside a leave
+* date range — conflict pre-check before applying.
+*
+* GET /api/doctor-leave/:employeeId/conflicts
+*/
+getConflicts: (
+employeeId: string,
+params: { date_from: string; date_to: string },
+) =>
+API.get<{
+success?: boolean;
+message: string;
+data: LeaveConflictDto[];
+}>(
+`/doctor-leave/${employeeId}/conflicts`,
+{ params },
+),
   };
