@@ -91,9 +91,10 @@ async function findNearestAvailableDate(
       const res = await appointmentApi.getAvailableSlots(doctorId, branchId, dateStr);
       const slots = res.data?.data?.slots || [];
       const isCancelled = res.data?.data?.is_cancelled ?? false;
-      // Skip cancelled days when searching for nearest available date.
-      // On week-off/leave days (not cancelled) the form stays put with free-time entry.
-      if (isCancelled) {
+      // Skip cancelled and leave days when searching for nearest
+      // available date. On plain week-off days (not cancelled, not
+      // on leave) the form stays put with free-time entry.
+      if (isCancelled || (res.data?.data?.is_on_leave ?? false)) {
         continue;
       }
       // On normal scheduled days with available slots, jump to that date.
@@ -183,7 +184,21 @@ export default function AddAppointment() {
   // Arriving from Patients grid view's schedule icon carries the chosen
   // patient in nav state so the form opens with the patient locked in and
   // the user only needs to pick a doctor.
-  const preselectedPatient = (location.state as { patient?: PatientRecord } | null)?.patient;
+  const preselectedPatient = (
+    location.state as
+      | { patient?: Pick<PatientRecord, "patient_id" | "patient_first_name" | "patient_middle_name" | "patient_last_name" | "patient_primary_mobile"> }
+      | null
+  )?.patient;
+
+  // Arriving from the doctor portal (/doctor/appointments) carries the
+  // logged-in doctor's identity so the form opens with themselves locked in
+  // as the doctor -- they can only pick the patient/date/time.
+  const doctorBooking = (
+    location.state as
+      | { doctorBooking?: { doctorId: string; branchId?: string; departmentId?: string } }
+      | null
+  )?.doctorBooking;
+  const isDoctorBooking = Boolean(doctorBooking);
 
   // Arriving from a doctor's profile (Scheduled.tsx, shared by both the
   // /doctor/view and /doctor/day-view routes) "Book Appointment" button
@@ -231,6 +246,17 @@ export default function AddAppointment() {
         branchId: preselectedSlot.branchId,
         departmentId: preselectedSlot.departmentId,
         selectDate: preselectedSlot.date,
+      };
+    }
+    // Doctor portal booking: the logged-in doctor books for themselves --
+    // their identity (and active branch/department) arrives locked in and
+    // wins over everything except an explicit Day View slot above.
+    if (doctorBooking) {
+      base = {
+        ...base,
+        doctorId: doctorBooking.doctorId,
+        ...(doctorBooking.branchId ? { branchId: doctorBooking.branchId } : {}),
+        ...(doctorBooking.departmentId ? { departmentId: doctorBooking.departmentId } : {}),
       };
     }
     return base;
@@ -360,8 +386,11 @@ export default function AddAppointment() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Patient dropdown options
-  const [patients, setPatients] = useState<PatientRecord[]>(
+  // Patient dropdown options. Entries are full records from the API, or the
+  // minimal preselected shape arriving via nav state (doctor portal
+  // follow-up booking) -- every read below only touches the Pick'd fields.
+  type PatientOption = PatientRecord | typeof preselectedPatient;
+  const [patients, setPatients] = useState<PatientOption[]>(
     preselectedPatient ? [preselectedPatient] : [],
   );
 
@@ -379,6 +408,9 @@ export default function AddAppointment() {
   // slots request itself failed - shown as "Doctor is not assigned for this day".
   const [doctorUnavailable, setDoctorUnavailable] = useState(false);
   const [slotsCancelled, setSlotsCancelled] = useState(false);
+  // Backend flagged the whole day as PENDING/APPROVED doctor leave.
+  const [doctorOnLeave, setDoctorOnLeave] = useState(false);
+  const [leaveReason, setLeaveReason] = useState<string | null>(null);
 
   // Branches assigned to the currently selected doctor (for filtered dropdown)
   const [doctorAssignedBranches, setDoctorAssignedBranches] = useState<DoctorAssignedBranch[]>([]);
@@ -502,6 +534,8 @@ export default function AddAppointment() {
     if (!formData.doctorId || !formData.branchId || !formData.selectDate) {
       setAvailableSlots([]);
       setDoctorUnavailable(false);
+      setDoctorOnLeave(false);
+      setLeaveReason(null);
       return;
     }
 
@@ -512,6 +546,10 @@ export default function AddAppointment() {
 
     setLoadingSlots(true);
     setDoctorUnavailable(false);
+    setDoctorOnLeave(false);
+    setLeaveReason(null);
+    setFormData((prev) => ({ ...prev, timeSlot: "" }));
+
     let cancelled = false;
 
     (async () => {
@@ -544,11 +582,16 @@ export default function AddAppointment() {
         openSlots = futureSlots;
 
         const isCancelled = res.data.data?.is_cancelled ?? false;
+        const isOnLeave = res.data.data?.is_on_leave ?? false;
         setSlotsCancelled(isCancelled);
+        setDoctorOnLeave(isOnLeave);
+        setLeaveReason(res.data.data?.leave_reason ?? null);
         setAvailableSlots(slots.filter((s) => s.is_available));
         // Empty slots array = the backend found no active schedule for this
         // doctor/branch/date (a fully-booked day still returns slot entries).
-        setDoctorUnavailable(slots.length === 0 && !isCancelled);
+        setDoctorUnavailable(
+          slots.length === 0 && !isCancelled && !isOnLeave
+        );
         openSlots = slots.filter((s) => s.is_available);
 
       } catch (error) {
@@ -556,6 +599,8 @@ export default function AddAppointment() {
         setAvailableSlots([]);
         setDoctorUnavailable(true);
         setSlotsCancelled(false);
+        setDoctorOnLeave(false);
+        setLeaveReason(null);
       }
 
       if (cancelled) return;
@@ -804,7 +849,7 @@ export default function AddAppointment() {
 
   const handleBookingDone = () => {
     setBookingResult(null);
-    navigate("/appointments");
+    navigate(isDoctorBooking ? "/doctor/appointments" : "/appointments");
   };
 
   const handleCancel = () => {
@@ -1021,11 +1066,14 @@ const isDirty = Boolean(
   // Arrived from a doctor's profile page with a doctor already chosen --
   // run the same selection logic as picking them from the dropdown, once
   // the doctor list has loaded (needed to resolve their specialization).
+  // The doctor portal's locked self-booking reuses this so their department
+  // auto-fills and the nearest open date gets located.
   useEffect(() => {
-    if (!preselectedDoctorId || doctors.length === 0) return;
-    applyDoctorSelection(preselectedDoctorId);
+    const doctorId = preselectedDoctorId || doctorBooking?.doctorId;
+    if (!doctorId || doctors.length === 0) return;
+    applyDoctorSelection(doctorId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preselectedDoctorId, doctors]);
+  }, [preselectedDoctorId, doctorBooking?.doctorId, doctors]);
 
   // Arrived from a Day View grid slot with doctor/branch/department/date all
   // already decided -- only the doctor's schedules still need loading so the
@@ -1150,6 +1198,9 @@ const isDirty = Boolean(
                   value={formData.branchId}
                   onValueChange={(val) => {
                     if (!val) {
+                      // Doctor portal booking keeps the logged-in doctor's
+                      // identity locked -- never let a branch clear wipe it.
+                      if (isDoctorBooking) return;
                       setFormData((prev) => ({
                         ...prev,
                         branchId: "",
@@ -1188,6 +1239,7 @@ const isDirty = Boolean(
                 <label className={labelClass}>Department {requiredStar}</label>
                 <FormDropdown
                   className={inputClass}
+                  disabled={isDoctorBooking}
                   options={[
                     { label: "None", value: "" },
                     ...departmentsForDropdown.map((d) => ({
@@ -1197,7 +1249,12 @@ const isDirty = Boolean(
                   ]}
                   value={formData.departmentId}
                   onValueChange={(val) =>
-                    setFormData((prev) => ({ ...prev, departmentId: val, doctorId: "", timeSlot: "" }))
+                    setFormData((prev) => ({
+                      ...prev,
+                      departmentId: val,
+                      doctorId: isDoctorBooking ? prev.doctorId : "",
+                      timeSlot: "",
+                    }))
                   }
                   placeholder={
                     branchDoctorsLoading
@@ -1211,9 +1268,17 @@ const isDirty = Boolean(
                 />
               </div>
               <div>
-                <label className={labelClass}>Doctor Name {requiredStar}</label>
+                <label className={labelClass}>
+                  Doctor Name {requiredStar}
+                  {isDoctorBooking && (
+                    <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-blue-600">
+                      (you)
+                    </span>
+                  )}
+                </label>
                 <FormDropdown
                   className={inputClass}
+                  disabled={isDoctorBooking}
                   options={[
                     { label: "None", value: "" },
                     ...doctorsForDropdown.map((doc) => {
@@ -1371,6 +1436,12 @@ const isDirty = Boolean(
                 ) : doctorUnavailable && slotsCancelled ? (
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
                     Doctor is unavailable on this date (marked as cancelled)
+                  </div>
+                ) : doctorOnLeave ? (
+                  <div className="col-span-full py-8 text-center text-sm text-gray-500 bg-gray-50 rounded-xl">
+                    Doctor is on leave
+                    {leaveReason ? ` (${leaveReason})` : ""} — no slots can be
+                    booked on this date
                   </div>
                 ) : doctorUnavailable ? (
                   <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">

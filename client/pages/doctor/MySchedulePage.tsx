@@ -5,6 +5,10 @@ import ScheduleSlotModal, {
   type ScheduleSlotAddPayload,
 } from "@/components/hms/ScheduleSlotModal";
 import { employeeApi } from "@/api/employee.api";
+import {
+  doctorLeaveApi,
+  type DoctorLeaveRecord,
+} from "@/api/doctorLeave.api";
 
 /* =========================================================
    TYPES
@@ -196,6 +200,20 @@ function dateKey(date: Date): string {
   const day = String(date.getDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
+}
+
+// Shifts a "YYYY-MM-DD" string by N days using the local
+// calendar so results stay aligned with dateKey().
+function addIsoDays(isoDate: string, days: number): string {
+  const [year, month, day] = isoDate
+    .slice(0, 10)
+    .split("-")
+    .map(Number);
+  const shifted = new Date(year, month - 1, day + days);
+
+  return `${shifted.getFullYear()}-${String(
+    shifted.getMonth() + 1
+  ).padStart(2, "0")}-${String(shifted.getDate()).padStart(2, "0")}`;
 }
 
 function formatWeekDate(date: Date): string {
@@ -916,6 +934,11 @@ export default function MySchedulePage() {
   const [pendingChanges, setPendingChanges] =
     useState<PendingChange[]>([]);
 
+  // APPROVED leaves for the logged-in doctor — shown as a
+  // "Doctor Leave" marker on week-view days they cover.
+  const [approvedLeaves, setApprovedLeaves] =
+    useState<DoctorLeaveRecord[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [changesLoading, setChangesLoading] =
     useState(false);
@@ -1343,6 +1366,37 @@ export default function MySchedulePage() {
     }
   }, [employeeId, selectedWeek]);
 
+  // Load the doctor's APPROVED leaves once their employee
+  // id resolves; week view marks covered days with them.
+  useEffect(() => {
+    if (!employeeId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    doctorLeaveApi
+      .getApprovedLeavesForDoctor(employeeId)
+      .then((response) => {
+        if (cancelled) return;
+        setApprovedLeaves(
+          response.data?.leaves ?? []
+        );
+      })
+      .catch((err: any) => {
+        console.error(
+          "Failed to load approved leaves:",
+          err
+        );
+        if (cancelled) return;
+        setApprovedLeaves([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeId]);
+
   /* =======================================================
      WEEK DAYS
      ======================================================= */
@@ -1361,6 +1415,43 @@ export default function MySchedulePage() {
       };
     });
   }, [selectedWeek]);
+
+  /* =======================================================
+     APPROVED LEAVES BY DATE
+     ======================================================= */
+
+  // Expands each APPROVED leave into every calendar day it
+  // covers so week view can flag those dates directly.
+  const leaveByDateKey = useMemo(() => {
+    const map = new Map<string, DoctorLeaveRecord>();
+
+    for (const leave of approvedLeaves) {
+      const startIso = String(
+        leave.leave_start_date
+      ).slice(0, 10);
+      const endIso = String(
+        leave.leave_end_date
+      ).slice(0, 10);
+
+      if (!startIso || !endIso) {
+        continue;
+      }
+
+      let cursor = startIso;
+      let guard = 0;
+
+      while (
+        cursor <= endIso &&
+        guard < 732
+      ) {
+        map.set(cursor, leave);
+        cursor = addIsoDays(cursor, 1);
+        guard += 1;
+      }
+    }
+
+    return map;
+  }, [approvedLeaves]);
 
   /* =======================================================
      GET NORMAL DAY
@@ -2481,6 +2572,13 @@ export default function MySchedulePage() {
                       </span>
                     </div>
 
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-3 w-3 rounded-sm border border-[#F5B7B7] bg-[#FDE8E8]" />
+                      <span className="text-xs text-gray-500">
+                        Doctor Leave
+                      </span>
+                    </div>
+
                     {pendingChanges.length >
                       0 && (
                       <span className="ml-auto flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
@@ -2529,6 +2627,11 @@ export default function MySchedulePage() {
                           const pending =
                             getPendingChangesForDate(
                               date
+                            );
+
+                          const dayLeave =
+                            leaveByDateKey.get(
+                              dateKey(date)
                             );
 
                           return (
@@ -2594,6 +2697,22 @@ export default function MySchedulePage() {
                                   )}
                                 </div>
                               </button>
+
+                              {dayLeave && (
+                                <div className="mt-1 flex min-h-[16px] justify-center">
+                                  <span
+                                    title={
+                                      dayLeave.leave_reason ??
+                                      "Approved leave"
+                                    }
+                                    className="rounded bg-[#FDE8E8] px-1.5 py-0.5 shadow-sm"
+                                  >
+                                    <span className="text-[9px] font-bold uppercase tracking-wide text-[#9B1C1C]">
+                                      Doctor Leave
+                                    </span>
+                                  </span>
+                                </div>
+                              )}
 
                               {(changes.length >
                                 0 ||
@@ -2735,6 +2854,11 @@ export default function MySchedulePage() {
                                 "CANCEL"
                             );
 
+                          const dayLeave =
+                            leaveByDateKey.get(
+                              dateKey(date)
+                            );
+
                           const branchName =
                             (id?: string) =>
                               id
@@ -2769,7 +2893,28 @@ export default function MySchedulePage() {
                                 }
                               `}
                             >
-                              {slots.length >
+                              {dayLeave ? (
+                                <div className="flex h-[80px] w-full flex-1 items-center justify-center p-1">
+                                  <span
+                                    title={
+                                      dayLeave.leave_reason ??
+                                      "Approved leave"
+                                    }
+                                    className="flex h-full w-full flex-col items-center justify-center rounded-[4px] border border-dashed border-[#F5B7B7] bg-[#FDE8E8] px-1 text-center"
+                                  >
+                                    <span className="text-[10px] font-bold text-[#9B1C1C]">
+                                      Doctor Leave
+                                    </span>
+                                    {dayLeave.leave_reason && (
+                                      <span className="mt-0.5 line-clamp-2 px-0.5 text-[9px] leading-tight text-[#9B1C1C]/80">
+                                        {
+                                          dayLeave.leave_reason
+                                        }
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
+                              ) : slots.length >
                               0 ? (
                                 <>
                                   {slots.map(

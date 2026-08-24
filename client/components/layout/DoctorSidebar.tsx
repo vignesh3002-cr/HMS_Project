@@ -1,21 +1,33 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   Users,
   CalendarX,
   FileText,
   CalendarCheck,
+  LogOut,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { remove } from "../../utils/token";
 
 interface DoctorSidebarProps {
   activeItem?: string;
   onNavigate?: (item: string) => void;
+  doctorName?: string;
 }
 
 const DoctorSidebar: React.FC<DoctorSidebarProps> = ({
   activeItem = "Dashboard",
   onNavigate,
 }) => {
+  const navigate = useNavigate();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const handleLogout = () => {
+    setConfirmOpen(true);
+  };
+
   const menuItems = [
     {
       name: "Dashboard",
@@ -59,6 +71,19 @@ const DoctorSidebar: React.FC<DoctorSidebarProps> = ({
         </p>
       </div>
 
+      <ConfirmationDialog
+        open={confirmOpen}
+        title="Logout"
+        description="Are you sure you want to logout?"
+        type="warning"
+        onConfirm={() => {
+          remove();
+          localStorage.removeItem("user_info");
+          navigate("/");
+        }}
+        onCancel={() => setConfirmOpen(false)}
+      />
+
       {/* ================= NAVIGATION ================= */}
       <nav className="flex-1 flex flex-col gap-1.5 px-3">
         {menuItems.map((item) => {
@@ -85,7 +110,9 @@ const DoctorSidebar: React.FC<DoctorSidebarProps> = ({
                 ${
                   isActive
                     ? "bg-[#dce6f8] text-[#0f3d91]"
-                    : "text-gray-600 hover:bg-gray-200/70 hover:text-gray-800"
+                    : item.name === "Logout"
+                      ? "text-red-600 hover:bg-red-100"
+                      : "text-gray-600 hover:bg-gray-200/70 hover:text-gray-800"
                 }
               `}
             >
@@ -116,13 +143,37 @@ const DoctorSidebar: React.FC<DoctorSidebarProps> = ({
         })}
       </nav>
 
+      {confirmOpen && (
+        <ConfirmationDialog
+          open={confirmOpen}
+          title="Logout"
+          description="Are you sure you want to logout?"
+          type="warning"
+          onConfirm={() => {
+            remove();
+            localStorage.removeItem("user_info");
+            navigate("/");
+          }}
+          onCancel={() => setConfirmOpen(false)}
+        />
+      )}
+
       {/* ================= PROFILE ================= */}
       <div className="px-4 pb-5 pt-3">
         
+        {/* Logout button above divider */}
+        <button
+          type="button"
+          onClick={() => setConfirmOpen(true)}
+          className="w-full flex items-center justify-center py-2 rounded-md text-red-600 hover:bg-red-100 mb-3"
+        >
+          <LogOut className="w-5 h-5" /> Logout
+        </button>
+
         {/* Divider */}
         <div className="border-t border-gray-200 mb-4" />
 
-        <div className="flex items-center gap-3 px-1">
+        <div className="flex items-center gap-3 px-1 cursor-pointer" onClick={() => navigate("/doctor/profile")}>
           
           {/* Profile Image */}
           <img
@@ -133,12 +184,8 @@ const DoctorSidebar: React.FC<DoctorSidebarProps> = ({
 
           {/* Profile Info */}
           <div className="flex flex-col min-w-0">
-            <span className="font-bold text-[13px] text-gray-900 leading-tight truncate">
-              Dr. Sarah Jenkins
-            </span>
-
             <span className="text-[11px] text-gray-500 font-medium mt-1 truncate">
-              Senior Cardiologist
+              Specialist
             </span>
           </div>
         </div>

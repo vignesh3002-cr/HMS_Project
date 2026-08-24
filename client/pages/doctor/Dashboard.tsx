@@ -1,18 +1,17 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { getActiveBranchId } from "../../api/axios";
 import {
   doctorDashboardApi,
   type DashboardAppointment,
   type DashboardDoctorResponse,
   type DashboardSchedule,
+  type DoctorNotificationItem,
 } from "../../api/doctorDashboard.api";
 import { activeBranches } from "../../lib/utils";
-import { appointmentApi } from "../../api/appointment.api";
 import { encounterApi } from "../../api/encounter.api";
 import { useToast } from "@/hooks/use-toast";
-
-const fallbackHospital = "General Hospital";
 
 type AppointmentStatus = "Check Out" | "Check In" | "Cancelled";
 
@@ -28,6 +27,8 @@ interface Appointment {
   appointmentId: string;
   originalStatus: string;
 }
+
+const fallbackHospital = "HMS Main Hospital";
 
 const chartData = [
   { day: "Mon", completed: 153.59, rescheduled: 51.19 },
@@ -197,6 +198,27 @@ function formatScheduleRange(start?: string | null, end?: string | null) {
   return `${formatTime(start)} - ${formatTime(end)}`;
 }
 
+function timeAgo(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+
+  const seconds = Math.max(
+    0,
+    Math.floor((Date.now() - then) / 1000)
+  );
+
+  if (seconds < 60) return "Just now";
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 export default function DoctorDashboard() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -207,10 +229,17 @@ export default function DoctorDashboard() {
   const [period, setPeriod] = useState("Last 7 Days");
   const [hospital, setHospital] = useState("");
   const [doctor, setDoctor] = useState<DashboardDoctorResponse["data"] | null>(null);
+  const doctorName = doctor?.employee
+    ? `Dr. ${doctor.employee.first_name} ${doctor.employee.last_name}`
+    : "Dr. Jenkins";
   const [dashboardAppointments, setDashboardAppointments] = useState<Appointment[]>([]);
   const [dashboardSchedules, setDashboardSchedules] = useState<DashboardSchedule[]>([]);
   const [totalAppointments, setTotalAppointments] = useState(0);
   const [cancelledAppointments, setCancelledAppointments] = useState(0);
+  const [totalPatientsToday, setTotalPatientsToday] = useState(0);
+  const [notifications, setNotifications] = useState<DoctorNotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [doctorEmployeeId, setDoctorEmployeeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [branchLoading, setBranchLoading] = useState(false);
   const [checkInLoading, setCheckInLoading] = useState<string | null>(null);
@@ -220,8 +249,17 @@ export default function DoctorDashboard() {
   const handleCheckIn = async (appointmentId: string) => {
     setCheckInLoading(appointmentId);
     try {
-      await appointmentApi.updateStatus(appointmentId, "IN_CONSULTATION");
-      await encounterApi.create({ appointment_id: appointmentId });
+      // createEncounter flips the appointment to IN_CONSULTATION inside its
+      // transaction; updating status separately first would strand an
+      // in-progress appointment with no encounter when creation fails.
+      try {
+        await encounterApi.create({ appointment_id: appointmentId });
+      } catch (error: any) {
+        const message = error?.response?.data?.message;
+        if (!message || !/already exists/i.test(message)) {
+          throw error;
+        }
+      }
       // Trigger reload by calling loadDashboard
       window.dispatchEvent(new CustomEvent("refreshDoctorDashboard"));
       toast({ title: "Patient checked in", description: "Encounter created successfully." });
@@ -234,8 +272,10 @@ export default function DoctorDashboard() {
 
   const handleCheckOut = async (appointmentId: string) => {
     try {
-      const encounters = await encounterApi.getAll({ appointmentId });
-      const encounter = encounters.data?.data?.encounters?.[0];
+      // Branch-independent lookup: the scoped list query can 403 a
+      // multi-branch doctor with no branch selected.
+      const response = await encounterApi.getByAppointment(appointmentId);
+      const encounter = response.data?.data;
       if (encounter) {
         await encounterApi.close(encounter.encounter_no, "DOCTOR");
       }
@@ -261,6 +301,9 @@ export default function DoctorDashboard() {
         setDashboardSchedules([]);
         setTotalAppointments(0);
         setCancelledAppointments(0);
+        setTotalPatientsToday(0);
+        setNotifications([]);
+        setUnreadCount(0);
       }
       setDashboardError("");
 
@@ -270,6 +313,8 @@ export default function DoctorDashboard() {
       if (!employeeId) {
         throw new Error("No employee ID is linked to the logged-in user.");
       }
+
+      setDoctorEmployeeId(employeeId);
 
       const today = new Date().toISOString().slice(0, 10);
       const employeeResponse = await doctorDashboardApi.getDoctor(employeeId);
@@ -293,7 +338,12 @@ export default function DoctorDashboard() {
         setHospital(firstActiveBranch.branch_name);
       }
 
-      const [appointmentsResponse, cancelledResponse] = await Promise.all([
+      const [
+        appointmentsResponse,
+        cancelledResponse,
+        checkedInResponse,
+        notificationsResponse,
+      ] = await Promise.all([
         doctorDashboardApi.getAppointments({
           employeeId,
           branchId,
@@ -309,10 +359,18 @@ export default function DoctorDashboard() {
           page: 1,
           limit: 1,
         }),
+        doctorDashboardApi.getPatientsCheckedInToday({
+          employeeId,
+          branchId: branchId || undefined,
+        }),
+        doctorDashboardApi.getNotifications(employeeId),
       ]);
 
       setTotalAppointments(appointmentsResponse.data.data.total);
       setCancelledAppointments(cancelledResponse.data.data.total);
+      setTotalPatientsToday(checkedInResponse.data.data.totalPatients);
+      setNotifications(notificationsResponse.data.data.notifications);
+      setUnreadCount(notificationsResponse.data.data.unreadCount);
 
       const mappedAppointments = appointmentsResponse.data.data.appointments
         .map(
@@ -383,6 +441,20 @@ export default function DoctorDashboard() {
     };
   }, [loadDashboard]);
 
+  // Opening the notification panel clears unread state (server + badge).
+  useEffect(() => {
+    if (
+      notificationOpen &&
+      unreadCount > 0 &&
+      doctorEmployeeId
+    ) {
+      setUnreadCount(0);
+      doctorDashboardApi
+        .markNotificationsRead(doctorEmployeeId)
+        .catch(() => {});
+    }
+  }, [notificationOpen, unreadCount, doctorEmployeeId]);
+
   useEffect(() => {
     const handleClick = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -429,10 +501,6 @@ export default function DoctorDashboard() {
     day: "numeric",
     year: "numeric",
   });
-
-  const doctorName = doctor?.employee
-    ? `Dr. ${doctor.employee.first_name} ${doctor.employee.last_name}`
-    : "Dr. Jenkins";
 
   const doctorId = doctor?.employee?.employee_id || "-";
 
@@ -515,9 +583,15 @@ export default function DoctorDashboard() {
                 onClick={() =>
                   setNotificationOpen((value) => !value)
                 }
-                className="flex h-12 w-12 items-center justify-center rounded-xl text-[#434654] transition hover:bg-slate-100"
+                className="relative flex h-12 w-12 items-center justify-center rounded-xl text-[#434654] transition hover:bg-slate-100"
               >
                 <Icon name="bell" />
+
+                {unreadCount > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
               </button>
 
               {notificationOpen && (
@@ -525,15 +599,78 @@ export default function DoctorDashboard() {
                   <h3 className="mb-3 text-base font-semibold">
                     Notifications
                   </h3>
-                  <div className="border-b border-slate-100 py-2.5 text-[13px] text-slate-600">
-                    You have 3 upcoming appointments today.
-                  </div>
-                  <div className="border-b border-slate-100 py-2.5 text-[13px] text-slate-600">
-                    Susan Babin checked in.
-                  </div>
-                  <div className="py-2.5 text-[13px] text-slate-600">
-                    Your weekly appointment report is ready.
-                  </div>
+
+                  {notifications.length === 0 ? (
+                    <div className="py-6 text-center text-[13px] text-slate-400">
+                      No new notifications
+                    </div>
+                  ) : (
+                    <div className="max-h-[320px] overflow-y-auto">
+                      {notifications.map(
+                        (item, index) => {
+                          const patient =
+                            item.appointment_history?.patient_bio_data;
+                          const patientName =
+                            [
+                              patient?.patient_first_name,
+                              patient?.patient_middle_name,
+                              patient?.patient_last_name,
+                            ]
+                              .filter(Boolean)
+                              .join(" ") || "A patient";
+
+                          const isBooking =
+                            item.notification_type === "BOOKING";
+                          const appointment =
+                            item.appointment_history;
+
+                          return (
+                            <div
+                              key={item.notification_id}
+                              className={`py-2.5 text-[13px] text-slate-600 ${
+                                index < notifications.length - 1
+                                  ? "border-b border-slate-100"
+                                  : ""
+                              }`}
+                            >
+                              <p className="leading-5">
+                                {item.status === "UNREAD" && (
+                                  <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-blue-500 align-middle" />
+                                )}
+                                {isBooking ? (
+                                  <>
+                                    <span className="font-semibold text-slate-800">
+                                      {patientName}
+                                    </span>{" "}
+                                    booked an appointment
+                                    {appointment
+                                      ? ` for ${formatDate(
+                                          appointment.appointment_date
+                                        )} at ${formatTime(
+                                          appointment.appointment_time
+                                        )}`
+                                      : ""}
+                                    .
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="font-semibold text-slate-800">
+                                      {patientName}
+                                    </span>{" "}
+                                    checked in.
+                                  </>
+                                )}
+                              </p>
+
+                              <span className="text-[11px] text-slate-400">
+                                {timeAgo(item.created_at)}
+                              </span>
+                            </div>
+                          );
+                        }
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -667,22 +804,17 @@ export default function DoctorDashboard() {
                 <div className="flex items-start justify-between gap-2.5">
                   <div className="flex flex-col gap-1">
                     <div className="text-xs font-medium uppercase leading-4 tracking-[0.6px] text-[#434654]">
-                      Total Patients
+                      Patients Checked In
                     </div>
 
                     <div className="text-2xl font-semibold leading-8 tracking-[-0.24px]">
-                      1,284
+                      {loading ? "—" : totalPatientsToday}
                     </div>
                   </div>
 
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-green-500/10 text-green-600">
                     <Icon name="users" />
                   </div>
-                </div>
-
-                <div className="flex items-center gap-2 pt-4 text-base leading-6 text-green-600">
-                  <Icon name="trend" className="h-3.5 w-3.5" />
-                  <span>84 new this month</span>
                 </div>
               </article>
 
@@ -716,15 +848,17 @@ export default function DoctorDashboard() {
                   Today's Appointments
                 </h2>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    alert("Opening all appointments...")
-                  }
-                  className="font-['Manrope',sans-serif] text-xs font-bold uppercase tracking-[0.6px] text-[#003d9b]"
-                >
-                  View All
-                </button>
+      <button
+        type="button"
+        onClick={() =>
+          navigate(
+            `/doctor/appointments?date=${new Date().toISOString().slice(0, 10)}`
+          )
+        }
+        className="font-['Manrope',sans-serif] text-xs font-bold uppercase tracking-[0.6px] text-[#003d9b]"
+      >
+        View All
+      </button>
               </div>
 
               {dashboardError && (
@@ -763,10 +897,18 @@ export default function DoctorDashboard() {
                   {dashboardAppointments.map((appointment) => (
                     <tr
                       key={`${appointment.patient}-${appointment.dateTime}`}
-                     onClick={(appointment.originalStatus === "IN_CONSULTATION")?(                  () =>
+                      onClick={(appointment.originalStatus === "IN_CONSULTATION")?(                  () =>
                         navigate("/doctor/patient-consultation", {
                           state: {
                             patientId: appointment.patientId,
+                            appointmentId: appointment.appointmentId,
+                            branchId:
+                              selectedBranchId ||
+                              getActiveBranchId() ||
+                              doctor?.branches?.find(
+                                (b) => b.status === undefined || b.status === 1
+                              )?.branch_id ||
+                              undefined,
                             appointmentDate: appointment.appointmentDate,
                             appointmentTime: appointment.appointmentTime,
                             consultedBy: doctorName,
@@ -846,6 +988,14 @@ export default function DoctorDashboard() {
                         navigate("/doctor/patient-consultation", {
                           state: {
                             patientId: appointment.patientId,
+                            appointmentId: appointment.appointmentId,
+                            branchId:
+                              selectedBranchId ||
+                              getActiveBranchId() ||
+                              doctor?.branches?.find(
+                                (b) => b.status === undefined || b.status === 1
+                              )?.branch_id ||
+                              undefined,
                             appointmentDate: appointment.appointmentDate,
                             appointmentTime: appointment.appointmentTime,
                             consultedBy: doctorName,

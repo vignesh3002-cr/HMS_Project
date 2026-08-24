@@ -1,3 +1,4 @@
+import type { AxiosRequestConfig } from "axios";
 import API from "./axios";
 
 export interface CreateAppointmentPayload {
@@ -27,6 +28,8 @@ export interface AvailableSlotsResult {
   day_of_week: string;
   slots: AvailableSlot[];
   is_cancelled?: boolean;
+  is_on_leave?: boolean;
+  leave_reason?: string | null;
 }
 
 export interface AppointmentResponse {
@@ -64,6 +67,9 @@ export interface AppointmentRecord {
     patient_last_name: string | null;
     patient_gender: string | null;
     patient_primary_mobile: string | null;
+    patient_dob?: string | null;
+    patient_age?: number | null;
+    patient_blood_group?: string | null;
   } | null;
   employees: {
     employee_id: string;
@@ -182,7 +188,7 @@ export const appointmentApi = {
       { status, cancel_reason: cancelReason, cancelled_by: cancelledBy },
     ),
 
-  getAll: (params?: GetAppointmentsParams) =>
+  getAll: (params?: GetAppointmentsParams, config?: AxiosRequestConfig) =>
     API.get<{
       success: boolean;
       message: string;
@@ -193,5 +199,5 @@ export const appointmentApi = {
         totalPages: number;
         appointments: AppointmentRecord[];
       };
-    }>("/appointments", { params }),
+    }>("/appointments", { params, ...config }),
 };

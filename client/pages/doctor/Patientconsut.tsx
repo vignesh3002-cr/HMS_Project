@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import API, { getActiveBranchId } from "../../api/axios";
 import { employeeApi } from "../../api/employee.api";
+import { appointmentApi } from "../../api/appointment.api";
 import { getUser } from "../../utils/token";
 import {
   patientApi,
@@ -60,6 +61,8 @@ interface Medication {
 
 interface ConsultationState {
   patientId?: string;
+  appointmentId?: string;
+  branchId?: string;
   appointmentDate?: string;
   appointmentTime?: string;
   consultedBy?: string;
@@ -81,6 +84,215 @@ const StepCheckLogo = ({ active = false }: { active?: boolean }) => (
   </svg>
 );
 
+/* ============================================================
+   ACTIVE ENCOUNTER LOOKUP
+   The encounter exists in the DB but scoped queries can still come
+   back empty or 403 when the active branch selector points at a
+   different branch than the one the encounter was created under,
+   or when a multi-branch doctor has no branch selected. Strategy:
+     0. By appointment_id (exact key, branch-independent)
+     1. Active branch + OPEN        (original behaviour)
+     2. Cross-branch + OPEN         (x-branch-id header suppressed)
+     3. Cross-branch, any state, OPEN preferred
+     4. Self-heal: recreate from the in-progress appointment
+   Scope errors (403) are collected so the UI can show the real
+   reason instead of a generic "not found".
+   ============================================================ */
+
+const collectScopeError = (error: any, sink: string[]) => {
+  if (error?.response?.status === 403) {
+    const message = error?.response?.data?.message;
+    if (message) sink.push(message);
+    return;
+  }
+  console.error("Failed to load encounter:", error);
+};
+
+const BRANCH_HINT =
+  " (or pick your branch from the selector in the header)";
+
+const findActiveEncounter = async (
+  patientId: string,
+  appointmentId?: string,
+  branchId?: string,
+): Promise<{ encounter: EncounterRecord | null; scopeError?: string }> => {
+  const scopeErrors: string[] = [];
+  /* Real reason encounter creation failed (400-class backend messages).
+     Preferred over scopeErrors when present: a failed POST /encounters is
+     the actionable root cause, while scoped-list 403s are just fallout. */
+  const createErrors: string[] = [];
+  const crossBranchConfig = { skipBranchScope: true };
+
+  /* 0. Precise hit - dedicated endpoint resolves by appointment_id with
+        mapping-based branch isolation (no active selection required). */
+  if (appointmentId) {
+    let missing = false;
+    try {
+      const response = await encounterApi.getByAppointment(appointmentId);
+      const exact = response.data.data;
+      if (exact && exact.patient_id === patientId) {
+        return { encounter: exact };
+      }
+    } catch (error: any) {
+      if (error?.response?.status === 404) {
+        // No encounter yet for this appointment.
+        missing = true;
+      } else {
+        collectScopeError(error, scopeErrors);
+      }
+    }
+
+    /* Encounter not created yet - create it directly from this
+       appointment (POST /encounters has no branchScope) and re-read it
+       through the mapping-checked endpoint. Deliberately no scoped list
+       calls here: they would 403 a multi-branch doctor with no selection. */
+    if (missing) {
+      try {
+        await encounterApi.create({ appointment_id: appointmentId });
+      } catch (error: any) {
+        // "Encounter already exists" or not creatable - verify decides.
+        const message = error?.response?.data?.message;
+        if (message && !/already exists/i.test(message)) {
+          createErrors.push(message);
+        }
+      }
+      try {
+        const response = await encounterApi.getByAppointment(appointmentId);
+        const healed = response.data.data;
+        if (healed && healed.patient_id === patientId) {
+          return { encounter: healed };
+        }
+      } catch (error: any) {
+        collectScopeError(error, scopeErrors);
+      }
+    }
+  }
+
+  /* An ALLOWED branchId query param makes branchScope validate membership
+     and pass through instead of demanding an active selection, so the nav
+     state's branch (dashboard context) unblocks multi-branch doctors. */
+  const activeBranch =
+    branchId ?? getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+
+  // 1. Known/active branch + OPEN (original behaviour)
+  try {
+    const response = await encounterApi.getAll({
+      ...(activeBranch ? { branchId: activeBranch } : {}),
+      patientId,
+      status: "OPEN",
+      page: 1,
+      limit: 5,
+    });
+    const encounters = response.data.data?.encounters ?? [];
+    const current =
+      encounters.find((item) => item.patient_id === patientId) ??
+      encounters[0] ??
+      null;
+    if (current) return { encounter: current };
+  } catch (error: any) {
+    collectScopeError(error, scopeErrors);
+  }
+
+  // 2. Any allowed branch + OPEN - recovers a branch mismatch.
+  try {
+    const response = await encounterApi.getAll(
+      { patientId, status: "OPEN", page: 1, limit: 10 },
+      crossBranchConfig,
+    );
+    const openEncounters = response.data.data?.encounters ?? [];
+    const openMatch = openEncounters.find(
+      (item) => item.patient_id === patientId,
+    );
+    if (openMatch) return { encounter: openMatch };
+  } catch (error: any) {
+    collectScopeError(error, scopeErrors);
+  }
+
+  // 3. Any allowed branch, any state, OPEN preferred.
+  try {
+    const response = await encounterApi.getAll(
+      { patientId, page: 1, limit: 10 },
+      crossBranchConfig,
+    );
+    const encounters = response.data.data?.encounters ?? [];
+    const anyOpen = encounters.find(
+      (item) => item.patient_id === patientId && item.status === "OPEN",
+    );
+    if (anyOpen) return { encounter: anyOpen };
+  } catch (error: any) {
+    collectScopeError(error, scopeErrors);
+  }
+
+  /* ============================================================
+     SELF-HEAL
+     Check-in flips the appointment status before the encounter
+     is created; when creation failed (e.g. the linked schedule
+     was deactivated) the appointment is stuck with no encounter.
+     Recreate it here from the patient's most recent in-progress
+     appointment so clinical details load instead of erroring.
+     Verification uses the mapping-checked by-appointment endpoint,
+     never a scoped list query.
+     ============================================================ */
+
+  const inProgressStatuses = ["IN_CONSULTATION", "CHECKED_IN"];
+  for (const status of inProgressStatuses) {
+    let candidates: { appointment_id: string }[] = [];
+    try {
+      const apptResponse = await appointmentApi.getAll(
+        {
+          ...(activeBranch ? { branchId: activeBranch } : {}),
+          patientId,
+          status,
+          sortBy: "created_at",
+          sortOrder: "desc",
+          page: 1,
+          limit: 5,
+        },
+        crossBranchConfig,
+      );
+      candidates = apptResponse.data.data?.appointments ?? [];
+    } catch {
+      continue;
+    }
+    for (const appt of candidates) {
+      try {
+        await encounterApi.create({ appointment_id: appt.appointment_id });
+      } catch (error: any) {
+        // "Encounter already exists" or not creatable - verify decides.
+        const message = error?.response?.data?.message;
+        if (message && !/already exists/i.test(message)) {
+          createErrors.push(message);
+        }
+      }
+      try {
+        const response = await encounterApi.getByAppointment(
+          appt.appointment_id,
+        );
+        const healed = response.data.data;
+        if (healed && healed.patient_id === patientId) {
+          return { encounter: healed };
+        }
+      } catch (error: any) {
+        collectScopeError(error, scopeErrors);
+      }
+    }
+  }
+
+  /* Prefer the real creation-failure reason over scope fallout: if POST
+     /encounters told us why it refused, that beats "Please select a branch
+     first." produced by the fallback list queries. */
+  const primaryMessage = createErrors[0] ?? scopeErrors[0];
+
+  return {
+    encounter: null,
+    scopeError: primaryMessage
+      ? `${primaryMessage}${
+          /select a branch/i.test(primaryMessage) ? BRANCH_HINT : ""
+        }`
+      : undefined,
+  };
+};
+
 const Consultation: React.FC = () => {
   /* ============================================================
      STATE
@@ -96,9 +308,12 @@ const Consultation: React.FC = () => {
     string[]
   >([]);
 
+  const [investigationNotes, setInvestigationNotes] = useState<
+    Record<string, string>
+  >({});
+
   const [showLabReview, setShowLabReview] = useState(false);
   const [activeStep, setActiveStep] = useState("CONSULTATION");
-  const [showProfilePortal, setShowProfilePortal] = useState(false);
   const [proceeding, setProceeding] = useState(false);
 
   /* ============================================================
@@ -179,23 +394,18 @@ const Consultation: React.FC = () => {
     if (!patientId) return;
     let cancelled = false;
     setEncounterError("");
-    // GET /encounters is branch-scoped (branchScope middleware 403s
-    // "Please select a branch first." when no branch is sent and the
-    // user maps to more than one branch).
-    const branchId = getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
-    encounterApi
-      .getAll({ branchId, patientId, status: "OPEN", page: 1, limit: 5 })
-      .then((response) => {
+    findActiveEncounter(
+      patientId,
+      consultationState?.appointmentId,
+      consultationState?.branchId,
+    )
+      .then(({ encounter: current, scopeError }) => {
         if (cancelled) return;
-        const encounters = response.data.data?.encounters ?? [];
-        const current =
-          encounters.find((item) => item.patient_id === patientId) ??
-          encounters[0] ??
-          null;
         setEncounter(current);
         if (!current) {
           setEncounterError(
-            "No active encounter found for this patient. Clinical details cannot be loaded.",
+            scopeError ||
+              "No active encounter found for this patient. Clinical details cannot be loaded.",
           );
         }
       })
@@ -212,7 +422,7 @@ const Consultation: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [consultationState?.patientId]);
+  }, [consultationState?.patientId, consultationState?.appointmentId]);
 
   const patientName = patient
     ? [
@@ -227,7 +437,7 @@ const Consultation: React.FC = () => {
   const patientPhoto = patient?.patient_photo_url || "";
 
   const patientAgeSex = patient
-    ? `${patient.patient_age ?? "—"} Y / ${patient.patient_gender ?? ""}`
+    ? `${patient.patient_age ?? "â€”"} Y / ${patient.patient_gender ?? ""}`
     : "";
 
   const patientDisplayId = patient?.patient_id || "";
@@ -290,14 +500,6 @@ const Consultation: React.FC = () => {
 
   const goBack = () => {
     navigate("/doctor-dashboard");
-  };
-
-  /* ============================================================
-     PROFILE
-  ============================================================ */
-
-  const viewProfile = () => {
-    setShowProfilePortal(true);
   };
 
   /* ============================================================
@@ -528,10 +730,6 @@ const Consultation: React.FC = () => {
      JSX
   ============================================================ */
 
-  if (showProfilePortal) {
-    return <HMSPatientPortal />;
-  }
-
   return (
     <div className="min-h-screen w-full bg-slate-50 font-[Inter,sans-serif] text-slate-700 antialiased">
 
@@ -702,7 +900,11 @@ const Consultation: React.FC = () => {
               {/* PROFILE */}
 
               <button
-                onClick={viewProfile}
+                onClick={() =>
+                  navigate("/doctor/patient-details", {
+                    state: { patientId: consultationState?.patientId },
+                  })
+                }
                 className="h-9 w-full rounded-md border border-blue-600 bg-white text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
               >
                 View Full Profile
@@ -869,6 +1071,8 @@ const Consultation: React.FC = () => {
                   <LabReview
                     embedded
                     patientId={consultationState?.patientId}
+                    appointmentId={consultationState?.appointmentId}
+                    branchId={consultationState?.branchId}
                     encounterNo={encounter?.encounter_no}
                     onNext={() => selectStep("DIAGNOSIS")}
                   />
@@ -894,6 +1098,8 @@ const Consultation: React.FC = () => {
                   <DischargeMedication
                     embedded
                     patientId={consultationState?.patientId}
+                    appointmentId={consultationState?.appointmentId}
+                    branchId={consultationState?.branchId}
                     encounterNo={encounter?.encounter_no}
                     onNext={() => selectStep("FOLLOW UP")}
                   />
@@ -905,10 +1111,6 @@ const Consultation: React.FC = () => {
                   />
 ) : activeStep === "SUMMARY" ? (
                   <Summary embedded patientId={patientDisplayId} />
-                ) : activeStep === "HISTORY" ? (
-                  <HistoryDashboard embedded />
-                ) : activeStep === "NOTES & DOCUMENTS" ? (
-                  <PatientNotesDocuments embedded />
                 ) : (
                   <>
                     {/* =================================================
@@ -1130,7 +1332,7 @@ const Consultation: React.FC = () => {
                     <div className="flex flex-col gap-4">
 
                       {/* PERFORMANCE STATUS / SYMPTOMS / ALLERGIES /
-                          COMORBIDITIES — backed by the Clinical Details
+                          COMORBIDITIES â€” backed by the Clinical Details
                           API (see components/hms/ClinicalDetailsSection.tsx) */}
 
                       {encounterError && (
@@ -1199,6 +1401,39 @@ const Consultation: React.FC = () => {
                     ))}
 
                   </div>
+
+                  {selectedInvestigations.length > 0 && (
+                    <div className="flex w-full flex-col gap-4 pt-2">
+
+                      {selectedInvestigations.map((investigation) => (
+
+                        <div
+                          key={investigation}
+                          className="flex flex-col gap-2"
+                        >
+
+                          <label className="text-xs font-bold leading-4 text-slate-500">
+                            Clinical Notes - {investigation}
+                          </label>
+
+                          <textarea
+                            value={investigationNotes[investigation] ?? ""}
+                            onChange={(e) =>
+                              setInvestigationNotes((prev) => ({
+                                ...prev,
+                                [investigation]: e.target.value,
+                              }))
+                            }
+                            placeholder={`Enter clinical notes for ${investigation}`}
+                            className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-300"
+                          />
+
+                        </div>
+
+                      ))}
+
+                    </div>
+                  )}
 
                   <div className="flex w-full flex-col gap-2 pt-2">
 
@@ -1372,8 +1607,8 @@ export default Consultation;
 
 /* ============================================================
    LAB REVIEW COMPONENT
-   (combined from client/pages/doctor/labreview.tsx —
-    renamed App → LabReview, duplicate React/useState import
+   (combined from client/pages/doctor/labreview.tsx â€”
+    renamed App â†’ LabReview, duplicate React/useState import
     removed so it can live in this file)
 ============================================================ */
 
@@ -1452,9 +1687,11 @@ const ArrowRightIcon = () => (
 const LabReview: React.FC<{
   embedded?: boolean;
   patientId?: string;
+  appointmentId?: string;
+  branchId?: string;
   encounterNo?: string;
   onNext?: () => void;
-}> = ({ embedded = false, patientId, encounterNo, onNext }) => {
+}> = ({ embedded = false, patientId, appointmentId, branchId, encounterNo, onNext }) => {
   const [observations, setObservations] = useState("");
   const [notifications, setNotifications] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1478,19 +1715,11 @@ const LabReview: React.FC<{
       let targetEncounterNo = encounterNo ?? "";
 
       if (!targetEncounterNo && patientId) {
-        const branchId =
-          getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
-        const response = await encounterApi.getAll({
-          branchId,
+        const { encounter: found } = await findActiveEncounter(
           patientId,
-          status: "OPEN",
-          page: 1,
-          limit: 5,
-        });
-        const found =
-          response.data.data?.encounters.find(
-            (item) => item.patient_id === patientId
-          ) ?? null;
+          appointmentId,
+          branchId,
+        );
         targetEncounterNo = found?.encounter_no ?? "";
       }
 
@@ -1764,7 +1993,7 @@ const LabReview: React.FC<{
             disabled={savingObservations}
             className="flex items-center gap-2 rounded-xl bg-[#2563EB] px-8 py-3 text-[15px] font-bold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {savingObservations ? "Saving…" : "Proceed to Treatment Plan"}
+            {savingObservations ? "Savingâ€¦" : "Proceed to Treatment Plan"}
             <ArrowRightIcon />
           </button>
         </div>
@@ -1775,8 +2004,8 @@ const LabReview: React.FC<{
 
 /* ============================================================
    DIAGNOSIS COMPONENT
-   (combined from client/pages/doctor/diagonisis.tsx —
-    renamed App → Diagnosis, duplicate React import removed,
+   (combined from client/pages/doctor/diagonisis.tsx â€”
+    renamed App â†’ Diagnosis, duplicate React import removed,
     CheckIcon / BackIcon / NotificationIcon reused from above)
 ============================================================ */
 
@@ -1940,7 +2169,10 @@ const Diagnosis: React.FC<{
     );
   };
 
-  const loadSubtypesForCancerType = (cancerTypeId: string) => {
+  const loadSubtypesForCancerType = (
+    cancerTypeId: string,
+    autoSelectIcd = true
+  ) => {
     if (!cancerTypeId) return;
     const requestId = ++diagnosisRequestRef.current;
     setDiagnosisLoading(true);
@@ -1954,10 +2186,10 @@ const Diagnosis: React.FC<{
         const items = response.data.data;
         setSubtypes(items);
         const first = items[0];
-        if (first) {
+        if (first && autoSelectIcd) {
           setFormData((previous) => ({
             ...previous,
-            icdCode: first.icd10_subtype ?? "",
+            icdCode: previous.icdCode || first.icd10_subtype || "",
           }));
         }
       })
@@ -1976,7 +2208,10 @@ const Diagnosis: React.FC<{
       });
   };
 
-  const loadStagesForCancerType = (cancerTypeId: string) => {
+  const loadStagesForCancerType = (
+    cancerTypeId: string,
+    resetStageSelection = true
+  ) => {
     if (!cancerTypeId) return;
     const requestId = ++stagingRequestRef.current;
     setDiagnosisLoading(true);
@@ -2002,7 +2237,7 @@ const Diagnosis: React.FC<{
           const criteria = (item.tnm_criteria ?? "")
             .replace(/\([^)]*\)/g, " ")
             .replace(/\s+/g, " ")
-            .replace(/\s*[-–]\s*$/g, "")
+            .replace(/\s*[-â€“]\s*$/g, "")
             .trim();
           if (criteria && /(\b[TNM]\d|\bAny\s+[TNM])/i.test(criteria)) {
             if (!tnmOptions.includes(criteria)) tnmOptions.push(criteria);
@@ -2017,7 +2252,7 @@ const Diagnosis: React.FC<{
             .filter((value): value is string => Boolean(value))
             .join(" ");
           for (const match of gradeSource.matchAll(
-            /grade\s+group\s*[\d\-–]+|grade\s+[\d\-–]+/gi
+            /grade\s+group\s*[\d\-â€“]+|grade\s+[\d\-â€“]+/gi
           )) {
             const grade = match[0]
               .replace(/\s+/g, " ")
@@ -2027,6 +2262,7 @@ const Diagnosis: React.FC<{
         }
         setTnmStages(tnmOptions.sort());
         setGrades(gradeOptions.sort());
+        if (!resetStageSelection) return;
         setFormData((previous) => ({
           ...previous,
           cancerStage: "",
@@ -2058,13 +2294,35 @@ const Diagnosis: React.FC<{
         const fetched = response.data.data;
         setCancerTypes(fetched);
 
+        let savedType = "";
+        try {
+          const savedDraft = JSON.parse(
+            localStorage.getItem(diagnosisDraftKey) ?? ""
+          ) as Partial<FormData> | null;
+          savedType = savedDraft?.type ?? "";
+        } catch (error) {
+          console.error("Failed to read diagnosis draft:", error);
+        }
+
+        const matchedSavedType = savedType
+          ? fetched.find((item) => item.cancer_type === savedType)
+          : undefined;
+
+        if (matchedSavedType) {
+          // Restoring a saved draft: reload options for the saved
+          // type without overwriting the user's selections.
+          loadSubtypesForCancerType(matchedSavedType.cancer_type_id, false);
+          loadStagesForCancerType(matchedSavedType.cancer_type_id, false);
+          return;
+        }
+
         const initial = fetched[0];
 
         if (initial) {
           setFormData((previous) => ({
             ...previous,
-            type: initial.cancer_type,
-            icdCode: initial.icd10 ?? "",
+            type: previous.type || initial.cancer_type,
+            icdCode: previous.icdCode || initial.icd10 || "",
           }));
           loadSubtypesForCancerType(initial.cancer_type_id);
           loadStagesForCancerType(initial.cancer_type_id);
@@ -2321,7 +2579,7 @@ const Diagnosis: React.FC<{
                 className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
               >
                 <option value="">
-                  {diagnosisLoading ? "Loading…" : "Select Sub Type"}
+                  {diagnosisLoading ? "Loadingâ€¦" : "Select Sub Type"}
                 </option>
 
                 {subtypes.map((subtype) => (
@@ -2340,7 +2598,7 @@ const Diagnosis: React.FC<{
             </div>
           </div>
 
-          {/* Histomorphology */}
+          {/* Histomorphology 
           <div>
             <label
               htmlFor="histomorphology"
@@ -2363,7 +2621,7 @@ const Diagnosis: React.FC<{
                 <ChevronDownIcon />
               </div>
             </div>
-          </div>
+          </div>*/}
 
           {/* Cancer Stage */}
           <div>
@@ -2384,7 +2642,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
               >
                 <option value="">
                   {diagnosisLoading
-                    ? "Loading…"
+                    ? "Loadingâ€¦"
                     : "Select Cancer Stage"}
                 </option>
 
@@ -2420,7 +2678,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
               >
                 <option value="">
                   {diagnosisLoading
-                    ? "Loading…"
+                    ? "Loadingâ€¦"
                     : "Select Grade"}
                 </option>
 
@@ -2456,7 +2714,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
               >
                 <option value="">
                   {diagnosisLoading
-                    ? "Loading…"
+                    ? "Loadingâ€¦"
                     : "Select TNM Stage"}
                 </option>
 
@@ -2491,7 +2749,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
               onChange={handleChange}
               placeholder={
                 diagnosisLoading
-                  ? "Loading diagnosis…"
+                  ? "Loading diagnosisâ€¦"
                   : "Enter ICD code"
               }
               className="block w-full rounded-md border-gray-300 px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:ring-[#1d4ed8]"
@@ -2652,8 +2910,8 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
 
 /* ============================================================
    DISCHARGE MEDICATION COMPONENT
-   (combined from client/pages/doctor/discharge.tsx —
-    renamed PatientDischargeMedication → DischargeMedication,
+   (combined from client/pages/doctor/discharge.tsx â€”
+    renamed PatientDischargeMedication â†’ DischargeMedication,
     Medication type renamed to DischargeMedicationItem to avoid
     clashing with the Medication interface above, duplicate
     React import and icon definitions removed,
@@ -2668,6 +2926,28 @@ type DischargeMedicationItem = {
   frequency: string;
   instruction: string;
   duration: string;
+};
+
+/* Row shape returned by
+   GET /chemotherapy/regimen-protocols/:protocolId/discharge-medicines */
+type DischargeMedicineRecord = {
+  discharge_instruction_id?: string;
+  protocol_id?: string;
+  drug_sequence?: number | null;
+  drug_from?: string | null;
+  frequency?: string | null;
+  composition?: string | null;
+  duration?: string | null;
+  patient_dose?: number | string | null;
+  patient_dose_unit?: string | null;
+  administration_detail?: string | null;
+  comment?: string | null;
+  medicine_master?: {
+    medicine_name: string | null;
+    generic_name?: string | null;
+    dosage_form?: string | null;
+    unit?: string | null;
+  } | null;
 };
 
 const ArrowLeftIcon = () => (
@@ -2744,14 +3024,20 @@ const MailIcon = () => (
 const DischargeMedication: React.FC<{
   embedded?: boolean;
   patientId?: string;
+  appointmentId?: string;
+  branchId?: string;
   encounterNo?: string;
   onNext?: () => void;
 }> = ({
   embedded = false,
   patientId,
+  appointmentId,
+  branchId,
   encounterNo,
   onNext,
 }) => {
+  const resolvedPatientId = patientId || "";
+
   const [medications, setMedications] = useState<DischargeMedicationItem[]>(
     []
   );
@@ -2759,35 +3045,127 @@ const DischargeMedication: React.FC<{
   const [activeStep, setActiveStep] = useState(1);
   const [savingMeds, setSavingMeds] = useState(false);
   const [medsError, setMedsError] = useState("");
+  const [medsLoading, setMedsLoading] = useState(false);
 
-  const handleAddDrug = () => {
-    const newMedication: DischargeMedicationItem = {
-      id: Date.now(),
-      drugName: "",
-      dosage: "",
-      frequency: "",
-      instruction: "",
-      duration: "",
+  /* ============================================================
+     LOAD DISCHARGE MEDICINES
+     Real take-home rows from
+     GET /chemotherapy/regimen-protocols/:protocolId/discharge-medicines.
+     The protocol is the one selected in the Treatment Plan step
+     (localStorage), falling back to the patient's chemotherapy plan.
+     ============================================================ */
+
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+
+    let cancelled = false;
+
+    const mapRecord = (
+      item: DischargeMedicineRecord,
+      index: number,
+    ): DischargeMedicationItem => ({
+      id: index,
+      drugName:
+        item.medicine_master?.medicine_name ||
+        item.medicine_master?.generic_name ||
+        "",
+      dosage:
+        item.patient_dose != null && item.patient_dose !== ""
+          ? `${item.patient_dose} ${
+              item.patient_dose_unit ?? item.medicine_master?.unit ?? ""
+            }`.trim()
+          : "",
+      frequency: item.frequency || "",
+      instruction:
+        item.administration_detail || item.comment || item.composition || "",
+      duration: item.duration || "",
+    });
+
+    setMedsLoading(true);
+    setMedsError("");
+
+    const resolveProtocolId = async (): Promise<string> => {
+      const savedProtocolId = localStorage.getItem(
+        `hms_selected_protocol_id_${resolvedPatientId}`
+      );
+      if (savedProtocolId) return savedProtocolId;
+
+      try {
+        const draft = JSON.parse(
+          localStorage.getItem(`hms_treatment_plan_${resolvedPatientId}`) ??
+            ""
+        ) as { protocol?: string } | null;
+        if (draft?.protocol) return draft.protocol;
+      } catch {
+        // Malformed draft - continue with the plan lookup.
+      }
+
+      const response = await API.get<{
+        success: boolean;
+        data: {
+          chemotherapy_regimen_protocol?: {
+            protocol_id?: string;
+          } | null;
+        }[];
+      }>("/chemotherapy/plans", {
+        params: {
+          patient_id: resolvedPatientId,
+          branchId:
+            getActiveBranchId() ?? getUser()?.branch_id ?? undefined,
+        },
+      });
+      const plan = response.data.data?.[0];
+      return plan?.chemotherapy_regimen_protocol?.protocol_id ?? "";
     };
 
-    setMedications((current) => [...current, newMedication]);
-  };
+    resolveProtocolId()
+      .then(async (protocolId) => {
+        if (!protocolId) return [];
+
+        const response = await API.get<{
+          success: boolean;
+          data: DischargeMedicineRecord[];
+        }>(
+          `/chemotherapy/regimen-protocols/${encodeURIComponent(
+            protocolId
+          )}/discharge-medicines`
+        );
+
+        return [...(response.data.data ?? [])].sort(
+          (a, b) => (a.drug_sequence ?? 0) - (b.drug_sequence ?? 0)
+        );
+      })
+      .then((records) => {
+        if (cancelled) return;
+        setMedications(records.map(mapRecord));
+      })
+      .catch((error: any) => {
+        console.error("Failed to load discharge medicines:", error);
+        if (cancelled) return;
+        setMedications([]);
+        setMedsError(
+          error?.response?.data?.message ||
+            error?.message ||
+            "Failed to load discharge medicines."
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setMedsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId]);
 
   const resolveEncounterNo = async () => {
     if (encounterNo) return encounterNo;
     if (!patientId) return "";
-    const branchId = getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
-    const response = await encounterApi.getAll({
-      branchId,
+    const { encounter: found } = await findActiveEncounter(
       patientId,
-      status: "OPEN",
-      page: 1,
-      limit: 5,
-    });
-    const found =
-      response.data.data?.encounters.find(
-        (item) => item.patient_id === patientId
-      ) ?? null;
+      appointmentId,
+      branchId,
+    );
     return found?.encounter_no ?? "";
   };
 
@@ -2900,6 +3278,39 @@ if (embedded) {
             </thead>
 
             <tbody className="text-sm text-gray-500">
+              {medsLoading && (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-8 py-8 text-center text-sm text-gray-500"
+                  >
+                    Loading discharge medicines...
+                  </td>
+                </tr>
+              )}
+
+              {!medsLoading && !medsError && medications.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-8 py-8 text-center text-sm text-gray-500"
+                  >
+                    No discharge medicines found for this patient's protocol.
+                  </td>
+                </tr>
+              )}
+
+              {medsError && (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-8 py-8 text-center text-sm text-red-500"
+                  >
+                    {medsError}
+                  </td>
+                </tr>
+              )}
+
               {medications.map((medication) => (
                 <tr
                   key={medication.id}
@@ -2929,17 +3340,6 @@ if (embedded) {
             </tbody>
           </table>
         </div>
-
-        {/* Add Drug */}
-        <div className="flex justify-end p-6">
-          <button
-            type="button"
-            onClick={handleAddDrug}
-            className="rounded border border-blue-600 px-6 py-2 text-sm font-semibold text-blue-600 transition-colors duration-200 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-          >
-            Add Drug
-          </button>
-        </div>
       </div>
 
       {/* FOOTER ACTION */}
@@ -2954,7 +3354,7 @@ if (embedded) {
           className="flex items-center gap-2 rounded-md bg-[#1d4ed8] px-8 py-3 font-bold text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <DoubleArrowIcon />
-          {savingMeds ? "Saving…" : "Next"}
+          {savingMeds ? "Savingâ€¦" : "Next"}
         </button>
       </div>
     </div>
@@ -3157,6 +3557,39 @@ if (embedded) {
                   </thead>
 
                   <tbody className="text-sm text-gray-500">
+                    {medsLoading && (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-8 py-8 text-center text-sm text-gray-500"
+                        >
+                          Loading discharge medicines...
+                        </td>
+                      </tr>
+                    )}
+
+                    {!medsLoading && !medsError && medications.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-8 py-8 text-center text-sm text-gray-500"
+                        >
+                          No discharge medicines found for this patient's protocol.
+                        </td>
+                      </tr>
+                    )}
+
+                    {medsError && (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-8 py-8 text-center text-sm text-red-500"
+                        >
+                          {medsError}
+                        </td>
+                      </tr>
+                    )}
+
                     {medications.map((medication) => (
                       <tr
                         key={medication.id}
@@ -3186,17 +3619,6 @@ if (embedded) {
                   </tbody>
                 </table>
               </div>
-
-              {/* Add Drug */}
-              <div className="flex justify-end p-6">
-                <button
-                  type="button"
-                  onClick={handleAddDrug}
-                  className="rounded border border-blue-600 px-6 py-2 text-sm font-semibold text-blue-600 transition-colors duration-200 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                >
-                  Add Drug
-                </button>
-              </div>
             </div>
 
             {/* FOOTER ACTION */}
@@ -3219,7 +3641,7 @@ if (embedded) {
 
 /* ============================================================
    CHEMOTHERAPY ORDER COMPONENT
-   (combined from client/pages/doctor/chemo.tsx —
+   (combined from client/pages/doctor/chemo.tsx â€”
     renamed App-style component ChemotherapyOrder to the same
     embedded pattern as LabReview / Diagnosis / DischargeMedication,
     icons moved inside the component to avoid colliding with the
@@ -3234,6 +3656,7 @@ type Drug = {
   dose: string;
   unit: string;
   volume: string;
+  planItemId?: string;
 };
 
 type ChemotherapyPlanItem = {
@@ -3336,7 +3759,17 @@ const ChemotherapyOrder: React.FC<{
 
   const protocolRef = useRef<RegimenProtocolDetail | null>(null);
   const planIdRef = useRef<string>("");
+  const planItemsRef = useRef<ChemotherapyPlanItem[]>([]);
   const [savingOrder, setSavingOrder] = useState(false);
+
+  /* Edit-in-place state (medication rows) */
+  const [editingRow, setEditingRow] = useState<{
+    kind: "drug" | "premedication";
+    id: number;
+  } | null>(null);
+  const [editDraft, setEditDraft] = useState<Drug | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
   const latestCycleRef = useRef<
     NonNullable<ChemotherapyPlan["chemotherapy_cycle"]>[number] | null
   >(null);
@@ -3659,7 +4092,7 @@ const ChemotherapyOrder: React.FC<{
           setCycleDay(
             latestCycle
               ? `Cycle ${latestCycle.cycle_number} / Day ${
-                  latestCycle.cycle_day ?? "—"
+                  latestCycle.cycle_day ?? "â€”"
                 }`
               : "Cycle 1 / Day 1"
           );
@@ -3675,11 +4108,13 @@ const ChemotherapyOrder: React.FC<{
             plan.protocol_name || plan.regimen_name || ""
           );
           const planItems = plan.chemotherapy_plan_items ?? [];
+          planItemsRef.current = planItems;
           const toPlanDrug = (
             item: ChemotherapyPlanItem,
             index: number
           ): Drug => ({
             id: index,
+            planItemId: item.chemotherapy_plan_item_id,
             name:
               item.medicine_master?.medicine_name ||
               item.medicine_master?.generic_name ||
@@ -3758,11 +4193,143 @@ const ChemotherapyOrder: React.FC<{
     );
   };
 
+  const startEdit = (kind: "drug" | "premedication", drug: Drug) => {
+    if (editingRow || savingEdit) return;
+
+    userTouched.current[kind === "drug" ? "drugs" : "premedication"] = true;
+    setEditError("");
+    setEditingRow({ kind, id: drug.id });
+    setEditDraft({ ...drug });
+  };
+
   const handleEdit = (id: number) => {
     const drug = drugs.find((item) => item.id === id);
 
     if (drug) {
-      console.log("Edit drug:", drug);
+      startEdit("drug", drug);
+    }
+  };
+
+  const handleEditPremedication = (id: number) => {
+    const drug = premedicationDrugs.find(
+      (item) => item.id === id
+    );
+
+    if (drug) {
+      startEdit("premedication", drug);
+    }
+  };
+
+  const cancelEdit = () => {
+    if (savingEdit) return;
+
+    setEditingRow(null);
+    setEditDraft(null);
+    setEditError("");
+  };
+
+  const updateEditDraft = (field: keyof Drug, value: string) => {
+    setEditDraft((previous) =>
+      previous
+        ? {
+            ...previous,
+            [field]: value,
+          }
+        : previous
+    );
+  };
+
+  const resolvePlanItemId = (
+    kind: "drug" | "premedication",
+    name: string
+  ) => {
+    const role = kind === "drug" ? "PRIMARY" : "PREMEDICATION";
+    const normalizedName = name.trim().toLowerCase();
+
+    const matched = planItemsRef.current.find(
+      (item) =>
+        (!item.drug_role || item.drug_role === role) &&
+        (
+          item.medicine_master?.medicine_name ||
+          item.medicine_master?.generic_name ||
+          ""
+        )
+          .trim()
+          .toLowerCase() === normalizedName
+    );
+
+    return matched?.chemotherapy_plan_item_id ?? "";
+  };
+
+  const saveEditedDrug = async () => {
+    if (!editDraft || !editingRow || savingEdit) return;
+
+    const trimmedDose = editDraft.dose.trim();
+
+    if (trimmedDose && Number.isNaN(Number(trimmedDose))) {
+      setEditError("Dose must be a valid number.");
+      return;
+    }
+
+    try {
+      setSavingEdit(true);
+      setEditError("");
+
+      let planItemId = "";
+
+      if (planIdRef.current) {
+        planItemId =
+          editDraft.planItemId ||
+          resolvePlanItemId(editingRow.kind, editDraft.name);
+
+        if (!planItemId) {
+          throw new Error(
+            "Could not match this medication to the patient's chemotherapy plan."
+          );
+        }
+
+        await API.put(
+          `/chemotherapy/plans/${planIdRef.current}/items/${planItemId}`,
+          {
+            dosage: trimmedDose === "" ? null : Number(trimmedDose),
+            dosage_unit: editDraft.unit.trim() || null,
+          }
+        );
+
+        editDraft.planItemId = planItemId;
+      } else {
+        throw new Error(
+          "No chemotherapy plan found for this patient. Complete the Treatment Plan step first."
+        );
+      }
+
+      const updatedDrug: Drug = { ...editDraft };
+
+      if (editingRow.kind === "drug") {
+        setDrugs((current) =>
+          current.map((item) =>
+            item.id === editingRow.id ? updatedDrug : item
+          )
+        );
+      } else {
+        setPremedicationDrugs((current) =>
+          current.map((item) =>
+            item.id === editingRow.id ? updatedDrug : item
+          )
+        );
+      }
+
+      setEditingRow(null);
+      setEditDraft(null);
+    } catch (error: any) {
+      console.error("Failed to save medication changes:", error);
+      setEditError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to save the medication changes. Please try again."
+      );
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -3772,16 +4339,6 @@ const ChemotherapyOrder: React.FC<{
     setPremedicationDrugs((current) =>
       current.filter((drug) => drug.id !== id)
     );
-  };
-
-  const handleEditPremedication = (id: number) => {
-    const drug = premedicationDrugs.find(
-      (item) => item.id === id
-    );
-
-    if (drug) {
-      console.log("Edit premedication drug:", drug);
-    }
   };
 
   /* Icons (scoped inside the component) */
@@ -4043,7 +4600,7 @@ const ChemotherapyOrder: React.FC<{
                 className="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <SaveIcon />
-                {savingOrder ? "Saving…" : "Save"}
+                {savingOrder ? "Savingâ€¦" : "Save"}
               </button>
             </div>
           </div>
@@ -4052,6 +4609,11 @@ const ChemotherapyOrder: React.FC<{
         {/* ================= ORDER TABLE ================= */}
         {activeTab === "Chemotherapy Orders" ? (
           <div className="p-8">
+            {editingRow?.kind === "drug" && editError && (
+              <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+                {editError}
+              </div>
+            )}
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -4072,10 +4634,6 @@ const ChemotherapyOrder: React.FC<{
                       Unit
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Volume
-                    </th>
-
                     <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
                       Action
                     </th>
@@ -4086,10 +4644,10 @@ const ChemotherapyOrder: React.FC<{
                   {planLoading && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={5}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
-                        Loading chemotherapy orders…
+                        Loading chemotherapy ordersâ€¦
                       </td>
                     </tr>
                   )}
@@ -4097,7 +4655,7 @@ const ChemotherapyOrder: React.FC<{
                   {!planLoading && !planError && drugs.length === 0 && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={5}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
                         No chemotherapy orders found for this patient.
@@ -4108,7 +4666,7 @@ const ChemotherapyOrder: React.FC<{
                   {planError && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={5}
                         className="px-6 py-8 text-center text-sm text-red-500"
                       >
                         {planError}
@@ -4116,7 +4674,99 @@ const ChemotherapyOrder: React.FC<{
                     </tr>
                   )}
 
-                  {drugs.map((drug) => (
+                  {drugs.map((drug) => {
+                    const isEditingRow =
+                      editingRow?.kind === "drug" &&
+                      editingRow.id === drug.id;
+
+                    if (isEditingRow && editDraft) {
+                      return (
+                        <tr
+                          key={drug.id}
+                          className="bg-blue-50/40 transition-colors"
+                        >
+                          <td className="px-3 py-3 pl-6 pr-3">
+                            <input
+                              type="text"
+                              value={editDraft.name}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "name",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[160px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.form}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "form",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[120px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.dose}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "dose",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.unit}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "unit",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={saveEditedDrug}
+                                disabled={savingEdit}
+                                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {savingEdit ? "Savingâ€¦" : "Save"}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={cancelEdit}
+                                disabled={savingEdit}
+                                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return (
                     <tr
                       key={drug.id}
                       className="transition-colors hover:bg-gray-50"
@@ -4135,10 +4785,6 @@ const ChemotherapyOrder: React.FC<{
 
                       <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
                         {drug.unit}
-                      </td>
-
-                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-500">
-                        {drug.volume}
                       </td>
 
                       <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
@@ -4167,24 +4813,19 @@ const ChemotherapyOrder: React.FC<{
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
-            </div>
-
-            {/* Add Drug */}
-            <div className="mt-6 flex justify-end">
-              <button
-                type="button"
-                onClick={handleAddDrug}
-                className="inline-flex items-center justify-center rounded-md border border-blue-200 bg-blue-50 px-6 py-2.5 text-sm font-semibold text-blue-600 shadow-sm transition-colors hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-              >
-                Add Drug
-              </button>
             </div>
           </div>
         ) : activeTab === "Premedication" ? (
           <div className="p-8">
+            {editingRow?.kind === "premedication" && editError && (
+              <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+                {editError}
+              </div>
+            )}
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -4205,10 +4846,6 @@ const ChemotherapyOrder: React.FC<{
                       Unit
                     </th>
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Volume
-                    </th>
-
                     <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
                       Action
                     </th>
@@ -4219,10 +4856,10 @@ const ChemotherapyOrder: React.FC<{
                   {planLoading && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={5}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
-                        Loading premedication…
+                        Loading premedicationâ€¦
                       </td>
                     </tr>
                   )}
@@ -4232,7 +4869,7 @@ const ChemotherapyOrder: React.FC<{
                     premedicationDrugs.length === 0 && (
                       <tr>
                         <td
-                          colSpan={6}
+                          colSpan={5}
                           className="px-6 py-8 text-center text-sm text-gray-500"
                         >
                           No premedication drugs found for this protocol.
@@ -4243,7 +4880,7 @@ const ChemotherapyOrder: React.FC<{
                   {planError && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={5}
                         className="px-6 py-8 text-center text-sm text-red-500"
                       >
                         {planError}
@@ -4251,7 +4888,99 @@ const ChemotherapyOrder: React.FC<{
                     </tr>
                   )}
 
-                  {premedicationDrugs.map((drug) => (
+                  {premedicationDrugs.map((drug) => {
+                    const isEditingRow =
+                      editingRow?.kind === "premedication" &&
+                      editingRow.id === drug.id;
+
+                    if (isEditingRow && editDraft) {
+                      return (
+                        <tr
+                          key={drug.id}
+                          className="bg-blue-50/40 transition-colors"
+                        >
+                          <td className="px-3 py-3 pl-6 pr-3">
+                            <input
+                              type="text"
+                              value={editDraft.name}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "name",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[160px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.form}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "form",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[120px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.dose}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "dose",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.unit}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "unit",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={saveEditedDrug}
+                                disabled={savingEdit}
+                                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {savingEdit ? "Savingâ€¦" : "Save"}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={cancelEdit}
+                                disabled={savingEdit}
+                                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return (
                     <tr
                       key={drug.id}
                       className="transition-colors hover:bg-gray-50"
@@ -4270,10 +4999,6 @@ const ChemotherapyOrder: React.FC<{
 
                       <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
                         {drug.unit}
-                      </td>
-
-                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-500">
-                        {drug.volume}
                       </td>
 
                       <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
@@ -4302,7 +5027,8 @@ const ChemotherapyOrder: React.FC<{
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -4455,8 +5181,8 @@ const ChemotherapyOrder: React.FC<{
 
 /* ============================================================
    FOLLOW UP COMPONENT
-   (combined from client/pages/doctor/Follow.tsx —
-    renamed FollowUpScreen → FollowUp, duplicate React import
+   (combined from client/pages/doctor/Follow.tsx â€”
+    renamed FollowUpScreen â†’ FollowUp, duplicate React import
     removed, icons scoped inside the component to avoid
     colliding with the module-level icons above, embedded prop
     added so it can live in this file, original Follow.tsx file
@@ -4943,7 +5669,7 @@ const FollowUp: React.FC<{
           className="inline-flex items-center justify-center rounded-lg border border-transparent bg-[#2557D6] px-8 py-3 text-base font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <DoubleArrowIcon />
-          {submittingFollowUp ? "Submitting…" : "Submit"}
+          {submittingFollowUp ? "Submittingâ€¦" : "Submit"}
         </button>
       </div>
     </>
@@ -5249,7 +5975,7 @@ const FollowUp: React.FC<{
 
 /* ============================================================
    TREATMENT PLAN COMPONENT
-   (combined from client/pages/doctor/Treatement.tsx —
+   (combined from client/pages/doctor/Treatement.tsx â€”
     TreatmentPlan given the same embedded pattern as
     LabReview / Diagnosis / ChemotherapyOrder,
     icons kept scoped inside the component to avoid colliding
@@ -5335,7 +6061,8 @@ const TreatmentPlan: React.FC<{
 
       if (data.treatmentIntent) setTreatmentIntent(data.treatmentIntent);
       if (Array.isArray(data.treatmentTypes)) {
-        setTreatmentTypes(data.treatmentTypes);
+        /* Treatment Type is single-select - keep at most one entry. */
+        setTreatmentTypes(data.treatmentTypes.slice(0, 1));
       }
       if (data.lineOfTherapy) setLineOfTherapy(data.lineOfTherapy);
       if (data.plannedStartDate) {
@@ -5379,15 +6106,20 @@ const TreatmentPlan: React.FC<{
     "Targeted Therapy",
   ];
 
+  /* Single-select behaviour - only one treatment type can be
+     active at a time (clicking it again clears the selection). */
   const toggleTreatmentType = (
     type: TreatmentType
   ) => {
     setTreatmentTypes((current) =>
-      current.includes(type)
-        ? current.filter((item) => item !== type)
-        : [...current, type]
+      current.includes(type) ? [] : [type]
     );
   };
+
+  /* Chemo-specific inputs (Line of Therapy, Planned Start Date,
+     Protocol) stay hidden unless Chemotherapy is ticked above. */
+  const isChemotherapySelected =
+    treatmentTypes.includes("Chemotherapy");
 
   useEffect(() => {
     let cancelled = false;
@@ -5484,76 +6216,90 @@ const TreatmentPlan: React.FC<{
       return;
     }
 
-    if (!plannedStartDate) {
-      setSaveError(
-        "Please set a planned start date before continuing."
-      );
-      return;
-    }
+    /* Chemo-only requirements - these inputs are hidden when
+       Chemotherapy is not part of the selected treatment types. */
+    let treatmentStartDate = "";
 
-    if (!protocol) {
-      setSaveError("Please select a protocol before continuing.");
-      return;
-    }
-
-    const dateMatch = plannedStartDate
-      .trim()
-      .match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-    const treatmentStartDate = dateMatch
-      ? `${dateMatch[3]}-${dateMatch[2].padStart(2, "0")}-${dateMatch[1].padStart(2, "0")}`
-      : plannedStartDate.trim();
-
-    if (!/^\d{4}-\d{2}-\d{2}/.test(treatmentStartDate)) {
-      setSaveError(
-        "Planned start date is not a valid date (use DD-MM-YYYY or YYYY-MM-DD)."
-      );
-      return;
-    }
-
-    const saved = localStorage.getItem("hms_diagnosis_selection");
-    let stagingDetailId = "";
-    let diagnosisId = "";
-
-    if (saved) {
-      try {
-        const selection = JSON.parse(saved);
-        stagingDetailId = selection?.staging_detail_id ?? "";
-        diagnosisId = selection?.diagnosis_id ?? "";
-      } catch (error) {
-        console.error("Failed to parse diagnosis selection:", error);
+    if (isChemotherapySelected) {
+      if (!plannedStartDate) {
+        setSaveError(
+          "Please set a planned start date before continuing."
+        );
+        return;
       }
-    }
 
-    if (!stagingDetailId || !diagnosisId) {
-      try {
-        const stagingResponse = await API.get<{
-          success: boolean;
-          data: {
-            staging_detail_id: string;
-            diagnosis_id: string | null;
-          }[];
-        }>("/oncology/staging-details", {
-          params: { patient_id: resolvedPatientId, limit: 1 },
-        });
-        const latest = stagingResponse.data?.data?.[0];
-        stagingDetailId = latest?.staging_detail_id ?? "";
-        diagnosisId = latest?.diagnosis_id ?? "";
-      } catch (error) {
-        console.error("Failed to load staging details:", error);
+      if (!protocol) {
+        setSaveError("Please select a protocol before continuing.");
+        return;
       }
-    }
 
-    if (!stagingDetailId || !diagnosisId) {
-      setSaveError(
-        "Diagnosis has not been saved yet. Complete the Diagnosis step first."
-      );
-      return;
+      const dateMatch = plannedStartDate
+        .trim()
+        .match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+      treatmentStartDate = dateMatch
+        ? `${dateMatch[3]}-${dateMatch[2].padStart(2, "0")}-${dateMatch[1].padStart(2, "0")}`
+        : plannedStartDate.trim();
+
+      if (!/^\d{4}-\d{2}-\d{2}/.test(treatmentStartDate)) {
+        setSaveError(
+          "Planned start date is not a valid date (use DD-MM-YYYY or YYYY-MM-DD)."
+        );
+        return;
+      }
     }
 
     setSaving(true);
     setSaveError("");
 
     try {
+      /* A chemotherapy plan is only created when Chemotherapy is
+         ticked; other treatment types continue to the next step. */
+      if (!isChemotherapySelected) {
+        setActiveStep(3);
+        onNext?.();
+        return;
+      }
+
+      const saved = localStorage.getItem("hms_diagnosis_selection");
+      let stagingDetailId = "";
+      let diagnosisId = "";
+
+      if (saved) {
+        try {
+          const selection = JSON.parse(saved);
+          stagingDetailId = selection?.staging_detail_id ?? "";
+          diagnosisId = selection?.diagnosis_id ?? "";
+        } catch (error) {
+          console.error("Failed to parse diagnosis selection:", error);
+        }
+      }
+
+      if (!stagingDetailId || !diagnosisId) {
+        try {
+          const stagingResponse = await API.get<{
+            success: boolean;
+            data: {
+              staging_detail_id: string;
+              diagnosis_id: string | null;
+            }[];
+          }>("/oncology/staging-details", {
+            params: { patient_id: resolvedPatientId, limit: 1 },
+          });
+          const latest = stagingResponse.data?.data?.[0];
+          stagingDetailId = latest?.staging_detail_id ?? "";
+          diagnosisId = latest?.diagnosis_id ?? "";
+        } catch (error) {
+          console.error("Failed to load staging details:", error);
+        }
+      }
+
+      if (!stagingDetailId || !diagnosisId) {
+        setSaveError(
+          "Diagnosis has not been saved yet. Complete the Diagnosis step first."
+        );
+        return;
+      }
+
       let employeeId = getUser()?.employee_id ?? null;
 
       if (!employeeId) {
@@ -5816,13 +6562,27 @@ const TreatmentPlan: React.FC<{
               }
               className="block w-full appearance-none rounded-lg border border-slate-300 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             >
-              <option value="Curative">
-                Curative
+              <option value="">
+                Select Treatment Intent
               </option>
 
-              <option value="Palliative">
-                Palliative
-              </option>
+              {[
+                "Curative",
+                "Adjuvant",
+                "Neoadjuvant",
+                "Palliative",
+                "Definitive",
+                "Maintenance",
+                "Salvage",
+                "Supportive / Symptom Control",
+                "Prophylactic",
+                "Diagnostic",
+                "Other",
+              ].map((intent) => (
+                <option key={intent} value={intent}>
+                  {intent}
+                </option>
+              ))}
             </select>
 
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
@@ -5875,9 +6635,10 @@ const TreatmentPlan: React.FC<{
         </div>
 
         {/* ============================================
-            LINE + START DATE
+            LINE + START DATE  (chemotherapy only)
         ============================================= */}
 
+        {isChemotherapySelected && (
         <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
 
           {/* Line of Therapy */}
@@ -5974,11 +6735,13 @@ const TreatmentPlan: React.FC<{
             </Popover>
           </div>
         </div>
+        )}
 
         {/* ============================================
-            PROTOCOL
+            PROTOCOL  (chemotherapy only)
         ============================================= */}
 
+        {isChemotherapySelected && (
         <div>
 
           <div className="mb-2 flex items-center justify-between">
@@ -6025,7 +6788,7 @@ const TreatmentPlan: React.FC<{
             >
               <option value="">
                 {protocolsLoading
-                  ? "Loading protocols…"
+                  ? "Loading protocolsâ€¦"
                   : "Select Protocol"}
               </option>
 
@@ -6051,6 +6814,7 @@ const TreatmentPlan: React.FC<{
             </div>
           )}
         </div>
+        )}
 
         {/* ============================================
             REMARKS
@@ -6098,7 +6862,7 @@ const TreatmentPlan: React.FC<{
           className="flex items-center rounded-lg bg-[#1d4ed8] px-6 py-2.5 font-semibold text-white transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <DoubleArrowIcon />
-          {saving ? "Saving…" : "Next"}
+          {saving ? "Savingâ€¦" : "Next"}
         </button>
 
       </div>
@@ -6398,8 +7162,8 @@ const TreatmentPlan: React.FC<{
 
 /* ============================================================
    SUMMARY COMPONENT
-   (combined from client/pages/doctor/summary.tsx —
-    renamed PatientSummary → Summary, Step helper moved inside
+   (combined from client/pages/doctor/summary.tsx â€”
+    renamed PatientSummary â†’ Summary, Step helper moved inside
     the component to avoid colliding with other names in this
     file, embedded prop added so it can live in this file,
     original summary.tsx file left untouched)
@@ -6410,17 +7174,30 @@ type SummaryPlanItem = {
   drug_role: string | null;
   protocol_dose: number | null;
   protocol_dose_unit: string | null;
+  calculated_dose?: number | string | null;
   formulation: string | null;
   dilution_volume: string | null;
   administration_route: string | null;
   frequency: string | null;
   remarks: string | null;
+  cycle_day?: number | null;
+  administration_day?: number | null;
   medicine_master: {
     medicine_name: string;
     generic_name: string | null;
     dosage_form: string | null;
     unit: string | null;
   } | null;
+};
+
+type StagingDetailRecord = {
+  id?: string;
+  staging_detail_id?: string;
+  patient_id?: string;
+  diagnosis_id?: string | null;
+  clinical_stage?: string | null;
+  cancer_types?: { cancer_type?: string | null } | null;
+  derived_fields?: { ajcc_stage?: string | null } | null;
 };
 
 type SummaryPlan = {
@@ -6440,17 +7217,22 @@ type SummaryPlan = {
   cycle_interval_days: number | null;
   treatment_start_date: string | null;
   expected_end_date: string | null;
+  ecog_status?: number | string | null;
+  karnofsky_score?: number | string | null;
+  diagnosis_id?: string | null;
+  staging_detail_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  employees?: {
+    first_name?: string | null;
+    last_name?: string | null;
+  } | null;
   chemotherapy_cycle: {
     cycle_number: number;
     cycle_day: number | null;
   }[] | null;
   chemotherapy_plan_items: SummaryPlanItem[] | null;
-  oncology_staging_detail: {
-    clinical_stage: string | null;
-    cancer_types: { cancer_type: string } | null;
-    cancer_subtypes: { subtype_name: string } | null;
-    derived_fields: { ajcc_stage: string | null } | null;
-  } | null;
+  oncology_staging_detail: StagingDetailRecord | null;
 };
 
 type ChemoOrderRow = {
@@ -6626,7 +7408,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
     const cycles = plan?.chemotherapy_cycle ?? [];
     const latest = cycles[cycles.length - 1];
     const cycleLabel = latest
-      ? `Cycle ${latest.cycle_number} / Day ${latest.cycle_day ?? "—"}`
+      ? `Cycle ${latest.cycle_number} / Day ${latest.cycle_day ?? "â€”"}`
       : "";
     const status = plan?.treatment_status
       ? ` (${plan.treatment_status})`
@@ -6704,13 +7486,12 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
 
     renderTable(
       "Chemotherapy Orders",
-      ["Drug Name", "Form", "Dose", "Unit", "Volume"],
+      ["Drug Name", "Form", "Dose", "Unit"],
       chemotherapyOrders.map((row) => [
         row.drug,
         row.form,
         row.dose,
         row.unit,
-        row.volume,
       ])
     );
     renderTable(
@@ -6733,8 +7514,8 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
     y += 8;
     doc.setFontSize(9);
     doc.setTextColor(15, 23, 42);
-    doc.text(`Next Visit Date: ${nextVisitDate || "—"}`, 40, y);
-    doc.text(`Next Cycle: ${nextCycle || "—"}`, 300, y);
+    doc.text(`Next Visit Date: ${nextVisitDate || "â€”"}`, 40, y);
+    doc.text(`Next Cycle: ${nextCycle || "â€”"}`, 300, y);
 
     const blob = doc.output("blob");
     const url = URL.createObjectURL(blob);
@@ -6745,6 +7526,11 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const handleSubmitSummary = () => {
+    if (!resolvedPatientId) return;
+    localStorage.removeItem(`hms_diagnosis_form_${resolvedPatientId}`);
   };
 
   const Step = ({
@@ -6760,7 +7546,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
           active ? "bg-green-500" : "bg-slate-400"
         }`}
       >
-        ✓
+        âœ“
       </div>
 
       <span
@@ -6831,7 +7617,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
 
                 <p className="flex items-center gap-2 text-sm text-slate-500">
                   {stage}
-                  <span className="text-slate-400">◷</span>
+                  <span className="text-slate-400">â—·</span>
                 </p>
               </div>
 
@@ -6852,7 +7638,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
 
                 <p className="flex items-center gap-2 text-sm text-slate-500">
                   {protocol}
-                  <span className="text-slate-400">◷</span>
+                  <span className="text-slate-400">â—·</span>
                 </p>
               </div>
 
@@ -6906,9 +7692,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
                       Unit
                     </th>
 
-                    <th className="pb-3 font-medium text-slate-900">
-                      Volume
-                    </th>
+                    
                   </tr>
                 </thead>
 
@@ -6920,9 +7704,6 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
                       <td className="py-3">{item.dose}</td>
                       <td className="py-3 text-xs uppercase">
                         {item.unit}
-                      </td>
-                      <td className="py-3 text-xs uppercase">
-                        {item.volume}
                       </td>
                     </tr>
                   ))}
@@ -7043,7 +7824,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
 
               <p className="flex items-center gap-2 text-slate-600">
                 {nextCycle}
-                <span className="text-slate-400">◷</span>
+                <span className="text-slate-400">â—·</span>
               </p>
             </div>
           </section>
@@ -7056,6 +7837,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
       <div className="mb-8 flex flex-wrap justify-end gap-4">
         <button
           type="button"
+          onClick={handleSubmitSummary}
           className="rounded-md bg-[#5624D0] px-8 py-3 font-medium text-white shadow-sm transition-colors hover:bg-[#4a1fb5]"
         >
           Submit
@@ -7110,7 +7892,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
           {/* Phone */}
           <div className="flex items-center gap-4">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-400">
-              <span className="text-sm">☎</span>
+              <span className="text-sm">â˜Ž</span>
             </div>
 
             <div>
@@ -7127,7 +7909,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
           {/* Email */}
           <div className="flex items-center gap-4">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-400">
-              <span className="text-sm">✉</span>
+              <span className="text-sm">âœ‰</span>
             </div>
 
             <div>
@@ -7198,7 +7980,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
               className="text-slate-500 transition-colors hover:text-slate-700"
               aria-label="Back"
             >
-              <span className="text-lg">←</span>
+              <span className="text-lg">â†</span>
             </button>
 
             <h1 className="text-xl font-semibold text-slate-800">
@@ -7213,7 +7995,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
               className="relative text-slate-500 transition-colors hover:text-slate-700"
               aria-label="Notifications"
             >
-              <span className="text-xl">♧</span>
+              <span className="text-xl">â™§</span>
 
               <span className="absolute right-0 top-0 h-2 w-2 rounded-full border border-white bg-red-500" />
             </button>
@@ -7257,2954 +8039,6 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
           </div>
         </div>
       </main>
-    </div>
-  );
-};
-
-/* ============================================================
-   MEDICATION PORTAL COMPONENT
-   (combined from client/pages/doctor/Medication.tsx —
-    renamed HMSPatientPortal → MedicationPortal so it can live
-    in this file, original Medication.tsx file left untouched)
-============================================================ */
-
-type Tab = "Order Summary" | "Medications" | "Discharge" | "History" | "Notes & Documents";
-
-const tabs: Tab[] = [
-  "Order Summary",
-  "Medications",
-  "Discharge",
-  "History",
-  "Notes & Documents",
-];
-
-const premedications = [
-  { no: 1, medication: "Decadron", sub: "(Dexamethasone)", dose: "12 mg", route: ["IV", "Push"], timing: ["T-30", "mins"] },
-  { no: 2, medication: "Avil (Pheniramine)", sub: "", dose: "22.75", dose2: "mg", route: ["IV", "Push"], timing: ["T-15", "mins"] },
-  { no: 3, medication: "Palzen (Palonosetron)", sub: "", dose: "0.25", dose2: "mg", route: ["IV", "Push"], timing: ["T-10", "mins"] },
-];
-
-const chemoDrugs = [
-  { no: 1, drug: "Taxol (Paclitaxel)", calc: "80 mg/m²", actual: "137.6 mg", route: "IV Infusion", diluent: "NS 250ml", status: "GIVEN" },
-  { no: 2, drug: "Herceptin (Trastuzumab)", calc: "2 mg", actual: "128 mg", route: "IV Infusion", diluent: "NS 100ml", status: "PENDING" },
-  { no: 3, drug: "Carboplatin", calc: "AUC 6", actual: "450 mg", route: "IV Infusion", diluent: "D5W 500ml", status: "PENDING" },
-];
-
-const dischargeMeds = [
-  { no: 1, medication: "Capecitabine", dose: "12 mg", frequency: "2-0-2", instruction: "Twice Daily", duration: "5 Days" },
-  { no: 2, medication: "Paracetamol", dose: "22.75 mg", frequency: "2-0-2", instruction: "Once Daily", duration: "5 Days" },
-];
-
-function StatusBadge({ children, warning = false }: { children: React.ReactNode; warning?: boolean }) {
-  return (
-    <span className={`inline-flex rounded-md px-2.5 py-1 text-[10px] font-bold uppercase ${
-      warning ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"
-    }`}>
-      {children}
-    </span>
-  );
-}
-
-function SectionHeader({ icon, title, badge, badgeClass = "bg-blue-100 text-[#0052cc]" }: {
-  icon: string; title: string; badge: string; badgeClass?: string;
-}) {
-  return (
-    <div className="flex items-center border-b border-slate-100 bg-slate-50/50 px-6 py-4">
-      <i className={`${icon} mr-3 text-sm text-slate-400`} />
-      <h3 className="mr-3 text-lg font-bold text-slate-800">{title}</h3>
-      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${badgeClass}`}>{badge}</span>
-    </div>
-  );
-}
-
-const MedicationPortal: React.FC<{ onBackToProfile?: () => void }> = ({
-  onBackToProfile,
-}) => {
-  const [activeTab, setActiveTab] = useState<Tab>("Medications");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [showDischargeDashboard, setShowDischargeDashboard] = useState(false);
-
-  if (showDischargeDashboard) {
-    return (
-      <DischargeDetailsPortal
-        onBack={() => setShowDischargeDashboard(false)}
-      />
-    );
-  }
-
-  return (
-    <div className="flex h-screen overflow-hidden bg-slate-50 font-sans text-slate-800">
-      {/* Mobile sidebar overlay */}
-      {sidebarOpen && (
-        <button
-          aria-label="Close sidebar"
-          onClick={() => setSidebarOpen(false)}
-          className="fixed inset-0 z-30 bg-black/20 lg:hidden"
-        />
-      )}
-
-     
-
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Header */}
-        <header className="flex h-[72px] shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-8">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-slate-500 lg:hidden">
-              <i className="fa-solid fa-bars" />
-            </button>
-            <div className="flex items-center text-sm font-semibold text-slate-700">
-              <i className="fa-solid fa-code-branch mr-2 text-slate-400" />
-              Main Branch
-              <i className="fa-solid fa-chevron-down ml-2 text-[10px] text-slate-400" />
-            </div>
-          </div>
-          <div className="flex items-center gap-5">
-            <button className="relative text-slate-500 hover:text-[#0052cc]">
-              <i className="fa-regular fa-bell text-xl" />
-              <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500" />
-            </button>
-            <div className="flex items-center gap-2 border-l border-slate-200 pl-5">
-              <span className="font-bold text-[#0052cc]">HMS</span>
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-700 text-white">
-                <i className="fa-solid fa-user text-xs" />
-              </div>
-            </div>
-          </div>
-        </header>
-
-            <div className="flex-1 overflow-y-auto relative">
-            <div className="p-8 max-w-[1400px] mx-auto pb-32">
-            {/* BEGIN: Patient Header Card */}
-            <div className="bg-white rounded-[16px] border border-[#e2e8f0] p-6 shadow-sm mb-6 flex justify-between items-center">
-            <div className="flex items-center">
-            <img alt="Vijaya Nallusamy" className="w-20 h-20 rounded-full border-4 border-white shadow-sm object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCVmv5vhpN6g6IwvwVBONWYZS06j9iELGi3guKAqt6M68HTL3HxSslWkIMAEQjWeTlKNOdnc-Pipmecvq47y_J4JkJpXBa7ODMic8izxEnar0D-CTbCOUggEhRCTr29jfsIrqPw9jJJRvmghxFC8vXF6U5zjzrn_8ajoH2ovseUywhLI0FurjCqa2DjfMMM3yvISAkY7jN2EjygmPh_WvJa_vc06-pRUGw2Xu4pFrWdOcPdAl4HggI"/>
-            <div className="ml-6">
-            <div className="flex items-center space-x-3 mb-1">
-            <h2 className="text-xl font-bold text-[#1e293b]">Vijaya Nallusamy</h2>
-            <span className="bg-slate-100 text-[#64748b] px-3 py-1 rounded-full text-xs font-semibold">ONC-2026-10025</span>
-            </div>
-            <div className="text-sm text-[#64748b] flex items-center space-x-3">
-            <span>51Y / Female</span>
-            <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-            <span className="text-[#1d4ed8] font-semibold">Ductal Carcinoma Stage II</span>
-            </div>
-            </div>
-            </div>
-            <div className="flex items-center">
-            <div className="flex space-x-8 px-8 border-r border-[#e2e8f0]">
-            <div className="space-y-4">
-            <div>
-            <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">HEIGHT</div>
-            <div className="font-bold text-sm">154 cm</div>
-            </div>
-            <div>
-            <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BP</div>
-            <div className="font-bold text-sm">118/74</div>
-            </div>
-            </div>
-            <div className="space-y-4">
-            <div>
-            <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">WEIGHT</div>
-            <div className="font-bold text-sm">52 kg</div>
-            </div>
-            <div>
-            <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">PULSE</div>
-            <div className="font-bold text-sm">78 bpm</div>
-            </div>
-            </div>
-            <div className="space-y-4">
-            <div>
-            <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BSA</div>
-            <div className="font-bold text-sm">1.49 m²</div>
-            </div>
-            <div>
-            <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">TEMP</div>
-            <div className="font-bold text-sm">36.8 °C</div>
-            </div>
-            </div>
-            <div className="space-y-4">
-            <div>
-            <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BMI</div>
-            <div className="font-bold text-sm">21.93</div>
-            </div>
-            <div>
-            <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">SPO2</div>
-            <div className="font-bold text-sm">99%</div>
-            </div>
-            </div>
-            </div>
-            <div className="pl-8">
-            <div className="bg-blue-50/50 border border-blue-100 rounded-[12px] p-4 w-[220px]">
-            <div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: NEOADJUVANT</div>
-            <div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">TAXOL - WEEKLY</div>
-            <div className="flex items-center text-xs text-[#64748b] font-medium">
-            <span className="w-2 h-2 rounded-full bg-[#10b981] mr-2"></span> Active Protocol
-                    </div>
-            </div>
-            </div>
-            </div>
-            </div>
-            {/* END: Patient Header Card */}
-
-            {/* BEGIN: Alerts Banner */}
-            <div className="flex items-center justify-between text-sm mb-8 border-b border-[#e2e8f0] pb-4">
-            <div className="flex items-center space-x-8">
-            <div className="flex items-center">
-            <i className="fa-solid fa-triangle-exclamation text-[#ef4444] mr-2"></i>
-            <span className="text-[#ef4444] font-semibold">Allergy:</span> <span className="ml-1 text-[#1e293b]">Penicillin</span>
-            </div>
-            <div className="flex items-center">
-            <i className="fa-solid fa-clock-rotate-left text-[#f59e0b] mr-2"></i>
-            <span className="text-[#f59e0b] font-semibold">Previous Cycle:</span> <span className="ml-1 text-[#1e293b]">Grade 2 Neutropenia</span>
-            </div>
-            <div className="flex items-center text-[#1d4ed8] font-medium">
-            <i className="fa-solid fa-link mr-2"></i>
-            <span>Central Line Available</span>
-            </div>
-            </div>
-            <a className="text-[#1d4ed8] font-semibold hover:underline" href="#">View Full Alerts (2)</a>
-            </div>
-            {/* END: Alerts Banner */}
-
-            {/* Tabs */}
-            <div className="overflow-x-auto border-b border-slate-200">
-              <nav className="flex min-w-max space-x-8">
-                {tabs.map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => {
-                      if (tab === "Order Summary") {
-                        onBackToProfile?.();
-                        return;
-                      }
-                      if (tab === "Discharge") {
-                        setShowDischargeDashboard(true);
-                        return;
-                      }
-                      setActiveTab(tab);
-                    }}
-                    className={`border-b-2 px-1 py-4 text-sm font-medium transition-colors ${
-                      activeTab === tab
-                        ? "border-[#0052cc] text-[#0052cc]"
-                        : "border-transparent text-slate-500 hover:text-slate-700"
-                    }`}
-                  >
-                    {tab}
-                  </button>
-                ))}
-              </nav>
-            </div>
-
-            {activeTab === "Medications" ? (
-              <>
-                {/* Summary cards */}
-                <div className="grid grid-cols-1 gap-4 pt-4 sm:grid-cols-2 xl:grid-cols-4">
-                  {[
-                    ["TOTAL MEDS", "8", "fa-solid fa-pills", "bg-blue-50 text-[#0052cc]"],
-                    ["PREMEDS", "3", "fa-solid fa-syringe", "bg-purple-50 text-purple-600"],
-                    ["CHEMO", "3", "fa-solid fa-hourglass-half", "bg-red-50 text-red-500"],
-                    ["SUPPORTIVE", "2", "fa-solid fa-heart-pulse", "bg-emerald-50 text-emerald-500"],
-                  ].map(([label, value, icon, cls]) => (
-                    <div key={label} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                      <div>
-                        <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
-                        <p className="text-2xl font-bold text-slate-800">{value}</p>
-                      </div>
-                      <div className={`flex h-10 w-10 items-center justify-center rounded-full ${cls}`}>
-                        <i className={icon} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-4 flex flex-col gap-6 lg:flex-row">
-                  <div className="min-w-0 flex-1 space-y-6">
-                    {/* Premeds */}
-                    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                      <SectionHeader icon="fa-solid fa-chevron-down" title="Premedications" badge="3 Prescribed" />
-                      <div className="overflow-x-auto">
-                        <table className="w-full min-w-[700px] text-left text-sm">
-                          <thead className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
-                            <tr>
-                              <th className="w-12 px-6 py-4 text-center font-semibold">#</th>
-                              <th className="px-6 py-4 font-semibold">MEDICATION</th>
-                              <th className="px-6 py-4 font-semibold">DOSE</th>
-                              <th className="px-6 py-4 font-semibold">ROUTE</th>
-                              <th className="px-6 py-4 font-semibold">TIMING</th>
-                              <th className="px-6 py-4 text-center font-semibold">STATUS</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-50">
-                            {premedications.map((m) => (
-                              <tr key={m.no} className="transition-colors hover:bg-slate-50">
-                                <td className="px-6 py-4 text-center text-slate-400">{m.no}</td>
-                                <td className="px-6 py-4">
-                                  <p className="font-bold text-slate-800">{m.medication}</p>
-                                  {m.sub && <p className="text-xs text-slate-500">{m.sub}</p>}
-                                </td>
-                                <td className="px-6 py-4 text-slate-700">{m.dose}{m.dose2 && <><br />{m.dose2}</>}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.route.map((x) => <React.Fragment key={x}>{x}<br /></React.Fragment>)}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.timing.map((x) => <React.Fragment key={x}>{x}<br /></React.Fragment>)}</td>
-                                <td className="px-6 py-4 text-center"><StatusBadge>GIVEN</StatusBadge></td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </section>
-
-                    {/* Chemo */}
-                    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                      <SectionHeader icon="fa-solid fa-chevron-down" title="Chemotherapy Drugs" badge="Active Cycle" badgeClass="border border-red-100 bg-red-50 text-red-600" />
-                      <div className="overflow-x-auto">
-                        <table className="w-full min-w-[850px] text-left text-sm">
-                          <thead className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
-                            <tr>
-                              <th className="w-12 px-6 py-4 text-center">#</th>
-                              <th className="px-6 py-4">DRUG NAME</th>
-                              <th className="px-6 py-4">CALC.<br />DOSE</th>
-                              <th className="px-6 py-4">ACTUAL<br />DOSE</th>
-                              <th className="px-6 py-4">ROUTE</th>
-                              <th className="px-6 py-4">DILUENT</th>
-                              <th className="px-6 py-4 text-center">STATUS</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-50">
-                            {chemoDrugs.map((m) => (
-                              <tr key={m.no} className="transition-colors hover:bg-slate-50">
-                                <td className="px-6 py-4 text-center text-slate-400">{m.no}</td>
-                                <td className="px-6 py-4"><a href="#" className="font-bold text-[#0052cc] hover:underline">{m.drug}</a></td>
-                                <td className="px-6 py-4 text-xs text-slate-500">{m.calc}</td>
-                                <td className="px-6 py-4 font-bold text-slate-800">{m.actual}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.route}</td>
-                                <td className="px-6 py-4 text-xs text-slate-500">{m.diluent}</td>
-                                <td className="px-6 py-4 text-center"><StatusBadge warning={m.status === "PENDING"}>{m.status}</StatusBadge></td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </section>
-
-                    {/* Discharge */}
-                    <section className="mb-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                      <SectionHeader icon="fa-solid fa-chevron-down" title="Discharge Medication" badge="3 Prescribed" />
-                      <div className="overflow-x-auto">
-                        <table className="w-full min-w-[750px] text-left text-sm">
-                          <thead className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
-                            <tr>
-                              <th className="w-12 px-6 py-4 text-center">#</th>
-                              <th className="px-6 py-4">MEDICATION</th>
-                              <th className="px-6 py-4">DOSE</th>
-                              <th className="px-6 py-4">FREQUENCY</th>
-                              <th className="px-6 py-4">INSTRUCTION</th>
-                              <th className="px-6 py-4">DURATION</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-50">
-                            {dischargeMeds.map((m) => (
-                              <tr key={m.no} className="transition-colors hover:bg-slate-50">
-                                <td className="px-6 py-4 text-center text-slate-400">{m.no}</td>
-                                <td className="px-6 py-4 font-bold text-slate-800">{m.medication}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.dose}</td>
-                                <td className="px-6 py-4 text-slate-700">{m.frequency}</td>
-                                <td className="px-6 py-4 font-medium text-slate-800">{m.instruction}</td>
-                                <td className="px-6 py-4 font-bold text-slate-800">{m.duration}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </section>
-                  </div>
-
-                  {/* Right sidebar */}
-                  <aside className="w-full shrink-0 space-y-6 lg:w-80">
-                    <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                      <h3 className="mb-6 text-base font-bold text-slate-800">Next Appointment</h3>
-                      <div className="mb-6 flex items-start">
-                        <div className="mr-4 flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-[#0052cc]">
-                          <i className="fa-regular fa-calendar text-xl" />
-                        </div>
-                        <div>
-                          <p className="text-lg font-bold text-slate-800">06 Jun 2026</p>
-                          <p className="mb-1 text-sm text-slate-500">09:30 AM</p>
-                          <p className="text-sm font-medium text-[#0052cc]">Day 2 Treatment</p>
-                        </div>
-                      </div>
-                      <button className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50">
-                        Reschedule
-                      </button>
-                    </section>
-
-                    <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                      <div className="mb-6 flex items-center">
-                        <i className="fa-regular fa-clock mr-2 text-[#0052cc]" />
-                        <h3 className="text-base font-bold text-slate-800">Medication Timeline</h3>
-                      </div>
-                      <div className="relative space-y-8 pl-4 before:absolute before:inset-y-0 before:left-5 before:w-px before:bg-slate-200">
-                        <div className="relative">
-                          <span className="absolute -left-6 top-1.5 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-white" />
-                          <p className="mb-0.5 text-sm font-bold text-slate-800">09:00 AM</p>
-                          <p className="text-sm text-slate-600">Decadron Administered</p>
-                          <p className="mt-0.5 text-xs text-slate-400">Nurse: Elena R.</p>
-                        </div>
-                        <div className="relative">
-                          <span className="absolute -left-6 top-1.5 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-white" />
-                          <p className="mb-0.5 text-sm font-bold text-slate-800">09:15 AM</p>
-                          <p className="text-sm text-slate-600">Avil Administered</p>
-                        </div>
-                        <div className="relative">
-                          <span className="absolute -left-6 top-1.5 h-3 w-3 rounded-full bg-[#0052cc] ring-4 ring-blue-50" />
-                          <p className="mb-0.5 text-sm font-bold text-slate-800">10:00 AM</p>
-                          <p className="text-sm font-bold text-[#0052cc]">Taxol Infusion Started</p>
-                          <p className="mt-0.5 text-xs text-slate-400">Remaining: 42 mins</p>
-                        </div>
-                      </div>
-                    </section>
-                  </aside>
-                </div>
-              </>
-            ) : activeTab === "History" ? (
-              <HistoryDashboard embedded />
-            ) : activeTab === "Notes & Documents" ? (
-              <PatientNotesDocuments embedded />
-            ) : (
-              <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-sm">
-                <i className="fa-solid fa-file-medical mb-4 text-3xl text-[#0052cc]" />
-                <h3 className="text-lg font-bold text-slate-800">{activeTab}</h3>
-                <p className="mt-2 text-sm text-slate-500">This section is ready for your HMS data.</p>
-              </div>
-            )}
-            </div>
-            </div>
-      </main>
-    </div>
-  );
-};
-
-/* ============================================================
-   PATIENT PROFILE PORTAL COMPONENT
-   (combined from client/pages/doctor/profile patient .tsx —
-    renamed MedicalPortalReplica → HMSPatientPortal to match the
-    original file's component name, original file left untouched)
-============================================================ */
-
-function HMSPatientPortal() {
-  const [activeTab, setActiveTab] = useState("Order Summary");
-  const [selectedDay, setSelectedDay] = useState("Day 1");
-  const [showBranchMenu, setShowBranchMenu] = useState(false);
-  const [showMedicationPortal, setShowMedicationPortal] = useState(false);
-  const [showDischargePortal, setShowDischargePortal] = useState(false);
-
-  const tabs = ["Order Summary", "Medications", "Discharge", "History", "Notes & Documents"];
-  const days = [
-    { label: "Day 1", date: "05 Jun 2026" },
-    { label: "Day 2", date: "06 Jun 2026" },
-    { label: "Day 3", date: "07 Jun 2026" },
-  ];
-
-  const handlePrint = () => window.print();
-
-  if (showMedicationPortal) {
-    return (
-      <MedicationPortal onBackToProfile={() => setShowMedicationPortal(false)} />
-    );
-  }
-
-  if (showDischargePortal) {
-    return (
-      <DischargeDetailsPortal onBack={() => setShowDischargePortal(false)} />
-    );
-  }
-
-  return (
-    <>
-      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
-      <div className="font-[Inter,sans-serif] text-[#1e293b] antialiased flex h-screen overflow-hidden bg-[#f8fafc]">
-
-
-{/* BEGIN: Main Content */}
-<main className="flex-1 flex flex-col h-full overflow-hidden bg-[#f8fafc] relative">
-{/* BEGIN: Top Header */}
-<header className="h-[72px] bg-[#f8fafc] border-b border-[#e2e8f0] flex items-center justify-between px-8 shrink-0 z-10">
-<div className="relative">
-<button type="button" onClick={() => setShowBranchMenu(v => !v)} className="flex items-center text-sm font-medium text-[#1e293b] cursor-pointer hover:text-[#1d4ed8] transition-colors">
-<i className="fa-solid fa-code-branch mr-2 text-[#64748b]"></i> Main Branch <i className="fa-solid fa-chevron-down ml-2 text-[10px] text-[#64748b]"></i>
-</button>
-<div className={`absolute top-9 left-0 z-30 bg-white border border-[#e2e8f0] rounded-lg shadow-lg p-2 w-44 ${showBranchMenu ? "block" : "hidden"}`}>
-<button type="button" className="w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-50">Main Branch</button>
-<button type="button" className="w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-50">Branch 02</button>
-</div>
-</div>
-<div className="flex items-center space-x-6">
-<button className="text-[#64748b] hover:text-[#1e293b] relative">
-<i className="fa-regular fa-bell text-[20px]"></i>
-<span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-2.5 w-2.5">
-<span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#ef4444] border-2 border-[#f8fafc]"></span>
-</span>
-</button>
-<div className="flex items-center space-x-3 cursor-pointer pl-6 border-l border-[#e2e8f0]">
-<span className="text-sm font-bold text-[#1d4ed8]">HMS</span>
-<div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white">
-<i className="fa-solid fa-user text-sm"></i>
-</div>
-</div>
-</div>
-</header>
-{/* END: Top Header */}
-<div className="flex-1 overflow-y-auto relative">
-<div className="p-8 max-w-[1400px] mx-auto pb-32">
-{/* BEGIN: Patient Header Card */}
-<div className="bg-white rounded-[16px] border border-[#e2e8f0] p-6 shadow-sm mb-6 flex justify-between items-center">
-<div className="flex items-center">
-<img alt="Vijaya Nallusamy" className="w-20 h-20 rounded-full border-4 border-white shadow-sm object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCVmv5vhpN6g6IwvwVBONWYZS06j9iELGi3guKAqt6M68HTL3HxSslWkIMAEQjWeTlKNOdnc-Pipmecvq47y_J4JkJpXBa7ODMic8izxEnar0D-CTbCOUggEhRCTr29jfsIrqPw9jJJRvmghxFC8vXF6U5zjzrn_8ajoH2ovseUywhLI0FurjCqa2DjfMMM3yvISAkY7jN2EjygmPh_WvJa_vc06-pRUGw2Xu4pFrWdOcPdAl4HggI"/>
-<div className="ml-6">
-<div className="flex items-center space-x-3 mb-1">
-<h2 className="text-xl font-bold text-[#1e293b]">Vijaya Nallusamy</h2>
-<span className="bg-slate-100 text-[#64748b] px-3 py-1 rounded-full text-xs font-semibold">ONC-2026-10025</span>
-</div>
-<div className="text-sm text-[#64748b] flex items-center space-x-3">
-<span>51Y / Female</span>
-<span className="w-1 h-1 rounded-full bg-slate-300"></span>
-<span className="text-[#1d4ed8] font-semibold">Ductal Carcinoma Stage II</span>
-</div>
-</div>
-</div>
-<div className="flex items-center">
-<div className="flex space-x-8 px-8 border-r border-[#e2e8f0]">
-<div className="space-y-4">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">HEIGHT</div>
-<div className="font-bold text-sm">154 cm</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BP</div>
-<div className="font-bold text-sm">118/74</div>
-</div>
-</div>
-<div className="space-y-4">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">WEIGHT</div>
-<div className="font-bold text-sm">52 kg</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">PULSE</div>
-<div className="font-bold text-sm">78 bpm</div>
-</div>
-</div>
-<div className="space-y-4">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BSA</div>
-<div className="font-bold text-sm">1.49 m²</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">TEMP</div>
-<div className="font-bold text-sm">36.8 °C</div>
-</div>
-</div>
-<div className="space-y-4">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BMI</div>
-<div className="font-bold text-sm">21.93</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">SPO2</div>
-<div className="font-bold text-sm">99%</div>
-</div>
-</div>
-</div>
-<div className="pl-8">
-<div className="bg-blue-50/50 border border-blue-100 rounded-[12px] p-4 w-[220px]">
-<div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: NEOADJUVANT</div>
-<div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">TAXOL - WEEKLY</div>
-<div className="flex items-center text-xs text-[#64748b] font-medium">
-<span className="w-2 h-2 rounded-full bg-[#10b981] mr-2"></span> Active Protocol
-                    </div>
-</div>
-</div>
-</div>
-</div>
-{/* END: Patient Header Card */}
-{/* BEGIN: Alerts Banner */}
-<div className="flex items-center justify-between text-sm mb-8 border-b border-[#e2e8f0] pb-4">
-<div className="flex items-center space-x-8">
-<div className="flex items-center">
-<i className="fa-solid fa-triangle-exclamation text-[#ef4444] mr-2"></i>
-<span className="text-[#ef4444] font-semibold">Allergy:</span> <span className="ml-1 text-[#1e293b]">Penicillin</span>
-</div>
-<div className="flex items-center">
-<i className="fa-solid fa-clock-rotate-left text-[#f59e0b] mr-2"></i>
-<span className="text-[#f59e0b] font-semibold">Previous Cycle:</span> <span className="ml-1 text-[#1e293b]">Grade 2 Neutropenia</span>
-</div>
-<div className="flex items-center text-[#1d4ed8] font-medium">
-<i className="fa-solid fa-link mr-2"></i>
-<span>Central Line Available</span>
-</div>
-</div>
-<a className="text-[#1d4ed8] font-semibold hover:underline" href="#">View Full Alerts (2)</a>
-</div>
-{/* END: Alerts Banner */}
-{/* BEGIN: Tabs */}
-<div className="border-b border-[#e2e8f0] mb-6">
-<nav className="flex space-x-8">
-{tabs.map((tab) => (
-<button key={tab} type="button" onClick={() => {
-          if (tab === "Medications") {
-            setShowMedicationPortal(true);
-          } else if (tab === "Discharge") {
-            setShowDischargePortal(true);
-          } else {
-            setActiveTab(tab);
-          }
-        }} className={`px-1 py-3 border-b-2 text-sm font-medium transition-colors ${activeTab === tab ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
-{tab}
-</button>
-))}
-</nav>
-</div>
-{/* END: Tabs */}
-{activeTab === "History" ? (
-<HistoryDashboard embedded />
-) : activeTab === "Notes & Documents" ? (
-<PatientNotesDocuments embedded />
-) : (
-<>
-<div className="flex space-x-6 mb-8">
-{/* Left Side (Timeline & Day Selector) */}
-<div className="flex-1 space-y-6">
-{/* BEGIN: Treatment Timeline */}
-<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-6 h-[200px]">
-<div className="flex items-center mb-8">
-<h3 className="text-lg font-bold text-[#1e293b]">Cycle 6</h3>
-<div className="ml-3 text-sm text-[#64748b] flex items-center cursor-pointer hover:text-[#1e293b]">
-                  (14 May - 21 May 2026) <i className="fa-solid fa-chevron-down text-[10px] ml-2"></i>
-</div>
-</div>
-<div className="relative px-8 mt-4">
-<div className="absolute top-[18px] left-[60px] right-[60px] h-[2px] bg-slate-200"></div>
-<div className="flex justify-between relative z-10">
-<div className="flex flex-col items-center">
-<div className="w-10 h-10 rounded-full bg-[#1d4ed8] text-white flex items-center justify-center font-bold ring-[6px] ring-white">1</div>
-<div className="mt-3 text-center">
-<div className="text-sm font-semibold text-[#1e293b]">Day 1</div>
-<div className="text-[11px] text-[#64748b] mt-1">05 Jun 2026</div>
-</div>
-</div>
-<div className="flex flex-col items-center">
-<div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center font-bold ring-[6px] ring-white">2</div>
-<div className="mt-3 text-center">
-<div className="text-sm font-medium text-[#64748b]">Day 2</div>
-<div className="text-[11px] text-slate-400 mt-1">06 Jun 2026</div>
-</div>
-</div>
-<div className="flex flex-col items-center">
-<div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center font-bold ring-[6px] ring-white">3</div>
-<div className="mt-3 text-center">
-<div className="text-sm font-medium text-[#64748b]">Day 3</div>
-<div className="text-[11px] text-slate-400 mt-1">07 Jun 2026</div>
-</div>
-</div>
-<div className="flex flex-col items-center">
-<div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center font-bold ring-[6px] ring-white"><i className="fa-regular fa-map"></i></div>
-<div className="mt-3 text-center">
-<div className="text-sm font-medium text-[#64748b]">Follow-up</div>
-<div className="text-[11px] text-slate-400 mt-1">21 Jun 2026</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-{/* END: Treatment Timeline */}
-{/* BEGIN: Day Selector */}
-<div className="flex items-center">
-<span className="text-sm font-semibold text-[#1e293b] mr-4">Select Day</span>
-<div className="flex bg-white rounded-[12px] border border-[#e2e8f0] shadow-sm p-1">
-{days.map((day) => (
-<button key={day.label} type="button" onClick={() => setSelectedDay(day.label)} className={`px-6 py-2 rounded-[8px] shadow-sm text-center min-w-[100px] transition-colors ${selectedDay === day.label ? "bg-[#1d4ed8] text-white" : "text-[#1e293b] hover:bg-slate-50"}`}>
-<div className="text-sm font-semibold">{day.label}</div>
-<div className={`text-[10px] font-normal mt-0.5 ${selectedDay === day.label ? "opacity-90" : "text-[#64748b]"}`}>{day.date}</div>
-</button>
-))}
-<button className="px-6 py-2 text-[#1d4ed8] hover:bg-blue-50 transition-colors rounded-[8px] text-sm font-semibold flex items-center justify-center">
-<i className="fa-solid fa-plus mr-1.5"></i> Add Day
-                  </button>
-</div>
-</div>
-{/* END: Day Selector */}
-</div>
-{/* Right Side (Cards) */}
-<div className="flex space-x-6">
-{/* BEGIN: Next Appointment */}
-<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-6 w-[220px] h-[200px] flex flex-col justify-between">
-<div>
-<h4 className="text-sm font-bold text-[#1e293b] mb-5">Next Appointment</h4>
-<div className="flex items-start">
-<div className="w-10 h-10 rounded-[10px] bg-blue-50 flex items-center justify-center text-[#1d4ed8] shrink-0 mr-3">
-<i className="fa-regular fa-calendar text-lg"></i>
-</div>
-<div>
-<div className="text-sm font-bold text-[#1e293b]">06 Jun 2026</div>
-<div className="text-xs text-[#64748b] mt-1">09:30 AM</div>
-<div className="text-xs text-[#64748b] mt-1">Day 2 Treatment</div>
-</div>
-</div>
-</div>
-<button className="w-full py-2 border border-[#e2e8f0] rounded-[8px] text-sm font-semibold text-[#1e293b] hover:bg-slate-50 transition-colors">Reschedule</button>
-</div>
-{/* END: Next Appointment */}
-{/* BEGIN: Treatment Progress */}
-<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-6 w-[220px] h-[200px] flex flex-col justify-between">
-<h4 className="text-sm font-bold text-[#1e293b] mb-2">Treatment Progress</h4>
-<div className="flex items-center justify-between">
-<div className="relative w-16 h-16 rounded-full bg-[conic-gradient(#1d4ed8_0%_33%,#e2e8f0_33%_100%)] flex items-center justify-center">
-<div className="absolute inset-[6px] rounded-full bg-white"></div>
-<span className="relative z-10 text-sm font-bold text-[#1e293b]">33%</span>
-</div>
-<div className="text-right">
-<div className="text-[10px] text-[#64748b] uppercase tracking-wide font-semibold mb-1">Completed</div>
-<div className="text-sm font-bold text-[#1e293b] mb-3">1 / 3 <span className="text-xs font-medium text-[#64748b] normal-case tracking-normal">Days</span></div>
-<div className="text-[10px] text-[#64748b] uppercase tracking-wide font-semibold mb-1">Remaining</div>
-<div className="text-sm font-bold text-[#1e293b]">2 Days</div>
-</div>
-</div>
-<div className="pt-4 flex justify-between items-center text-xs">
-<span className="text-[#64748b] font-medium">Next Visit</span>
-<span className="font-bold text-[#1e293b]">06 Jun 2026</span>
-</div>
-</div>
-{/* END: Treatment Progress */}
-</div>
-</div>
-{/* BEGIN: Bottom Grid */}
-<div className="grid grid-cols-12 gap-6">
-{/* Left Column */}
-<div className="col-span-3 space-y-6">
-<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-5">
-<h4 className="text-sm font-bold text-[#1e293b] mb-4">Cycle &amp; Schedule</h4>
-<div className="grid grid-cols-3 gap-4 mb-5">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">CYCLE</div>
-<div className="font-bold text-sm">6</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">DAY</div>
-<div className="font-bold text-sm">1</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">TOTAL DAYS</div>
-<div className="font-bold text-sm">3</div>
-</div>
-</div>
-<div className="grid grid-cols-3 gap-4">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">START DATE</div>
-<div className="font-bold text-sm">14 May<br/>2026</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">END DATE</div>
-<div className="font-bold text-sm">21 May<br/>2026</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">NEXT DAY</div>
-<div className="font-bold text-sm">06 Jun<br/>2026</div>
-</div>
-</div>
-</div>
-<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-5">
-<h4 className="text-sm font-bold text-[#1e293b] mb-4">Clinical Info</h4>
-<div className="grid grid-cols-2 gap-4 mb-5">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">TYPE</div>
-<div className="font-bold text-sm">Ductal<br/>Carcinoma</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">STAGE</div>
-<div className="font-bold text-sm">Stage II</div>
-</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">GRADE</div>
-<div className="font-bold text-sm">G3</div>
-</div>
-</div>
-</div>
-{/* Middle Column */}
-<div className="col-span-4 space-y-6">
-<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-5">
-<div className="flex items-center mb-4">
-<h4 className="text-sm font-bold text-[#1e293b] mr-3">Lab Validation</h4>
-<span className="px-2 py-0.5 bg-green-50 text-[#10b981] text-[10px] font-bold uppercase rounded border border-green-100">Approved</span>
-</div>
-<table className="w-full text-left text-sm mb-4">
-<thead>
-<tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
-<th className="pb-2 font-semibold">PARAMETER</th>
-<th className="pb-2 font-semibold">RESULT</th>
-<th className="pb-2 font-semibold">RANGE</th>
-<th className="pb-2 font-semibold">STATUS</th>
-</tr>
-</thead>
-<tbody>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">Hb</td>
-<td className="py-3 font-semibold">12.6 g/dL</td>
-<td className="py-3 text-[#64748b]">11 - 15</td>
-<td className="py-3 font-semibold text-[#10b981] flex items-center"><div className="w-1.5 h-1.5 rounded-full bg-[#10b981] mr-2"></div>Normal</td>
-</tr>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">WBC</td>
-<td className="py-3 font-semibold">6,200 /μL</td>
-<td className="py-3 text-[#64748b]">4,000 - 11,000</td>
-<td className="py-3 font-semibold text-[#10b981] flex items-center"><div className="w-1.5 h-1.5 rounded-full bg-[#10b981] mr-2"></div>Normal</td>
-</tr>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">Platelets</td>
-<td className="py-3 font-semibold">2.45 L</td>
-<td className="py-3 text-[#64748b]">1.50 - 4.00</td>
-<td className="py-3 font-semibold text-[#f59e0b] flex items-center"><div className="w-1.5 h-1.5 rounded-full bg-[#f59e0b] mr-2"></div>Borderline</td>
-</tr>
-<tr>
-<td className="py-3 text-[#64748b]">Creatinine</td>
-<td className="py-3 font-semibold">0.8 mg/dL</td>
-<td className="py-3 text-[#64748b]">0.6 - 1.2</td>
-<td className="py-3 font-semibold text-[#10b981] flex items-center"><div className="w-1.5 h-1.5 rounded-full bg-[#10b981] mr-2"></div>Normal</td>
-</tr>
-</tbody>
-</table>
-<div className="border-t border-slate-100 pt-3 flex justify-between items-center text-sm">
-<span className="text-[#64748b]">Chemo Clearance :</span>
-<span className="font-bold text-[#10b981] uppercase">Approved</span>
-</div>
-</div>
-<div className="bg-blue-50/50 rounded-[16px] shadow-sm border border-blue-100 p-5 relative overflow-hidden">
-<div className="flex items-center justify-between mb-5">
-<div className="flex items-center text-[#1d4ed8]">
-<i className="fa-solid fa-flask text-lg mr-2"></i>
-<h4 className="text-sm font-bold uppercase">PROTOCOL: TAXOL - WEEKLY</h4>
-</div>
-<a className="text-xs text-[#1d4ed8] font-medium hover:underline flex items-center" href="#">View Protocol <i className="fa-solid fa-chevron-right text-[10px] ml-1"></i></a>
-</div>
-<div className="grid grid-cols-4 gap-4">
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">DOSE</div>
-<div className="font-bold text-sm text-[#1e293b]">80 mg/m²</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">PATIENT DOSE</div>
-<div className="font-bold text-sm text-[#1e293b]">120 mg</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">ROUTE</div>
-<div className="font-bold text-sm text-[#1e293b]">IV</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">DILUENT</div>
-<div className="font-bold text-sm text-[#1e293b]">Dextrose</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">VOLUME</div>
-<div className="font-bold text-sm text-[#1e293b]">100 ml</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">INF. TIME</div>
-<div className="font-bold text-sm text-[#1e293b]">60 mins</div>
-</div>
-<div className="col-span-2 flex items-end justify-end space-x-2">
-<span className="px-2 py-1 bg-blue-100 text-[#1d4ed8] text-[10px] font-bold rounded">WEEKLY</span>
-<span className="px-2 py-1 bg-white border border-slate-200 text-[#64748b] text-[10px] font-bold rounded">IV BOLUS</span>
-</div>
-</div>
-</div>
-</div>
-{/* Right Column */}
-<div className="col-span-5 space-y-6">
-<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden">
-<div className="px-5 py-4 border-b border-[#e2e8f0] flex items-center text-purple-600">
-<i className="fa-solid fa-pills mr-2"></i>
-<h4 className="text-sm font-bold">Premedications</h4>
-</div>
-<div className="p-5">
-<table className="w-full text-left text-sm">
-<thead>
-<tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
-<th className="pb-2 font-semibold w-8">#</th>
-<th className="pb-2 font-semibold">DRUG</th>
-<th className="pb-2 font-semibold">DOSE</th>
-<th className="pb-2 font-semibold">ROUTE</th>
-<th className="pb-2 font-semibold">TIMING</th>
-<th className="pb-2 font-semibold text-right">STATUS</th>
-</tr>
-</thead>
-<tbody>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">1</td>
-<td className="py-3 font-semibold text-[#1e293b]">Inj. Decadron</td>
-<td className="py-3 text-[#64748b]">8 mg</td>
-<td className="py-3 text-[#64748b]">IV Bolus</td>
-<td className="py-3 text-[#64748b]">30m before</td>
-<td className="py-3 font-semibold text-[#10b981] text-right"><i className="fa-solid fa-check mr-1"></i> Given</td>
-</tr>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">2</td>
-<td className="py-3 font-semibold text-[#1e293b]">Inj. Avil</td>
-<td className="py-3 text-[#64748b]">2 cc</td>
-<td className="py-3 text-[#64748b]">IV Bolus</td>
-<td className="py-3 text-[#64748b]">30m before</td>
-<td className="py-3 font-semibold text-[#10b981] text-right"><i className="fa-solid fa-check mr-1"></i> Given</td>
-</tr>
-<tr>
-<td className="py-3 text-[#64748b]">3</td>
-<td className="py-3 font-semibold text-[#1e293b]">Inj. Palzen</td>
-<td className="py-3 text-[#64748b]">0.25 mg</td>
-<td className="py-3 text-[#64748b]">IV Bolus</td>
-<td className="py-3 text-[#64748b]">30m before</td>
-<td className="py-3 font-semibold text-[#10b981] text-right"><i className="fa-solid fa-check mr-1"></i> Given</td>
-</tr>
-</tbody>
-</table>
-</div>
-</div>
-<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden">
-<div className="px-5 py-4 border-b border-[#e2e8f0] flex items-center text-[#1d4ed8]">
-<i className="fa-solid fa-prescription-bottle-medical mr-2"></i>
-<h4 className="text-sm font-bold">Chemo Orders</h4>
-</div>
-<div className="p-5">
-<table className="w-full text-left text-sm">
-<thead>
-<tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
-<th className="pb-2 font-semibold w-8">#</th>
-<th className="pb-2 font-semibold">DRUG</th>
-<th className="pb-2 font-semibold">DOSE</th>
-<th className="pb-2 font-semibold">ROUTE</th>
-<th className="pb-2 font-semibold">DILUENT</th>
-<th className="pb-2 font-semibold text-right">STATUS</th>
-</tr>
-</thead>
-<tbody>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">1</td>
-<td className="py-3 font-semibold text-[#1e293b]">Inj. Taxol</td>
-<td className="py-3 text-[#64748b]">120 mg</td>
-<td className="py-3 text-[#64748b]">IV</td>
-<td className="py-3 text-[#64748b]">NS 100ml</td>
-<td className="py-3 font-semibold text-[#10b981] text-right"><i className="fa-solid fa-check mr-1"></i> Given</td>
-</tr>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">2</td>
-<td className="py-3 font-semibold text-[#1e293b]">Inj. Herceptin</td>
-<td className="py-3 text-[#64748b]">150 mg</td>
-<td className="py-3 text-[#64748b]">IV</td>
-<td className="py-3 text-[#64748b]">NS 250ml</td>
-<td className="py-3 font-semibold text-[#f59e0b] text-right"><i className="fa-solid fa-clock mr-1"></i> Pending</td>
-</tr>
-<tr>
-<td className="py-3 text-[#64748b]">3</td>
-<td className="py-3 font-semibold text-[#1e293b]">Inj. Carboplatin</td>
-<td className="py-3 text-[#64748b]">AUC 5</td>
-<td className="py-3 text-[#64748b]">IV</td>
-<td className="py-3 text-[#64748b]">Dextrose</td>
-<td className="py-3 font-semibold text-[#64748b] text-right"><i className="fa-solid fa-ban mr-1"></i> Not Started</td>
-</tr>
-</tbody>
-</table>
-</div>
-</div>
-<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden">
-<div className="px-5 py-4 border-b border-[#e2e8f0] flex items-center text-orange-500">
-<i className="fa-solid fa-capsules mr-2"></i>
-<h4 className="text-sm font-bold">Discharge Medication</h4>
-</div>
-<div className="p-5">
-<table className="w-full text-left text-sm">
-<thead>
-<tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
-<th className="pb-2 font-semibold w-8">#</th>
-<th className="pb-2 font-semibold">DRUG</th>
-<th className="pb-2 font-semibold">DOSE</th>
-<th className="pb-2 font-semibold">FREQUENCY</th>
-<th className="pb-2 font-semibold">DILUENT</th>
-<th className="pb-2 font-semibold text-right">STATUS</th>
-</tr>
-</thead>
-<tbody>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">1</td>
-<td className="py-3 font-semibold text-[#1e293b]">Capecitabine</td>
-<td className="py-3 text-[#64748b]">500 mg</td>
-<td className="py-3 text-[#64748b]">2-0-2</td>
-<td className="py-3 text-[#64748b]">After Food</td>
-<td className="py-3 text-[#64748b] text-right">14 Days</td>
-</tr>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">2</td>
-<td className="py-3 font-semibold text-[#1e293b]">Domstal</td>
-<td className="py-3 text-[#64748b]">10 mg</td>
-<td className="py-3 text-[#64748b]">1-1-1</td>
-<td className="py-3 text-[#64748b]">NS 250ml</td>
-<td className="py-3 text-[#64748b] text-right">10 Days</td>
-</tr>
-<tr className="border-b border-slate-50">
-<td className="py-3 text-[#64748b]">3</td>
-<td className="py-3 font-semibold text-[#1e293b]">Loperamide</td>
-<td className="py-3 text-[#64748b]">2 mg</td>
-<td className="py-3 text-[#64748b]">0-0-1</td>
-<td className="py-3 text-[#64748b]">Dextrose</td>
-<td className="py-3 text-[#64748b] text-right">5 Days</td>
-</tr>
-<tr>
-<td className="py-3 text-[#64748b]">4</td>
-<td className="py-3 font-semibold text-[#1e293b]">Pantoprazole</td>
-<td className="py-3 text-[#64748b]">40 mg</td>
-<td className="py-3 text-[#64748b]">2-2-0</td>
-<td className="py-3 text-[#64748b]">Dextrose</td>
-<td className="py-3 text-[#64748b] text-right">8 Days</td>
-</tr>
-</tbody>
-</table>
-</div>
-</div>
-</div>
-</div>
-{/* END: Bottom Grid */}
-{/* BEGIN: Instructions Card */}
-<div className="mt-6 bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-6 flex justify-between items-start">
-<div>
-<div className="flex items-center text-[#1d4ed8] mb-4">
-<i className="fa-regular fa-file-lines mr-2"></i>
-<h4 className="text-sm font-bold">Instructions</h4>
-</div>
-<p className="text-sm text-[#64748b] mb-3">Premedication tablets to take a day before:</p>
-<ul className="space-y-2 text-sm text-[#1e293b] font-medium list-disc list-inside">
-<li>Tab. Avil 25 mg (Night - After Food)</li>
-<li>Tab. Dexamethasone 4 mg (Night - After Food)</li>
-<li>Tab. Pantodac 40 mg (Night - Before Food)</li>
-</ul>
-<a className="inline-block mt-4 text-sm font-semibold text-[#1d4ed8] underline" href="#">Investigation for Next Cycle: TC, Sugar, CBC, LFT, Creatinine.</a>
-</div>
-<div className="bg-slate-50 border border-slate-200 rounded-[12px] p-5 flex flex-col items-center justify-center w-[160px] h-full">
-<div className="text-[10px] text-[#1d4ed8] font-bold uppercase tracking-wider mb-2">NEXT CYCLE</div>
-<div className="flex items-center text-sm font-bold text-[#1d4ed8]">
-<i className="fa-regular fa-calendar mr-2"></i> 21 May 2026
-              </div>
-</div>
-</div>
-{/* END: Instructions Card */}
-</>
-)}
-</div>
-</div>
-{/* BEGIN: Footer */}
-<footer className="absolute bottom-0 left-0 right-0 bg-white border-t border-[#e2e8f0] px-8 py-4 flex items-center justify-between z-20">
-<div>
-<div className="text-xs text-[#64748b]">Created by <span className="font-medium text-[#1e293b]">Dr. Naveen</span> on 05 Jun 2026, 09:30 AM</div>
-<div className="text-xs text-[#64748b] mt-1">Last updated by <span className="font-medium text-[#1e293b]">Admin</span> on 05 Jun 2026, 04:35 PM</div>
-</div>
-<div className="flex items-center space-x-4">
-<button type="button" onClick={handlePrint} className="px-4 py-2 border border-[#e2e8f0] rounded-[8px] text-sm font-semibold text-[#1e293b] hover:bg-slate-50 transition-colors flex items-center">
-<i className="fa-solid fa-print mr-2"></i> Print
-          </button>
-<button className="px-4 py-2 border border-[#e2e8f0] rounded-[8px] text-sm font-semibold text-[#1e293b] hover:bg-slate-50 transition-colors flex items-center">
-<i className="fa-solid fa-share-nodes mr-2"></i> Share
-          </button>
-<button className="px-4 py-2 border border-[#e2e8f0] rounded-[8px] text-sm font-semibold text-[#1e293b] hover:bg-slate-50 transition-colors flex items-center">
-<i className="fa-regular fa-copy mr-2"></i> Duplicate Cycle
-          </button>
-<button className="px-6 py-2 bg-[#1d4ed8] text-white rounded-[8px] text-sm font-semibold hover:bg-blue-700 transition-colors">
-            Update Order
-          </button>
-</div>
-</footer>
-{/* END: Footer */}
-</main>
-{/* END: Main Content */}
-
-      </div>
-    </>
-  );
-}
-
-/* ============================================================
-   HISTORY DASHBOARD COMPONENT
-   (combined from client/pages/doctor/history.tsx —
-    renamed HealthcareDashboard → HistoryDashboard so it can
-    live in this file as an embedded step, embedded prop added,
-    original history.tsx file left untouched)
-============================================================ */
-
-const HistoryDashboard: React.FC<{ embedded?: boolean }> = ({
-  embedded = false,
-}) => {
-  const vitals = [
-    ["Height", "154 cm"],
-    ["Weight", "52 kg"],
-    ["BSA", "1.49 m²"],
-    ["BMI", "21.93"],
-    ["BP", "118/74"],
-    ["Pulse", "78 bpm"],
-    ["Temp", "36.8 °C"],
-    ["SPO2", "99%"],
-  ];
-
-  const cycles = [
-    {
-      cycle: "CYCLE 06 (FINAL)",
-      date: "16 Feb 2026 - 19 Feb 2026",
-      description:
-        "Protocol completed. Patient shows excellent clinical response with 80% tumor reduction.",
-        final: true,
-    },
-    {
-      cycle: "CYCLE 05",
-      date: "09 Feb 2026 - 12 Feb 2026",
-      description:
-        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
-        final: false,
-    },
-    {
-      cycle: "CYCLE 04",
-      date: "05 Feb 2026 - 07 Feb 2026",
-      description:
-        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
-        final: false,
-    },
-    {
-      cycle: "CYCLE 03",
-      date: "01 Feb 2026 - 03 Feb 2026",
-      description:
-        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
-        final: false,
-    },
-    {
-      cycle: "CYCLE 02",
-      date: "24 Jan 2026 - 28 Jan 2026",
-      description:
-        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
-        final: false,
-    },
-    {
-      cycle: "CYCLE 01",
-      date: "18 Jan 2026 - 21 Jan 2026",
-      description:
-        "Treatment as scheduled. Grade 1 peripheral neuropathy reported. Dose maintained.",
-        final: false,
-    },
-  ];
-
-  const cycleHistory = [
-    ["CYCLE 06", "16 Feb 2026 - 19 Feb 2026"],
-    ["CYCLE 05", "09 Feb 2026 - 12 Feb 2026"],
-    ["CYCLE 04", "05 Feb 2026 - 07 Feb 2026"],
-    ["CYCLE 03", "01 Feb 2026 - 03 Feb 2026"],
-    ["CYCLE 02", "24 Jan 2026 - 28 Jan 2026"],
-    ["CYCLE 01", "18 Jan 2026 - 21 Jan 2026"],
-  ];
-
-  const medications = [
-    {
-      medication: "Ondansetron",
-      start: "18 Jan 2026",
-      end: "Present",
-      dosage: "8 mg",
-      route: "Oral",
-      status: "ACTIVE",
-    },
-    {
-      medication: "Dexamethasone",
-      start: "18 Jan 2026",
-      end: "19 Feb 2026",
-      dosage: "20 mg",
-      route: "IV",
-      status: "COMPLETED",
-    },
-    {
-      medication: "Filgrastim",
-      start: "19 Jan 2026",
-      end: "24 Jan 2026",
-      dosage: "300 mcg",
-      route: "Subcutaneous",
-      status: "COMPLETED",
-    },
-  ];
-
-  /* =========================================================
-     CONTENT (PATIENT HEADER + HISTORY SECTIONS + ACTIONS)
-  ========================================================= */
-
-  const content = (
-    <>
-      {/* TIMELINE + RIGHT COLUMN */}
-      <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6 bg-slate-50/50">
-        {/* LEFT */}
-        <div className="lg:col-span-2">
-          <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-2">
-                <i className="fa-solid fa-chart-line text-blue-600" />
-
-                <h2 className="text-lg font-bold text-gray-900">
-                  Treatment Timeline
-                </h2>
-              </div>
-
-              <span className="text-sm font-medium text-gray-500">
-                Aug 2026 - Present
-              </span>
-            </div>
-
-            {/* Timeline */}
-            <div className="relative pl-4 space-y-6">
-              <div className="absolute left-[21px] top-4 bottom-4 w-px bg-gray-200" />
-
-              {cycles.map((item) => (
-                <div
-                  key={item.cycle}
-                  className="relative flex items-start"
-                >
-                  <div className="absolute left-[-4px] top-3 w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center ring-4 ring-white z-10">
-                    <i className="fa-solid fa-check text-white text-[10px]" />
-                  </div>
-
-                  <div
-                    className={`ml-8 w-full rounded-lg p-4 transition hover:shadow-md ${
-                      item.final
-                        ? "bg-blue-50/40 border border-blue-100"
-                        : "bg-white border border-gray-200"
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <h3
-                        className={`font-bold text-sm ${
-                          item.final
-                            ? "text-blue-700"
-                            : "text-gray-800"
-                        }`}
-                      >
-                        {item.cycle}
-                      </h3>
-
-                      <span className="text-sm text-gray-500">
-                        {item.date}
-                      </span>
-                    </div>
-
-                    <p className="text-sm text-gray-700">
-                      {item.description}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT */}
-        <div className="space-y-6">
-          {/* VITAL TREND */}
-          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-            <h2 className="text-base font-bold text-gray-900 mb-4">
-              Vitals Trend History
-            </h2>
-
-            <div className="mb-4">
-              <div className="flex justify-between text-xs text-gray-500 uppercase font-semibold mb-2">
-                <span>WEIGHT (KG)</span>
-                <span>Avg 51.8</span>
-              </div>
-
-              <div className="flex items-end h-12 gap-1">
-                <div className="w-full bg-blue-100 rounded-t h-[60%]" />
-                <div className="w-full bg-blue-200 rounded-t h-[65%]" />
-                <div className="w-full bg-blue-200 rounded-t h-[62%]" />
-                <div className="w-full bg-blue-200 rounded-t h-[68%]" />
-                <div className="w-full bg-blue-200 rounded-t h-[64%]" />
-                <div className="w-full bg-blue-700 rounded-t h-[70%]" />
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-gray-500 font-medium">
-                BP / PULSE / TEMP
-              </span>
-
-              <button
-                type="button"
-                className="text-blue-600 font-bold hover:underline"
-              >
-                VIEW DETAILED CHARTS
-              </button>
-            </div>
-          </div>
-
-          {/* DOCUMENT HISTORY */}
-          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-base font-bold text-gray-900">
-                Document History
-              </h2>
-
-              <button
-                type="button"
-                className="text-xs text-blue-600 font-bold hover:underline uppercase"
-              >
-                View All
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50/50 hover:bg-gray-50 transition">
-                <div className="flex items-center gap-3">
-                  <i className="fa-regular fa-file-pdf text-red-500 text-lg" />
-
-                  <div>
-                    <div className="text-sm font-semibold text-gray-800">
-                      Final_Summary.pdf
-                    </div>
-
-                    <div className="text-xs text-gray-500">
-                      19 Feb 2026
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <i className="fa-solid fa-download" />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50/50 hover:bg-gray-50 transition">
-                <div className="flex items-center gap-3">
-                  <i className="fa-regular fa-file-pdf text-red-500 text-lg" />
-
-                  <div>
-                    <div className="text-sm font-semibold text-gray-800">
-                      Cycle_6_Report.pdf
-                    </div>
-
-                    <div className="text-xs text-gray-500">
-                      16 Feb 2026
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <i className="fa-solid fa-download" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* CHEMOTHERAPY CYCLE HISTORY */}
-      <section className="px-6 pb-6">
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="flex justify-between items-center p-5 border-b border-gray-200 bg-gray-50/50">
-            <h2 className="text-lg font-bold text-gray-900">
-              Chemotherapy Cycle History
-            </h2>
-
-            <button
-              type="button"
-              className="text-sm text-blue-600 font-bold hover:underline"
-            >
-              View Protocol Details
-            </button>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-6 py-3 font-semibold">
-                    Cycle
-                  </th>
-
-                  <th className="px-6 py-3 font-semibold">
-                    Dates
-                  </th>
-
-                  <th className="px-6 py-3 font-semibold">
-                    Agent
-                  </th>
-
-                  <th className="px-6 py-3 font-semibold">
-                    Planned Dose
-                  </th>
-
-                  <th className="px-6 py-3 font-semibold">
-                    Actual Dose
-                  </th>
-
-                  <th className="px-6 py-3 font-semibold text-right">
-                    Outcome
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-gray-100">
-                {cycleHistory.map(([cycle, dates]) => (
-                  <tr
-                    key={cycle}
-                    className="hover:bg-gray-50"
-                  >
-                    <td className="px-6 py-4 font-medium text-gray-900">
-                      {cycle}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-500">
-                      {dates}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-700">
-                      Paclitaxel
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-700">
-                      80 mg/m²
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-700">
-                      80 mg/m²
-                    </td>
-
-                    <td className="px-6 py-4 text-right">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                        SUCCESSFUL
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      {/* MEDICATION HISTORY */}
-      <section className="px-6 pb-6">
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="flex justify-between items-center p-5 border-b border-gray-200 bg-gray-50/50">
-            <h2 className="text-lg font-bold text-gray-900">
-              Medication History
-            </h2>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-6 py-3 font-semibold">
-                    Medication
-                  </th>
-
-                  <th className="px-6 py-3 font-semibold">
-                    Start Date
-                  </th>
-
-                  <th className="px-6 py-3 font-semibold">
-                    End Date
-                  </th>
-
-                  <th className="px-6 py-3 font-semibold">
-                    Dosage
-                  </th>
-
-                  <th className="px-6 py-3 font-semibold">
-                    Route
-                  </th>
-
-                  <th className="px-6 py-3 font-semibold text-right">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-gray-100">
-                {medications.map((medication) => (
-                  <tr
-                    key={medication.medication}
-                    className="hover:bg-gray-50"
-                  >
-                    <td className="px-6 py-4 font-medium text-gray-900">
-                      {medication.medication}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-500">
-                      {medication.start}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-500">
-                      {medication.end}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-700">
-                      {medication.dosage}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-700">
-                      {medication.route}
-                    </td>
-
-                    <td className="px-6 py-4 text-right">
-                      {medication.status === "ACTIVE" ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                          ACTIVE
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
-                          COMPLETED
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      {/* ADVERSE EVENTS */}
-      <section className="px-6 pb-6">
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="flex justify-between items-center p-5 border-b border-gray-200 bg-gray-50/50">
-            <h2 className="text-lg font-bold text-gray-900">
-              Adverse Events History
-            </h2>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-6 py-3 font-semibold">
-                    Date
-                  </th>
-
-                  <th className="px-6 py-3 font-semibold">
-                    Event
-                  </th>
-
-                  <th className="px-6 py-3 font-semibold">
-                    Grade
-                  </th>
-
-                  <th className="px-6 py-3 font-semibold">
-                    Action Taken
-                  </th>
-
-                  <th className="px-6 py-3 font-semibold text-right">
-                    Outcome
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-gray-100">
-                <tr className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-gray-500">
-                    12 Feb 2026
-                  </td>
-
-                  <td className="px-6 py-4 font-medium text-gray-900">
-                    Peripheral Neuropathy
-                  </td>
-
-                  <td className="px-6 py-4 text-gray-700">
-                    Grade 1
-                  </td>
-
-                  <td className="px-6 py-4 text-gray-700">
-                    Dose maintained
-                  </td>
-
-                  <td className="px-6 py-4 text-right">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
-                      ONGOING
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      {/* ACTION BUTTONS */}
-      <div className="px-6 pb-8 flex justify-end gap-4">
-        <button
-          type="button"
-          className="px-6 py-2.5 border border-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-colors text-sm"
-        >
-          Save &amp; Exit
-        </button>
-
-        <button
-          type="button"
-          className="px-6 py-2.5 border border-blue-600 text-blue-600 font-semibold rounded-lg hover:bg-blue-50 transition-colors text-sm"
-        >
-          Generate Report
-        </button>
-
-        <button
-          type="button"
-          className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm text-sm"
-        >
-          Submit Review
-        </button>
-      </div>
-    </>
-  );
-
-  if (embedded) {
-    return (
-      <>
-        <link
-          rel="stylesheet"
-          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-        />
-        <div className="w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          {content}
-        </div>
-      </>
-    );
-  }
-
-  return (
-    <>
-      <link
-        rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-      />
-      <link
-        rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      />
-      <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800 font-sans">
-        {/* TOP HEADER */}
-        <header className="bg-[#f2f4f7] border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <i className="fa-solid fa-code-branch text-gray-500" />
-
-            <span className="font-medium text-gray-800">
-              Main Branch
-            </span>
-
-            <i className="fa-solid fa-chevron-down text-gray-500 text-xs" />
-          </div>
-
-          <div className="flex items-center gap-6">
-            <div className="relative">
-              <i className="fa-regular fa-bell text-gray-500 text-lg" />
-
-              <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border border-white" />
-            </div>
-
-            <span className="text-blue-600 font-semibold text-sm">
-              HMS
-            </span>
-
-            <div className="w-8 h-8 rounded-full bg-slate-800 border-2 border-slate-300 flex items-center justify-center overflow-hidden">
-              <i className="fa-solid fa-user text-white text-xs" />
-            </div>
-          </div>
-        </header>
-
-        {/* MAIN CONTENT */}
-        <main className="max-w-[1400px] mx-auto bg-white flex-grow pb-12 w-full shadow-sm">
-          {content}
-        </main>
-
-        {/* FOOTER */}
-        <footer className="bg-white border-t border-gray-200 mt-auto">
-          <div className="max-w-[1400px] mx-auto px-6 py-6 flex flex-col md:flex-row justify-between items-center text-sm text-gray-500">
-            <div className="mb-4 md:mb-0">
-              © 2026 Hospital Management System. All rights reserved.
-            </div>
-
-            <div className="flex gap-6">
-              <button className="hover:text-gray-900 transition-colors">
-                Privacy Policy
-              </button>
-
-              <button className="hover:text-gray-900 transition-colors">
-                Terms of Service
-              </button>
-
-              <button className="hover:text-gray-900 transition-colors">
-                Help Center
-              </button>
-            </div>
-          </div>
-        </footer>
-      </div>
-    </>
-  );
-};
-
-/* ============================================================
-   PATIENT DISCHARGE DASHBOARD COMPONENT
-   (combined from client/pages/doctor/discharage  details.tsx —
-    renamed PatientDischargeDashboard → DischargeDetailsPortal
-    so it can live in this file, original file left untouched)
-============================================================ */
-
-function DischargeDetailsPortal({ onBack }: { onBack?: () => void }) {
-  const [showBranchMenu, setShowBranchMenu] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
-  const [showNotesDocs, setShowNotesDocs] = useState(false);
-
-  const tabs = [
-    "Order Summary",
-    "Medications",
-    "Discharge",
-    "History",
-    "Notes & Documents",
-  ];
-
-  const medications = [
-    {
-      medication: "Ondansetron",
-      purpose: "Anti-nausea",
-      dose: "1 Tablet",
-      frequency: "TID (Every 8 Hours)",
-      duration: "3 Days",
-    },
-  ];
-
-  const vitals = [
-    {
-      label: "BP",
-      value: "118/76",
-      status: "Stable",
-    },
-    {
-      label: "Pulse",
-      value: "74 bpm",
-      status: "Normal",
-    },
-    {
-      label: "Temp",
-      value: "98.6°F",
-      status: "Apyrexic",
-    },
-    {
-      label: "SpO2",
-      value: "99%",
-      status: "Room Air",
-    },
-  ];
-
-  const checklist = [
-    "Infusion protocol complete",
-    "Vitals stable for 30 mins",
-    "Allergy status verified",
-    "Discharge instructions provided",
-    "Medications reviewed",
-    "Follow-up appointment scheduled",
-    "Patient education completed",
-  ];
-
-  return (
-    <>
-      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
-      <div className="font-[Inter,sans-serif] text-[#1e293b] antialiased flex h-screen overflow-hidden bg-[#f8fafc]">
-
-{/* BEGIN: Main Content */}
-<main className="flex-1 flex flex-col h-full overflow-hidden bg-[#f8fafc] relative">
-{/* BEGIN: Top Header */}
-<header className="h-[72px] bg-[#f8fafc] border-b border-[#e2e8f0] flex items-center justify-between px-8 shrink-0 z-10">
-<div className="flex items-center gap-4">
-{onBack && (
-<button type="button" aria-label="Go back" onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-slate-100">
-<svg viewBox="0 0 24 24" fill="none" stroke="#334155" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-<path d="M19 12H5" />
-<path d="m12 19-7-7 7-7" />
-</svg>
-</button>
-)}
-<div className="relative">
-<button type="button" onClick={() => setShowBranchMenu(v => !v)} className="flex items-center text-sm font-medium text-[#1e293b] cursor-pointer hover:text-[#1d4ed8] transition-colors">
-<i className="fa-solid fa-code-branch mr-2 text-[#64748b]"></i> Main Branch <i className="fa-solid fa-chevron-down ml-2 text-[10px] text-[#64748b]"></i>
-</button>
-<div className={`absolute top-9 left-0 z-30 bg-white border border-[#e2e8f0] rounded-lg shadow-lg p-2 w-44 ${showBranchMenu ? "block" : "hidden"}`}>
-<button type="button" className="w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-50">Main Branch</button>
-<button type="button" className="w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-50">Branch 02</button>
-</div>
-</div>
-</div>
-<div className="flex items-center space-x-6">
-<button className="text-[#64748b] hover:text-[#1e293b] relative">
-<i className="fa-regular fa-bell text-[20px]"></i>
-<span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-2.5 w-2.5">
-<span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#ef4444] border-2 border-[#f8fafc]"></span>
-</span>
-</button>
-<div className="flex items-center space-x-3 cursor-pointer pl-6 border-l border-[#e2e8f0]">
-<span className="text-sm font-bold text-[#1d4ed8]">HMS</span>
-<div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white">
-<i className="fa-solid fa-user text-sm"></i>
-</div>
-</div>
-</div>
-</header>
-{/* END: Top Header */}
-<div className="flex-1 overflow-y-auto relative">
-<div className="p-8 max-w-[1400px] mx-auto pb-32">
-{/* BEGIN: Patient Header Card */}
-<div className="bg-white rounded-[16px] border border-[#e2e8f0] p-6 shadow-sm mb-6 flex justify-between items-center">
-<div className="flex items-center">
-<img alt="Vijaya Nallusamy" className="w-20 h-20 rounded-full border-4 border-white shadow-sm object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCVmv5vhpN6g6IwvwVBONWYZS06j9iELGi3guKAqt6M68HTL3HxSslWkIMAEQjWeTlKNOdnc-Pipmecvq47y_J4JkJpXBa7ODMic8izxEnar0D-CTbCOUggEhRCTr29jfsIrqPw9jJJRvmghxFC8vXF6U5zjzrn_8ajoH2ovseUywhLI0FurjCqa2DjfMMM3yvISAkY7jN2EjygmPh_WvJa_vc06-pRUGw2Xu4pFrWdOcPdAl4HggI"/>
-<div className="ml-6">
-<div className="flex items-center space-x-3 mb-1">
-<h2 className="text-xl font-bold text-[#1e293b]">Vijaya Nallusamy</h2>
-<span className="bg-slate-100 text-[#64748b] px-3 py-1 rounded-full text-xs font-semibold">ONC-2026-10025</span>
-</div>
-<div className="text-sm text-[#64748b] flex items-center space-x-3">
-<span>51Y / Female</span>
-<span className="w-1 h-1 rounded-full bg-slate-300"></span>
-<span className="text-[#1d4ed8] font-semibold">Ductal Carcinoma Stage II</span>
-</div>
-</div>
-</div>
-<div className="flex items-center">
-<div className="flex space-x-8 px-8 border-r border-[#e2e8f0]">
-<div className="space-y-4">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">HEIGHT</div>
-<div className="font-bold text-sm">154 cm</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BP</div>
-<div className="font-bold text-sm">118/74</div>
-</div>
-</div>
-<div className="space-y-4">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">WEIGHT</div>
-<div className="font-bold text-sm">52 kg</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">PULSE</div>
-<div className="font-bold text-sm">78 bpm</div>
-</div>
-</div>
-<div className="space-y-4">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BSA</div>
-<div className="font-bold text-sm">1.49 m²</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">TEMP</div>
-<div className="font-bold text-sm">36.8 °C</div>
-</div>
-</div>
-<div className="space-y-4">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BMI</div>
-<div className="font-bold text-sm">21.93</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">SPO2</div>
-<div className="font-bold text-sm">99%</div>
-</div>
-</div>
-</div>
-<div className="pl-8">
-<div className="bg-blue-50/50 border border-blue-100 rounded-[12px] p-4 w-[220px]">
-<div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: NEOADJUVANT</div>
-<div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">TAXOL - WEEKLY</div>
-<div className="flex items-center text-xs text-[#64748b] font-medium">
-<span className="w-2 h-2 rounded-full bg-[#10b981] mr-2"></span> Active Protocol
-                    </div>
-</div>
-</div>
-</div>
-</div>
-{/* END: Patient Header Card */}
-{/* BEGIN: Tabs */}
-<div className="border-b border-[#e2e8f0] mb-6">
-<nav className="flex space-x-8">
-{tabs.map((tab) => {
-const isActive = showNotesDocs ? tab === "Notes & Documents" : showHistory ? tab === "History" : tab === "Discharge";
-return (
-<button key={tab} type="button" onClick={() => { if (tab === "History") { setShowHistory(true); setShowNotesDocs(false); return; } if (tab === "Notes & Documents") { setShowNotesDocs(true); setShowHistory(false); return; } setShowHistory(false); setShowNotesDocs(false); if (tab !== "Discharge") { onBack?.(); } }} className={`px-1 py-3 border-b-2 text-sm font-medium transition-colors ${isActive ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
-{tab}
-</button>
-);
-})}
-</nav>
-</div>
-{/* END: Tabs */}
-
-       
-          {/* =====================================================
-              MAIN GRID
-          ====================================================== */}
-          {showHistory ? (
-            <HistoryDashboard embedded />
-          ) : showNotesDocs ? (
-            <PatientNotesDocuments embedded />
-          ) : (
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-            {/* ===================================================
-                LEFT COLUMN
-            ==================================================== */}
-            <div className="space-y-6 xl:col-span-2">
-              {/* =================================================
-                  DISCHARGE STATUS SUMMARY
-              ================================================== */}
-              <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                {/* Section Header */}
-                <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
-                  <h3 className="text-lg font-medium text-gray-900">
-                    Discharge Status Summary
-                  </h3>
-
-                  <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-700">
-                    <i className="fa-regular fa-circle-check mr-1.5" />
-                    Ready for Discharge
-                  </span>
-                </div>
-
-                {/* Section Body */}
-                <div className="flex flex-col gap-6 p-6 lg:flex-row">
-                  {/* Details */}
-                  <div className="flex-1 space-y-5">
-                    {/* Treatment Outcome */}
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="text-sm text-gray-500">
-                        Treatment
-                        <br />
-                        Outcome
-                      </div>
-
-                      <div className="col-span-2 text-lg font-semibold text-green-700">
-                        Completed
-                        <br />
-                        Successfully
-                      </div>
-                    </div>
-
-                    {/* Discharge Date */}
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="flex items-center text-sm text-gray-500">
-                        Discharge Date
-                      </div>
-
-                      <div className="col-span-2 flex items-center font-semibold text-gray-900">
-                        05 Jun 2026
-                      </div>
-                    </div>
-
-                    {/* Discharge Time */}
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="flex items-center text-sm text-gray-500">
-                        Discharge Time
-                      </div>
-
-                      <div className="col-span-2 flex items-center font-semibold text-gray-900">
-                        04:30 PM
-                      </div>
-                    </div>
-
-                    {/* Physician */}
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="flex items-center text-sm text-gray-500">
-                        Admitting Physician
-                      </div>
-
-                      <div className="col-span-2 flex items-center font-semibold text-gray-900">
-                        Dr. Naveen
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Treatment Cycle Stats */}
-                  <div className="w-full rounded-lg border border-dashed border-gray-300 bg-white p-5 lg:w-80">
-                    <h4 className="mb-4 text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Treatment Cycle Stats
-                    </h4>
-
-                    <div className="grid grid-cols-2 gap-y-4">
-                      {/* Planned */}
-                      <div>
-                        <p className="mb-1 text-xs text-gray-500">
-                          Cycles Planned
-                        </p>
-                        <p className="text-xl font-medium text-gray-900">
-                          5
-                        </p>
-                      </div>
-
-                      {/* Administered */}
-                      <div>
-                        <p className="mb-1 text-xs text-gray-500">
-                          Cycles Administered
-                        </p>
-                        <p className="text-xl font-medium text-blue-800">
-                          5
-                        </p>
-                      </div>
-
-                      {/* Duration */}
-                      <div>
-                        <p className="mb-1 text-xs text-gray-500">
-                          Total Duration
-                        </p>
-                        <p className="text-base text-gray-900">4 Hours</p>
-                      </div>
-
-                      {/* Reactions */}
-                      <div>
-                        <p className="mb-1 text-xs text-gray-500">
-                          Infusion Reactions
-                        </p>
-                        <p className="text-base font-medium text-green-700">
-                          None
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              {/* =================================================
-                  TAKE HOME MEDICATIONS
-              ================================================== */}
-              <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                {/* Header */}
-                <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-                  <h3 className="text-lg font-medium text-gray-900">
-                    Take-Home Medications
-                  </h3>
-
-                  <button
-                    type="button"
-                    className="flex items-center text-sm font-medium text-blue-800 transition hover:underline"
-                    onClick={() => window.print()}
-                  >
-                    <i className="fa-solid fa-print mr-2" />
-                    Print Rx
-                  </button>
-                </div>
-
-                {/* Table */}
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-slate-50">
-                      <tr>
-                        <th className="whitespace-nowrap px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                          Medication
-                        </th>
-
-                        <th className="whitespace-nowrap px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                          Purpose
-                        </th>
-
-                        <th className="whitespace-nowrap px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                          Dose
-                        </th>
-
-                        <th className="whitespace-nowrap px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                          Frequency
-                        </th>
-
-                        <th className="whitespace-nowrap px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                          Duration
-                        </th>
-                      </tr>
-                    </thead>
-
-                    <tbody className="divide-y divide-gray-200 bg-white">
-                      {medications.map((medication, index) => (
-                        <tr key={index}>
-                          <td className="whitespace-nowrap px-6 py-4 font-medium text-gray-900">
-                            {medication.medication}
-                          </td>
-
-                          <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
-                            {medication.purpose}
-                          </td>
-
-                          <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
-                            {medication.dose}
-                          </td>
-
-                          <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
-                            {medication.frequency}
-                          </td>
-
-                          <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
-                            {medication.duration}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            </div>
-
-            {/* ===================================================
-                RIGHT COLUMN
-            ==================================================== */}
-            <div className="space-y-6">
-              {/* =================================================
-                  FINAL VITAL SIGNS
-              ================================================== */}
-              <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="mb-5 flex items-end justify-between">
-                  <h3 className="text-lg font-medium text-gray-900">
-                    Final Vital Signs
-                  </h3>
-
-                  <span className="text-xs text-gray-500">
-                    Last checked: 04:15 PM
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  {vitals.map((vital) => (
-                    <div
-                      key={vital.label}
-                      className="rounded-lg bg-slate-50 p-4"
-                    >
-                      <p className="mb-1 text-xs text-gray-500">
-                        {vital.label}
-                      </p>
-
-                      <p className="text-xl font-bold text-gray-900">
-                        {vital.value}
-                      </p>
-
-                      <p className="mt-1 text-xs font-medium uppercase text-green-700">
-                        {vital.status}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              {/* =================================================
-                  CHECKLIST
-              ================================================== */}
-              <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="mb-5 flex items-center justify-between">
-                  <h3 className="text-lg font-medium text-gray-900">
-                    Checklist
-                  </h3>
-
-                  <span className="inline-flex items-center rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700">
-                    {checklist.length}/{checklist.length} Done
-                  </span>
-                </div>
-
-                <ul className="space-y-4">
-                  {checklist.map((item, index) => (
-                    <li key={index} className="flex items-start">
-                      <i className="fa-solid fa-circle-check mr-3 mt-0.5 text-lg text-green-500" />
-
-                      <span className="text-sm text-gray-700">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            </div>
-          </div>
-          )}
-</div>
-</div>
-</main>
-{/* END: Main Content */}
-
-      </div>
-    </>
-  );
-}
-
-/* ============================================================
-   PATIENT NOTES & DOCUMENTS COMPONENT
-   (combined from client/pages/doctor/notes and doc.tsx —
-    component name PatientNotesDocuments kept the same,
-    embedded prop added so it can live in this file as an
-    embedded step, original "notes and doc.tsx" file left
-    untouched)
-============================================================ */
-
-const PatientNotesDocuments: React.FC<{ embedded?: boolean }> = ({
-  embedded = false,
-}) => {
-  const [activeTab, setActiveTab] = useState("Notes & Documents");
-  const [labTab, setLabTab] = useState("Chemistry");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const documents = [
-    {
-      name: "Treatment Summary_Q1",
-      info: "PDF • 2.4 MB • 12 May 2026",
-      icon: "fa-file-lines",
-      color: "text-blue-500",
-      hover: "hover:border-blue-300",
-    },
-    {
-      name: "Biopsy Report_Initial",
-      info: "PDF • 1.1 MB • 05 Apr 2026",
-      icon: "fa-file-waveform",
-      color: "text-green-500",
-      hover: "hover:border-green-300",
-    },
-    {
-      name: "Prescription_Cycle_5",
-      info: "PDF • 450 KB • 28 May 2026",
-      icon: "fa-prescription",
-      color: "text-purple-500",
-      hover: "hover:border-purple-300",
-    },
-  ];
-
-  const activities = [
-    {
-      title: "New Note Added",
-      description: "Dr. Naveen added 'Treatment Assessment'",
-      time: "15 MINS AGO",
-      dot: "bg-blue-500",
-    },
-    {
-      title: "Report Uploaded",
-      description: "Nurse Rani uploaded 'CBC_05Jun26'",
-      time: "1 HOUR AGO",
-      dot: "bg-green-500",
-    },
-    {
-      title: "Prescription Updated",
-      description: "New medication orders for Taxol cycle 6",
-      time: "3 HOURS AGO",
-      dot: "bg-purple-500",
-    },
-  ];
-
-  const handleFileChange = (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const file = event.target.files?.[0];
-
-    if (file) {
-      setSelectedFile(file);
-    }
-  };
-
-  const handleSelectFiles = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleDownload = (name: string) => {
-    console.log(`Downloading: ${name}`);
-  };
-
-  const handleView = (name: string) => {
-    console.log(`Viewing: ${name}`);
-  };
-
-  const handleAddNote = () => {
-    console.log("Add Note clicked");
-  };
-
-  const handleSave = () => {
-    console.log("Save Notes & Changes clicked");
-  };
-
-  /* =========================================================
-     CONTENT (TAB NAVIGATION + TWO COLUMN LAYOUT)
-  ========================================================= */
-
-  const content = (
-    <>
-      {/* ===================================================
-          TAB NAVIGATION (hidden when embedded — the parent
-          portal already renders its own tab bar)
-      ==================================================== */}
-      {!embedded && (
-        <div className="mb-6 border-b border-slate-200">
-          <nav className="flex space-x-8 overflow-x-auto">
-            {tabs.map((tab) => {
-              const isActive = activeTab === tab;
-
-              return (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setActiveTab(tab)}
-                  className={`whitespace-nowrap border-b-2 px-1 py-4 text-sm font-medium transition-colors ${
-                    isActive
-                      ? "border-[#0052cc] font-semibold text-[#0052cc]"
-                      : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700"
-                  }`}
-                >
-                  {tab}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-      )}
-
-      {/* ===================================================
-          TWO COLUMN LAYOUT
-      ==================================================== */}
-      <div className="flex flex-col gap-6 xl:flex-row">
-
-        {/* =================================================
-            LEFT / MAIN COLUMN
-        ================================================== */}
-        <div className="min-w-0 flex-1">
-
-          {/* =================================================
-              SUMMARY CARDS
-          ================================================== */}
-          <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
-
-            {/* Total Notes */}
-            <div className="flex items-center rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="mr-4 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                <i className="fa-regular fa-file-lines text-lg" />
-              </div>
-
-              <div>
-                <p className="text-sm text-slate-500">
-                  Total Notes
-                </p>
-                <p className="text-xl font-bold text-slate-900">
-                  18
-                </p>
-              </div>
-            </div>
-
-            {/* Documents */}
-            <div className="flex items-center rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="mr-4 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                <i className="fa-regular fa-folder-open text-lg" />
-              </div>
-
-              <div>
-                <p className="text-sm text-slate-500">
-                  Documents
-                </p>
-                <p className="text-xl font-bold text-slate-900">
-                  32
-                </p>
-              </div>
-            </div>
-
-            {/* Reports */}
-            <div className="flex items-center rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="mr-4 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-green-50 text-green-600">
-                <i className="fa-solid fa-chart-simple text-lg" />
-              </div>
-
-              <div>
-                <p className="text-sm text-slate-500">
-                  Reports
-                </p>
-                <p className="text-xl font-bold text-slate-900">
-                  12
-                </p>
-              </div>
-            </div>
-
-            {/* Prescriptions */}
-            <div className="flex items-center rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="mr-4 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-purple-50 text-purple-600">
-                <i className="fa-solid fa-prescription-bottle-medical text-lg" />
-              </div>
-
-              <div>
-                <p className="text-sm text-slate-500">
-                  Prescriptions
-                </p>
-                <p className="text-xl font-bold text-slate-900">
-                  6
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* =================================================
-              RECENT CLINICAL NOTES
-          ================================================== */}
-          <section className="mb-8 rounded-xl border border-slate-200 bg-white shadow-sm">
-
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-200 p-5">
-              <h3 className="text-lg font-semibold text-slate-900">
-                Recent Clinical Notes
-              </h3>
-
-              <button
-                type="button"
-                onClick={handleAddNote}
-                className="flex items-center rounded-md bg-[#0052cc] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-              >
-                <i className="fa-solid fa-plus mr-2" />
-                Add Note
-              </button>
-            </div>
-
-            {/* Timeline */}
-            <div className="p-6">
-              <div className="relative">
-
-                {/* Note 1 */}
-                <div className="relative mb-8 pl-12">
-                  {/* Timeline Line */}
-                  <div className="absolute left-5 top-10 bottom-[-2rem] w-0.5 bg-slate-200" />
-
-                  {/* Avatar */}
-                  <div className="absolute left-0 top-0 z-10 flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-blue-100 text-sm font-bold text-blue-700">
-                    DN
-                  </div>
-
-                  <div className="mb-2 flex items-start justify-between gap-4">
-                    <div>
-                      <h4 className="text-base font-bold text-slate-900">
-                        Treatment Assessment
-                      </h4>
-
-                      <p className="text-sm text-slate-500">
-                        Dr. Naveen • Oncologist • Today, 09:15 AM
-                      </p>
-                    </div>
-
-                    <span className="rounded border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
-                      E-Signed
-                    </span>
-                  </div>
-
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-slate-700">
-                    Patient reporting mild fatigue following the
-                    previous cycle. CBC shows ANC within acceptable
-                    limits for Cycle 6 Day 1. Protocol TAXOL - WEEKLY
-                    to continue as planned. Encouraged increased
-                    fluid intake and moderate walking.
-                  </div>
-                </div>
-
-                {/* Note 2 */}
-                <div className="relative pl-12">
-                  {/* Avatar */}
-                  <div className="absolute left-0 top-0 z-10 flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-sm font-bold text-slate-700">
-                    RR
-                  </div>
-
-                  <div className="mb-2">
-                    <h4 className="text-base font-bold text-slate-900">
-                      Nursing Observation
-                    </h4>
-
-                    <p className="text-sm text-slate-500">
-                      Nurse Rani • Oncology Nurse • Today, 08:30 AM
-                    </p>
-                  </div>
-
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-slate-700">
-                    Vitals stable. BP: 120/80, Temp: 98.4F. Central
-                    line patency confirmed. Patient appears
-                    well-rested. Provided orientation for today's
-                    medication administration schedule.
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* =================================================
-              DOCUMENT LIBRARY
-          ================================================== */}
-          <section className="mb-8">
-
-            <div className="mb-4 flex items-end justify-between">
-              <h3 className="text-lg font-semibold text-slate-900">
-                Document Library
-              </h3>
-
-              <button
-                type="button"
-                className="flex items-center text-sm font-medium text-blue-600 transition-colors hover:text-blue-800"
-              >
-                View All Documents
-                <i className="fa-solid fa-arrow-right ml-1" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              {documents.map((document) => (
-                <div
-                  key={document.name}
-                  className={`group relative rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors ${document.hover}`}
-                >
-                  {/* More */}
-                  <button
-                    type="button"
-                    className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
-                    aria-label={`More options for ${document.name}`}
-                  >
-                    <i className="fa-solid fa-ellipsis-vertical" />
-                  </button>
-
-                  {/* Icon */}
-                  <div
-                    className={`mb-3 text-2xl ${document.color}`}
-                  >
-                    <i className={`fa-solid ${document.icon}`} />
-                  </div>
-
-                  {/* Name */}
-                  <h4 className="mb-1 truncate text-sm font-bold text-slate-900">
-                    {document.name}
-                  </h4>
-
-                  {/* Details */}
-                  <p className="mb-4 text-xs text-slate-500">
-                    {document.info}
-                  </p>
-
-                  {/* Buttons */}
-                  <div className="flex space-x-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleView(document.name)
-                      }
-                      className="flex-1 rounded bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100"
-                    >
-                      View
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleDownload(document.name)
-                      }
-                      className="flex-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
-                    >
-                      Download
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* =================================================
-              LAB & DIAGNOSTIC REPORTS
-          ================================================== */}
-          <section className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-
-            {/* Header */}
-            <div className="flex flex-col justify-between gap-4 border-b border-slate-200 p-5 md:flex-row md:items-center">
-              <h3 className="text-lg font-semibold text-slate-900">
-                Lab & Diagnostic Reports
-              </h3>
-
-              <div className="flex w-fit space-x-2 rounded-lg bg-slate-100 p-1">
-                {["CBC", "Chemistry", "Radiology"].map((tab) => {
-                  const active = labTab === tab;
-
-                  return (
-                    <button
-                      key={tab}
-                      type="button"
-                      onClick={() => setLabTab(tab)}
-                      className={`rounded-md px-3 py-1 text-sm font-medium transition-all ${
-                        active
-                          ? "bg-white text-blue-600 shadow-sm"
-                          : "text-slate-600 hover:bg-white hover:shadow-sm"
-                      }`}
-                    >
-                      {tab}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-left">
-                <thead>
-                  <tr className="border-b border-slate-200 bg-white text-sm text-slate-500">
-                    <th className="w-1/4 p-4 pl-6 font-medium">
-                      Test Name
-                    </th>
-
-                    <th className="w-1/5 p-4 font-medium">
-                      Date
-                    </th>
-
-                    <th className="w-1/5 p-4 font-medium">
-                      Result
-                    </th>
-
-                    <th className="w-1/4 p-4 font-medium">
-                      Trend
-                    </th>
-
-                    <th className="p-4 pr-6 text-center font-medium">
-                      Action
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y divide-slate-100 text-sm text-slate-700">
-
-                  {/* Creatinine */}
-                  <tr className="transition-colors hover:bg-slate-50">
-                    <td className="p-4 pl-6 font-semibold text-slate-900">
-                      Serum Creatinine
-                    </td>
-
-                    <td className="p-4">
-                      05 Jun 2026
-                    </td>
-
-                    <td className="p-4">
-                      0.48 mg/dL
-                    </td>
-
-                    <td className="p-4">
-                      <div className="flex h-6 w-24 items-end">
-                        <div className="group relative mx-px h-[30%] w-1/4 bg-blue-300">
-                          <span className="absolute -top-5 left-0 hidden rounded bg-black px-1 text-[10px] text-white group-hover:block">
-                            0.85
-                          </span>
-                        </div>
-
-                        <div className="group relative mx-px h-[40%] w-1/4 bg-blue-300">
-                          <span className="absolute -top-5 left-0 hidden rounded bg-black px-1 text-[10px] text-white group-hover:block">
-                            0.95
-                          </span>
-                        </div>
-
-                        <div className="group relative mx-px h-[20%] w-1/4 bg-blue-800">
-                          <span className="absolute -top-5 left-0 hidden rounded bg-black px-1 text-[10px] text-white group-hover:block">
-                            0.25
-                          </span>
-                        </div>
-
-                        <div className="group relative mx-px h-[25%] w-1/4 bg-blue-600">
-                          <span className="absolute -top-5 left-0 hidden rounded bg-black px-1 text-[10px] text-white group-hover:block">
-                            0.48
-                          </span>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="p-4 pr-6 text-center">
-                      <button
-                        type="button"
-                        className="text-blue-600 hover:text-blue-800"
-                        aria-label="View Serum Creatinine"
-                      >
-                        <i className="fa-regular fa-eye" />
-                      </button>
-                    </td>
-                  </tr>
-
-                  {/* Hemoglobin */}
-                  <tr className="transition-colors hover:bg-slate-50">
-                    <td className="p-4 pl-6 font-semibold text-slate-900">
-                      Hemoglobin (Hb)
-                    </td>
-
-                    <td className="p-4">
-                      05 Jun 2026
-                    </td>
-
-                    <td className="p-4">
-                      11.2 g/dL
-                    </td>
-
-                    <td className="p-4">
-                      <div className="flex h-6 w-24 items-end">
-                        <div className="mx-px h-[90%] w-1/4 bg-blue-300" />
-                        <div className="mx-px h-[70%] w-1/4 bg-blue-300" />
-                        <div className="mx-px h-[80%] w-1/4 bg-blue-600" />
-                        <div className="mx-px h-[40%] w-1/4 bg-blue-800" />
-                      </div>
-                    </td>
-
-                    <td className="p-4 pr-6 text-center">
-                      <button
-                        type="button"
-                        className="text-blue-600 hover:text-blue-800"
-                        aria-label="View Hemoglobin"
-                      >
-                        <i className="fa-regular fa-eye" />
-                      </button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
-
-        {/* =================================================
-            RIGHT SIDEBAR
-        ================================================== */}
-        <aside className="flex w-full flex-shrink-0 flex-col gap-6 xl:w-80">
-
-          {/* =================================================
-              UPLOAD DOCUMENT
-          ================================================== */}
-          <div
-            onClick={handleSelectFiles}
-            className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/50 p-6 text-center transition-colors hover:bg-blue-50"
-          >
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-xl text-blue-600">
-              <i className="fa-solid fa-file-arrow-up" />
-            </div>
-
-            <h4 className="mb-1 text-base font-bold text-slate-900">
-              Upload Document
-            </h4>
-
-            <p className="mb-4 px-4 text-xs text-slate-500">
-              Drag & Drop or click to browse files (PDF, JPG, PNG)
-            </p>
-
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                handleSelectFiles();
-              }}
-              className="rounded-md border border-blue-600 bg-white px-6 py-2 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50"
-            >
-              Select Files
-            </button>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
-              className="hidden"
-              onChange={handleFileChange}
-            />
-
-            {selectedFile && (
-              <p className="mt-3 max-w-full truncate text-xs font-medium text-green-600">
-                Selected: {selectedFile.name}
-              </p>
-            )}
-          </div>
-
-          {/* =================================================
-              RECENT ACTIVITY
-          ================================================== */}
-          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="mb-4 text-base font-semibold text-slate-900">
-              Recent Activity
-            </h3>
-
-            <div className="relative pl-4">
-              {/* Vertical Line */}
-              <div className="absolute bottom-0 left-5 top-0 w-0.5 bg-gradient-to-b from-transparent via-slate-200 to-transparent" />
-
-              <div className="space-y-6">
-                {activities.map((activity) => (
-                  <div
-                    key={activity.title}
-                    className="group relative flex items-start gap-4"
-                  >
-                    {/* Dot */}
-                    <div
-                      className={`absolute -left-[5px] top-1.5 h-3 w-3 rounded-full border-2 border-white ring-2 ring-slate-100 ${activity.dot}`}
-                    />
-
-                    <div className="pl-4">
-                      <h4 className="text-sm font-semibold text-slate-900">
-                        {activity.title}
-                      </h4>
-
-                      <p className="mt-0.5 text-xs text-slate-600">
-                        {activity.description}
-                      </p>
-
-                      <span className="mt-1 block text-[10px] font-medium uppercase text-slate-400">
-                        {activity.time}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          {/* =================================================
-              IMPORTANT FLAGS
-          ================================================== */}
-          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-base font-semibold text-slate-900">
-                Important Flags
-              </h3>
-
-              <i className="fa-solid fa-thumbtack text-slate-400" />
-            </div>
-
-            <div className="space-y-3">
-
-              {/* Allergy */}
-              <div className="rounded-r-lg border-l-4 border-red-500 bg-red-50 p-3">
-                <h4 className="mb-1 text-sm font-bold text-red-800">
-                  Allergy Warning
-                </h4>
-
-                <p className="text-xs leading-snug text-red-700">
-                  Patient is highly sensitive to Penicillin-based
-                  antibiotics.
-                </p>
-              </div>
-
-              {/* Neutropenia */}
-              <div className="rounded-r-lg border-l-4 border-orange-500 bg-orange-50 p-3">
-                <h4 className="mb-1 text-sm font-bold text-orange-800">
-                  Neutropenia History
-                </h4>
-
-                <p className="text-xs leading-snug text-orange-700">
-                  Previous cycle was delayed due to Grade 2
-                  Neutropenia (ANC &lt; 1500).
-                </p>
-              </div>
-            </div>
-          </section>
-        </aside>
-      </div>
-    </>
-  );
-
-  if (embedded) {
-    return (
-      <>
-        <link
-          rel="stylesheet"
-          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-        />
-        {content}
-      </>
-    );
-  }
-
-  return (
-    <div className="h-screen overflow-hidden bg-slate-50 text-slate-800 antialiased font-sans">
-      {/* =========================================================
-          MAIN CONTENT AREA
-      ========================================================== */}
-      <div className="relative flex h-screen flex-col overflow-hidden">
-        {/* =======================================================
-            TOP HEADER
-        ======================================================== */}
-        <header className="z-10 flex h-16 flex-shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6">
-          {/* Branch */}
-          <button
-            type="button"
-            className="flex cursor-pointer items-center text-sm text-slate-600 transition-colors hover:text-slate-900"
-          >
-            <i className="fa-solid fa-share-nodes mr-2" />
-            <span>Main Branch</span>
-            <i className="fa-solid fa-chevron-down ml-1 text-xs" />
-          </button>
-
-          {/* Header Actions */}
-          <div className="flex items-center space-x-4">
-            {/* Notification */}
-            <button
-              type="button"
-              className="relative text-slate-400 transition-colors hover:text-slate-600"
-              aria-label="Notifications"
-            >
-              <i className="fa-regular fa-bell" />
-
-              <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
-            </button>
-
-            {/* HMS */}
-            <span className="rounded bg-blue-50 px-2 py-1 text-sm font-medium text-blue-600">
-              HMS
-            </span>
-
-            {/* User */}
-            <img
-              alt="User"
-              className="h-8 w-8 cursor-pointer rounded-full border border-slate-200 object-cover"
-              src="https://lh3.googleusercontent.com/aida-public/AB6AXuDlp4Z9SpVdXaVjgWZ4_KJ2BK03faz2udRJkhREXle-y5y2rTeFCwW4cbRgPfipcwrkUgzEHseDbPrPvNEe_LapOJGREVcYW0M369brOZfN0BTfuLLYfu0i4w4HpxvhO9ZSkb6fT5V_FaljJqtWdRO0L6kZAPR45Uo2fY1juqc7pc031lqOhWAxw8XzQ5u-o242ARI4GCY9VzzSZzaHG9i7vz6KrxDGT5zlthoATD7Ljf0DI-aEZ7RrJA"
-            />
-          </div>
-        </header>
-
-        {/* =======================================================
-            SCROLLABLE CONTENT
-        ======================================================== */}
-        <main className="relative flex-1 overflow-y-auto bg-slate-50">
-          <div className="mx-auto max-w-7xl px-6 pb-28 pt-6">
-            {content}
-          </div>
-        </main>
-
-        {/* =======================================================
-            BOTTOM ACTION BAR
-        ======================================================== */}
-        <div className="absolute bottom-0 left-0 right-0 z-20 flex h-16 flex-shrink-0 items-center justify-between border-t border-slate-200 bg-white px-6 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-
-          <div className="text-sm text-slate-500">
-            Showing 18 of 56 total records
-          </div>
-
-          <div className="flex space-x-3">
-
-            {/* Download All */}
-            <button
-              type="button"
-              onClick={() => console.log("Download All")}
-              className="flex items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
-            >
-              <i className="fa-solid fa-download mr-2" />
-              Download All
-            </button>
-
-            {/* Export */}
-            <button
-              type="button"
-              onClick={() => console.log("Export Documents")}
-              className="flex items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
-            >
-              <i className="fa-solid fa-file-export mr-2" />
-              Export Documents
-            </button>
-
-            {/* Save */}
-            <button
-              type="button"
-              onClick={handleSave}
-              className="rounded-md bg-[#0052cc] px-6 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
-            >
-              Save Notes & Changes
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };

@@ -1,11 +1,37 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import {
+  CalendarPlus,
+  Loader2,
+  MoreVertical,
+  PencilLine,
+  Plus,
+  X,
+  XCircle,
+} from "lucide-react";
 import {
   appointmentApi,
   type AppointmentRecord,
 } from "../../api/appointment.api";
+import { encounterApi } from "../../api/encounter.api";
+import {
+  doctorDashboardApi,
+  type DoctorNotificationItem,
+} from "../../api/doctorDashboard.api";
 import { employeeApi } from "../../api/employee.api";
-import { getActiveBranchId } from "../../api/axios";
+import API, { getActiveBranchId } from "../../api/axios";
 import { getUser } from "../../utils/token";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useToast } from "@/hooks/use-toast";
+import CalendarPicker from "@/components/hms/Calender";
 
 type AppointmentStatus =
   | "Checked Out"
@@ -20,6 +46,7 @@ type AppointmentStatus =
 
 interface Patient {
   id: string;
+  patientId: string;
   name: string;
   patientCode: string;
   age?: number;
@@ -27,6 +54,9 @@ interface Patient {
   phone?: string;
   bloodGroup?: string;
   appointmentDate: string;
+  appointmentDateRaw: string;
+  appointmentTimeRaw: string;
+  originalStatus: string;
   status: AppointmentStatus;
   avatarUrl?: string;
 }
@@ -78,6 +108,48 @@ function formatAppointmentTime(time?: string | null): string {
   return `${String(hour12).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${period}`;
 }
 
+function computeAge(dob?: string | null): number | undefined {
+  if (!dob) return undefined;
+  const parsed = new Date(dob);
+  if (isNaN(parsed.getTime())) return undefined;
+  const now = new Date();
+  let age = now.getFullYear() - parsed.getFullYear();
+  const monthDiff = now.getMonth() - parsed.getMonth();
+  if (
+    monthDiff < 0 ||
+    (monthDiff === 0 && now.getDate() < parsed.getDate())
+  ) {
+    age -= 1;
+  }
+  return age >= 0 && age < 130 ? age : undefined;
+}
+
+// Date-filter keys are "YYYY-MM-DD" strings in UTC convention
+// (matching how the backend serializes appointment_date). These
+// helpers convert between that key and the calendar picker's
+// local Date without any timezone drift.
+function isoToPickerDate(iso: string): Date {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function pickerDateToKey(date: Date): string {
+  return `${date.getFullYear()}-${String(
+    date.getMonth() + 1,
+  ).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function shiftIsoDay(iso: string, days: number): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  return pickerDateToKey(
+    new Date(year, month - 1, day + days),
+  );
+}
+
+function todayIso(): string {
+  return pickerDateToKey(new Date());
+}
+
 function toPatient(a: AppointmentRecord): Patient {
   const bio = a.patient_bio_data;
   const gender = bio?.patient_gender
@@ -90,11 +162,19 @@ function toPatient(a: AppointmentRecord): Patient {
 
   return {
     id: a.appointment_id,
+    patientId: a.patient_id,
     name: buildPatientName(bio),
     patientCode: bio?.patient_id ?? `Token ${a.token_number ?? ""}`.trim(),
     gender,
     phone: bio?.patient_primary_mobile ?? "—",
     appointmentDate: formatAppointmentTime(a.appointment_time) || dateFallback,
+    appointmentDateRaw: a.appointment_date
+      ? a.appointment_date.slice(0, 10)
+      : "",
+    appointmentTimeRaw: a.appointment_time ?? "",
+    originalStatus: a.status ?? "",
+    age: bio?.patient_age ?? computeAge(bio?.patient_dob),
+    bloodGroup: bio?.patient_blood_group ?? undefined,
     status: toDisplayStatus(a.status),
   };
 }
@@ -143,7 +223,23 @@ interface ToolbarProps {
   onViewChange: (view: "grid" | "list") => void;
   search: string;
   onSearchChange: (value: string) => void;
+  selectedDateKey: string | null;
+  onShiftDate: (days: number) => void;
+  onJumpToToday: () => void;
+  statusFilter: string;
+  onStatusFilterChange: (status: string) => void;
 }
+
+const STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: "SCHEDULED", label: "Confirmed" },
+  { value: "CHECKED_IN", label: "Checked In" },
+  { value: "IN_CONSULTATION", label: "In Consultation" },
+  { value: "COMPLETED", label: "Checked Out" },
+  { value: "CANCELLED", label: "Cancelled" },
+  { value: "NO_SHOW", label: "No Show" },
+  { value: "NOT_CHECKED_IN", label: "Not Checked In" },
+  { value: "RESCHEDULED", label: "Reschedule" },
+];
 
 function AppointmentToolbar({
   totalPatients,
@@ -151,7 +247,21 @@ function AppointmentToolbar({
   onViewChange,
   search,
   onSearchChange,
+  selectedDateKey,
+  onShiftDate,
+  onJumpToToday,
+  statusFilter,
+  onStatusFilterChange,
 }: ToolbarProps) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const todayKey = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  })();
+
+  const anchorKey = selectedDateKey ?? todayKey;
+
   return (
     <div className="flex items-center justify-between gap-4 flex-wrap px-5 py-3 border-b border-[rgba(194,198,212,0.10)]">
       <div className="flex items-center gap-3">
@@ -243,6 +353,7 @@ function AppointmentToolbar({
           <button
             type="button"
             aria-label="Previous day"
+            onClick={() => onShiftDate(-1)}
             className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
           >
             <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
@@ -258,14 +369,29 @@ function AppointmentToolbar({
 
           <button
             type="button"
-            className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]"
+            onClick={onJumpToToday}
+            title="Jump to today"
+            className={`flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6] ${
+              selectedDateKey === todayKey
+                ? "bg-[#EEF2FF] text-[#4F46E5]"
+                : "bg-white"
+            }`}
           >
-            Today
+            {selectedDateKey
+              ? (() => {
+                  const [y, m, d] = selectedDateKey.split("-").map(Number);
+                  return new Date(y, m - 1, d).toLocaleDateString("en-GB", {
+                    day: "2-digit",
+                    month: "short",
+                  });
+                })()
+              : "All dates"}
           </button>
 
           <button
             type="button"
             aria-label="Next day"
+            onClick={() => onShiftDate(1)}
             className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
           >
             <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
@@ -280,28 +406,86 @@ function AppointmentToolbar({
           </button>
         </div>
 
-        {/* Filters */}
-        <button
-          type="button"
-          className="flex items-center gap-1.5 px-4 py-2 bg-[#004785] rounded-[10px] text-white text-xs font-semibold whitespace-nowrap hover:opacity-90 transition-opacity"
-        >
-          <svg
-            className="w-3.5 h-3.5"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <path d="M4 5h16l-6 8v5l-4 2v-7L4 5z" />
-          </svg>
-          Filters
-        </button>
+        {/* Status filter */}
+        <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-opacity ${
+                statusFilter
+                  ? "bg-[#062f6e] text-white"
+                  : "bg-[#004785] text-white hover:opacity-90"
+              }`}
+            >
+              <svg
+                className="w-3.5 h-3.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M4 5h16l-6 8v5l-4 2v-7L4 5z" />
+              </svg>
+              {statusFilter
+                ? STATUS_FILTER_OPTIONS.find(
+                    (option) => option.value === statusFilter,
+                  )?.label ?? "Filters"
+                : "Filters"}
+            </button>
+          </PopoverTrigger>
+
+          <PopoverContent align="end" className="w-52 p-1 border-[#E5E7EB]">
+            <button
+              type="button"
+              onClick={() => {
+                onStatusFilterChange("");
+                setFiltersOpen(false);
+              }}
+              className={`w-full text-left px-3 py-1.5 text-xs rounded-md transition-colors ${
+                statusFilter === ""
+                  ? "bg-blue-50 font-semibold text-blue-700"
+                  : "text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              All statuses
+            </button>
+            {STATUS_FILTER_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => {
+                  onStatusFilterChange(option.value);
+                  setFiltersOpen(false);
+                }}
+                className={`w-full text-left px-3 py-1.5 text-xs rounded-md transition-colors ${
+                  statusFilter === option.value
+                    ? "bg-blue-50 font-semibold text-blue-700"
+                    : "text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
       </div>
     </div>
   );
 }
 
-function PatientCard({ patient }: { patient: Patient }) {
+function PatientCard({
+  patient,
+  actionBusyId,
+  onCheckIn,
+  onProceed,
+  onCancelRequest,
+  onReschedule,
+  onBookFollowUp,
+}: { patient: Patient } & PatientActionProps) {
+  const canCheckIn = CHECKIN_STATUSES.includes(patient.originalStatus);
+  const canProceed = PROCEED_STATUSES.includes(patient.originalStatus);
+  const isBusy = actionBusyId === patient.id;
+
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-4 flex gap-4">
       {patient.avatarUrl ? (
@@ -329,13 +513,12 @@ function PatientCard({ patient }: { patient: Patient }) {
             {patient.name}
           </h3>
 
-          <button
-            type="button"
-            aria-label="More options"
-            className="text-gray-400 hover:text-gray-600 -mt-1 -mr-1 px-1"
-          >
-            ⋮
-          </button>
+          <AppointmentRowMenu
+            patient={patient}
+            onCancelRequest={onCancelRequest}
+            onReschedule={onReschedule}
+            onBookFollowUp={onBookFollowUp}
+          />
         </div>
 
         <p className="text-xs font-medium text-blue-600">
@@ -358,6 +541,8 @@ function PatientCard({ patient }: { patient: Patient }) {
           <button
             type="button"
             aria-label={`Schedule appointment for ${patient.name}`}
+            title="Book a follow-up appointment for this patient"
+            onClick={() => onBookFollowUp(patient)}
             className="w-7 h-7 flex items-center justify-center rounded-md bg-gray-50 text-gray-400 hover:bg-blue-50 hover:text-blue-600"
           >
             <svg
@@ -378,6 +563,32 @@ function PatientCard({ patient }: { patient: Patient }) {
             </svg>
           </button>
         </div>
+
+        {(canCheckIn || canProceed) && (
+          <div className="flex items-center gap-2 mt-3">
+            {canCheckIn && (
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={() => onCheckIn(patient)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#00488D] text-white text-xs font-semibold hover:bg-[#003a72] disabled:opacity-60"
+              >
+                {isBusy && <Loader2 className="w-3 h-3 animate-spin" />}
+                Check In
+              </button>
+            )}
+
+            {canProceed && (
+              <button
+                type="button"
+                onClick={() => onProceed(patient)}
+                className="px-3 py-1.5 rounded-lg border border-[#00488D] text-[#00488D] text-xs font-semibold hover:bg-blue-50"
+              >
+                Proceed
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -392,21 +603,192 @@ const COLUMNS: { key: string; label: string }[] = [
   { key: "status", label: "Status" },
 ];
 
-function SortIcon() {
+function SortIcon({ direction }: { direction?: "asc" | "desc" | null }) {
   return (
     <svg
-      className="w-3 h-3 inline ml-1 text-gray-300"
+      className={`w-3 h-3 inline ml-1 ${
+        direction ? "text-blue-600" : "text-gray-300"
+      }`}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
       strokeWidth="2"
     >
-      <path d="M8 9l4-4 4 4M8 15l4 4 4-4" />
+      {direction === "asc" ? (
+        <path d="M8 15l4-6 4 6" />
+      ) : direction === "desc" ? (
+        <path d="M8 9l4 6 4-6" />
+      ) : (
+        <path d="M8 9l4-4 4 4M8 15l4 4 4-4" />
+      )}
     </svg>
   );
 }
 
-function PatientTable({ patients }: { patients: Patient[] }) {
+// Statuses that allow the Check In transition (mirrors the dashboard).
+const CHECKIN_STATUSES = ["SCHEDULED", "RESCHEDULED", "NOT_CHECKED_IN"];
+// Statuses that can proceed to the consultation screen.
+const PROCEED_STATUSES = ["CHECKED_IN", "IN_CONSULTATION"];
+// Statuses that can no longer be cancelled.
+const NON_CANCELABLE_STATUSES = ["COMPLETED", "CANCELLED", "NO_SHOW"];
+// Statuses the backend refuses to modify (TERMINAL_APPOINTMENT_STATUSES) --
+// reschedule/edit is hidden for these.
+const NON_EDITABLE_STATUSES = [
+  "COMPLETED",
+  "CANCELLED",
+  "NO_SHOW",
+  "NOT_CHECKED_IN",
+];
+
+interface PatientActionProps {
+  actionBusyId: string | null;
+  onCheckIn: (patient: Patient) => void;
+  onProceed: (patient: Patient) => void;
+  onCancelRequest: (patient: Patient) => void;
+  onReschedule: (patient: Patient) => void;
+  onBookFollowUp: (patient: Patient) => void;
+}
+
+// Shared "⋮" menu for grid cards and table rows. Every lifecycle action
+// lives here: book a follow-up for this patient, reschedule this
+// appointment, or cancel it. Items disappear once the backend would
+// refuse the transition (terminal statuses).
+function AppointmentRowMenu({
+  patient,
+  onReschedule,
+  onBookFollowUp,
+  onCancelRequest,
+}: {
+  patient: Patient;
+} & Pick<
+  PatientActionProps,
+  "onReschedule" | "onBookFollowUp" | "onCancelRequest"
+>) {
+  const canReschedule = !NON_EDITABLE_STATUSES.includes(
+    patient.originalStatus,
+  );
+  const canCancel = !NON_CANCELABLE_STATUSES.includes(
+    patient.originalStatus,
+  );
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={`More options for ${patient.name}`}
+          className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+        >
+          <MoreVertical className="w-4 h-4" />
+        </button>
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuItem
+          className="gap-2"
+          onSelect={() => onBookFollowUp(patient)}
+        >
+          <CalendarPlus className="w-4 h-4 text-gray-500" />
+          Book Follow-up
+        </DropdownMenuItem>
+
+        {canReschedule && (
+          <DropdownMenuItem
+            className="gap-2"
+            onSelect={() => onReschedule(patient)}
+          >
+            <PencilLine className="w-4 h-4 text-gray-500" />
+            Reschedule
+          </DropdownMenuItem>
+        )}
+
+        {canCancel && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="gap-2 text-red-600 focus:text-red-600 focus:bg-red-50"
+              onSelect={() => onCancelRequest(patient)}
+            >
+              <XCircle className="w-4 h-4" />
+              Cancel Appointment
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function PatientActions({ patient, actionBusyId, onCheckIn, onProceed, onCancelRequest }: PatientActionProps & { patient: Patient }) {
+  const canCheckIn = CHECKIN_STATUSES.includes(patient.originalStatus);
+  const canProceed = PROCEED_STATUSES.includes(patient.originalStatus);
+  const canCancel = !NON_CANCELABLE_STATUSES.includes(patient.originalStatus);
+  const isBusy = actionBusyId === patient.id;
+
+  if (!canCheckIn && !canProceed && !canCancel) {
+    return (
+      <div className="flex items-center justify-end gap-3 text-gray-400">
+        —
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-end gap-2">
+      {canCheckIn && (
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={() => onCheckIn(patient)}
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#00488D] text-white text-xs font-semibold hover:bg-[#003a72] disabled:opacity-60"
+        >
+          {isBusy && <Loader2 className="w-3 h-3 animate-spin" />}
+          Check In
+        </button>
+      )}
+
+      {canProceed && (
+        <button
+          type="button"
+          onClick={() => onProceed(patient)}
+          className="px-2.5 py-1 rounded-md border border-[#00488D] text-[#00488D] text-xs font-semibold hover:bg-blue-50"
+        >
+          Proceed
+        </button>
+      )}
+
+      {canCancel && (
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={() => onCancelRequest(patient)}
+          title="Cancel this appointment"
+          className="px-2.5 py-1 rounded-md border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50 disabled:opacity-60"
+        >
+          Cancel
+        </button>
+      )}
+    </div>
+  );
+}
+
+function PatientTable({
+  patients,
+  actionBusyId,
+  onCheckIn,
+  onProceed,
+  onCancelRequest,
+  onReschedule,
+  onBookFollowUp,
+  sortKey,
+  sortDir,
+  onSort,
+}: {
+  patients: Patient[];
+  sortKey: string | null;
+  sortDir: "asc" | "desc";
+  onSort: (key: string) => void;
+} & PatientActionProps) {
   return (
     <div className="overflow-x-auto px-5">
       <table className="w-full text-sm">
@@ -415,10 +797,23 @@ function PatientTable({ patients }: { patients: Patient[] }) {
             {COLUMNS.map((col) => (
               <th
                 key={col.key}
-                className="font-medium py-3 px-3 whitespace-nowrap select-none cursor-pointer"
+                aria-sort={
+                  sortKey === col.key
+                    ? sortDir === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : undefined
+                }
+                onClick={() => onSort(col.key)}
+                title={`Sort by ${col.label}`}
+                className="font-medium py-3 px-3 whitespace-nowrap select-none cursor-pointer hover:text-gray-600 transition-colors"
               >
                 {col.label}
-                <SortIcon />
+                <SortIcon
+                  direction={
+                    sortKey === col.key ? sortDir : null
+                  }
+                />
               </th>
             ))}
 
@@ -490,57 +885,22 @@ function PatientTable({ patients }: { patients: Patient[] }) {
                 </td>
 
                 <td className="py-3 px-3">
-                  <div className="flex items-center justify-end gap-3 text-gray-400">
-                    <button
-                      type="button"
-                      aria-label={`Edit ${patient.name}`}
-                      className="hover:text-blue-600"
-                    >
-                      <svg
-                        className="w-4 h-4"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path d="M12 20h9" />
-                        <path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
-                      </svg>
-                    </button>
-
-                    <button
-                      type="button"
-                      aria-label={`View ${patient.name}`}
-                      className="hover:text-blue-600"
-                    >
-                      <svg
-                        className="w-4 h-4"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </svg>
-                    </button>
-
-                    <button
-                      type="button"
-                      aria-label={`Delete ${patient.name}`}
-                      className="hover:text-red-500"
-                    >
-                      <svg
-                        className="w-4 h-4"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path d="M3 6h18" />
-                        <path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                      </svg>
-                    </button>
+                  <div className="flex items-center justify-end gap-1">
+                    <PatientActions
+                      patient={patient}
+                      actionBusyId={actionBusyId}
+                      onCheckIn={onCheckIn}
+                      onProceed={onProceed}
+                      onCancelRequest={onCancelRequest}
+                      onReschedule={onReschedule}
+                      onBookFollowUp={onBookFollowUp}
+                    />
+                    <AppointmentRowMenu
+                      patient={patient}
+                      onCancelRequest={onCancelRequest}
+                      onReschedule={onReschedule}
+                      onBookFollowUp={onBookFollowUp}
+                    />
                   </div>
                 </td>
               </tr>
@@ -614,70 +974,86 @@ function Pagination({
 }
 
 export default function AppointmentPage() {
+  const { toast } = useToast();
   const [view, setView] = useState<"grid" | "list">("grid");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+
+  // Column sorting (list view headers). null = unsorted, which keeps
+  // the fetch order (newest appointment date first).
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const handleSort = (key: string): void => {
+    setPage(1);
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  // Optional date filter — seeded from ?date=YYYY-MM-DD (the
+  // dashboard's "View All" links here with today's date).
+  // null = show every date. The key is a plain "YYYY-MM-DD"
+  // string in UTC convention — identical to how appointment_date
+  // is serialized — so chip, rows and URL can never disagree.
+  const [searchParams] = useSearchParams();
+  const [selectedDateKey, setSelectedDateKey] = useState<
+    string | null
+  >(() => {
+    const raw = searchParams.get("date");
+    return raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+  });
+  const [dateFilterOpen, setDateFilterOpen] = useState(false);
+
+  const handleSelectDate = (key: string | null) => {
+    setSelectedDateKey(key);
+    setPage(1);
+  };
 
   const [patients, setPatients] = useState<Patient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [loadErrorMsg, setLoadErrorMsg] = useState("");
 
-  // This page is the logged-in doctor's appointment list. It must only ever
-  // show patients booked with THAT doctor ("Senthil") -- never everyone
-  // else's. Resolve the doctor's employee_id from the employee list (name
-  // match on "senthil"), falling back to the logged-in user's own
-  // employee_id, then filter every GET /appointments call by it.
+  // This page shows ONLY the logged-in doctor's appointments. The doctor's
+  // employee_id comes from /auth/me (server truth — the same source the
+  // dashboard uses); the cached login snapshot is only a fallback. Branches
+  // come from /employees/me so bookings in any mapped branch are included
+  // (backend branchScope 403s multi-branch users unless a branch is sent).
   const [targetDoctorId, setTargetDoctorId] = useState<string | null>(null);
-  // The branches this user is actually mapped to (GET /employees/me →
-  // data.branches). A doctor's appointments can live in a branch OTHER than
-  // their primary one (Senthil's all sit in BRA005, his primary mapping is
-  // BRA004), and the backend branchScope 403s multi-branch users unless an
-  // explicit branch is sent -- so we must query every mapped branch.
+  // Every employee_id that belongs to this user account. Duplicate doctor
+  // rows can exist (documented), so ownership accepts any of them.
+  const [ownEmployeeIds, setOwnEmployeeIds] = useState<string[]>([]);
+  const [resolved, setResolved] = useState(false);
   const [branchIds, setBranchIds] = useState<string[] | null>(null);
+  // Display name for the Proceed hand-off ("consultedBy") and the
+  // booking form's locked doctor context.
+  const [doctorName, setDoctorName] = useState("");
 
   useEffect(() => {
     let cancelled = false;
 
     const resolveDoctorAndBranches = async () => {
       let doctorId: string | null = null;
+      let userId: string | null = null;
 
+      // Server truth first; cached snapshot is only a fallback.
       try {
-        const firstPage = await employeeApi.getAll({
-          roleType: "DOCTOR",
-          page: 1,
-          limit: 1000,
-        });
-        const firstData = firstPage.data?.data;
-        const remainingPages = Array.from(
-          { length: Math.max(0, (firstData?.totalPages ?? 1) - 1) },
-          (_, index) =>
-            employeeApi.getAll({
-              roleType: "DOCTOR",
-              page: index + 2,
-              limit: 1000,
-            }),
-        );
-        const remainingResults = await Promise.all(remainingPages);
-        const employees = [
-          ...(firstData?.employees ?? []),
-          ...remainingResults.flatMap((res) => res.data?.data?.employees ?? []),
-        ];
-
-        const senthil = employees.find((emp) =>
-          `${emp.first_name} ${emp.middle_name ?? ""} ${emp.last_name ?? ""}`
-            .toLowerCase()
-            .includes("senthil"),
-        );
-
-        doctorId = senthil?.employee_id ?? null;
+        const authMe = await doctorDashboardApi.getCurrentUser();
+        doctorId = authMe.data?.user?.employee_id ?? null;
+        userId = authMe.data?.user?.user_id ?? null;
       } catch (err) {
-        console.error("[AppointmentPage] Failed to resolve doctor:", err);
+        console.error(
+          "[AppointmentPage] /auth/me failed, falling back to session:",
+          err,
+        );
+        doctorId = getUser()?.employee_id ?? null;
       }
 
-      if (!cancelled) {
-        setTargetDoctorId(doctorId ?? getUser()?.employee_id ?? null);
-      }
+      let resolvedBranches: string[] | null = null;
 
       try {
         const me = await employeeApi.getMe();
@@ -685,14 +1061,82 @@ export default function AppointmentPage() {
           .filter((b) => b.status !== 0)
           .map((b) => b.branch_id)
           .filter((b): b is string => Boolean(b));
-        if (!cancelled) {
-          setBranchIds(branches.length > 0 ? [...new Set(branches)] : null);
-        }
+        resolvedBranches =
+          branches.length > 0 ? [...new Set(branches)] : null;
+
+        const meData = me.data?.data?.employee;
+        const nameParts = [
+          meData?.first_name,
+          meData?.middle_name,
+          meData?.last_name,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        if (nameParts) setDoctorName(`Dr. ${nameParts}`);
       } catch (err) {
         console.error("[AppointmentPage] Failed to resolve branches:", err);
-        if (!cancelled) {
-          setBranchIds(null);
+      }
+
+      if (!cancelled) {
+        setTargetDoctorId(doctorId);
+        setOwnEmployeeIds(doctorId ? [doctorId] : []);
+      }
+
+      // Duplicate-record safety net: gather every employee_id
+      // mapped to this user account so ownership checks can't
+      // be defeated by a stale/secondary doctor row.
+      if (userId && !cancelled) {
+        try {
+          const firstPage = await employeeApi.getAll({
+            roleType: "DOCTOR",
+            page: 1,
+            limit: 1000,
+          });
+          const firstData = firstPage.data?.data;
+          const remainingPages = Array.from(
+            { length: Math.max(0, (firstData?.totalPages ?? 1) - 1) },
+            (_, index) =>
+              employeeApi
+                .getAll({
+                  roleType: "DOCTOR",
+                  page: index + 2,
+                  limit: 1000,
+                })
+                .catch(() => null),
+          );
+          const remainingResults = await Promise.all(remainingPages);
+          const employees = [
+            ...(firstData?.employees ?? []),
+            ...remainingResults.flatMap(
+              (res) => res?.data?.data?.employees ?? [],
+            ),
+          ];
+
+          const matchedIds = employees
+            .filter(
+              (emp) =>
+                String((emp as any).user_id ?? "") ===
+                String(userId),
+            )
+            .map((emp) => emp.employee_id)
+            .filter(Boolean);
+
+          if (matchedIds.length > 0) {
+            setOwnEmployeeIds([
+              ...new Set([...(doctorId ? [doctorId] : []), ...matchedIds]),
+            ]);
+          }
+        } catch (err) {
+          console.error(
+            "[AppointmentPage] Duplicate employee-id scan failed:",
+            err,
+          );
         }
+      }
+
+      if (!cancelled) {
+        setBranchIds(resolvedBranches);
+        setResolved(true);
       }
     };
 
@@ -703,6 +1147,10 @@ export default function AppointmentPage() {
   }, []);
 
   const fetchAppointments = useCallback(async () => {
+    // Wait until the doctor/branch resolution finished — otherwise the
+    // first run fires with no filters and races the real one.
+    if (!resolved) return;
+
     try {
       setIsLoading(true);
       setLoadError(false);
@@ -715,6 +1163,38 @@ export default function AppointmentPage() {
       const primaryBranchId =
         getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
 
+      // Fetch every page for a branch so lists larger than one
+      // 100-row page are not silently truncated.
+      const fetchAllForBranch = async (
+        branchId: string | undefined,
+      ): Promise<AppointmentRecord[]> => {
+        const first = await appointmentApi.getAll({
+          branchId,
+          employeeId,
+          page: 1,
+          limit: 100,
+        });
+        const data = first.data?.data;
+        const items = data?.appointments ?? [];
+        const extraPages = Array.from(
+          { length: Math.max(0, (data?.totalPages ?? 1) - 1) },
+          (_, index) =>
+            appointmentApi
+              .getAll({
+                branchId,
+                employeeId,
+                page: index + 2,
+                limit: 100,
+              })
+              .catch(() => null),
+        );
+        const rest = await Promise.all(extraPages);
+        return [
+          ...items,
+          ...rest.flatMap((res) => res?.data?.data?.appointments ?? []),
+        ];
+      };
+
       let appointments: AppointmentRecord[] = [];
 
       if (branchIds && branchIds.length > 0) {
@@ -722,19 +1202,12 @@ export default function AppointmentPage() {
         // so appointments booked in a non-primary branch are not missed.
         const results = await Promise.all(
           branchIds.map((branchId) =>
-            appointmentApi
-              .getAll({
-                branchId,
-                employeeId,
-                page: 1,
-                limit: 100,
-              })
-              .catch(() => null),
+            fetchAllForBranch(branchId).catch(() => []),
           ),
         );
         const seen = new Set<string>();
-        for (const res of results) {
-          for (const appointment of res?.data?.data?.appointments ?? []) {
+        for (const branchAppointments of results) {
+          for (const appointment of branchAppointments) {
             if (!seen.has(appointment.appointment_id)) {
               seen.add(appointment.appointment_id);
               appointments.push(appointment);
@@ -742,29 +1215,22 @@ export default function AppointmentPage() {
           }
         }
       } else {
-        const res = await appointmentApi.getAll({
-          branchId: primaryBranchId,
-          employeeId,
-          page: 1,
-          limit: 100,
-        });
-        appointments = res.data?.data?.appointments ?? [];
+        appointments = await fetchAllForBranch(primaryBranchId);
       }
 
-      // Belt and braces: even if the employee_id filter is missed (e.g.
-      // doctor_name stored differently), never surface another doctor's
-      // patient on this page.
-      const senthilAppointments = appointments
+      // Only this doctor's appointments, newest date first.
+      const ownAppointments = appointments
         .filter(
           (a) =>
-            (a.doctor_name ?? "").toLowerCase().includes("senthil") ||
-            (employeeId != null && a.employees?.employee_id === employeeId),
+            ownEmployeeIds.includes(
+              a.employees?.employee_id ?? "",
+            ),
         )
         .sort((x, y) =>
           (y.appointment_date ?? "").localeCompare(x.appointment_date ?? ""),
         );
 
-      setPatients(senthilAppointments.map(toPatient));
+      setPatients(ownAppointments.map(toPatient));
     } catch (err: any) {
       console.error(
         "[AppointmentPage] Failed to load appointments:",
@@ -779,21 +1245,301 @@ export default function AppointmentPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [targetDoctorId, branchIds]);
+  }, [resolved, targetDoctorId, branchIds, ownEmployeeIds]);
 
   useEffect(() => {
     fetchAppointments();
   }, [fetchAppointments]);
 
-  const filtered = useMemo(
-    () =>
-      patients.filter((p) =>
-        `${p.name} ${p.patientCode}`
-          .toLowerCase()
-          .includes(search.toLowerCase())
-      ),
-    [patients, search]
-  );
+  /* =======================================================
+     ROW ACTIONS
+     ======================================================= */
+
+  const navigate = useNavigate();
+
+  const [actionBusyId, setActionBusyId] = useState<
+    string | null
+  >(null);
+  const [cancelTarget, setCancelTarget] =
+    useState<Patient | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+
+  const handleCheckIn = async (
+    patient: Patient,
+  ): Promise<void> => {
+    try {
+      setActionBusyId(patient.id);
+      await appointmentApi.updateStatus(
+        patient.id,
+        "IN_CONSULTATION",
+      );
+      // Same flow as the dashboard card: checking in also
+      // opens the clinical encounter.
+      await encounterApi.create({
+        appointment_id: patient.id,
+      });
+      await fetchAppointments();
+    } catch (err: any) {
+      toast({
+        title: "Failed to check in patient",
+        description:
+          err?.response?.data?.message ||
+          err?.message ||
+          "Something went wrong.",
+        variant: "destructive",
+      });
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
+  const handleProceed = (patient: Patient): void => {
+    navigate("/doctor/patient-consultation", {
+      state: {
+        patientId: patient.patientId,
+        appointmentId: patient.id,
+        branchId:
+          getActiveBranchId() ?? getUser()?.branch_id ?? undefined,
+        appointmentDate: patient.appointmentDateRaw,
+        appointmentTime: patient.appointmentTimeRaw,
+        consultedBy: doctorName || getUser()?.name || "",
+      },
+    });
+  };
+
+  const handleCancelAppointment = async (): Promise<void> => {
+    if (!cancelTarget) return;
+
+    try {
+      setCancelling(true);
+      await appointmentApi.cancel(
+        cancelTarget.id,
+        "Cancelled by doctor from appointments page",
+      );
+      setCancelTarget(null);
+      toast({
+        title: "Appointment cancelled",
+        description: "The slot has been released.",
+      });
+      await fetchAppointments();
+    } catch (err: any) {
+      toast({
+        title: "Failed to cancel appointment",
+        description:
+          err?.response?.data?.message ||
+          err?.message ||
+          "Something went wrong.",
+        variant: "destructive",
+      });
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  /* =======================================================
+     BOOK / RESCHEDULE NAVIGATION
+     ======================================================= */
+
+  // The logged-in doctor's identity for the booking form, which locks
+  // the doctor field to whoever is signed in.
+  const primaryDoctorId =
+    ownEmployeeIds[0] ??
+    targetDoctorId ??
+    getUser()?.employee_id ??
+    undefined;
+
+  const buildBookingState = (patient?: Patient) => ({
+    doctorBooking: primaryDoctorId
+      ? {
+          doctorId: primaryDoctorId,
+          branchId:
+            getActiveBranchId() ??
+            getUser()?.branch_id ??
+            branchIds?.[0],
+        }
+      : undefined,
+    ...(patient
+      ? {
+          patient: {
+            patient_id: patient.patientId,
+            patient_first_name: patient.name.split(" ")[0] || patient.name,
+            patient_middle_name:
+              patient.name.split(" ").length > 2
+                ? patient.name.split(" ").slice(1, -1).join(" ")
+                : null,
+            patient_last_name:
+              patient.name.split(" ").length > 1
+                ? patient.name.split(" ").slice(-1)[0]
+                : null,
+            patient_primary_mobile:
+              patient.phone && patient.phone !== "—" ? patient.phone : null,
+          },
+        }
+      : {}),
+  });
+
+  const handleBookNew = (): void => {
+    navigate("/doctor/appointments/add", {
+      state: buildBookingState(),
+    });
+  };
+
+  const handleBookFollowUp = (patient: Patient): void => {
+    navigate("/doctor/appointments/add", {
+      state: buildBookingState(patient),
+    });
+  };
+
+  const handleReschedule = (patient: Patient): void => {
+    navigate(`/doctor/appointments/edit/${patient.id}`);
+  };
+
+  /* =======================================================
+     HEADER NOTIFICATIONS
+     ======================================================= */
+
+  const [notificationsOpen, setNotificationsOpen] =
+    useState(false);
+  const [notifications, setNotifications] = useState<
+    DoctorNotificationItem[]
+  >([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const notificationRef = useRef<HTMLDivElement>(null);
+
+  const bellEmployeeId =
+    targetDoctorId ?? getUser()?.employee_id ?? null;
+
+  useEffect(() => {
+    if (!bellEmployeeId) return;
+
+    let cancelled = false;
+
+    const load = () => {
+      doctorDashboardApi
+        .getNotifications(bellEmployeeId)
+        .then((res) => {
+          if (cancelled) return;
+          setNotifications(
+            res.data?.data?.notifications ?? []
+          );
+          setUnreadCount(
+            res.data?.data?.unreadCount ?? 0
+          );
+        })
+        .catch(() => {});
+    };
+
+    load();
+    const intervalId = window.setInterval(load, 10000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [bellEmployeeId]);
+
+  // Opening the panel clears unread state (server + badge).
+  useEffect(() => {
+    if (
+      notificationsOpen &&
+      unreadCount > 0 &&
+      bellEmployeeId
+    ) {
+      setUnreadCount(0);
+      doctorDashboardApi
+        .markNotificationsRead(bellEmployeeId)
+        .catch(() => {});
+    }
+  }, [notificationsOpen, unreadCount, bellEmployeeId]);
+
+  useEffect(() => {
+    const handleClick = (event: MouseEvent) => {
+      if (
+        !notificationRef.current?.contains(
+          event.target as Node,
+        )
+      ) {
+        setNotificationsOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClick);
+    return () =>
+      document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  function timeAgo(iso: string): string {
+    const then = new Date(iso).getTime();
+    if (Number.isNaN(then)) return "";
+
+    const seconds = Math.max(
+      0,
+      Math.floor((Date.now() - then) / 1000),
+    );
+
+    if (seconds < 60) return "Just now";
+
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  }
+
+  /* =======================================================
+     FILTERS
+     ======================================================= */
+
+  const [statusFilter, setStatusFilter] = useState("");
+
+  const shiftDateBy = (days: number): void => {
+    const base = selectedDateKey ?? todayIso();
+    handleSelectDate(shiftIsoDay(base, days));
+  };
+
+  const jumpToToday = (): void => {
+    handleSelectDate(todayIso());
+  };
+
+  const filtered = useMemo(() => {
+    const matches = patients.filter((p) => {
+      const matchesSearch = `${p.name} ${p.patientCode}`
+        .toLowerCase()
+        .includes(search.toLowerCase());
+      const matchesDate =
+        !selectedDateKey || p.appointmentDateRaw === selectedDateKey;
+      const matchesStatus =
+        !statusFilter || p.originalStatus === statusFilter;
+      return matchesSearch && matchesDate && matchesStatus;
+    });
+
+    if (!sortKey) return matches;
+
+    // Unsorted state keeps the fetch order (newest date first); every
+    // column sort runs client-side on the already-fetched list.
+    const factor = sortDir === "asc" ? 1 : -1;
+    const compare = (a: Patient, b: Patient): number => {
+      switch (sortKey) {
+        case "age":
+          return (a.age ?? -1) - (b.age ?? -1);
+        case "appointmentDate":
+          return `${a.appointmentDateRaw} ${a.appointmentTimeRaw}`.localeCompare(
+            `${b.appointmentDateRaw} ${b.appointmentTimeRaw}`,
+          );
+        case "status":
+          return a.originalStatus.localeCompare(b.originalStatus);
+        default: {
+          const key = sortKey as keyof Patient;
+          return String(a[key] ?? "").localeCompare(String(b[key] ?? ""));
+        }
+      }
+    };
+
+    return [...matches].sort((a, b) => compare(a, b) * factor);
+  }, [patients, search, selectedDateKey, statusFilter, sortKey, sortDir]);
 
   const totalPages = Math.max(
     1,
@@ -822,43 +1568,198 @@ export default function AppointmentPage() {
         <div className="flex items-center gap-4">
           <button
             type="button"
-            aria-label="Notifications"
-            className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500"
+            onClick={handleBookNew}
+            className="flex items-center gap-1.5 h-[27px] px-3 rounded-lg bg-[#00488D] text-white text-xs font-semibold hover:bg-[#003a72] transition-colors"
           >
-            <svg
-              className="w-5 h-5"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-            >
-              <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.7 21a2 2 0 01-3.4 0" />
-            </svg>
+            <Plus className="w-3.5 h-3.5" />
+            Book Appointment
           </button>
+
+          <div className="relative" ref={notificationRef}>
+            <button
+              type="button"
+              aria-label="Notifications"
+              onClick={() =>
+                setNotificationsOpen((value) => !value)
+              }
+              className="relative w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500"
+            >
+              <svg
+                className="w-5 h-5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              >
+                <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.7 21a2 2 0 01-3.4 0" />
+              </svg>
+
+              {unreadCount > 0 && (
+                <span className="absolute top-0 right-0 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-bold leading-none text-white">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {notificationsOpen && (
+              <div className="absolute right-0 top-12 z-50 w-[300px] rounded-xl border border-gray-200 bg-white p-4 shadow-xl">
+                <h3 className="mb-2 text-sm font-semibold text-gray-800">
+                  Notifications
+                </h3>
+
+                {notifications.length === 0 ? (
+                  <div className="py-5 text-center text-xs text-gray-400">
+                    No new notifications
+                  </div>
+                ) : (
+                  <div className="max-h-[300px] overflow-y-auto">
+                    {notifications.map(
+                      (item, index) => {
+                        const patientBio =
+                          item.appointment_history
+                            ?.patient_bio_data;
+                        const patientName =
+                          [
+                            patientBio?.patient_first_name,
+                            patientBio?.patient_middle_name,
+                            patientBio?.patient_last_name,
+                          ]
+                            .filter(Boolean)
+                            .join(" ") || "A patient";
+
+                        const isBooking =
+                          item.notification_type ===
+                          "BOOKING";
+
+                        return (
+                          <div
+                            key={item.notification_id}
+                            className={`py-2.5 text-xs text-gray-600 ${
+                              index <
+                              notifications.length - 1
+                                ? "border-b border-gray-100"
+                                : ""
+                            }`}
+                          >
+                            <p className="leading-4">
+                              {item.status === "UNREAD" && (
+                                <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-blue-500 align-middle" />
+                              )}
+                              {isBooking ? (
+                                <>
+                                  <span className="font-semibold text-gray-800">
+                                    {patientName}
+                                  </span>{" "}
+                                  booked an appointment
+                                  {item.appointment_history
+                                    ? ` for ${new Date(
+                                        item.appointment_history.appointment_date,
+                                      ).toLocaleDateString("en-GB")}`
+                                    : ""}
+                                  .
+                                </>
+                              ) : (
+                                <>
+                                  <span className="font-semibold text-gray-800">
+                                    {patientName}
+                                  </span>{" "}
+                                  checked in.
+                                </>
+                              )}
+                            </p>
+
+                            <span className="text-[10px] text-gray-400">
+                              {timeAgo(item.created_at)}
+                            </span>
+                          </div>
+                        );
+                      },
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           <span className="h-6 w-px bg-gray-200" />
 
-          <span className="flex items-center gap-2 h-[27px] px-3 border border-[#E5E7EB] rounded-lg bg-white text-xs font-medium text-[#424752]">
-            <svg
-              className="w-4 h-4"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-            >
-              <rect
-                x="3"
-                y="4"
-                width="18"
-                height="17"
-                rx="2"
-              />
-              <path d="M3 9h18M8 2v4M16 2v4" />
-            </svg>
+          <Popover open={dateFilterOpen} onOpenChange={setDateFilterOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className={`flex items-center gap-2 h-[27px] px-3 border rounded-lg bg-white text-xs font-medium transition-colors ${
+                  selectedDateKey
+                    ? "border-[#003d9b] text-[#003d9b]"
+                    : "border-[#E5E7EB] text-[#424752] hover:border-[#003d9b]"
+                }`}
+              >
+                <svg
+                  className="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                >
+                  <rect
+                    x="3"
+                    y="4"
+                    width="18"
+                    height="17"
+                    rx="2"
+                  />
+                  <path d="M3 9h18M8 2v4M16 2v4" />
+                </svg>
 
-            August 12, 2026
-          </span>
+                {selectedDateKey
+                  ? isoToPickerDate(selectedDateKey).toLocaleDateString(
+                      "en-GB",
+                      {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      },
+                    )
+                  : "All dates"}
+              </button>
+            </PopoverTrigger>
+
+            <PopoverContent
+              align="end"
+              className="w-auto border-[#E5E7EB] p-0 shadow-lg"
+            >
+              <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                  Filter by date
+                </span>
+                {selectedDateKey && (
+                  <button
+                    type="button"
+                    onClick={() => handleSelectDate(null)}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline"
+                  >
+                    <X className="w-3 h-3" />
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              <CalendarPicker
+                selected={
+                  selectedDateKey
+                    ? isoToPickerDate(selectedDateKey)
+                    : null
+                }
+                hideThemePicker
+                onSelect={(date) => {
+                  if (date instanceof Date) {
+                    handleSelectDate(pickerDateToKey(date));
+                    setDateFilterOpen(false);
+                  }
+                }}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
@@ -870,6 +1771,14 @@ export default function AppointmentPage() {
           search={search}
           onSearchChange={(value) => {
             setSearch(value);
+            setPage(1);
+          }}
+          selectedDateKey={selectedDateKey}
+          onShiftDate={shiftDateBy}
+          onJumpToToday={jumpToToday}
+          statusFilter={statusFilter}
+          onStatusFilterChange={(status) => {
+            setStatusFilter(status);
             setPage(1);
           }}
         />
@@ -896,15 +1805,44 @@ export default function AppointmentPage() {
                 <PatientCard
                   key={patient.id}
                   patient={patient}
+                  actionBusyId={actionBusyId}
+                  onCheckIn={handleCheckIn}
+                  onProceed={handleProceed}
+                  onCancelRequest={setCancelTarget}
+                  onReschedule={handleReschedule}
+                  onBookFollowUp={handleBookFollowUp}
                 />
               ))}
             </div>
           ) : (
-            <PatientTable patients={pageItems} />
+            <PatientTable
+              patients={pageItems}
+              actionBusyId={actionBusyId}
+              onCheckIn={handleCheckIn}
+              onProceed={handleProceed}
+              onCancelRequest={setCancelTarget}
+              onReschedule={handleReschedule}
+              onBookFollowUp={handleBookFollowUp}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+            />
           )
         ) : (
           <div className="text-center text-sm text-gray-500 py-10">
-            No patients match "{search}".
+            {selectedDateKey
+              ? `No appointments on ${isoToPickerDate(
+                  selectedDateKey,
+                ).toLocaleDateString("en-GB", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                })}${
+                  search ? ` matching "${search}"` : ""
+                }. Clear the date filter to see all.`
+              : search
+              ? `No patients match "${search}".`
+              : "No appointments found."}
           </div>
         )}
 
@@ -922,6 +1860,19 @@ export default function AppointmentPage() {
           />
         )}
       </div>
+
+      <ConfirmationDialog
+        open={!!cancelTarget}
+        title="Cancel this appointment?"
+        description={`Cancel ${
+          cancelTarget?.name ?? "this patient"
+        }'s appointment? The slot will be released and the patient marked as cancelled.`}
+        confirmText="Yes, cancel it"
+        cancelText="Keep appointment"
+        loading={cancelling}
+        onConfirm={handleCancelAppointment}
+        onCancel={() => setCancelTarget(null)}
+      />
     </div>
   );
 }

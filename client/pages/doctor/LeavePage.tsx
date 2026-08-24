@@ -1,4 +1,30 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { format } from "date-fns";
+import { CalendarDays, CheckCircle2, Loader2 } from "lucide-react";
+import API from "@/api/axios";
+import {
+  doctorLeaveApi,
+  type ApplyDoctorLeavePayload,
+  type DoctorLeaveRecord,
+} from "@/api/doctorLeave.api";
+import { getUser } from "@/utils/token";
+import {
+  findLeaveConflictingAppointments,
+  formatTimeOfDay,
+  type LeaveConflict,
+} from "@/utils/leaveConflicts";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import CalendarPicker from "@/components/hms/Calender";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 
 type AbsenceType = "Emergency" | "Vacation" | "Sick Leave";
 
@@ -8,11 +34,27 @@ interface AbsenceTypeOption {
   className: string;
 }
 
-interface LoggedAbsence {
-  type: AbsenceType;
+interface LoggedAbsenceRow {
+  leaveId: string;
+  type: string;
   duration: string;
-  date: string;
-  icon: string;
+  status: string;
+  dateLogged: string;
+}
+
+const STATUS_BADGE_STYLES: Record<string, string> = {
+  PENDING: "bg-[#fff7ed] text-[#b45309]",
+  APPROVED: "bg-[#f0fdf4] text-[#16a34a]",
+  REJECTED: "bg-[#fef2f2] text-[#dc2626]",
+};
+
+function startOfToday(): Date {
+  const now = new Date();
+  return new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  );
 }
 
 interface ChecklistState {
@@ -26,8 +68,17 @@ const AbsenceManagement: React.FC = () => {
   const [selectedType, setSelectedType] =
     useState<AbsenceType>("Emergency");
 
-  const [startDate, setStartDate] = useState<string>("");
-  const [endDate, setEndDate] = useState<string>("");
+  const [startDate, setStartDate] =
+    useState<Date | null>(null);
+  const [endDate, setEndDate] = useState<Date | null>(
+    null
+  );
+  const [
+    isStartCalendarOpen,
+    setIsStartCalendarOpen,
+  ] = useState<boolean>(false);
+  const [isEndCalendarOpen, setIsEndCalendarOpen] =
+    useState<boolean>(false);
   const [handoverDetails, setHandoverDetails] =
     useState<string>("");
 
@@ -40,6 +91,27 @@ const AbsenceManagement: React.FC = () => {
     });
 
   const [toast, setToast] = useState<string>("");
+
+  const [leaveConfirmOpen, setLeaveConfirmOpen] =
+    useState<boolean>(false);
+  const [leaveSuccessOpen, setLeaveSuccessOpen] =
+    useState<boolean>(false);
+  const [submittingLeave, setSubmittingLeave] =
+    useState<boolean>(false);
+  const [leaveSuccessInfo, setLeaveSuccessInfo] = useState<{
+    type: AbsenceType;
+    from: string;
+    to: string;
+    leaveId?: string;
+    queuedCount?: number;
+    queueFailed?: boolean;
+  } | null>(null);
+  const [leaveConflicts, setLeaveConflicts] = useState<
+    LeaveConflict[]
+  >([]);
+  const [leaveConflictsOpen, setLeaveConflictsOpen] =
+    useState<boolean>(false);
+  const employeeIdRef = useRef<string | null>(null);
 
   const absenceTypes: AbsenceTypeOption[] = [
     {
@@ -59,26 +131,151 @@ const AbsenceManagement: React.FC = () => {
     },
   ];
 
-  const loggedAbsences: LoggedAbsence[] = [
-    {
-      type: "Vacation",
-      duration: "Oct 12 - Oct 15 (4 Days)",
-      date: "Sep 28, 2023",
-      icon: "https://www.figma.com/api/mcp/asset/d82072ef-6a79-44c2-bac8-fc24ec98ebe7.svg",
-    },
-    {
-      type: "Sick Leave",
-      duration: "Sep 05 - Sep 06 (2 Days)",
-      date: "Sep 05, 2023",
-      icon: "https://www.figma.com/api/mcp/asset/e0afd6f3-107f-4eaa-b336-b59cfe32ccb5.svg",
-    },
-    {
-      type: "Emergency",
-      duration: "Aug 20 (1 Day)",
-      date: "Aug 20, 2023",
-      icon: "https://www.figma.com/api/mcp/asset/5f848e32-7a8d-43ff-932a-89192bc8307f.svg",
-    },
+  const [absences, setAbsences] = useState<
+    LoggedAbsenceRow[]
+  >([]);
+  const [absencesLoading, setAbsencesLoading] =
+    useState<boolean>(true);
+
+  /*
+   * =========================================================
+   * LOGGED ABSENCES HELPERS
+   * =========================================================
+   */
+
+  const MONTHS_SHORT = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
   ];
+
+  const parseDateSafe = (
+    value?: string | null
+  ): Date | null => {
+    if (!value) {
+      return null;
+    }
+
+    const parsed = new Date(value);
+
+    return isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const formatDateLogged = (
+    value?: string | null
+  ): string => {
+    const parsed = parseDateSafe(value);
+    return parsed
+      ? `${
+          MONTHS_SHORT[parsed.getUTCMonth()]
+        } ${parsed.getUTCDate()}, ${parsed.getUTCFullYear()}`
+      : "-";
+  };
+
+  const deriveAbsenceType = (reason: string): string => {
+    const lower = (reason || "").toLowerCase();
+
+    if (lower.startsWith("emergency")) {
+      return "Emergency";
+    }
+
+    if (lower.startsWith("vacation")) {
+      return "Vacation";
+    }
+
+    if (lower.startsWith("sick")) {
+      return "Sick Leave";
+    }
+
+    return "Leave";
+  };
+
+  const absenceIconByType = (type: string): string =>
+    absenceTypes.find(
+      (option: AbsenceTypeOption) =>
+        option.name === type
+    )?.icon ?? absenceTypes[0].icon;
+
+  const formatDurationRange = (
+    startValue: string,
+    endValue: string
+  ): string => {
+    const start = parseDateSafe(startValue);
+    const end = parseDateSafe(endValue);
+
+    if (!start || !end) {
+      return "-";
+    }
+
+    const days =
+      Math.round(
+        (end.getTime() - start.getTime()) / 86400000
+      ) + 1;
+
+    const startLabel = `${
+      MONTHS_SHORT[start.getUTCMonth()]
+    } ${start.getUTCDate()}`;
+
+    const endLabel = `${
+      MONTHS_SHORT[end.getUTCMonth()]
+    } ${end.getUTCDate()}`;
+
+    if (days <= 1) {
+      return `${startLabel} (1 Day)`;
+    }
+
+    return `${startLabel} - ${endLabel} (${days} Days)`;
+  };
+
+  const toAbsenceRow = (
+    leave: DoctorLeaveRecord
+  ): LoggedAbsenceRow => ({
+    leaveId: leave.leave_id,
+    type: deriveAbsenceType(leave.leave_reason),
+    duration: formatDurationRange(
+      leave.leave_start_date,
+      leave.leave_end_date
+    ),
+    status: leave.status,
+    dateLogged: formatDateLogged(leave.requested_at),
+  });
+
+  const loadAbsences = useCallback(
+    async (): Promise<void> => {
+      try {
+        setAbsencesLoading(true);
+
+        const employeeId =
+          await resolveEmployeeId();
+
+        if (!employeeId) {
+          setAbsences([]);
+          return;
+        }
+
+        const response = await doctorLeaveApi.getAll({
+          employee_id: employeeId,
+          page: 1,
+          limit: 50,
+        });
+
+        const leaves: DoctorLeaveRecord[] =
+          response.data?.leaves ?? [];
+
+        setAbsences(
+          leaves.map(toAbsenceRow)
+        );
+      } catch {
+        setAbsences([]);
+      } finally {
+        setAbsencesLoading(false);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    loadAbsences();
+  }, [loadAbsences]);
 
   /*
    * =========================================================
@@ -96,40 +293,6 @@ const AbsenceManagement: React.FC = () => {
 
   /*
    * =========================================================
-   * DATE FORMATTER
-   * =========================================================
-   */
-
-  const formatDate = (value: string): string => {
-    let numbers = value.replace(/\D/g, "");
-
-    if (numbers.length > 8) {
-      numbers = numbers.substring(0, 8);
-    }
-
-    if (numbers.length >= 5) {
-      return (
-        numbers.substring(0, 2) +
-        "/" +
-        numbers.substring(2, 4) +
-        "/" +
-        numbers.substring(4)
-      );
-    }
-
-    if (numbers.length >= 3) {
-      return (
-        numbers.substring(0, 2) +
-        "/" +
-        numbers.substring(2)
-      );
-    }
-
-    return numbers;
-  };
-
-  /*
-   * =========================================================
    * FORM SUBMIT
    * =========================================================
    */
@@ -139,19 +302,204 @@ const AbsenceManagement: React.FC = () => {
   ): void => {
     event.preventDefault();
 
-    if (!startDate.trim()) {
-      showToast("Please enter the start date.");
+    if (!startDate) {
+      showToast("Please select the start date.");
       return;
     }
 
-    if (!endDate.trim()) {
-      showToast("Please enter the end date.");
+    if (!endDate) {
+      showToast("Please select the end date.");
       return;
     }
 
-    showToast(
-      `${selectedType} absence confirmed successfully.`
-    );
+    if (endDate < startDate) {
+      showToast("End date cannot be before start date.");
+      return;
+    }
+
+    setLeaveConfirmOpen(true);
+  };
+
+  /*
+   * =========================================================
+   * LEAVE SUBMISSION (API)
+   * =========================================================
+   */
+
+  const toIsoDate = (date: Date): string =>
+    format(date, "yyyy-MM-dd");
+
+  const resolveEmployeeId = async (): Promise<string | null> => {
+    const stored = getUser()?.employee_id;
+
+    if (stored) {
+      return String(stored);
+    }
+
+    try {
+      const response = await API.get<{
+        user?: { employee_id?: string | null };
+      }>("/auth/me");
+
+      return response.data?.user?.employee_id ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  const resetAbsenceForm = (): void => {
+    setSelectedType("Emergency");
+    setStartDate(null);
+    setEndDate(null);
+    setHandoverDetails("");
+  };
+
+  const doApplyLeave = async (): Promise<void> => {
+    try {
+      setSubmittingLeave(true);
+
+      if (!startDate || !endDate) {
+        setLeaveConfirmOpen(false);
+        showToast("Please select the leave dates.");
+        return;
+      }
+
+      const isoStart = toIsoDate(startDate);
+      const isoEnd = toIsoDate(endDate);
+
+      const employeeId = await resolveEmployeeId();
+
+      if (!employeeId) {
+        setLeaveConfirmOpen(false);
+        showToast(
+          "Could not determine your employee ID. Please log in again."
+        );
+        return;
+      }
+
+      employeeIdRef.current = employeeId;
+
+      // Check for booked appointments inside the leave
+      // range before actually applying.
+      const conflicts =
+        await findLeaveConflictingAppointments(
+          employeeId,
+          isoStart,
+          isoEnd
+        );
+
+      setLeaveConfirmOpen(false);
+
+      if (conflicts.length > 0) {
+        setLeaveConflicts(conflicts);
+        setLeaveConflictsOpen(true);
+        return;
+      }
+
+      await applyLeaveNow(employeeId, false);
+    } catch (error: any) {
+      showToast(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to check appointments for this leave period."
+      );
+    } finally {
+      setSubmittingLeave(false);
+    }
+  };
+
+  const applyLeaveNow = async (
+    employeeId: string,
+    queueConflicts: boolean
+  ): Promise<void> => {
+    try {
+      setSubmittingLeave(true);
+
+      if (!startDate || !endDate) {
+        setLeaveConflictsOpen(false);
+        showToast("Please select the leave dates.");
+        return;
+      }
+
+      const isoStart = toIsoDate(startDate);
+      const isoEnd = toIsoDate(endDate);
+
+      const handover = handoverDetails.trim();
+
+      const leaveReason =
+        (
+          `${selectedType} absence.` +
+          (handover ? ` Handover notes: ${handover}` : "")
+        ).slice(0, 500);
+
+      const payload: ApplyDoctorLeavePayload = {
+        leave_start_date: isoStart,
+        leave_end_date: isoEnd,
+        leave_reason: leaveReason,
+        requested_by: getUser()?.user_id ?? "",
+      };
+
+      const response = await doctorLeaveApi.apply(
+        employeeId,
+        payload
+      );
+
+      if (response.data?.success === false) {
+        throw new Error(
+          response.data.message || "Failed to apply leave."
+        );
+      }
+
+      let queuedCount: number | undefined;
+      let queueFailed = false;
+
+      if (queueConflicts) {
+        try {
+          const queueResponse =
+            await doctorLeaveApi.queueReschedule(
+              employeeId,
+              {
+                date_from: isoStart,
+                date_to: isoEnd,
+                reason: `${selectedType} absence`,
+              }
+            );
+          queuedCount = queueResponse.data?.data?.queued;
+        } catch (queueError: any) {
+          console.error(
+            "Reschedule queueing failed:",
+            queueError
+          );
+          queueFailed = true;
+        }
+      }
+
+      setLeaveSuccessInfo({
+        type: selectedType,
+        from: format(startDate, "dd/MM/yyyy"),
+        to: format(endDate, "dd/MM/yyyy"),
+        leaveId: response.data?.leave?.leave_id,
+        queuedCount,
+        queueFailed,
+      });
+
+      setLeaveConflictsOpen(false);
+      setLeaveSuccessOpen(true);
+
+      resetAbsenceForm();
+      loadAbsences();
+    } catch (error: any) {
+      setLeaveConfirmOpen(false);
+      setLeaveConflictsOpen(false);
+
+      showToast(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to apply for leave."
+      );
+    } finally {
+      setSubmittingLeave(false);
+    }
   };
 
   /*
@@ -162,8 +510,8 @@ const AbsenceManagement: React.FC = () => {
 
   const handleCancel = (): void => {
     setSelectedType("Emergency");
-    setStartDate("");
-    setEndDate("");
+    setStartDate(null);
+    setEndDate(null);
     setHandoverDetails("");
 
     showToast("Form cleared.");
@@ -191,27 +539,30 @@ const AbsenceManagement: React.FC = () => {
    */
 
   const handleDownload = (): void => {
+    if (absences.length === 0) {
+      showToast("No absences logged yet.");
+      return;
+    }
+
     const archive: string[][] = [
       [
+        "Leave ID",
         "Absence Type",
         "Duration",
+        "Status",
         "Date Logged",
       ],
-      [
-        "Vacation",
-        "Oct 12 - Oct 15 (4 Days)",
-        "Sep 28, 2023",
-      ],
-      [
-        "Sick Leave",
-        "Sep 05 - Sep 06 (2 Days)",
-        "Sep 05, 2023",
-      ],
-      [
-        "Emergency",
-        "Aug 20 (1 Day)",
-        "Aug 20, 2023",
-      ],
+      ...absences.map(
+        (
+          absence: LoggedAbsenceRow
+        ): string[] => [
+          absence.leaveId,
+          absence.type,
+          absence.duration,
+          absence.status,
+          absence.dateLogged,
+        ]
+      ),
     ];
 
     const csv: string = archive
@@ -468,40 +819,75 @@ const AbsenceManagement: React.FC = () => {
                         START DATE
                       </label>
 
-                      <input
-                        id="startDate"
-                        type="text"
-                        value={startDate}
-                        maxLength={10}
-                        placeholder="mm/dd/yyyy"
-                        autoComplete="off"
-                        onChange={(
-                          event: React.ChangeEvent<HTMLInputElement>
-                        ) =>
-                          setStartDate(
-                            formatDate(
-                              event.target.value
-                            )
-                          )
+                      <Popover
+                        open={isStartCalendarOpen}
+                        onOpenChange={
+                          setIsStartCalendarOpen
                         }
-                        className="
-                          h-[50px]
-                          w-full
-                          rounded-[2px]
-                          border
-                          border-[#c3c6d5]
-                          bg-white
-                          px-[13px]
-                          text-[16px]
-                          leading-6
-                          text-[#191c1d]
-                          outline-none
-                          placeholder:text-[#191c1d]
-                          focus:border-[#00327d]
-                          focus:ring-1
-                          focus:ring-[#00327d]
-                        "
-                      />
+                      >
+                        <PopoverTrigger asChild>
+                          <button
+                            type="button"
+                            className="
+                              flex
+                              h-[50px]
+                              w-full
+                              items-center
+                              justify-between
+                              rounded-[2px]
+                              border
+                              border-[#c3c6d5]
+                              bg-white
+                              px-[13px]
+                              text-[16px]
+                              leading-6
+                              text-[#191c1d]
+                              outline-none
+                              transition
+                              hover:border-[#00327d]
+                              focus:border-[#00327d]
+                              focus:ring-1
+                              focus:ring-[#00327d]
+                            "
+                          >
+                            <span
+                              className={
+                                startDate
+                                  ? ""
+                                  : "text-[#6b7280]"
+                              }
+                            >
+                              {startDate
+                                ? format(
+                                    startDate,
+                                    "dd/MM/yyyy"
+                                  )
+                                : "Select date"}
+                            </span>
+
+                            <CalendarDays className="size-[18px] shrink-0 text-[#434653]" />
+                          </button>
+                        </PopoverTrigger>
+
+                        <PopoverContent
+                          align="start"
+                          className="w-auto border-[#c3c6d5] p-0 shadow-lg"
+                        >
+                          <CalendarPicker
+                            selected={startDate}
+                            hideThemePicker
+                            minDate={startOfToday()}
+                            onSelect={(date) => {
+                              if (date instanceof Date) {
+                                setStartDate(date);
+                                setIsStartCalendarOpen(
+                                  false
+                                );
+                              }
+                            }}
+                          />
+                        </PopoverContent>
+                      </Popover>
 
                     </div>
 
@@ -517,40 +903,75 @@ const AbsenceManagement: React.FC = () => {
                         END DATE
                       </label>
 
-                      <input
-                        id="endDate"
-                        type="text"
-                        value={endDate}
-                        maxLength={10}
-                        placeholder="mm/dd/yyyy"
-                        autoComplete="off"
-                        onChange={(
-                          event: React.ChangeEvent<HTMLInputElement>
-                        ) =>
-                          setEndDate(
-                            formatDate(
-                              event.target.value
-                            )
-                          )
-                        }
-                        className="
-                          h-[50px]
-                          w-full
-                          rounded-[2px]
-                          border
-                          border-[#c3c6d5]
-                          bg-white
-                          px-[13px]
-                          text-[16px]
-                          leading-6
-                          text-[#191c1d]
-                          outline-none
-                          placeholder:text-[#191c1d]
-                          focus:border-[#00327d]
-                          focus:ring-1
-                          focus:ring-[#00327d]
-                        "
-                      />
+                      <Popover
+                        open={isEndCalendarOpen}
+                        onOpenChange={setIsEndCalendarOpen}
+                      >
+                        <PopoverTrigger asChild>
+                          <button
+                            type="button"
+                            className="
+                              flex
+                              h-[50px]
+                              w-full
+                              items-center
+                              justify-between
+                              rounded-[2px]
+                              border
+                              border-[#c3c6d5]
+                              bg-white
+                              px-[13px]
+                              text-[16px]
+                              leading-6
+                              text-[#191c1d]
+                              outline-none
+                              transition
+                              hover:border-[#00327d]
+                              focus:border-[#00327d]
+                              focus:ring-1
+                              focus:ring-[#00327d]
+                            "
+                          >
+                            <span
+                              className={
+                                endDate
+                                  ? ""
+                                  : "text-[#6b7280]"
+                              }
+                            >
+                              {endDate
+                                ? format(
+                                    endDate,
+                                    "dd/MM/yyyy"
+                                  )
+                                : "Select date"}
+                            </span>
+
+                            <CalendarDays className="size-[18px] shrink-0 text-[#434653]" />
+                          </button>
+                        </PopoverTrigger>
+
+                        <PopoverContent
+                          align="start"
+                          className="w-auto border-[#c3c6d5] p-0 shadow-lg"
+                        >
+                          <CalendarPicker
+                            selected={endDate}
+                            hideThemePicker
+                            minDate={
+                              startDate ?? startOfToday()
+                            }
+                            onSelect={(date) => {
+                              if (date instanceof Date) {
+                                setEndDate(date);
+                                setIsEndCalendarOpen(
+                                  false
+                                );
+                              }
+                            }}
+                          />
+                        </PopoverContent>
+                      </Popover>
 
                     </div>
 
@@ -724,6 +1145,10 @@ const AbsenceManagement: React.FC = () => {
                           Date Logged
                         </th>
 
+                        <th className="h-10 px-6 py-3 text-left text-[12px] font-bold leading-4 tracking-[0.6px] text-[#434653]">
+                          Status
+                        </th>
+
                         <th className="h-10 px-6 py-3 text-right text-[12px] font-bold leading-4 tracking-[0.6px] text-[#434653]">
                           Actions
                         </th>
@@ -735,69 +1160,116 @@ const AbsenceManagement: React.FC = () => {
 
                     <tbody>
 
-                      {loggedAbsences.map(
-                        (
-                          absence: LoggedAbsence
-                        ) => (
-                          <tr key={absence.type}>
+                      {absencesLoading ? (
 
-                            <td className="h-14 border-b border-[#c3c6d5] px-6 py-4 text-[14px] leading-5 text-[#191c1d]">
+                        <tr>
 
-                              <div className="flex items-center gap-2 whitespace-nowrap">
+                          <td
+                            colSpan={5}
+                            className="h-28 px-6 py-4 text-center"
+                          >
 
-                                <img
-                                  src={absence.icon}
-                                  alt=""
-                                  className="h-[15px] w-[15px] object-contain"
-                                />
+                            <Loader2 className="mx-auto size-5 animate-spin text-[#00327d]" />
 
-                                <span>
-                                  {absence.type}
+                          </td>
+
+                        </tr>
+
+                      ) : absences.length === 0 ? (
+
+                        <tr>
+
+                          <td
+                            colSpan={5}
+                            className="h-28 px-6 py-4 text-center text-[14px] text-[#a0a7b1]"
+                          >
+                            No absences logged yet.
+                          </td>
+
+                        </tr>
+
+                      ) : (
+                        absences.map(
+                          (
+                            absence: LoggedAbsenceRow
+                          ) => (
+                            <tr
+                              key={absence.leaveId}
+                            >
+
+                              <td className="h-14 border-b border-[#c3c6d5] px-6 py-4 text-[14px] leading-5 text-[#191c1d]">
+
+                                <div className="flex items-center gap-2 whitespace-nowrap">
+
+                                  <img
+                                    src={absenceIconByType(absence.type)}
+                                    alt=""
+                                    className="h-[15px] w-[15px] object-contain"
+                                  />
+
+                                  <span>
+                                    {absence.type}
+                                  </span>
+
+                                </div>
+
+                              </td>
+
+
+                              <td className="h-14 border-b border-[#c3c6d5] px-6 py-4 text-[14px] leading-5 text-[#191c1d]">
+
+                                {absence.duration}
+
+                              </td>
+
+
+                              <td className="h-14 border-b border-[#c3c6d5] px-6 py-4 text-[14px] leading-5 text-[#434653]">
+
+                                {absence.dateLogged}
+
+                              </td>
+
+
+                              <td className="h-14 border-b border-[#c3c6d5] px-6 py-4">
+
+                                <span
+                                  className={`inline-flex items-center rounded-full px-[10px] py-[4px] text-[11px] font-bold tracking-[0.4px] ${
+                                    STATUS_BADGE_STYLES[
+                                      absence.status
+                                    ] ?? "bg-[#f7f8fa] text-[#434653]"
+                                  }`}
+                                >
+                                  {absence.status}
                                 </span>
 
-                              </div>
-
-                            </td>
+                              </td>
 
 
-                            <td className="h-14 border-b border-[#c3c6d5] px-6 py-4 text-[14px] leading-5 text-[#191c1d]">
+                              <td className="h-14 border-b border-[#c3c6d5] px-6 py-4 text-right">
 
-                              {absence.duration}
+                                <button
+                                  type="button"
+                                  title="View absence"
+                                  onClick={() =>
+                                    showToast(
+                                      `Viewing ${absence.type} absence · ${absence.duration} · Status: ${absence.status}`
+                                    )
+                                  }
+                                  className="inline-flex items-center justify-center"
+                                >
 
-                            </td>
+                                  <img
+                                    src="https://www.figma.com/api/mcp/asset/eeb68661-6bbd-410f-9112-78c5df575306.svg"
+                                    alt="View"
+                                    className="h-[15px] w-[22px] object-contain transition hover:scale-105"
+                                  />
 
+                                </button>
 
-                            <td className="h-14 border-b border-[#c3c6d5] px-6 py-4 text-[14px] leading-5 text-[#434653]">
+                              </td>
 
-                              {absence.date}
-
-                            </td>
-
-
-                            <td className="h-14 border-b border-[#c3c6d5] px-6 py-4 text-right">
-
-                              <button
-                                type="button"
-                                title="View absence"
-                                onClick={() =>
-                                  showToast(
-                                    `Viewing ${absence.type} absence.`
-                                  )
-                                }
-                                className="inline-flex items-center justify-center"
-                              >
-
-                                <img
-                                  src="https://www.figma.com/api/mcp/asset/eeb68661-6bbd-410f-9112-78c5df575306.svg"
-                                  alt="View"
-                                  className="h-[15px] w-[22px] object-contain transition hover:scale-105"
-                                />
-
-                              </button>
-
-                            </td>
-
-                          </tr>
+                            </tr>
+                          )
                         )
                       )}
 
@@ -1014,6 +1486,187 @@ const AbsenceManagement: React.FC = () => {
 
       </div>
 
+
+      {/* =====================================================
+          LEAVE CONFIRM DIALOG
+      ====================================================== */}
+
+      <AlertDialog
+        open={leaveConfirmOpen}
+        onOpenChange={(open) => {
+          if (!submittingLeave) setLeaveConfirmOpen(open);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Do you want to proceed with the leave?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectedType} absence from{" "}
+              {startDate
+                ? format(startDate, "dd/MM/yyyy")
+                : "-"}{" "}
+              to{" "}
+              {endDate
+                ? format(endDate, "dd/MM/yyyy")
+                : "-"}
+              . The request will be submitted for admin
+              approval.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={submittingLeave}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={submittingLeave}
+              onClick={(event) => {
+                event.preventDefault();
+                doApplyLeave();
+              }}
+            >
+              {submittingLeave ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Checking...
+                </>
+              ) : (
+                "Proceed"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* =====================================================
+          LEAVE SUCCESS DIALOG
+      ====================================================== */}
+
+      <AlertDialog open={leaveSuccessOpen} onOpenChange={setLeaveSuccessOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-green-600">
+              <CheckCircle2 className="size-5" />
+              Leave applied successfully
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {leaveSuccessInfo && (
+                <>
+                  {leaveSuccessInfo.type} absence · Leave date:{" "}
+                  {leaveSuccessInfo.from} to {leaveSuccessInfo.to}
+                  {leaveSuccessInfo.leaveId
+                    ? ` · Leave ID: ${leaveSuccessInfo.leaveId}`
+                    : ""}
+                  .
+                  {typeof leaveSuccessInfo.queuedCount ===
+                    "number" &&
+                  leaveSuccessInfo.queuedCount > 0
+                    ? ` ${leaveSuccessInfo.queuedCount} patient(s) sent to the reschedule queue.`
+                    : ""}
+                  {leaveSuccessInfo.queueFailed
+                    ? " Could not add patients to the reschedule queue."
+                    : ""}{" "}
+                  Status: pending admin approval.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setLeaveSuccessOpen(false)}>
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* =====================================================
+          LEAVE CONFLICTS DIALOG
+      ====================================================== */}
+
+      <AlertDialog
+        open={leaveConflictsOpen}
+        onOpenChange={(open) => {
+          if (!submittingLeave) setLeaveConflictsOpen(open);
+        }}
+      >
+        <AlertDialogContent className="max-w-[460px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {leaveConflicts.length} appointment
+              {leaveConflicts.length === 1 ? "" : "s"} scheduled during
+              this leave
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You can send these patients to the reschedule queue so
+              staff can assign them new slots, or apply the leave
+              without changes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="max-h-[220px] overflow-y-auto rounded-[4px] border border-[#c3c6d5]">
+            {leaveConflicts.map(
+              (conflict: LeaveConflict) => (
+                <div
+                  key={conflict.appointment_id}
+                  className="flex items-center justify-between gap-3 border-b border-[#e5e7eb] px-3 py-2 text-[12px] last:border-b-0"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold leading-5 text-[#191c1d]">
+                      {conflict.patientName}
+                    </p>
+                    <p className="leading-4 text-[#434653]">
+                      {conflict.appointment_date
+                        ? format(
+                            new Date(conflict.appointment_date),
+                            "dd/MM/yyyy"
+                          )
+                        : "-"}
+                      {formatTimeOfDay(conflict.appointment_time)
+                        ? ` · ${formatTimeOfDay(conflict.appointment_time)}`
+                        : ""}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-[#f1f2f4] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#434653]">
+                    {conflict.status}
+                  </span>
+                </div>
+              )
+            )}
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={submittingLeave}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={submittingLeave}
+              className="border border-[#c3c6d5] bg-white text-[#191c1d] hover:bg-[#f6f8fb]"
+              onClick={(event) => {
+                event.preventDefault();
+                if (employeeIdRef.current) {
+                  applyLeaveNow(employeeIdRef.current, false);
+                }
+              }}
+            >
+              Apply leave anyway
+            </AlertDialogAction>
+            <AlertDialogAction
+              disabled={submittingLeave}
+              onClick={(event) => {
+                event.preventDefault();
+                if (employeeIdRef.current) {
+                  applyLeaveNow(employeeIdRef.current, true);
+                }
+              }}
+            >
+              Apply leave &amp; queue{" "}
+              {leaveConflicts.length} patient
+              {leaveConflicts.length === 1 ? "" : "s"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* =====================================================
           TOAST

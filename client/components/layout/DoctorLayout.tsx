@@ -2,7 +2,15 @@ import React from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import DoctorSidebar from "./DoctorSidebar";
 
-const DoctorLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
+interface DoctorLayoutProps {
+  children?: React.ReactNode;
+  doctorName?: string;
+}
+
+const DoctorLayout: React.FC<DoctorLayoutProps> = ({
+  children,
+  doctorName,
+}) => {
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -63,6 +71,7 @@ const DoctorLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
       <DoctorSidebar
         activeItem={getActiveItem()}
         onNavigate={handleNavigation}
+        doctorName={doctorName}
       />
 
       {/* Doctor Content */}
