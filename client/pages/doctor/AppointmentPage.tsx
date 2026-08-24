@@ -1130,6 +1130,9 @@ export default function AppointmentPage() {
     navigate("/doctor/patient-consultation", {
       state: {
         patientId: patient.patientId,
+        appointmentId: patient.id,
+        branchId:
+          getActiveBranchId() ?? getUser()?.branch_id ?? undefined,
         appointmentDate: patient.appointmentDateRaw,
         appointmentTime: patient.appointmentTimeRaw,
         consultedBy: "",

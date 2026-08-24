@@ -888,10 +888,18 @@ export default function DoctorDashboard() {
                   {dashboardAppointments.map((appointment) => (
                     <tr
                       key={`${appointment.patient}-${appointment.dateTime}`}
-                     onClick={(appointment.originalStatus === "IN_CONSULTATION")?(                  () =>
+                      onClick={(appointment.originalStatus === "IN_CONSULTATION")?(                  () =>
                         navigate("/doctor/patient-consultation", {
                           state: {
                             patientId: appointment.patientId,
+                            appointmentId: appointment.appointmentId,
+                            branchId:
+                              selectedBranchId ||
+                              getActiveBranchId() ||
+                              doctor?.branches?.find(
+                                (b) => b.status === undefined || b.status === 1
+                              )?.branch_id ||
+                              undefined,
                             appointmentDate: appointment.appointmentDate,
                             appointmentTime: appointment.appointmentTime,
                             consultedBy: doctorName,
@@ -971,6 +979,14 @@ export default function DoctorDashboard() {
                         navigate("/doctor/patient-consultation", {
                           state: {
                             patientId: appointment.patientId,
+                            appointmentId: appointment.appointmentId,
+                            branchId:
+                              selectedBranchId ||
+                              getActiveBranchId() ||
+                              doctor?.branches?.find(
+                                (b) => b.status === undefined || b.status === 1
+                              )?.branch_id ||
+                              undefined,
                             appointmentDate: appointment.appointmentDate,
                             appointmentTime: appointment.appointmentTime,
                             consultedBy: doctorName,

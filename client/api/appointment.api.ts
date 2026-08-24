@@ -1,3 +1,4 @@
+import type { AxiosRequestConfig } from "axios";
 import API from "./axios";
 
 export interface CreateAppointmentPayload {
@@ -179,7 +180,7 @@ export const appointmentApi = {
       { status },
     ),
 
-  getAll: (params?: GetAppointmentsParams) =>
+  getAll: (params?: GetAppointmentsParams, config?: AxiosRequestConfig) =>
     API.get<{
       success: boolean;
       message: string;
@@ -190,5 +191,5 @@ export const appointmentApi = {
         totalPages: number;
         appointments: AppointmentRecord[];
       };
-    }>("/appointments", { params }),
+    }>("/appointments", { params, ...config }),
 };

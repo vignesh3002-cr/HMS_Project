@@ -71,7 +71,7 @@ export interface EncounterRecord {
 
 export interface GetEncountersParams {
   branchId?: string;
-  employeeId?: string;
+  doctorId?: string;
   patientId?: string;
   appointmentId?: string;
   status?: string;
@@ -85,7 +85,7 @@ export const encounterApi = {
   create: (data: CreateEncounterPayload) =>
     API.post<{ success: boolean; message: string; data: EncounterRecord }>("/encounters", data),
 
-  getAll: (params?: GetEncountersParams) =>
+  getAll: (params?: GetEncountersParams, config?: AxiosRequestConfig) =>
     API.get<{
       success: boolean;
       message: string;
@@ -96,10 +96,20 @@ export const encounterApi = {
         totalPages: number;
         encounters: EncounterRecord[];
       };
-    }>("/encounters", { params }),
+    }>("/encounters", { params, ...config }),
 
   getByNumber: (encounterNo: string, config?: AxiosRequestConfig) =>
     API.get<{ success: boolean; data: EncounterRecord }>(`/encounters/${encounterNo}`, config),
+
+  /**
+   * Selection-independent lookup used by clinical flows. The backend checks
+   * the caller's active branch mappings against the encounter's branch, so
+   * this works for multi-branch doctors even when no branch is selected.
+   */
+  getByAppointment: (appointmentId: string) =>
+    API.get<{ success: boolean; data: EncounterRecord }>(
+      `/encounters/by-appointment/${appointmentId}`,
+    ),
 
   update: (encounterNo: string, data: Partial<EncounterRecord>) =>
     API.put<{ success: boolean; message: string; data: EncounterRecord }>(

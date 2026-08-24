@@ -61,6 +61,8 @@ interface Medication {
 
 interface ConsultationState {
   patientId?: string;
+  appointmentId?: string;
+  branchId?: string;
   appointmentDate?: string;
   appointmentTime?: string;
   consultedBy?: string;
@@ -84,23 +86,90 @@ const StepCheckLogo = ({ active = false }: { active?: boolean }) => (
 
 /* ============================================================
    ACTIVE ENCOUNTER LOOKUP
-   The encounter exists in the DB but the strict query
-   (branch + patient + OPEN) can return empty when the active
-   branch selector points to a different branch than the one
-   the encounter was created under. Retry progressively:
+   The encounter exists in the DB but scoped queries can still come
+   back empty or 403 when the active branch selector points at a
+   different branch than the one the encounter was created under,
+   or when a multi-branch doctor has no branch selected. Strategy:
+     0. By appointment_id (exact key, branch-independent)
      1. Active branch + OPEN        (original behaviour)
-     2. Any allowed branch + OPEN   (recovers branch mismatch)
-     3. Any allowed branch, any state, OPEN preferred
+     2. Cross-branch + OPEN         (x-branch-id header suppressed)
+     3. Cross-branch, any state, OPEN preferred
+     4. Self-heal: recreate from the in-progress appointment
+   Scope errors (403) are collected so the UI can show the real
+   reason instead of a generic "not found".
    ============================================================ */
+
+const collectScopeError = (error: any, sink: string[]) => {
+  if (error?.response?.status === 403) {
+    const message = error?.response?.data?.message;
+    if (message) sink.push(message);
+    return;
+  }
+  console.error("Failed to load encounter:", error);
+};
+
+const BRANCH_HINT =
+  " (or pick your branch from the selector in the header)";
 
 const findActiveEncounter = async (
   patientId: string,
-): Promise<EncounterRecord | null> => {
-  const branchId = getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+  appointmentId?: string,
+  branchId?: string,
+): Promise<{ encounter: EncounterRecord | null; scopeError?: string }> => {
+  const scopeErrors: string[] = [];
+  const crossBranchConfig = { skipBranchScope: true };
 
+  /* 0. Precise hit - dedicated endpoint resolves by appointment_id with
+        mapping-based branch isolation (no active selection required). */
+  if (appointmentId) {
+    let missing = false;
+    try {
+      const response = await encounterApi.getByAppointment(appointmentId);
+      const exact = response.data.data;
+      if (exact && exact.patient_id === patientId) {
+        return { encounter: exact };
+      }
+    } catch (error: any) {
+      if (error?.response?.status === 404) {
+        // No encounter yet for this appointment.
+        missing = true;
+      } else {
+        collectScopeError(error, scopeErrors);
+      }
+    }
+
+    /* Encounter not created yet - create it directly from this
+       appointment (POST /encounters has no branchScope) and re-read it
+       through the mapping-checked endpoint. Deliberately no scoped list
+       calls here: they would 403 a multi-branch doctor with no selection. */
+    if (missing) {
+      try {
+        await encounterApi.create({ appointment_id: appointmentId });
+      } catch {
+        // "Encounter already exists" or not creatable - verify decides.
+      }
+      try {
+        const response = await encounterApi.getByAppointment(appointmentId);
+        const healed = response.data.data;
+        if (healed && healed.patient_id === patientId) {
+          return { encounter: healed };
+        }
+      } catch (error: any) {
+        collectScopeError(error, scopeErrors);
+      }
+    }
+  }
+
+  /* An ALLOWED branchId query param makes branchScope validate membership
+     and pass through instead of demanding an active selection, so the nav
+     state's branch (dashboard context) unblocks multi-branch doctors. */
+  const activeBranch =
+    branchId ?? getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+
+  // 1. Known/active branch + OPEN (original behaviour)
   try {
     const response = await encounterApi.getAll({
-      branchId,
+      ...(activeBranch ? { branchId: activeBranch } : {}),
       patientId,
       status: "OPEN",
       page: 1,
@@ -111,41 +180,39 @@ const findActiveEncounter = async (
       encounters.find((item) => item.patient_id === patientId) ??
       encounters[0] ??
       null;
-    if (current) return current;
-  } catch (error) {
-    console.error("Failed to load encounter:", error);
+    if (current) return { encounter: current };
+  } catch (error: any) {
+    collectScopeError(error, scopeErrors);
   }
 
-  let openEncounters: EncounterRecord[] = [];
+  // 2. Any allowed branch + OPEN - recovers a branch mismatch.
   try {
-    const response = await encounterApi.getAll({
-      patientId,
-      status: "OPEN",
-      page: 1,
-      limit: 10,
-    });
-    openEncounters = response.data.data?.encounters ?? [];
-  } catch {
-    // Multi-branch users without an active selection get a 403 here.
+    const response = await encounterApi.getAll(
+      { patientId, status: "OPEN", page: 1, limit: 10 },
+      crossBranchConfig,
+    );
+    const openEncounters = response.data.data?.encounters ?? [];
+    const openMatch = openEncounters.find(
+      (item) => item.patient_id === patientId,
+    );
+    if (openMatch) return { encounter: openMatch };
+  } catch (error: any) {
+    collectScopeError(error, scopeErrors);
   }
-  const openMatch = openEncounters.find(
-    (item) => item.patient_id === patientId,
-  );
-  if (openMatch) return openMatch;
 
+  // 3. Any allowed branch, any state, OPEN preferred.
   try {
-    const response = await encounterApi.getAll({
-      patientId,
-      page: 1,
-      limit: 10,
-    });
+    const response = await encounterApi.getAll(
+      { patientId, page: 1, limit: 10 },
+      crossBranchConfig,
+    );
     const encounters = response.data.data?.encounters ?? [];
     const anyOpen = encounters.find(
       (item) => item.patient_id === patientId && item.status === "OPEN",
     );
-    if (anyOpen) return anyOpen;
-  } catch (error) {
-    console.error("Failed to load encounter:", error);
+    if (anyOpen) return { encounter: anyOpen };
+  } catch (error: any) {
+    collectScopeError(error, scopeErrors);
   }
 
   /* ============================================================
@@ -155,20 +222,26 @@ const findActiveEncounter = async (
      was deactivated) the appointment is stuck with no encounter.
      Recreate it here from the patient's most recent in-progress
      appointment so clinical details load instead of erroring.
+     Verification uses the mapping-checked by-appointment endpoint,
+     never a scoped list query.
      ============================================================ */
 
   const inProgressStatuses = ["IN_CONSULTATION", "CHECKED_IN"];
   for (const status of inProgressStatuses) {
     let candidates: { appointment_id: string }[] = [];
     try {
-      const apptResponse = await appointmentApi.getAll({
-        patientId,
-        status,
-        sortBy: "created_at",
-        sortOrder: "desc",
-        page: 1,
-        limit: 5,
-      });
+      const apptResponse = await appointmentApi.getAll(
+        {
+          ...(activeBranch ? { branchId: activeBranch } : {}),
+          patientId,
+          status,
+          sortBy: "created_at",
+          sortOrder: "desc",
+          page: 1,
+          limit: 5,
+        },
+        crossBranchConfig,
+      );
       candidates = apptResponse.data.data?.appointments ?? [];
     } catch {
       continue;
@@ -177,27 +250,32 @@ const findActiveEncounter = async (
       try {
         await encounterApi.create({ appointment_id: appt.appointment_id });
       } catch {
-        // "Encounter already exists" or not creatable - the lookup below decides.
+        // "Encounter already exists" or not creatable - verify decides.
       }
       try {
-        const response = await encounterApi.getAll({
-          patientId,
-          status: "OPEN",
-          page: 1,
-          limit: 5,
-        });
-        const healed =
-          response.data.data?.encounters.find(
-            (item) => item.patient_id === patientId,
-          ) ?? null;
-        if (healed) return healed;
-      } catch (error) {
-        console.error("Failed to load encounter:", error);
+        const response = await encounterApi.getByAppointment(
+          appt.appointment_id,
+        );
+        const healed = response.data.data;
+        if (healed && healed.patient_id === patientId) {
+          return { encounter: healed };
+        }
+      } catch (error: any) {
+        collectScopeError(error, scopeErrors);
       }
     }
   }
 
-  return null;
+  const scopeMessage = scopeErrors[0];
+
+  return {
+    encounter: null,
+    scopeError: scopeMessage
+      ? `${scopeMessage}${
+          /select a branch/i.test(scopeMessage) ? BRANCH_HINT : ""
+        }`
+      : undefined,
+  };
 };
 
 const Consultation: React.FC = () => {
@@ -302,13 +380,18 @@ const Consultation: React.FC = () => {
     if (!patientId) return;
     let cancelled = false;
     setEncounterError("");
-    findActiveEncounter(patientId)
-      .then((current) => {
+    findActiveEncounter(
+      patientId,
+      consultationState?.appointmentId,
+      consultationState?.branchId,
+    )
+      .then(({ encounter: current, scopeError }) => {
         if (cancelled) return;
         setEncounter(current);
         if (!current) {
           setEncounterError(
-            "No active encounter found for this patient. Clinical details cannot be loaded.",
+            scopeError ||
+              "No active encounter found for this patient. Clinical details cannot be loaded.",
           );
         }
       })
@@ -325,7 +408,7 @@ const Consultation: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [consultationState?.patientId]);
+  }, [consultationState?.patientId, consultationState?.appointmentId]);
 
   const patientName = patient
     ? [
@@ -982,6 +1065,8 @@ const Consultation: React.FC = () => {
                   <LabReview
                     embedded
                     patientId={consultationState?.patientId}
+                    appointmentId={consultationState?.appointmentId}
+                    branchId={consultationState?.branchId}
                     encounterNo={encounter?.encounter_no}
                     onNext={() => selectStep("DIAGNOSIS")}
                   />
@@ -1007,6 +1092,8 @@ const Consultation: React.FC = () => {
                   <DischargeMedication
                     embedded
                     patientId={consultationState?.patientId}
+                    appointmentId={consultationState?.appointmentId}
+                    branchId={consultationState?.branchId}
                     encounterNo={encounter?.encounter_no}
                     onNext={() => selectStep("FOLLOW UP")}
                   />
@@ -1598,9 +1685,11 @@ const ArrowRightIcon = () => (
 const LabReview: React.FC<{
   embedded?: boolean;
   patientId?: string;
+  appointmentId?: string;
+  branchId?: string;
   encounterNo?: string;
   onNext?: () => void;
-}> = ({ embedded = false, patientId, encounterNo, onNext }) => {
+}> = ({ embedded = false, patientId, appointmentId, branchId, encounterNo, onNext }) => {
   const [observations, setObservations] = useState("");
   const [notifications, setNotifications] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1624,7 +1713,11 @@ const LabReview: React.FC<{
       let targetEncounterNo = encounterNo ?? "";
 
       if (!targetEncounterNo && patientId) {
-        const found = await findActiveEncounter(patientId);
+        const { encounter: found } = await findActiveEncounter(
+          patientId,
+          appointmentId,
+          branchId,
+        );
         targetEncounterNo = found?.encounter_no ?? "";
       }
 
@@ -2907,11 +3000,15 @@ const MailIcon = () => (
 const DischargeMedication: React.FC<{
   embedded?: boolean;
   patientId?: string;
+  appointmentId?: string;
+  branchId?: string;
   encounterNo?: string;
   onNext?: () => void;
 }> = ({
   embedded = false,
   patientId,
+  appointmentId,
+  branchId,
   encounterNo,
   onNext,
 }) => {
@@ -2939,7 +3036,11 @@ const DischargeMedication: React.FC<{
   const resolveEncounterNo = async () => {
     if (encounterNo) return encounterNo;
     if (!patientId) return "";
-    const found = await findActiveEncounter(patientId);
+    const { encounter: found } = await findActiveEncounter(
+      patientId,
+      appointmentId,
+      branchId,
+    );
     return found?.encounter_no ?? "";
   };
 
