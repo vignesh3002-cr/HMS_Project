@@ -85,7 +85,8 @@ import DoctorSchedule from "./pages/doctor/MySchedulePage";
 import DoctorReviews from "./pages/doctor/ReviewPage";
 import DoctorProfile from "./pages/doctor/Profile";
 import Consultation from "./pages/doctor/Patientconsut";
-import DoctorPatientProfile from "./pages/doctor/notes and doc"; 
+import DoctorPatientProfile from "./pages/doctor/notes and doc";
+import PatientDetails from "./pages/doctor/patient details";
 
 // ============================================================
 // HOOKS / AUTH
@@ -555,6 +556,22 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <DoctorPatientProfile />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ==================================================
+                DOCTOR PORTAL - PATIENT FULL PROFILE
+
+                Opens the HMSPatientPortal (Order Summary tab by
+                default) for the patient passed via location.state.
+            ================================================== */}
+
+            <Route
+              path="/doctor/patient-details"
+              element={
+                <ProtectedRoute>
+                  <PatientDetails />
                 </ProtectedRoute>
               }
             />
