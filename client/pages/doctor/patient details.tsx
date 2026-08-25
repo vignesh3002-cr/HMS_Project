@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import API, { getActiveBranchId } from "../../api/axios";
 import { getUser } from "../../utils/token";
 import {
@@ -222,19 +222,23 @@ const MedicationPortal: React.FC<{
         {/* Header */}
         <header className="flex h-[72px] shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-8">
           <div className="flex items-center gap-3">
+            {onBackToProfile && (
+              <button type="button" aria-label="Go back" onClick={onBackToProfile} className="flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-slate-100">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#334155" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+                  <path d="M19 12H5" />
+                  <path d="m12 19-7-7 7-7" />
+                </svg>
+              </button>
+            )}
             <button onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-slate-500 lg:hidden">
               <i className="fa-solid fa-bars" />
             </button>
-            <div className="flex items-center text-sm font-semibold text-slate-700">
-              <i className="fa-solid fa-code-branch mr-2 text-slate-400" />
-              Main Branch
-              <i className="fa-solid fa-chevron-down ml-2 text-[10px] text-slate-400" />
-            </div>
+           
           </div>
           <div className="flex items-center gap-5">
-            <button className="relative text-slate-500 hover:text-[#0052cc]">
+            <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]">
               <i className="fa-regular fa-bell text-xl" />
-              <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500" />
+              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-[#003ec7]" />
             </button>
             <div className="flex items-center gap-2 border-l border-slate-200 pl-5">
               <span className="font-bold text-[#0052cc]">HMS</span>
@@ -1043,7 +1047,6 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [activeTab, setActiveTab] = useState("Order Summary");
   const [selectedDay, setSelectedDay] = useState("Day 1");
   const [selectedCycle, setSelectedCycle] = useState(1);
-  const [showBranchMenu, setShowBranchMenu] = useState(false);
   const [showMedicationPortal, setShowMedicationPortal] = useState(false);
   const [showDischargePortal, setShowDischargePortal] = useState(false);
   const [savedPlan, setSavedPlan] = useState<SummaryPlan | null>(null);
@@ -1591,22 +1594,12 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </svg>
 </button>
 )}
-<div className="relative">
-<button type="button" onClick={() => setShowBranchMenu(v => !v)} className="flex items-center text-sm font-medium text-[#1e293b] cursor-pointer hover:text-[#1d4ed8] transition-colors">
-<i className="fa-solid fa-code-branch mr-2 text-[#64748b]"></i> Main Branch <i className="fa-solid fa-chevron-down ml-2 text-[10px] text-[#64748b]"></i>
-</button>
-<div className={`absolute top-9 left-0 z-30 bg-white border border-[#e2e8f0] rounded-lg shadow-lg p-2 w-44 ${showBranchMenu ? "block" : "hidden"}`}>
-<button type="button" className="w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-50">Main Branch</button>
-<button type="button" className="w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-50">Branch 02</button>
-</div>
-</div>
+
 </div>
 <div className="flex items-center space-x-6">
-<button className="text-[#64748b] hover:text-[#1e293b] relative">
-<i className="fa-regular fa-bell text-[20px]"></i>
-<span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-2.5 w-2.5">
-<span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#ef4444] border-2 border-[#f8fafc]"></span>
-</span>
+<button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]">
+<i className="fa-regular fa-bell text-xl"></i>
+<span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-[#003ec7]"></span>
 </button>
 <div className="flex items-center space-x-3 cursor-pointer pl-6 border-l border-[#e2e8f0]">
 <span className="text-sm font-bold text-[#1d4ed8]">HMS</span>
@@ -2940,21 +2933,19 @@ const HistoryDashboard: React.FC<{
       <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800 font-sans">
         {/* TOP HEADER */}
         <header className="bg-[#f2f4f7] border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <i className="fa-solid fa-code-branch text-gray-500" />
-
-            <span className="font-medium text-gray-800">
-              Main Branch
-            </span>
-
-            <i className="fa-solid fa-chevron-down text-gray-500 text-xs" />
-          </div>
+          
 
           <div className="flex items-center gap-6">
             <div className="relative">
-              <i className="fa-regular fa-bell text-gray-500 text-lg" />
+              <button
+                type="button"
+                aria-label="Notifications"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]"
+              >
+                <i className="fa-regular fa-bell text-lg" />
+              </button>
 
-              <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border border-white" />
+              <div className="absolute -top-1 -right-1 w-2 h-2 bg-[#003ec7] rounded-full border border-white" />
             </div>
 
             <span className="text-blue-600 font-semibold text-sm">
@@ -3013,7 +3004,6 @@ function DischargeDetailsPortal({
   onBack?: () => void;
   patientId?: string;
 }) {
-  const [showBranchMenu, setShowBranchMenu] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showNotesDocs, setShowNotesDocs] = useState(false);
   const [showOrderSummary, setShowOrderSummary] = useState(false);
@@ -3500,22 +3490,12 @@ function DischargeDetailsPortal({
 </svg>
 </button>
 )}
-<div className="relative">
-<button type="button" onClick={() => setShowBranchMenu(v => !v)} className="flex items-center text-sm font-medium text-[#1e293b] cursor-pointer hover:text-[#1d4ed8] transition-colors">
-<i className="fa-solid fa-code-branch mr-2 text-[#64748b]"></i> Main Branch <i className="fa-solid fa-chevron-down ml-2 text-[10px] text-[#64748b]"></i>
-</button>
-<div className={`absolute top-9 left-0 z-30 bg-white border border-[#e2e8f0] rounded-lg shadow-lg p-2 w-44 ${showBranchMenu ? "block" : "hidden"}`}>
-<button type="button" className="w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-50">Main Branch</button>
-<button type="button" className="w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-50">Branch 02</button>
-</div>
-</div>
+
 </div>
 <div className="flex items-center space-x-6">
-<button className="text-[#64748b] hover:text-[#1e293b] relative">
-<i className="fa-regular fa-bell text-[20px]"></i>
-<span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-2.5 w-2.5">
-<span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#ef4444] border-2 border-[#f8fafc]"></span>
-</span>
+<button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]">
+<i className="fa-regular fa-bell text-xl"></i>
+<span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-[#003ec7]"></span>
 </button>
 <div className="flex items-center space-x-3 cursor-pointer pl-6 border-l border-[#e2e8f0]">
 <span className="text-sm font-bold text-[#1d4ed8]">HMS</span>
@@ -4611,26 +4591,18 @@ const PatientNotesDocuments: React.FC<{
         ======================================================== */}
         <header className="z-10 flex h-16 flex-shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6">
           {/* Branch */}
-          <button
-            type="button"
-            className="flex cursor-pointer items-center text-sm text-slate-600 transition-colors hover:text-slate-900"
-          >
-            <i className="fa-solid fa-share-nodes mr-2" />
-            <span>Main Branch</span>
-            <i className="fa-solid fa-chevron-down ml-1 text-xs" />
-          </button>
-
+          
           {/* Header Actions */}
           <div className="flex items-center space-x-4">
             {/* Notification */}
             <button
               type="button"
-              className="relative text-slate-400 transition-colors hover:text-slate-600"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]"
               aria-label="Notifications"
             >
               <i className="fa-regular fa-bell" />
 
-              <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
+              <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-[#003ec7] ring-2 ring-white" />
             </button>
 
             {/* HMS */}
@@ -4702,6 +4674,9 @@ const PatientNotesDocuments: React.FC<{
   );
 };
 
-const PatientDetails: React.FC = () => <HMSPatientPortal />;
+const PatientDetails: React.FC = () => {
+  const navigate = useNavigate();
+  return <HMSPatientPortal onBack={() => navigate(-1)} />;
+};
 
 export default PatientDetails;

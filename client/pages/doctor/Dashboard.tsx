@@ -585,30 +585,53 @@ export default function DoctorDashboard() {
                 onClick={() =>
                   setNotificationOpen((value) => !value)
                 }
-                className="relative flex h-12 w-12 items-center justify-center rounded-xl text-[#434654] transition hover:bg-slate-100"
+                className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]"
               >
-                <Icon name="bell" />
+                <Icon name="bell" className="h-5 w-5" />
 
                 {unreadCount > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white">
+                  <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#003ec7] px-1 text-[10px] font-bold leading-none text-white">
                     {unreadCount > 9 ? "9+" : unreadCount}
                   </span>
                 )}
               </button>
 
               {notificationOpen && (
-                <div className="absolute right-0 top-14 z-50 w-[300px] rounded-[10px] border border-slate-200 bg-white p-[18px] shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-                  <h3 className="mb-3 text-base font-semibold">
-                    Notifications
-                  </h3>
-
-                  {notifications.length === 0 ? (
-                    <div className="py-6 text-center text-[13px] text-slate-400">
-                      No new notifications
+                <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
+                  <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
+                    <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">
+                      Notifications
+                    </h1>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNotifications((prev) =>
+                            prev.map((n) => ({ ...n, status: "READ" }))
+                          );
+                        }}
+                        className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
+                      >
+                        Mark all as read
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNotifications([])}
+                        disabled={notifications.length === 0}
+                        className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Clear all
+                      </button>
                     </div>
-                  ) : (
-                    <div className="max-h-[320px] overflow-y-auto">
-                      {notifications.map(
+                  </header>
+
+                  <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
+                    {notifications.length === 0 ? (
+                      <p className="py-6 text-center text-xs text-[#434656]">
+                        No new notifications
+                      </p>
+                    ) : (
+                      notifications.map(
                         (item, index) => {
                           const patient =
                             item.appointment_history?.patient_bio_data;
@@ -625,54 +648,116 @@ export default function DoctorDashboard() {
                             item.notification_type === "BOOKING";
                           const appointment =
                             item.appointment_history;
+                          const isUnread = item.status === "UNREAD";
 
                           return (
-                            <div
+                            <article
                               key={item.notification_id}
-                              className={`py-2.5 text-[13px] text-slate-600 ${
-                                index < notifications.length - 1
-                                  ? "border-b border-slate-100"
-                                  : ""
-                              }`}
+                              className="relative flex gap-3 rounded-lg px-2 py-3 transition-colors"
                             >
-                              <p className="leading-5">
-                                {item.status === "UNREAD" && (
-                                  <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-blue-500 align-middle" />
-                                )}
-                                {isBooking ? (
-                                  <>
-                                    <span className="font-semibold text-slate-800">
-                                      {patientName}
-                                    </span>{" "}
-                                    booked an appointment
-                                    {appointment
-                                      ? ` for ${formatDate(
-                                          appointment.appointment_date
-                                        )} at ${formatTime(
-                                          appointment.appointment_time
-                                        )}`
-                                      : ""}
-                                    .
-                                  </>
-                                ) : (
-                                  <>
-                                    <span className="font-semibold text-slate-800">
-                                      {patientName}
-                                    </span>{" "}
-                                    checked in.
-                                  </>
-                                )}
-                              </p>
+                              {isUnread && (
+                                <span className="absolute left-0 top-5 h-2 w-2 rounded-full bg-[#003ec7]" />
+                              )}
 
-                              <span className="text-[11px] text-slate-400">
-                                {timeAgo(item.created_at)}
-                              </span>
-                            </div>
+                              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f0eaff]">
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  className="h-5 w-5 text-[#7046c9]"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.8"
+                                >
+                                  <rect x="3" y="5" width="18" height="16" rx="2" />
+                                  <path d="M16 3v4M8 3v4M3 10h18" strokeLinecap="round" />
+                                  <path d="M8 14h3M8 17h5" strokeLinecap="round" />
+                                </svg>
+                              </div>
+
+                              <div className="min-w-0 flex-1">
+                                <div className="mb-1 flex items-start justify-between gap-3">
+                                  <h3 className="truncate text-xs font-semibold tracking-[0.02em] text-[#131b2e]">
+                                    {isBooking ? (
+                                      <>
+                                        <span className="font-semibold text-[#131b2e]">
+                                          {patientName}
+                                        </span>{" "}
+                                        booked an appointment
+                                        {appointment
+                                          ? ` for ${formatDate(
+                                              appointment.appointment_date
+                                            )} at ${formatTime(
+                                              appointment.appointment_time
+                                            )}`
+                                          : ""}
+                                        .
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="font-semibold text-[#131b2e]">
+                                          {patientName}
+                                        </span>{" "}
+                                        checked in.
+                                      </>
+                                    )}
+                                  </h3>
+
+                                  <div className="flex shrink-0 items-center gap-2">
+                                    <span
+                                      className={[
+                                        "text-[11px] font-medium leading-[14px]",
+                                        isUnread
+                                          ? "text-[#003ec7]"
+                                          : "text-[#434656]",
+                                      ].join(" ")}
+                                    >
+                                      {timeAgo(item.created_at)}
+                                    </span>
+
+                                    {isUnread && (
+                                      <span
+                                        aria-label="Unread indicator"
+                                        className="h-2 w-2 rounded-full bg-[#003ec7]"
+                                      />
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setNotifications((prev) =>
+                                          prev.filter(
+                                            (n) => n.notification_id !== item.notification_id
+                                          )
+                                        )
+                                      }
+                                      aria-label="Delete notification"
+                                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
+                                    >
+                                      <svg
+                                        viewBox="0 0 24 24"
+                                        className="h-3.5 w-3.5 fill-none stroke-current"
+                                        strokeWidth="2"
+                                      >
+                                        <path
+                                          d="M6 6l12 12M18 6L6 18"
+                                          strokeLinecap="round"
+                                        />
+                                      </svg>
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <p className="text-[13px] font-normal leading-[18px] text-[#434656]">
+                                  {isBooking
+                                    ? `${patientName} was booked for an appointment.`
+                                    : `${patientName} checked in.`}
+                                </p>
+                              </div>
+                            </article>
                           );
                         }
-                      )}
-                    </div>
-                  )}
+                      )
+                    )}
+                  </main>
                 </div>
               )}
             </div>

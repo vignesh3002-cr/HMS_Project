@@ -1794,6 +1794,8 @@ const LabReview: React.FC<{
 }> = ({
   embedded = false,
   patientId,
+  appointmentId,
+  branchId,
   encounterNo,
   pendingTests = [],
   onOrdered,
@@ -2183,22 +2185,43 @@ const LabReview: React.FC<{
         </div>
 
         <div className="flex items-center gap-6">
-          <button
-            type="button"
-            aria-label="Notifications"
-            onClick={() => setNotifications((prev) => !prev)}
-            className="relative text-gray-500 transition-colors hover:text-gray-700 focus:outline-none"
-          >
-            <NotificationIcon />
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="Notifications"
+              onClick={() => setNotifications((prev) => !prev)}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none"
+            >
+              <NotificationIcon />
 
-            <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
+              <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-[#003ec7] ring-2 ring-white" />
+            </button>
 
             {notifications && (
-              <div className="absolute right-0 top-8 w-52 rounded-lg border border-gray-200 bg-white p-3 text-left text-sm text-gray-600 shadow-lg">
-                No new notifications
+              <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
+                <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
+                  <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <button
+                      type="button"
+                      className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
+                    >
+                      Mark all as read
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                </header>
+                <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
+                  <p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
+                </main>
               </div>
             )}
-          </button>
+          </div>
 
           <div className="flex items-center gap-3">
             <span className="font-semibold text-gray-700">HMS</span>
@@ -3255,16 +3278,35 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                   setNotificationOpen((previous) => !previous)
                 }
                 aria-label="Notifications"
-                className="relative text-gray-500 transition-colors hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none"
               >
                 <NotificationIcon />
 
-                <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
+                <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-[#003ec7] ring-2 ring-white" />
               </button>
 
               {notificationOpen && (
-                <div className="absolute right-0 top-9 z-30 w-56 rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-600 shadow-lg">
-                  No new notifications
+                <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
+                  <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
+                    <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <button
+                        type="button"
+                        className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
+                      >
+                        Mark all as read
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Clear all
+                      </button>
+                    </div>
+                  </header>
+                  <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
+                    <p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
+                  </main>
                 </div>
               )}
             </div>
@@ -7141,6 +7183,11 @@ const TreatmentPlan: React.FC<{
                 <Calendar
                   mode="single"
                   selected={parsePickedDate(plannedStartDate)}
+                  disabled={(date) => {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    return date < today;
+                  }}
                   onSelect={(date) => {
                     if (date instanceof Date) {
                       const value = formatPickedDate(date);
@@ -7183,7 +7230,7 @@ const TreatmentPlan: React.FC<{
               }
               className="text-sm font-semibold text-blue-700 hover:underline"
             >
-              View Protocol
+            
             </button>
 
           </div>
