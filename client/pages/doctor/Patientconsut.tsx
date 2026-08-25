@@ -1,4 +1,10 @@
-﻿import React, { useEffect, useRef, useState, useCallback } from "react";
+﻿import React, {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -25,6 +31,7 @@ import {
 } from "../../api/labOrder.api";
 import { Calendar } from "../../components/ui/calendar";
 import { ClinicalDetailsSection } from "../../components/hms/ClinicalDetailsSection";
+import PatientVitalsPanel from "../../components/hms/PatientVitalsPanel";
 import {
   Popover,
   PopoverContent,
@@ -121,6 +128,55 @@ const collectScopeError = (error: any, sink: string[]) => {
 
 const BRANCH_HINT =
   " (or pick your branch from the selector in the header)";
+
+/* ============================================================
+   LATEST VITALS / MEASUREMENTS
+   Height, weight, BSA and BMI shown across the consult page
+   sidebars are read from the active encounter record (triage
+   vitals land on the same encounter via VitalsSignsPopover).
+   ============================================================ */
+
+interface MeasurementValues {
+  height: string;
+  weight: string;
+  bsa: string;
+  bmi: string;
+}
+
+const vitalNum = (
+  value: number | string | null | undefined
+): number | null => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const buildMeasurements = (
+  encounter: EncounterRecord | null | undefined
+): MeasurementValues => {
+  const height = vitalNum(encounter?.height);
+  const weight = vitalNum(encounter?.weight);
+
+  const bsa =
+    height !== null && weight !== null && height > 0 && weight > 0
+      ? Math.sqrt((height * weight) / 3600).toFixed(2)
+      : "";
+
+  const storedBmi = vitalNum(encounter?.BMI);
+  const bmi =
+    storedBmi !== null
+      ? String(storedBmi)
+      : height !== null && weight !== null && height > 0
+        ? (weight / Math.pow(height / 100, 2)).toFixed(1)
+        : "";
+
+  return {
+    height: height !== null ? `${height} cm` : "",
+    weight: weight !== null ? `${weight} kg` : "",
+    bsa: bsa ? `${bsa} m²` : "",
+    bmi,
+  };
+};
 
 const findActiveEncounter = async (
   patientId: string,
@@ -542,6 +598,13 @@ const Consultation: React.FC = () => {
     consultationState?.visit_type || fallbackVisitType || "";
 
   const consultedBy = consultationState?.consultedBy || "";
+
+  /* ============================================================
+     LATEST VITALS (from the active encounter record)
+  ============================================================ */
+
+  const measurements = useMemo(() => buildMeasurements(encounter), [encounter]);
+
   /* ============================================================
      TOAST
   ============================================================ */
@@ -954,7 +1017,7 @@ const Consultation: React.FC = () => {
                     HEIGHT
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
-                    {""}
+                    {measurements.height}
                   </div>
                 </div>
 
@@ -963,7 +1026,7 @@ const Consultation: React.FC = () => {
                     WEIGHT
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
-                    {""}
+                    {measurements.weight}
                   </div>
                 </div>
 
@@ -972,7 +1035,7 @@ const Consultation: React.FC = () => {
                     BSA
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
-                    {""}
+                    {measurements.bsa}
                   </div>
                 </div>
 
@@ -981,7 +1044,7 @@ const Consultation: React.FC = () => {
                     BMI
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
-                    {""}
+                    {measurements.bmi}
                   </div>
                 </div>
 
@@ -1181,6 +1244,7 @@ const Consultation: React.FC = () => {
                   <TreatmentPlan
                     embedded
                     patientId={patientDisplayId}
+                    measurements={measurements}
                     onNext={() => selectStep("CHEMOTHERAPY ORDER")}
                   />
                 ) : activeStep === "CHEMOTHERAPY ORDER" ? (
@@ -1196,18 +1260,30 @@ const Consultation: React.FC = () => {
                     appointmentId={consultationState?.appointmentId}
                     branchId={consultationState?.branchId}
                     encounterNo={encounter?.encounter_no}
+                    measurements={measurements}
                     onNext={() => selectStep("FOLLOW UP")}
                   />
                 ) : activeStep === "FOLLOW UP" ? (
                   <FollowUp
                     embedded
                     patientId={patientDisplayId}
+                    measurements={measurements}
                     onNext={() => selectStep("SUMMARY")}
                   />
 ) : activeStep === "SUMMARY" ? (
-                  <Summary embedded patientId={patientDisplayId} />
+                  <Summary
+                    embedded
+                    patientId={patientDisplayId}
+                    measurements={measurements}
+                  />
                 ) : (
                   <>
+                    {/* =============================================
+                    PATIENT LATEST VITALS
+                ============================================ */}
+
+              
+
                     {/* =================================================
                     CONSULTATION SUMMARY
                 ================================================= */}
@@ -3495,6 +3571,7 @@ const DischargeMedication: React.FC<{
   appointmentId?: string;
   branchId?: string;
   encounterNo?: string;
+  measurements?: MeasurementValues;
   onNext?: () => void;
 }> = ({
   embedded = false,
@@ -3502,6 +3579,7 @@ const DischargeMedication: React.FC<{
   appointmentId,
   branchId,
   encounterNo,
+  measurements,
   onNext,
 }) => {
   const resolvedPatientId = patientId || "";
@@ -3900,7 +3978,7 @@ if (embedded) {
               </p>
 
               <p className="text-[15px] font-bold text-gray-900">
-                {""}
+                {measurements.height}
               </p>
             </div>
 
@@ -3910,7 +3988,7 @@ if (embedded) {
               </p>
 
               <p className="text-[15px] font-bold text-gray-900">
-                {""}
+                {measurements.weight}
               </p>
             </div>
 
@@ -3920,7 +3998,7 @@ if (embedded) {
               </p>
 
               <p className="text-[15px] font-bold text-gray-900">
-                {""}
+                {measurements.bsa}
               </p>
             </div>
 
@@ -3930,7 +4008,7 @@ if (embedded) {
               </p>
 
               <p className="text-[15px] font-bold text-gray-900">
-                {""}
+                {measurements.bmi}
               </p>
             </div>
           </div>
@@ -5662,10 +5740,12 @@ type FollowUpStep = 1 | 2 | 3;
 const FollowUp: React.FC<{
   embedded?: boolean;
   patientId?: string;
+  measurements?: MeasurementValues;
   onNext?: () => void;
 }> = ({
   embedded = false,
   patientId,
+  measurements,
   onNext,
 }) => {
   const location = useLocation();
@@ -6223,7 +6303,7 @@ const FollowUp: React.FC<{
               Height
             </p>
             <p className="text-sm font-bold text-gray-900">
-              {""}
+              {measurements.height}
             </p>
           </div>
 
@@ -6232,7 +6312,7 @@ const FollowUp: React.FC<{
               Weight
             </p>
             <p className="text-sm font-bold text-gray-900">
-              {""}
+              {measurements.weight}
             </p>
           </div>
 
@@ -6241,7 +6321,7 @@ const FollowUp: React.FC<{
               BSA
             </p>
             <p className="text-sm font-bold text-gray-900">
-              {""}
+              {measurements.bsa}
             </p>
           </div>
 
@@ -6250,7 +6330,7 @@ const FollowUp: React.FC<{
               BMI
             </p>
             <p className="text-sm font-bold text-gray-900">
-              {""}
+              {measurements.bmi}
             </p>
           </div>
 
@@ -6474,8 +6554,9 @@ interface RegimenProtocol {
 const TreatmentPlan: React.FC<{
   embedded?: boolean;
   patientId?: string;
+  measurements?: MeasurementValues;
   onNext?: () => void;
-}> = ({ embedded = false, patientId, onNext }) => {
+}> = ({ embedded = false, patientId, measurements, onNext }) => {
   const location = useLocation();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
@@ -7420,7 +7501,7 @@ const TreatmentPlan: React.FC<{
                 HEIGHT
               </div>
               <p className="font-semibold text-slate-900">
-                {""}
+                {measurements.height}
               </p>
             </div>
 
@@ -7429,7 +7510,7 @@ const TreatmentPlan: React.FC<{
                 WEIGHT
               </div>
               <p className="font-semibold text-slate-900">
-                {""}
+                {measurements.weight}
               </p>
             </div>
 
@@ -7438,7 +7519,7 @@ const TreatmentPlan: React.FC<{
                 BSA
               </div>
               <p className="font-semibold text-slate-900">
-                {""}
+                {measurements.bsa}
               </p>
             </div>
 
@@ -7447,7 +7528,7 @@ const TreatmentPlan: React.FC<{
                 BMI
               </div>
               <p className="font-semibold text-slate-900">
-                {""}
+                {measurements.bmi}
               </p>
             </div>
 
@@ -7731,9 +7812,14 @@ type DischargeRow = {
   duration: string;
 };
 
-const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
+const Summary: React.FC<{
+  embedded?: boolean;
+  patientId?: string;
+  measurements?: MeasurementValues;
+}> = ({
   embedded = false,
   patientId,
+  measurements,
 }) => {
   const location = useLocation();
   const statePatientId = (
@@ -8506,28 +8592,28 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               Height
             </p>
-            <p className="font-semibold text-slate-800">{""}</p>
+            <p className="font-semibold text-slate-800">{measurements.height}</p>
           </div>
 
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               Weight
             </p>
-            <p className="font-semibold text-slate-800">{""}</p>
+            <p className="font-semibold text-slate-800">{measurements.weight}</p>
           </div>
 
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               BSA
             </p>
-            <p className="font-semibold text-slate-800">{""}</p>
+            <p className="font-semibold text-slate-800">{measurements.bsa}</p>
           </div>
 
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               BMI
             </p>
-            <p className="font-semibold text-slate-800">{""}</p>
+            <p className="font-semibold text-slate-800">{measurements.bmi}</p>
           </div>
         </div>
 

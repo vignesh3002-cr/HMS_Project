@@ -4,6 +4,7 @@ import { ArrowLeft, KeyRound, Lock, Loader2, X } from "lucide-react";
 import api from "@/api/axios";
 import { getUser, saveUser } from "@/utils/token";
 import { useToast } from "@/hooks/use-toast";
+import { addAccountActivity } from "@/utils/accountActivity";
 
 const inputCls =
   "w-full h-10 px-4 bg-white border border-gray-200 rounded-xl text-[13.5px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-[3px] focus:ring-blue-500/15 focus:border-blue-500 transition-all duration-200 disabled:bg-gray-50 disabled:text-gray-400";
@@ -39,6 +40,7 @@ function ChangeUsernameModal({
       const res = await api.patch("/auth/me/username", { newUsername: newUsername.trim() });
       if (res.data.success) {
         toast({ title: "Username updated", description: "Your username has been changed successfully." });
+        addAccountActivity("Username updated", `Your username was changed to "${newUsername.trim()}".`);
         onSuccess(newUsername.trim());
       }
     } catch (err: any) {
@@ -139,6 +141,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
       const res = await api.patch("/auth/me/password", { oldPassword, newPassword });
       if (res.data.success) {
         toast({ title: "Password updated", description: "Your password has been changed successfully." });
+        addAccountActivity("Password updated", "Your password was changed successfully.");
         onClose();
       }
     } catch (err: any) {
@@ -226,7 +229,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-export default function Security() {
+export default function Security({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
   const [username, setUsername] = useState(() => getUser()?.username || "");
   const [showUsernameModal, setShowUsernameModal] = useState(false);
@@ -242,12 +245,14 @@ export default function Security() {
   return (
     <div className="mx-auto max-w-[800px]">
       <div className="flex items-center gap-3 mb-6">
-        <button
-          onClick={() => navigate(-1)}
-          className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 hover:bg-gray-50"
-        >
-          <ArrowLeft className="w-4 h-4" />
-        </button>
+        {!embedded && (
+          <button
+            onClick={() => navigate(-1)}
+            className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 hover:bg-gray-50"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+        )}
         <div>
           <h1 className="text-lg font-bold text-[#0F172A] leading-tight">Security</h1>
           <p className="text-xs text-gray-500">Manage your login username and password.</p>

@@ -437,27 +437,31 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
                   <>
                     <div>
                       <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                        DEPARTMENT
+                        EFFECTIVE DATE
                       </label>
 
-                      <select
-                        value={slotDepartment}
-                        onChange={(e) => setSlotDepartment(e.target.value)}
+                      <input
+                        type="date"
+                        min={toDateInputValue(new Date())}
+                        value={slotEffectiveDate}
+                        onChange={(e) => setSlotEffectiveDate(e.target.value)}
                         className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
-                      >
-                        <option value="">Select department</option>
-                        {departments.map((d) => (
-                          <option key={d.department_id} value={d.department_id}>
-                            {d.department_name}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </div>
-                  </>
-                )}
 
-                {slotMode !== "date" && (
-                  <>
+                    <div>
+                      <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
+                        CONSULTATION MINUTES
+                      </label>
+
+                      <input
+                        type="number"
+                        min={1}
+                        value={slotConsultationMinutes}
+                        onChange={(e) => setSlotConsultationMinutes(e.target.value)}
+                        className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
+                      />
+                    </div>
 
                     <div>
                       <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
