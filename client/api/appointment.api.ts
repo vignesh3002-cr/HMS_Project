@@ -53,6 +53,7 @@ export interface AppointmentRecord {
   token_number: number | null;
   status: string | null;
   reason_for_visit: string | null;
+  Patient_visit_type?: string | null;
   branch_id: string | null;
   department_id: string | null;
   employee_id: string | null;

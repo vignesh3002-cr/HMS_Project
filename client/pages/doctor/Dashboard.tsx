@@ -26,6 +26,7 @@ interface Appointment {
   status: AppointmentStatus;
   appointmentId: string;
   originalStatus: string;
+  visit_type: string;
 }
 
 const fallbackHospital = "HMS Main Hospital";
@@ -394,6 +395,7 @@ export default function DoctorDashboard() {
             status: item.status as AppointmentStatus,
             appointmentId: item.appointment_id,
             originalStatus: item.status,
+            visit_type: item.Patient_visit_type || "",
           })
         )
         // Sort by appointment_time ascending
@@ -848,17 +850,6 @@ export default function DoctorDashboard() {
                   Today's Appointments
                 </h2>
 
-      <button
-        type="button"
-        onClick={() =>
-          navigate(
-            `/doctor/appointments?date=${new Date().toISOString().slice(0, 10)}`
-          )
-        }
-        className="font-['Manrope',sans-serif] text-xs font-bold uppercase tracking-[0.6px] text-[#003d9b]"
-      >
-        View All
-      </button>
               </div>
 
               {dashboardError && (
@@ -999,6 +990,7 @@ export default function DoctorDashboard() {
                             appointmentDate: appointment.appointmentDate,
                             appointmentTime: appointment.appointmentTime,
                             consultedBy: doctorName,
+                            visit_type:appointment.visit_type
                           },
                         })
                       }
@@ -1140,7 +1132,7 @@ export default function DoctorDashboard() {
                     <div className="absolute right-0 top-[55px] z-30 w-[180px] overflow-hidden rounded border border-slate-200 bg-white shadow-[0_5px_15px_rgba(0,0,0,0.12)]">
                       {(activeBranches(doctor?.branches).length
                         ? activeBranches(doctor?.branches)
-                        : [{ branch_id: "", branch_name: fallbackHospital }]
+                        : [{ branch_id: "", branch_name: hospital || "Select Branch" }]
                       ).map((branch) => (
                         <button
                           type="button"
