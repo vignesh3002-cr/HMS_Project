@@ -23,7 +23,6 @@ import ScheduleSlotModal, {
 import { employeeApi, type EmployeeDetailResponse, type DoctorScheduleRecord } from "@/api/employee.api";
 import { appointmentApi, type AvailableSlotsResult } from "@/api/appointment.api";
 import { doctorLeaveApi } from "@/api/doctorLeave.api";
-import { departmentApi, type Department } from "@/api/department.api";
 import {
   doctorScheduleApi,
   type ScheduleChangeMode,
@@ -249,7 +248,6 @@ export default function DoctorProfile() {
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
   const [isToCalendarOpen, setIsToCalendarOpen] = useState(false);
   const [savingSlot, setSavingSlot] = useState(false);
-  const [departments, setDepartments] = useState<Department[]>([]);
   const [pendingTransfer, setPendingTransfer] = useState<{
     transferId: string;
     appointments: TransferAppointmentSummary[];
@@ -355,13 +353,6 @@ export default function DoctorProfile() {
   }, [approvedLeaves]);
 
   useEffect(() => {
-    departmentApi
-      .getAll()
-      .then((res) => setDepartments(res.data?.data ?? []))
-      .catch((err) => console.error("[Doctor Profile] Failed to load departments:", err));
-  }, []);
-
-  useEffect(() => {
     if (!id) return;
     employeeApi
       .getOne(id)
@@ -381,8 +372,8 @@ export default function DoctorProfile() {
 
   const doctorEmployee = doctorDetail?.employee ?? null;
   const doctorName = formatDoctorFullName(doctorEmployee);
-  const doctorSpecialization = doctorDetail?.doctorProfile?.specialization || doctorEmployee?.specialization || "â€”";
-  const doctorQualification = doctorDetail?.doctorProfile?.qualification || doctorEmployee?.qualification || "â€”";
+  const doctorSpecialization = doctorDetail?.doctorProfile?.specialization || doctorEmployee?.specialization || "";
+  const doctorQualification = doctorDetail?.doctorProfile?.qualification || doctorEmployee?.qualification || "";
   const doctorBranchNames = (doctorDetail?.branches?.length
     ? doctorDetail.branches.map((b) => b.branch_name)
     : doctorEmployee?.branch?.branch_name
@@ -394,16 +385,16 @@ export default function DoctorProfile() {
   // image, so the avatar block simply doesn't render when the doctor has
   // no employee_photo_URL on file.
   const doctorPhoto = doctorEmployee?.employee_photo_URL || "";
-  const doctorLicenseNo = doctorDetail?.doctorProfile?.license_no || doctorEmployee?.license_no || "â€”";
-  const doctorPhone = doctorEmployee?.mobile_no || "â€”";
-  const doctorEmail = doctorEmployee?.email || "â€”";
-  const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanent_address || "â€”";
-  const doctorBloodGroup = doctorEmployee?.blood_group || "â€”";
-  const doctorExperience = doctorEmployee?.employee_no_experence != null ? `${doctorEmployee.employee_no_experence}+ yrs` : "â€”";
+  const doctorLicenseNo = doctorDetail?.doctorProfile?.license_no || doctorEmployee?.license_no || "";
+  const doctorPhone = doctorEmployee?.mobile_no || "";
+  const doctorEmail = doctorEmployee?.email || "";
+  const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanent_address || "";
+  const doctorBloodGroup = doctorEmployee?.blood_group || "";
+  const doctorExperience = doctorEmployee?.employee_no_experence != null ? `${doctorEmployee.employee_no_experence}+ yrs` : "";
   const doctorDOB = (doctorEmployee as any)?.dob
     ? format(new Date((doctorEmployee as any).dob), "dd MMM yyyy")
-    : "â€”";
-  const doctorGender = (doctorEmployee as any)?.gender || "â€”";
+    : "";
+  const doctorGender = (doctorEmployee as any)?.gender || "";
 
   useEffect(() => {
     const branchId = doctorDetail?.branches?.[0]?.branch_id;
@@ -799,7 +790,6 @@ export default function DoctorProfile() {
       effectiveDate,
       consultationMinutes,
       transferReason,
-      departmentId,
     } = payload;
 
     if (!id || !branchId) {
@@ -1789,10 +1779,10 @@ const applyLeaveNow = async (queueConflicts: boolean) => {
                     {a.patient_name || a.patient_id}
                   </div>
                   <div className="text-[11px] text-[#5f6672]">
-                    {a.appointment_date} Â· {a.appointment_time} Â·{" "}
+                    {a.appointment_date}  {a.appointment_time} ·{" "}
                     {a.branch_id
                       ? doctorDetail?.branches?.find((b) => b.branch_id === a.branch_id)?.branch_name ?? a.branch_id
-                      : "â€”"}
+                      : ""}
                   </div>
                 </div>
               ))}
@@ -2072,9 +2062,7 @@ const applyLeaveNow = async (queueConflicts: boolean) => {
       <ScheduleSlotModal
         ref={slotModalRef}
         branches={doctorDetail?.branches?.filter((b) => b.status === 1) ?? []}
-        departments={departments}
         defaultConsultationMinutes={doctorDetail?.doctorProfile?.consultation_minutes ?? 20}
-        defaultDepartmentId={doctorEmployee?.department_id ?? ""}
         onAddSlot={handleAddSlot}
         onUpdateSlot={handleUpdateSlot}
         onCancelSlot={handleCancelSlot}

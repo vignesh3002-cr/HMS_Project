@@ -6,6 +6,8 @@ import { getUser } from "@/utils/token";
 import { cn } from "@/lib/utils";
 import { BranchSelector } from "@/components/hms/BranchSelector";
 import { BranchFilterProvider } from "@/context/BranchFilterContext";
+import { employeeApi } from "@/api/employee.api";
+import { clearAccountActivity } from "@/utils/accountActivity";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
 import { usePermission } from "@/context/PermissionContext";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
@@ -108,6 +110,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
 
   const logout = () => {
     remove();
+    clearAccountActivity();
     localStorage.removeItem("user_info");
     navigate("/");
   };
@@ -127,6 +130,32 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
     branch_area: "",
     branch: "",
   });
+  const [adminPhoto, setAdminPhoto] = useState("");
+  const [bellDot, setBellDot] = useState(false);
+
+  /*
+   * The notification feed broadcasts whether
+   * anything is unread; the dot shows only then.
+   */
+  useEffect(() => {
+    const handleUnreadChanged = (event: Event) => {
+      setBellDot(
+        Boolean((event as CustomEvent).detail)
+      );
+    };
+
+    window.addEventListener(
+      "hms-unread-changed",
+      handleUnreadChanged
+    );
+
+    return () => {
+      window.removeEventListener(
+        "hms-unread-changed",
+        handleUnreadChanged
+      );
+    };
+  }, []);
 
   const { can, loading: permissionsLoading } = usePermission();
   const hasPermission = (perm?: string) => !perm || permissionsLoading || can(perm);
@@ -201,6 +230,36 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
     syncUserData();
     window.addEventListener("user-updated", syncUserData);
     return () => window.removeEventListener("user-updated", syncUserData);
+  }, []);
+
+  // Keep the sidebar / header avatar in sync with the logged-in user's
+  // profile photo. It is loaded once on mount and then updated live
+  // whenever the photo changes on the Account page (profile-photo-updated).
+  useEffect(() => {
+    let mounted = true;
+
+    const handlePhotoUpdate = (e: Event) => {
+      const url = (e as CustomEvent<string>).detail;
+      if (url) setAdminPhoto(url);
+    };
+
+    employeeApi
+      .getMe()
+      .then((res) => {
+        if (!mounted) return;
+        const emp = res.data?.data?.employee;
+        const url = emp?.employee_photo_URL || emp?.photo || "";
+        if (url) setAdminPhoto(url);
+      })
+      .catch(() => {
+        /* keep the placeholder avatar */
+      });
+
+    window.addEventListener("profile-photo-updated", handlePhotoUpdate);
+    return () => {
+      mounted = false;
+      window.removeEventListener("profile-photo-updated", handlePhotoUpdate);
+    };
   }, []);
 
   return (
@@ -333,7 +392,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
           <div className="pt-4">
             <div className="flex items-center gap-2 p-3 rounded-lg bg-[#F2F4F6]">
               <img
-                src="https://i.pravatar.cc/40"
+                src={adminPhoto || "https://i.pravatar.cc/40"}
                 alt="Admin"
                 className="w-8 h-8 rounded-xl object-cover"
               />
@@ -356,6 +415,15 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
           {/* HEADER */}
           <header className="flex h-16 items-center justify-between bg-white/90 backdrop-blur-sm border-b border-slate-200 px-8 shadow-sm sticky top-0 z-30">
+            {/*
+             * Persistent notification watcher: keeps polling
+             * changes even while the popover is closed so the
+             * bell dot turns on the moment anything changes.
+             */}
+            <div className="hidden" aria-hidden="true">
+              <Notifications />
+            </div>
+
             {/* LEFT */}
             <div className="flex items-center gap-3">
               {/* MOBILE BUTTON */}
@@ -372,11 +440,21 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
             {/* RIGHT */}
             <div className="flex items-center gap-4">
               {/* NOTIFICATION */}
-              <Popover>
+              <Popover
+                onOpenChange={(open) => {
+                  if (open) {
+                    window.dispatchEvent(
+                      new Event("hms-view-notifications")
+                    );
+                  }
+                }}
+              >
                 <PopoverTrigger asChild>
                   <button className="relative p-2 rounded-full hover:bg-slate-100 transition-colors">
                     <Bell size={18} className="text-[#334155]" />
-                    <span className="absolute top-1 right-1 w-2 h-2 bg-red-600 rounded-full"></span>
+                    {bellDot && (
+                      <span className="absolute top-1 right-1 w-2 h-2 bg-red-600 rounded-full"></span>
+                    )}
                   </button>
                 </PopoverTrigger>
                 <PopoverContent className="w-[380px] overflow-hidden rounded-[16px] border border-[#E5E7EB] bg-white p-0 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.16)]" align="end">
@@ -390,6 +468,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
               <UserProfileDropdown
                 userName={userData.username || "HMS"}
                 userSubtext={userData.user_id || "Admin user"}
+                userAvatar={adminPhoto || undefined}
                 onLogout={() => setLogoutOpen(true)}
               />
             </div>

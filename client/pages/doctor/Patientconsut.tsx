@@ -1,4 +1,10 @@
-﻿import React, { useEffect, useRef, useState, useCallback } from "react";
+﻿import React, {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -6,6 +12,10 @@ import API, { getActiveBranchId } from "../../api/axios";
 import { employeeApi } from "../../api/employee.api";
 import { appointmentApi } from "../../api/appointment.api";
 import { getUser } from "../../utils/token";
+import {
+  doctorDashboardApi,
+  type DoctorNotificationItem,
+} from "../../api/doctorDashboard.api";
 import {
   patientApi,
   type PatientRecord,
@@ -25,11 +35,13 @@ import {
 } from "../../api/labOrder.api";
 import { Calendar } from "../../components/ui/calendar";
 import { ClinicalDetailsSection } from "../../components/hms/ClinicalDetailsSection";
+import PatientVitalsPanel from "../../components/hms/PatientVitalsPanel";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "../../components/ui/popover";
+import { MultiSelectDropdown } from "../../components/ui/multi-select-dropdown";
 
 const formatPickedDate = (date: Date) => {
   const day = String(date.getDate()).padStart(2, "0");
@@ -120,6 +132,55 @@ const collectScopeError = (error: any, sink: string[]) => {
 
 const BRANCH_HINT =
   " (or pick your branch from the selector in the header)";
+
+/* ============================================================
+   LATEST VITALS / MEASUREMENTS
+   Height, weight, BSA and BMI shown across the consult page
+   sidebars are read from the active encounter record (triage
+   vitals land on the same encounter via VitalsSignsPopover).
+   ============================================================ */
+
+interface MeasurementValues {
+  height: string;
+  weight: string;
+  bsa: string;
+  bmi: string;
+}
+
+const vitalNum = (
+  value: number | string | null | undefined
+): number | null => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const buildMeasurements = (
+  encounter: EncounterRecord | null | undefined
+): MeasurementValues => {
+  const height = vitalNum(encounter?.height);
+  const weight = vitalNum(encounter?.weight);
+
+  const bsa =
+    height !== null && weight !== null && height > 0 && weight > 0
+      ? Math.sqrt((height * weight) / 3600).toFixed(2)
+      : "";
+
+  const storedBmi = vitalNum(encounter?.BMI);
+  const bmi =
+    storedBmi !== null
+      ? String(storedBmi)
+      : height !== null && weight !== null && height > 0
+        ? (weight / Math.pow(height / 100, 2)).toFixed(1)
+        : "";
+
+  return {
+    height: height !== null ? `${height} cm` : "",
+    weight: weight !== null ? `${weight} kg` : "",
+    bsa: bsa ? `${bsa} m²` : "",
+    bmi,
+  };
+};
 
 const findActiveEncounter = async (
   patientId: string,
@@ -489,7 +550,7 @@ const Consultation: React.FC = () => {
   const patientPhoto = patient?.patient_photo_url || "";
 
   const patientAgeSex = patient
-    ? `${patient.patient_age ?? "â€”"} Y / ${patient.patient_gender ?? ""}`
+    ? `${patient.patient_age ?? ""} Y / ${patient.patient_gender ?? ""}`
     : "";
 
   const patientDisplayId = patient?.patient_id || "";
@@ -541,6 +602,13 @@ const Consultation: React.FC = () => {
     consultationState?.visit_type || fallbackVisitType || "";
 
   const consultedBy = consultationState?.consultedBy || "";
+
+  /* ============================================================
+     LATEST VITALS (from the active encounter record)
+  ============================================================ */
+
+  const measurements = useMemo(() => buildMeasurements(encounter), [encounter]);
+
   /* ============================================================
      TOAST
   ============================================================ */
@@ -552,6 +620,105 @@ const Consultation: React.FC = () => {
       setToast("");
     }, 2200);
   };
+
+  /* ============================================================
+     NOTIFICATIONS
+  ============================================================ */
+
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [notifItems, setNotifItems] = useState<DoctorNotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [doctorEmployeeId, setDoctorEmployeeId] = useState<string | null>(null);
+  const notificationRef = useRef<HTMLDivElement>(null);
+
+  const notifTimeAgo = (iso: string): string => {
+    const then = new Date(iso).getTime();
+    if (Number.isNaN(then)) return "";
+    const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+    if (seconds < 60) return "Just now";
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  };
+
+  const notifFormatDate = (value: string) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleDateString("en-US", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  const notifFormatTime = (value: string) => {
+    if (!value) return "";
+    const timeMatch = value.match(
+      /(?:T|\s)?(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?/
+    );
+    if (timeMatch) {
+      let hour = Number(timeMatch[1]);
+      const minute = timeMatch[2];
+      const suffix = hour >= 12 ? "PM" : "AM";
+      hour = hour % 12 || 12;
+      return `${String(hour).padStart(2, "0")}:${minute} ${suffix}`;
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  useEffect(() => {
+    const user = getUser();
+    const empId = user?.employee_id;
+    if (!empId) return;
+    setDoctorEmployeeId(empId);
+    let cancelled = false;
+    doctorDashboardApi
+      .getNotifications(empId)
+      .then((res) => {
+        if (cancelled) return;
+        setNotifItems(res.data.data.notifications);
+        setUnreadCount(res.data.data.unreadCount);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (notificationOpen && unreadCount > 0 && doctorEmployeeId) {
+      setUnreadCount(0);
+      doctorDashboardApi
+        .markNotificationsRead(doctorEmployeeId)
+        .catch(() => {});
+    }
+  }, [notificationOpen, unreadCount, doctorEmployeeId]);
+
+  useEffect(() => {
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (notificationRef.current && !notificationRef.current.contains(target)) {
+        setNotificationOpen(false);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setNotificationOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
 
   /* ============================================================
      LOAD DRAFT
@@ -953,7 +1120,7 @@ const Consultation: React.FC = () => {
                     HEIGHT
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
-                    {""}
+                    {measurements.height}
                   </div>
                 </div>
 
@@ -962,7 +1129,7 @@ const Consultation: React.FC = () => {
                     WEIGHT
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
-                    {""}
+                    {measurements.weight}
                   </div>
                 </div>
 
@@ -971,7 +1138,7 @@ const Consultation: React.FC = () => {
                     BSA
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
-                    {""}
+                    {measurements.bsa}
                   </div>
                 </div>
 
@@ -980,7 +1147,7 @@ const Consultation: React.FC = () => {
                     BMI
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
-                    {""}
+                    {measurements.bmi}
                   </div>
                 </div>
 
@@ -1053,28 +1220,206 @@ const Consultation: React.FC = () => {
 
                 {/* NOTIFICATION */}
 
-                <div className="relative h-6 w-6">
-
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="#94a3b8"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-6 w-6"
+                <div className="relative" ref={notificationRef}>
+                  <button
+                    type="button"
+                    aria-label="Notifications"
+                    onClick={() => setNotificationOpen((v) => !v)}
+                    className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none"
                   >
-                    <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
-                    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-                  </svg>
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="h-5 w-5"
+                    >
+                      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+                      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                    </svg>
 
-                  <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500" />
+                    {unreadCount > 0 && (
+                      <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#003ec7] px-1 text-[10px] font-bold leading-none text-white">
+                        {unreadCount > 9 ? "9+" : unreadCount}
+                      </span>
+                    )}
+                  </button>
 
+                  {notificationOpen && (
+                    <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
+                      <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
+                        <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">
+                          Notifications
+                        </h1>
+                        <div className="flex shrink-0 items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setNotifItems((prev) =>
+                                prev.map((n) => ({ ...n, status: "READ" }))
+                              )
+                            }
+                            className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
+                          >
+                            Mark all as read
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNotifItems([])}
+                            disabled={notifItems.length === 0}
+                            className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            Clear all
+                          </button>
+                        </div>
+                      </header>
+
+                      <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
+                        {notifItems.length === 0 ? (
+                          <p className="py-6 text-center text-xs text-[#434656]">
+                            No new notifications
+                          </p>
+                        ) : (
+                          notifItems.map((item, index) => {
+                            const patient =
+                              item.appointment_history?.patient_bio_data;
+                            const patientName = [
+                              patient?.patient_first_name,
+                              patient?.patient_middle_name,
+                              patient?.patient_last_name,
+                            ]
+                              .filter(Boolean)
+                              .join(" ") || "A patient";
+
+                            const isBooking =
+                              item.notification_type === "BOOKING";
+                            const appointment =
+                              item.appointment_history;
+                            const isUnread = item.status === "UNREAD";
+
+                            return (
+                              <article
+                                key={item.notification_id}
+                                className="relative flex gap-3 rounded-lg px-2 py-3 transition-colors"
+                              >
+                                {isUnread && (
+                                  <span className="absolute left-0 top-5 h-2 w-2 rounded-full bg-[#003ec7]" />
+                                )}
+
+                                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f0eaff]">
+                                  <svg
+                                    viewBox="0 0 24 24"
+                                    className="h-5 w-5 text-[#7046c9]"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.8"
+                                  >
+                                    <rect
+                                      x="3"
+                                      y="5"
+                                      width="18"
+                                      height="16"
+                                      rx="2"
+                                    />
+                                    <path
+                                      d="M16 3v4M8 3v4M3 10h18"
+                                      strokeLinecap="round"
+                                    />
+                                    <path
+                                      d="M8 14h3M8 17h5"
+                                      strokeLinecap="round"
+                                    />
+                                  </svg>
+                                </div>
+
+                                <div className="min-w-0 flex-1">
+                                  <div className="mb-1 flex items-start justify-between gap-3">
+                                    <h3 className="truncate text-xs font-semibold tracking-[0.02em] text-[#131b2e]">
+                                      {isBooking ? (
+                                        <>
+                                          <span className="font-semibold text-[#131b2e]">
+                                            {patientName}
+                                          </span>{" "}
+                                          booked an appointment
+                                          {appointment
+                                            ? ` for ${notifFormatDate(appointment.appointment_date)} at ${notifFormatTime(appointment.appointment_time)}`
+                                            : ""}
+                                          .
+                                        </>
+                                      ) : (
+                                        <>
+                                          <span className="font-semibold text-[#131b2e]">
+                                            {patientName}
+                                          </span>{" "}
+                                          checked in.
+                                        </>
+                                      )}
+                                    </h3>
+
+                                    <div className="flex shrink-0 items-center gap-2">
+                                      <span
+                                        className={[
+                                          "text-[11px] font-medium leading-[14px]",
+                                          isUnread
+                                            ? "text-[#003ec7]"
+                                            : "text-[#434656]",
+                                        ].join(" ")}
+                                      >
+                                        {notifTimeAgo(item.created_at)}
+                                      </span>
+
+                                      {isUnread && (
+                                        <span
+                                          aria-label="Unread indicator"
+                                          className="h-2 w-2 rounded-full bg-[#003ec7]"
+                                        />
+                                      )}
+
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setNotifItems((prev) =>
+                                            prev.filter(
+                                              (n) =>
+                                                n.notification_id !==
+                                                item.notification_id
+                                            )
+                                          )
+                                        }
+                                        aria-label="Delete notification"
+                                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
+                                      >
+                                        <svg
+                                          viewBox="0 0 24 24"
+                                          className="h-3.5 w-3.5 fill-none stroke-current"
+                                          strokeWidth="2"
+                                        >
+                                          <path
+                                            d="M6 6l12 12M18 6L6 18"
+                                            strokeLinecap="round"
+                                          />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </article>
+                            );
+                          })
+                        )}
+                      </main>
+                    </div>
+                  )}
                 </div>
 
                 {/* USER */}
 
-                <div className="flex items-center gap-3">
+                <button
+                  onClick={() => navigate("/doctor/profile")}
+                  className="flex items-center gap-3 cursor-pointer"
+                >
 
                   <div className="text-sm font-bold leading-5 text-slate-700">
                     HMS
@@ -1084,7 +1429,7 @@ const Consultation: React.FC = () => {
                     DR
                   </div>
 
-                </div>
+                </button>
 
               </div>
 
@@ -1177,6 +1522,7 @@ const Consultation: React.FC = () => {
                   <TreatmentPlan
                     embedded
                     patientId={patientDisplayId}
+                    measurements={measurements}
                     onNext={() => selectStep("CHEMOTHERAPY ORDER")}
                   />
                 ) : activeStep === "CHEMOTHERAPY ORDER" ? (
@@ -1192,12 +1538,14 @@ const Consultation: React.FC = () => {
                     appointmentId={consultationState?.appointmentId}
                     branchId={consultationState?.branchId}
                     encounterNo={encounter?.encounter_no}
+                    measurements={measurements}
                     onNext={() => selectStep("FOLLOW UP")}
                   />
                 ) : activeStep === "FOLLOW UP" ? (
                   <FollowUp
                     embedded
                     patientId={patientDisplayId}
+                    measurements={measurements}
                     onNext={() => selectStep("SUMMARY")}
                   />
 ) : activeStep === "SUMMARY" ? (
@@ -1209,6 +1557,12 @@ const Consultation: React.FC = () => {
                   />
                 ) : (
                   <>
+                    {/* =============================================
+                    PATIENT LATEST VITALS
+                ============================================ */}
+
+              
+
                     {/* =================================================
                     CONSULTATION SUMMARY
                 ================================================= */}
@@ -1408,7 +1762,7 @@ const Consultation: React.FC = () => {
                     <div className="flex flex-col gap-4">
 
                       {/* PERFORMANCE STATUS / SYMPTOMS / ALLERGIES /
-                          COMORBIDITIES â€” backed by the Clinical Details
+                          COMORBIDITIES ” backed by the Clinical Details
                           API (see components/hms/ClinicalDetailsSection.tsx) */}
 
                       {encounterError && (
@@ -1705,8 +2059,8 @@ export default Consultation;
 
 /* ============================================================
    LAB REVIEW COMPONENT
-   (combined from client/pages/doctor/labreview.tsx â€”
-    renamed App â†’ LabReview, duplicate React/useState import
+   (combined from client/pages/doctor/labreview.tsx ”
+    renamed App ’ LabReview, duplicate React/useState import
     removed so it can live in this file)
 
    Table rows come from the lab_order_item table via
@@ -2189,22 +2543,43 @@ const LabReview: React.FC<{
         </div>
 
         <div className="flex items-center gap-6">
-          <button
-            type="button"
-            aria-label="Notifications"
-            onClick={() => setNotifications((prev) => !prev)}
-            className="relative text-gray-500 transition-colors hover:text-gray-700 focus:outline-none"
-          >
-            <NotificationIcon />
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="Notifications"
+              onClick={() => setNotifications((prev) => !prev)}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none"
+            >
+              <NotificationIcon />
 
-            <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
+              <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-[#003ec7] ring-2 ring-white" />
+            </button>
 
             {notifications && (
-              <div className="absolute right-0 top-8 w-52 rounded-lg border border-gray-200 bg-white p-3 text-left text-sm text-gray-600 shadow-lg">
-                No new notifications
+              <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
+                <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
+                  <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <button
+                      type="button"
+                      className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
+                    >
+                      Mark all as read
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                </header>
+                <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
+                  <p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
+                </main>
               </div>
             )}
-          </button>
+          </div>
 
           <div className="flex items-center gap-3">
             <span className="font-semibold text-gray-700">HMS</span>
@@ -2294,7 +2669,7 @@ const LabReview: React.FC<{
             disabled={savingObservations}
             className="flex items-center gap-2 rounded-xl bg-[#2563EB] px-8 py-3 text-[15px] font-bold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {savingObservations ? "Savingâ€¦" : "Proceed to Treatment Plan"}
+            {savingObservations ? "Saving" : "Proceed to Treatment Plan"}
             <ArrowRightIcon />
           </button>
         </div>
@@ -2305,8 +2680,8 @@ const LabReview: React.FC<{
 
 /* ============================================================
    DIAGNOSIS COMPONENT
-   (combined from client/pages/doctor/diagonisis.tsx â€”
-    renamed App â†’ Diagnosis, duplicate React import removed,
+   (combined from client/pages/doctor/diagonisis.tsx ”
+    renamed App ’ Diagnosis, duplicate React import removed,
     CheckIcon / BackIcon / NotificationIcon reused from above)
 ============================================================ */
 
@@ -2316,7 +2691,9 @@ type FormData = {
   histomorphology: string;
   cancerStage: string;
   grade: string;
-  tnmStage: string;
+  tStage: string;
+  nStage: string;
+  mStage: string;
   icdCode: string;
   notes: string;
 };
@@ -2405,7 +2782,9 @@ const Diagnosis: React.FC<{
     histomorphology: "",
     cancerStage: "",
     grade: "",
-    tnmStage: "",
+    tStage: "",
+    nStage: "",
+    mStage: "",
     icdCode: "",
     notes: "",
   });
@@ -2435,7 +2814,11 @@ const Diagnosis: React.FC<{
   const [subtypes, setSubtypes] = useState<CancerSubtypeItem[]>([]);
   const [stageLabels, setStageLabels] = useState<string[]>([]);
   const [tnmStages, setTnmStages] = useState<string[]>([]);
+  const [tOptions, setTOptions] = useState<string[]>([]);
+  const [nOptions, setNOptions] = useState<string[]>([]);
+  const [mOptions, setMOptions] = useState<string[]>([]);
   const [grades, setGrades] = useState<string[]>([]);
+  const [metastasisSites, setMetastasisSites] = useState<string[]>([]);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
   const [diagnosisError, setDiagnosisError] = useState("");
   const [savingDiagnosis, setSavingDiagnosis] = useState(false);
@@ -2518,7 +2901,11 @@ const Diagnosis: React.FC<{
     setDiagnosisLoading(true);
     setDiagnosisError("");
     setTnmStages([]);
+    setTOptions([]);
+    setNOptions([]);
+    setMOptions([]);
     setGrades([]);
+    setMetastasisSites([]);
 
     API.get<{ success: boolean; data: StagingReferenceItem[] }>(
       "/oncology/reference/staging",
@@ -2538,7 +2925,7 @@ const Diagnosis: React.FC<{
           const criteria = (item.tnm_criteria ?? "")
             .replace(/\([^)]*\)/g, " ")
             .replace(/\s+/g, " ")
-            .replace(/\s*[-â€“]\s*$/g, "")
+            .replace(/\s*[-“]\s*$/g, "")
             .trim();
           if (criteria && /(\b[TNM]\d|\bAny\s+[TNM])/i.test(criteria)) {
             if (!tnmOptions.includes(criteria)) tnmOptions.push(criteria);
@@ -2553,7 +2940,7 @@ const Diagnosis: React.FC<{
             .filter((value): value is string => Boolean(value))
             .join(" ");
           for (const match of gradeSource.matchAll(
-            /grade\s+group\s*[\d\-â€“]+|grade\s+[\d\-â€“]+/gi
+            /grade\s+group\s*[\d\-“]+|grade\s+[\d\-“]+/gi
           )) {
             const grade = match[0]
               .replace(/\s+/g, " ")
@@ -2562,6 +2949,41 @@ const Diagnosis: React.FC<{
           }
         }
         setTnmStages(tnmOptions.sort());
+
+        const expandTnmRange = (token: string): string[] => {
+          const rangeMatch = token.match(/^([TNM])(\d+)([a-z])?-([a-z\d]+)$/i);
+          if (!rangeMatch) return [token];
+          const prefix = rangeMatch[1].toUpperCase();
+          const startNum = parseInt(rangeMatch[2], 10);
+          const startLetter = rangeMatch[3] || "";
+          const endStr = rangeMatch[4];
+          const results: string[] = [];
+          const endNum = parseInt(endStr, 10);
+          if (!startLetter && !isNaN(endNum)) {
+            for (let i = startNum; i <= endNum; i++) results.push(`${prefix}${i}`);
+          } else if (startLetter && endStr.length === 1) {
+            const startCode = startLetter.charCodeAt(0);
+            const endCode = endStr.charCodeAt(0);
+            for (let c = startCode; c <= endCode; c++) results.push(`${prefix}${startNum}${String.fromCharCode(c)}`);
+          }
+          return results.length > 0 ? results : [token];
+        };
+
+        const tSet = new Set<string>();
+        const nSet = new Set<string>();
+        const mSet = new Set<string>();
+        for (const option of tnmOptions) {
+          const parts = option.split(/\s+/);
+          for (const part of parts) {
+            if (/^T\d/i.test(part)) expandTnmRange(part).forEach((v) => tSet.add(v));
+            else if (/^N\d/i.test(part) || /^N[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => nSet.add(v));
+            else if (/^M\d/i.test(part) || /^M[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => mSet.add(v));
+          }
+        }
+        setTOptions([...tSet].sort());
+        setNOptions([...nSet].sort());
+        setMOptions([...mSet].sort());
+
         setGrades(gradeOptions.sort());
         if (!resetStageSelection) return;
         setFormData((previous) => ({
@@ -2725,19 +3147,9 @@ const Diagnosis: React.FC<{
       return;
     }
 
-    let tStage: string | null = null;
-    let nStage: string | null = null;
-    let mStage: string | null = null;
-
-    if (/^T/i.test(formData.tnmStage)) {
-      const [t, n, m] = formData.tnmStage.trim().split(/\s+/);
-      tStage = t ?? null;
-      nStage = n ?? null;
-      mStage = m ?? null;
-    } else if (formData.tnmStage) {
-      const m = formData.tnmStage.trim().split(/\s+/).pop() ?? null;
-      mStage = m && /^M/i.test(m) ? m : null;
-    }
+    const tStage: string | null = formData.tStage || null;
+    const nStage: string | null = formData.nStage || null;
+    const mStage: string | null = formData.mStage || null;
 
     const normalizedIcd = formData.icdCode.trim().toUpperCase();
     let catalog = diagnosisCatalogRef.current;
@@ -2782,6 +3194,7 @@ const Diagnosis: React.FC<{
         t_stage: tStage,
         n_stage: nStage,
         m_stage: mStage,
+        metastasis_sites: mStage?.trim().toUpperCase().startsWith("M1") && metastasisSites.length > 0 ? metastasisSites : null,
       });
 
       const created = response.data?.data;
@@ -2880,7 +3293,7 @@ const Diagnosis: React.FC<{
                 className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
               >
                 <option value="">
-                  {diagnosisLoading ? "Loadingâ€¦" : "Select Sub Type"}
+                  {diagnosisLoading ? "Loading" : "Select Sub Type"}
                 </option>
 
                 {subtypes.map((subtype) => (
@@ -2943,7 +3356,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
               >
                 <option value="">
                   {diagnosisLoading
-                    ? "Loadingâ€¦"
+                    ? "Loading"
                     : "Select Cancer Stage"}
                 </option>
 
@@ -2979,7 +3392,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
               >
                 <option value="">
                   {diagnosisLoading
-                    ? "Loadingâ€¦"
+                    ? "Loading"
                     : "Select Grade"}
                 </option>
 
@@ -2996,42 +3409,132 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
             </div>
           </div>
 
-          {/* TNM Stage */}
+          {/* T Stage */}
           <div>
             <label
-              htmlFor="tnmStage"
+              htmlFor="tStage"
               className="mb-2 block text-sm font-semibold text-gray-600"
             >
-              TNM Stage
+              T Stage
             </label>
 
             <div className="relative">
               <select
-                id="tnmStage"
-                name="tnmStage"
-                value={formData.tnmStage}
+                id="tStage"
+                name="tStage"
+                value={formData.tStage}
                 onChange={handleChange}
                 className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
               >
                 <option value="">
                   {diagnosisLoading
-                    ? "Loadingâ€¦"
-                    : "Select TNM Stage"}
+                    ? "Loading"
+                    : "Select T Stage"}
                 </option>
 
-                {tnmStages.map((stage) => (
-                  <option key={stage} value={stage}>
-                    {stage}
+                {tOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
                   </option>
                 ))}
               </select>
 
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
                 <ChevronDownIcon />
-                
               </div>
             </div>
           </div>
+
+          {/* N Stage */}
+          <div>
+            <label
+              htmlFor="nStage"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              N Stage
+            </label>
+
+            <div className="relative">
+              <select
+                id="nStage"
+                name="nStage"
+                value={formData.nStage}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  {diagnosisLoading
+                    ? "Loading"
+                    : "Select N Stage"}
+                </option>
+
+                {nOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* M Stage */}
+          <div>
+            <label
+              htmlFor="mStage"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              M Stage
+            </label>
+
+            <div className="relative">
+              <select
+                id="mStage"
+                name="mStage"
+                value={formData.mStage}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  {diagnosisLoading
+                    ? "Loading"
+                    : "Select M Stage"}
+                </option>
+
+                {mOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Metastasis Sites - shown when M stage is M1+ */}
+          {formData.mStage.trim().toUpperCase().startsWith("M1") && (
+            <div className="lg:col-span-2">
+              <label className="mb-2 block text-sm font-semibold text-gray-600">
+                Metastasis Sites
+              </label>
+              <MultiSelectDropdown
+                options={[
+                  "Bone", "Liver", "Lung", "Brain", "Lymph Nodes",
+                  "Adrenal Gland", "Peritoneum", "Pleura", "Skin",
+                  "Contralateral Adrenal", "Ovary", "Other"
+                ]}
+                value={metastasisSites}
+                onValueChange={setMetastasisSites}
+                placeholder="Select metastasis site(s)"
+              />
+            </div>
+          )}
 
           {/* ICD Code */}
           <div>
@@ -3050,7 +3553,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
               onChange={handleChange}
               placeholder={
                 diagnosisLoading
-                  ? "Loading diagnosisâ€¦"
+                  ? "Loading diagnosis"
                   : "Enter ICD code"
               }
               className="block w-full rounded-md border-gray-300 px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:ring-[#1d4ed8]"
@@ -3133,16 +3636,35 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                   setNotificationOpen((previous) => !previous)
                 }
                 aria-label="Notifications"
-                className="relative text-gray-500 transition-colors hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none"
               >
                 <NotificationIcon />
 
-                <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
+                <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-[#003ec7] ring-2 ring-white" />
               </button>
 
               {notificationOpen && (
-                <div className="absolute right-0 top-9 z-30 w-56 rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-600 shadow-lg">
-                  No new notifications
+                <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
+                  <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
+                    <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <button
+                        type="button"
+                        className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
+                      >
+                        Mark all as read
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Clear all
+                      </button>
+                    </div>
+                  </header>
+                  <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
+                    <p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
+                  </main>
                 </div>
               )}
             </div>
@@ -3211,8 +3733,8 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
 
 /* ============================================================
    DISCHARGE MEDICATION COMPONENT
-   (combined from client/pages/doctor/discharge.tsx â€”
-    renamed PatientDischargeMedication â†’ DischargeMedication,
+   (combined from client/pages/doctor/discharge.tsx 
+    renamed PatientDischargeMedication  DischargeMedication,
     Medication type renamed to DischargeMedicationItem to avoid
     clashing with the Medication interface above, duplicate
     React import and icon definitions removed,
@@ -3328,6 +3850,7 @@ const DischargeMedication: React.FC<{
   appointmentId?: string;
   branchId?: string;
   encounterNo?: string;
+  measurements?: MeasurementValues;
   onNext?: () => void;
 }> = ({
   embedded = false,
@@ -3335,6 +3858,7 @@ const DischargeMedication: React.FC<{
   appointmentId,
   branchId,
   encounterNo,
+  measurements,
   onNext,
 }) => {
   const resolvedPatientId = patientId || "";
@@ -3655,7 +4179,7 @@ if (embedded) {
           className="flex items-center gap-2 rounded-md bg-[#1d4ed8] px-8 py-3 font-bold text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <DoubleArrowIcon />
-          {savingMeds ? "Savingâ€¦" : "Next"}
+          {savingMeds ? "Saving" : "Next"}
         </button>
       </div>
     </div>
@@ -3733,7 +4257,7 @@ if (embedded) {
               </p>
 
               <p className="text-[15px] font-bold text-gray-900">
-                {""}
+                {measurements.height}
               </p>
             </div>
 
@@ -3743,7 +4267,7 @@ if (embedded) {
               </p>
 
               <p className="text-[15px] font-bold text-gray-900">
-                {""}
+                {measurements.weight}
               </p>
             </div>
 
@@ -3753,7 +4277,7 @@ if (embedded) {
               </p>
 
               <p className="text-[15px] font-bold text-gray-900">
-                {""}
+                {measurements.bsa}
               </p>
             </div>
 
@@ -3763,7 +4287,7 @@ if (embedded) {
               </p>
 
               <p className="text-[15px] font-bold text-gray-900">
-                {""}
+                {measurements.bmi}
               </p>
             </div>
           </div>
@@ -3942,7 +4466,7 @@ if (embedded) {
 
 /* ============================================================
    CHEMOTHERAPY ORDER COMPONENT
-   (combined from client/pages/doctor/chemo.tsx â€”
+   (combined from client/pages/doctor/chemo.tsx 
     renamed App-style component ChemotherapyOrder to the same
     embedded pattern as LabReview / Diagnosis / DischargeMedication,
     icons moved inside the component to avoid colliding with the
@@ -4393,7 +4917,7 @@ const ChemotherapyOrder: React.FC<{
           setCycleDay(
             latestCycle
               ? `Cycle ${latestCycle.cycle_number} / Day ${
-                  latestCycle.cycle_day ?? "â€”"
+                  latestCycle.cycle_day ?? ""
                 }`
               : "Cycle 1 / Day 1"
           );
@@ -4901,7 +5425,7 @@ const ChemotherapyOrder: React.FC<{
                 className="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <SaveIcon />
-                {savingOrder ? "Savingâ€¦" : "Save"}
+                {savingOrder ? "Saving" : "Save"}
               </button>
             </div>
           </div>
@@ -4948,7 +5472,7 @@ const ChemotherapyOrder: React.FC<{
                         colSpan={5}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
-                        Loading chemotherapy ordersâ€¦
+                        Loading chemotherapy orders
                       </td>
                     </tr>
                   )}
@@ -5050,7 +5574,7 @@ const ChemotherapyOrder: React.FC<{
                                 disabled={savingEdit}
                                 className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                               >
-                                {savingEdit ? "Savingâ€¦" : "Save"}
+                                {savingEdit ? "Saving" : "Save"}
                               </button>
 
                               <button
@@ -5160,7 +5684,7 @@ const ChemotherapyOrder: React.FC<{
                         colSpan={5}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
-                        Loading premedicationâ€¦
+                        Loading premedication
                       </td>
                     </tr>
                   )}
@@ -5264,7 +5788,7 @@ const ChemotherapyOrder: React.FC<{
                                 disabled={savingEdit}
                                 className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                               >
-                                {savingEdit ? "Savingâ€¦" : "Save"}
+                                {savingEdit ? "Saving" : "Save"}
                               </button>
 
                               <button
@@ -5482,8 +6006,8 @@ const ChemotherapyOrder: React.FC<{
 
 /* ============================================================
    FOLLOW UP COMPONENT
-   (combined from client/pages/doctor/Follow.tsx â€”
-    renamed FollowUpScreen â†’ FollowUp, duplicate React import
+   (combined from client/pages/doctor/Follow.tsx 
+    renamed FollowUpScreen  FollowUp, duplicate React import
     removed, icons scoped inside the component to avoid
     colliding with the module-level icons above, embedded prop
     added so it can live in this file, original Follow.tsx file
@@ -5495,10 +6019,12 @@ type FollowUpStep = 1 | 2 | 3;
 const FollowUp: React.FC<{
   embedded?: boolean;
   patientId?: string;
+  measurements?: MeasurementValues;
   onNext?: () => void;
 }> = ({
   embedded = false,
   patientId,
+  measurements,
   onNext,
 }) => {
   const location = useLocation();
@@ -5970,7 +6496,7 @@ const FollowUp: React.FC<{
           className="inline-flex items-center justify-center rounded-lg border border-transparent bg-[#2557D6] px-8 py-3 text-base font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <DoubleArrowIcon />
-          {submittingFollowUp ? "Submittingâ€¦" : "Submit"}
+          {submittingFollowUp ? "Submitting" : "Submit"}
         </button>
       </div>
     </>
@@ -6056,7 +6582,7 @@ const FollowUp: React.FC<{
               Height
             </p>
             <p className="text-sm font-bold text-gray-900">
-              {""}
+              {measurements.height}
             </p>
           </div>
 
@@ -6065,7 +6591,7 @@ const FollowUp: React.FC<{
               Weight
             </p>
             <p className="text-sm font-bold text-gray-900">
-              {""}
+              {measurements.weight}
             </p>
           </div>
 
@@ -6074,7 +6600,7 @@ const FollowUp: React.FC<{
               BSA
             </p>
             <p className="text-sm font-bold text-gray-900">
-              {""}
+              {measurements.bsa}
             </p>
           </div>
 
@@ -6083,7 +6609,7 @@ const FollowUp: React.FC<{
               BMI
             </p>
             <p className="text-sm font-bold text-gray-900">
-              {""}
+              {measurements.bmi}
             </p>
           </div>
 
@@ -6276,7 +6802,7 @@ const FollowUp: React.FC<{
 
 /* ============================================================
    TREATMENT PLAN COMPONENT
-   (combined from client/pages/doctor/Treatement.tsx â€”
+   (combined from client/pages/doctor/Treatement.tsx 
     TreatmentPlan given the same embedded pattern as
     LabReview / Diagnosis / ChemotherapyOrder,
     icons kept scoped inside the component to avoid colliding
@@ -6307,8 +6833,9 @@ interface RegimenProtocol {
 const TreatmentPlan: React.FC<{
   embedded?: boolean;
   patientId?: string;
+  measurements?: MeasurementValues;
   onNext?: () => void;
-}> = ({ embedded = false, patientId, onNext }) => {
+}> = ({ embedded = false, patientId, measurements, onNext }) => {
   const location = useLocation();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
@@ -7019,6 +7546,11 @@ const TreatmentPlan: React.FC<{
                 <Calendar
                   mode="single"
                   selected={parsePickedDate(plannedStartDate)}
+                  disabled={(date) => {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    return date < today;
+                  }}
                   onSelect={(date) => {
                     if (date instanceof Date) {
                       const value = formatPickedDate(date);
@@ -7061,7 +7593,7 @@ const TreatmentPlan: React.FC<{
               }
               className="text-sm font-semibold text-blue-700 hover:underline"
             >
-              View Protocol
+            
             </button>
 
           </div>
@@ -7089,7 +7621,7 @@ const TreatmentPlan: React.FC<{
             >
               <option value="">
                 {protocolsLoading
-                  ? "Loading protocolsâ€¦"
+                  ? "Loading protocols"
                   : "Select Protocol"}
               </option>
 
@@ -7163,7 +7695,7 @@ const TreatmentPlan: React.FC<{
           className="flex items-center rounded-lg bg-[#1d4ed8] px-6 py-2.5 font-semibold text-white transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <DoubleArrowIcon />
-          {saving ? "Savingâ€¦" : "Next"}
+          {saving ? "Saving" : "Next"}
         </button>
 
       </div>
@@ -7248,7 +7780,7 @@ const TreatmentPlan: React.FC<{
                 HEIGHT
               </div>
               <p className="font-semibold text-slate-900">
-                {""}
+                {measurements.height}
               </p>
             </div>
 
@@ -7257,7 +7789,7 @@ const TreatmentPlan: React.FC<{
                 WEIGHT
               </div>
               <p className="font-semibold text-slate-900">
-                {""}
+                {measurements.weight}
               </p>
             </div>
 
@@ -7266,7 +7798,7 @@ const TreatmentPlan: React.FC<{
                 BSA
               </div>
               <p className="font-semibold text-slate-900">
-                {""}
+                {measurements.bsa}
               </p>
             </div>
 
@@ -7275,7 +7807,7 @@ const TreatmentPlan: React.FC<{
                 BMI
               </div>
               <p className="font-semibold text-slate-900">
-                {""}
+                {measurements.bmi}
               </p>
             </div>
 
@@ -7463,8 +7995,8 @@ const TreatmentPlan: React.FC<{
 
 /* ============================================================
    SUMMARY COMPONENT
-   (combined from client/pages/doctor/summary.tsx â€”
-    renamed PatientSummary â†’ Summary, Step helper moved inside
+   (combined from client/pages/doctor/summary.tsx 
+    renamed PatientSummary  Summary, Step helper moved inside
     the component to avoid colliding with other names in this
     file, embedded prop added so it can live in this file,
     original summary.tsx file left untouched)
@@ -7605,6 +8137,11 @@ const Summary: React.FC<{
   const [plan, setPlan] = useState<SummaryPlan | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState("");
+  const [dischargeMedications, setDischargeMedications] = useState<
+    DischargeRow[]
+  >([]);
+  const [dischargeLoading, setDischargeLoading] = useState(false);
+  const [dischargeError, setDischargeError] = useState("");
 
   useEffect(() => {
     if (!resolvedPatientId) return;
@@ -7646,6 +8183,107 @@ const Summary: React.FC<{
     };
   }, [resolvedPatientId]);
 
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    let cancelled = false;
+
+    const resolveProtocolId = async (): Promise<string> => {
+      const savedProtocolId = localStorage.getItem(
+        `hms_selected_protocol_id_${resolvedPatientId}`
+      );
+      if (savedProtocolId) return savedProtocolId;
+
+      try {
+        const draft = JSON.parse(
+          localStorage.getItem(`hms_treatment_plan_${resolvedPatientId}`) ??
+            ""
+        ) as { protocol?: string } | null;
+        if (draft?.protocol) return draft.protocol;
+      } catch {
+        // Malformed draft - continue with the plan lookup.
+      }
+
+      const response = await API.get<{
+        success: boolean;
+        data: {
+          chemotherapy_regimen_protocol?: {
+            protocol_id?: string;
+          } | null;
+        }[];
+      }>("/chemotherapy/plans", {
+        params: {
+          patient_id: resolvedPatientId,
+          branchId:
+            getActiveBranchId() ?? getUser()?.branch_id ?? undefined,
+        },
+      });
+      const planRow = response.data.data?.[0];
+      return planRow?.chemotherapy_regimen_protocol?.protocol_id ?? "";
+    };
+
+    setDischargeLoading(true);
+    setDischargeError("");
+
+    resolveProtocolId()
+      .then(async (protocolId) => {
+        if (!protocolId) return [];
+
+        const response = await API.get<{
+          success: boolean;
+          data: DischargeMedicineRecord[];
+        }>(
+          `/chemotherapy/regimen-protocols/${encodeURIComponent(
+            protocolId
+          )}/discharge-medicines`
+        );
+
+        return [...(response.data.data ?? [])].sort(
+          (a, b) => (a.drug_sequence ?? 0) - (b.drug_sequence ?? 0)
+        );
+      })
+      .then((records) => {
+        if (cancelled) return;
+        setDischargeMedications(
+          records.map((item) => ({
+            drug:
+              item.medicine_master?.medicine_name ||
+              item.medicine_master?.generic_name ||
+              "",
+            dose:
+              item.patient_dose != null && item.patient_dose !== ""
+                ? `${item.patient_dose} ${
+                    item.patient_dose_unit ?? item.medicine_master?.unit ?? ""
+                  }`.trim()
+                : "",
+            frequency: item.frequency || "",
+            instruction:
+              item.administration_detail ||
+              item.comment ||
+              item.composition ||
+              "",
+            duration: item.duration || "",
+          }))
+        );
+      })
+      .catch((error: any) => {
+        console.error("Failed to load discharge medicines:", error);
+        if (cancelled) return;
+        setDischargeMedications([]);
+        setDischargeError(
+          error?.response?.data?.message ||
+            error?.message ||
+            "Failed to load discharge medicines."
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setDischargeLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId]);
+
   const planItems = plan?.chemotherapy_plan_items ?? [];
 
   const chemotherapyOrders: ChemoOrderRow[] = planItems
@@ -7674,25 +8312,6 @@ const Summary: React.FC<{
       dose: item.protocol_dose != null ? String(item.protocol_dose) : "",
       route: item.administration_route || "",
       time: item.frequency || "",
-    }));
-
-  const dischargeMedications: DischargeRow[] = planItems
-    .filter(
-      (item) =>
-        item.drug_role === "SUPPORTIVE" ||
-        item.drug_role === "POSTMEDICATION"
-    )
-    .map((item) => ({
-      drug:
-        item.medicine_master?.medicine_name ||
-        item.medicine_master?.generic_name ||
-        "",
-      dose: item.protocol_dose != null ? String(item.protocol_dose) : "",
-      frequency: item.frequency || "",
-      instruction: item.remarks || "",
-      duration: item.administration_route
-        ? `via ${item.administration_route}`
-        : "",
     }));
 
   const cancerType =
@@ -7727,7 +8346,7 @@ const Summary: React.FC<{
     const cycles = plan?.chemotherapy_cycle ?? [];
     const latest = cycles[cycles.length - 1];
     const cycleLabel = latest
-      ? `Cycle ${latest.cycle_number} / Day ${latest.cycle_day ?? "â€”"}`
+      ? `Cycle ${latest.cycle_number} / Day ${latest.cycle_day ?? ""}`
       : "";
     const status = plan?.treatment_status
       ? ` (${plan.treatment_status})`
@@ -7833,8 +8452,8 @@ const Summary: React.FC<{
     y += 8;
     doc.setFontSize(9);
     doc.setTextColor(15, 23, 42);
-    doc.text(`Next Visit Date: ${nextVisitDate || "â€”"}`, 40, y);
-    doc.text(`Next Cycle: ${nextCycle || "â€”"}`, 300, y);
+    doc.text(`Next Visit Date: ${nextVisitDate || ""}`, 40, y);
+    doc.text(`Next Cycle: ${nextCycle || ""}`, 300, y);
 
     const blob = doc.output("blob");
     const url = URL.createObjectURL(blob);
@@ -7977,7 +8596,7 @@ const Summary: React.FC<{
           active ? "bg-green-500" : "bg-slate-400"
         }`}
       >
-        âœ“
+        
       </div>
 
       <span
@@ -8048,7 +8667,7 @@ const Summary: React.FC<{
 
                 <p className="flex items-center gap-2 text-sm text-slate-500">
                   {stage}
-                  <span className="text-slate-400">â—·</span>
+                  <span className="text-slate-400"></span>
                 </p>
               </div>
 
@@ -8069,7 +8688,7 @@ const Summary: React.FC<{
 
                 <p className="flex items-center gap-2 text-sm text-slate-500">
                   {protocol}
-                  <span className="text-slate-400">â—·</span>
+                  <span className="text-slate-400"></span>
                 </p>
               </div>
 
@@ -8195,6 +8814,22 @@ const Summary: React.FC<{
               Discharge Medication
             </h3>
 
+            {dischargeLoading && (
+              <div className="mb-4 text-sm text-slate-500">
+                Loading discharge medicines...
+              </div>
+            )}
+            {dischargeError && (
+              <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {dischargeError}
+              </div>
+            )}
+            {!dischargeLoading && !dischargeError && dischargeMedications.length === 0 && (
+              <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                No discharge medicines found for this patient's protocol.
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full min-w-[700px] text-left text-sm">
                 <thead>
@@ -8255,7 +8890,7 @@ const Summary: React.FC<{
 
               <p className="flex items-center gap-2 text-slate-600">
                 {nextCycle}
-                <span className="text-slate-400">â—·</span>
+                <span className="text-slate-400"></span>
               </p>
             </div>
           </section>
@@ -8333,7 +8968,7 @@ const Summary: React.FC<{
           {/* Phone */}
           <div className="flex items-center gap-4">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-400">
-              <span className="text-sm">â˜Ž</span>
+              <span className="text-sm"></span>
             </div>
 
             <div>
@@ -8350,7 +8985,7 @@ const Summary: React.FC<{
           {/* Email */}
           <div className="flex items-center gap-4">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-400">
-              <span className="text-sm">âœ‰</span>
+              <span className="text-sm"></span>
             </div>
 
             <div>
@@ -8371,28 +9006,28 @@ const Summary: React.FC<{
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               Height
             </p>
-            <p className="font-semibold text-slate-800">{""}</p>
+            <p className="font-semibold text-slate-800">{measurements.height}</p>
           </div>
 
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               Weight
             </p>
-            <p className="font-semibold text-slate-800">{""}</p>
+            <p className="font-semibold text-slate-800">{measurements.weight}</p>
           </div>
 
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               BSA
             </p>
-            <p className="font-semibold text-slate-800">{""}</p>
+            <p className="font-semibold text-slate-800">{measurements.bsa}</p>
           </div>
 
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-400">
               BMI
             </p>
-            <p className="font-semibold text-slate-800">{""}</p>
+            <p className="font-semibold text-slate-800">{measurements.bmi}</p>
           </div>
         </div>
 
@@ -8421,7 +9056,7 @@ const Summary: React.FC<{
               className="text-slate-500 transition-colors hover:text-slate-700"
               aria-label="Back"
             >
-              <span className="text-lg">â†</span>
+              <span className="text-lg"></span>
             </button>
 
             <h1 className="text-xl font-semibold text-slate-800">
@@ -8436,7 +9071,7 @@ const Summary: React.FC<{
               className="relative text-slate-500 transition-colors hover:text-slate-700"
               aria-label="Notifications"
             >
-              <span className="text-xl">â™§</span>
+              <span className="text-xl"></span>
 
               <span className="absolute right-0 top-0 h-2 w-2 rounded-full border border-white bg-red-500" />
             </button>

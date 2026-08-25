@@ -150,7 +150,22 @@ function todayIso(): string {
   return pickerDateToKey(new Date());
 }
 
-function toPatient(a: AppointmentRecord): Patient {
+function isBeforeToday(dateStr: string): boolean {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const apptDate = new Date(dateStr);
+  return apptDate < today;
+}
+
+function toPatient(a: AppointmentRecord): Patient | null {
+  const effectiveStatus = a.status ?? "";
+  const isCancelled = effectiveStatus === "CANCELLED";
+  const apptDate = a.appointment_date;
+
+  // Only show: SCHEDULED, RESCHEDULED, CANCELLED (up to yesterday)
+  const allowedStatuses = new Set(["SCHEDULED", "RESCHEDULED", "CANCELLED"]);
+  if (!allowedStatuses.has(effectiveStatus)) return null;
+  if (isCancelled && !isBeforeToday(apptDate)) return null;
   const bio = a.patient_bio_data;
   const gender = bio?.patient_gender
     ? bio.patient_gender.charAt(0).toUpperCase() +
@@ -175,7 +190,7 @@ function toPatient(a: AppointmentRecord): Patient {
     originalStatus: a.status ?? "",
     age: bio?.patient_age ?? computeAge(bio?.patient_dob),
     bloodGroup: bio?.patient_blood_group ?? undefined,
-    status: toDisplayStatus(a.status),
+    status: toDisplayStatus(effectiveStatus),
   };
 }
 
@@ -237,7 +252,6 @@ const STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: "COMPLETED", label: "Checked Out" },
   { value: "CANCELLED", label: "Cancelled" },
   { value: "NO_SHOW", label: "No Show" },
-  { value: "NOT_CHECKED_IN", label: "Not Checked In" },
   { value: "RESCHEDULED", label: "Reschedule" },
 ];
 
@@ -1230,7 +1244,7 @@ export default function AppointmentPage() {
           (y.appointment_date ?? "").localeCompare(x.appointment_date ?? ""),
         );
 
-      setPatients(ownAppointments.map(toPatient));
+      setPatients(ownAppointments.map(toPatient).filter((p): p is Patient => p !== null));
     } catch (err: any) {
       console.error(
         "[AppointmentPage] Failed to load appointments:",
@@ -1419,12 +1433,9 @@ export default function AppointmentPage() {
         .getNotifications(bellEmployeeId)
         .then((res) => {
           if (cancelled) return;
-          setNotifications(
-            res.data?.data?.notifications ?? []
-          );
-          setUnreadCount(
-            res.data?.data?.unreadCount ?? 0
-          );
+          // Show ALL change notifications — no status filtering here.
+          setNotifications(res.data?.data?.notifications ?? []);
+          setUnreadCount(res.data?.data?.unreadCount ?? 0);
         })
         .catch(() => {});
     };
