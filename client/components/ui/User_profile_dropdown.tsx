@@ -111,7 +111,7 @@ export function UserProfileDropdown({
             className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[#464555] hover:bg-[#FFDAD6] hover:text-[#93000A] transition-colors group"
           >
             <LogOut size={18} />
-            <span className="text-sm font-medium">Sign out</span>
+            <span className="text-sm font-medium">Log out</span>
           </button>
         </div>
       </DropdownMenuContent>

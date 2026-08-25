@@ -87,7 +87,7 @@ function mapToGridPatient(p: PatientRecord) {
 // still upcoming/current — never for one that's cancelled, a no-show, or
 // already completed. Once it's over, the patient goes back to Unassigned
 // rather than continuing to show whoever last treated them.
-const NON_ASSIGNING_APPOINTMENT_STATUSES = new Set(["CANCELLED", "NO_SHOW", "NOT_CHECKED_IN", "COMPLETED"]);
+const NON_ASSIGNING_APPOINTMENT_STATUSES = new Set(["CANCELLED", "NO_SHOW", "COMPLETED"]);
 
 interface AssignedDoctor {
   name: string;

@@ -27,6 +27,7 @@ export interface HmsTableProps<T> {
   rowsPerPageOptions?: number[];
   emptyMessage?: string;
   scrollable?: boolean;
+
   minWidth?: string;
   rowKey: (row: T, index: number) => string;
 }
@@ -110,10 +111,11 @@ export function PaginationBar({
   rowsPerPageOptions?: number[];
 }) {
   const PAGE_WINDOW = 4;
+  const safePage = Math.min(Math.max(currentPage, 1), Math.max(1, totalPages));
   const pageStart =
     totalPages <= PAGE_WINDOW
       ? 1
-      : Math.max(1, Math.min(currentPage - 2, totalPages - (PAGE_WINDOW - 1)));
+      : Math.max(1, Math.min(safePage - 2, totalPages - (PAGE_WINDOW - 1)));
   const pageEnd = Math.min(totalPages, pageStart + PAGE_WINDOW - 1);
   const pages = Array.from(
     { length: pageEnd - pageStart + 1 },
@@ -121,7 +123,7 @@ export function PaginationBar({
   );
 
   return (
-    <div className="mt-auto shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur gap-2">
+    <div className="mt-auto shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] gap-2">
       <div className="flex items-center gap-2">
         <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
           Showing {visibleStart} to {visibleEnd} of {totalRecords} entries
@@ -134,7 +136,7 @@ export function PaginationBar({
       </div>
       <div className="flex items-center gap-1">
         <button
-          disabled={currentPage <= 1}
+          disabled={safePage <= 1}
           onClick={() => onPageChange(1)}
           title="First page"
           className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
@@ -142,8 +144,8 @@ export function PaginationBar({
           <ChevronsLeft className="w-3.5 h-3.5 text-[#424752]" />
         </button>
         <button
-          disabled={currentPage <= 1}
-          onClick={() => onPageChange(currentPage - 1)}
+          disabled={safePage <= 1}
+          onClick={() => onPageChange(safePage - 1)}
           className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
         >
           <svg width="5" height="8" viewBox="0 0 5 8" fill="none">
@@ -156,7 +158,7 @@ export function PaginationBar({
             key={page}
             onClick={() => onPageChange(page)}
             className={`w-6 h-6 flex items-center justify-center rounded-md text-[10px] font-semibold transition-colors ${
-              currentPage === page
+              safePage === page
                 ? "bg-[#004785] text-white"
                 : "text-[#1D1A1A] hover:bg-[#F2F4F6]"
             }`}
@@ -166,8 +168,8 @@ export function PaginationBar({
         ))}
         {pageEnd < totalPages && <span className="text-[#6B7280] text-xs">...</span>}
         <button
-          disabled={currentPage >= totalPages}
-          onClick={() => onPageChange(currentPage + 1)}
+          disabled={safePage >= totalPages}
+          onClick={() => onPageChange(safePage + 1)}
           className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
         >
           <svg width="5" height="8" viewBox="0 0 5 8" fill="none">
@@ -175,7 +177,7 @@ export function PaginationBar({
           </svg>
         </button>
         <button
-          disabled={currentPage >= totalPages}
+          disabled={safePage >= totalPages}
           onClick={() => onPageChange(totalPages)}
           title="Last page"
           className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors"
@@ -203,7 +205,8 @@ export default function HmsTable<T>({
   onRowsPerPageChange,
   rowsPerPageOptions,
   emptyMessage = "No data found.",
-  scrollable = true,
+scrollable = true,
+
   minWidth = "800px",
   rowKey,
 }: HmsTableProps<T>) {
@@ -212,16 +215,16 @@ export default function HmsTable<T>({
       {scrollable ? (
       <div className="overflow-x-auto hide-scrollbar">
         <table className="w-full" style={{ minWidth }}>
-          <thead className="hms-columnHeading-style">
+          <thead>
             <tr className="bg-[rgba(242,244,246,0.40)]">
               {columns.map((column, idx) => {
                 const isSorted = sortField === column.key;
                 return (
                   <th
                     key={column.key}
-                    className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-5" : ""} ${
+                    className={`hms-columnHeading-style px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-5" : ""} ${
                       column.sortable !== false ? "cursor-pointer select-none" : ""
-                    } ${column.headerClassName || ""}`}
+                    } ${column.headerClassName || ""} `}
                   >
                     <div
                       className="flex items-center gap-1 whitespace-nowrap"
@@ -272,16 +275,16 @@ export default function HmsTable<T>({
       </div>
       ) : (
         <table className="w-full">
-          <thead className="hms-columnHeading-style">
+          <thead>
             <tr className="bg-[rgba(242,244,246,0.40)]">
               {columns.map((column, idx) => {
                 const isSorted = sortField === column.key;
                 return (
                   <th
                     key={column.key}
-                    className={`px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-5" : ""} ${
+                    className={`hms-columnHeading-style px-5 py-3 hms-table-header text-left ${idx === 0 ? "pl-5" : ""} ${
                       column.sortable !== false ? "cursor-pointer select-none" : ""
-                    } ${column.headerClassName || ""}`}
+                    } ${column.headerClassName || ""} `}
                   >
                     <div
                       className="flex items-center gap-1 whitespace-nowrap"

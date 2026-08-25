@@ -1,5 +1,5 @@
-import { useState, useMemo, useRef, useEffect } from "react";
-import { ChevronLeft, ChevronRight, Sun, Moon, Leaf, Wind, Palette } from "lucide-react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { ChevronLeft, ChevronRight, Sun, Moon, Leaf, Wind, Palette, Star, CalendarOff, RotateCw, X } from "lucide-react";
 
 /**
  * Themeable Calendar
@@ -166,12 +166,16 @@ export type DateRange = { from: Date; to: Date };
 interface CalendarProps {
   /** Controlled theme. If omitted, the calendar manages its own theme with the picker. */
   theme?: ThemeName;
-  /** Selection mode: "single" (default) or "range" */
-  mode?: "single" | "range";
-  /** Controlled selected date(s). Single mode: Date | null. Range mode: DateRange | null. */
-  selected?: Date | DateRange | null;
+  /** Selection mode: "single" (default) | "range" | "multi" | "week" */
+  mode?: "single" | "range" | "multi" | "week";
+  /** Controlled selected date(s). Single mode: Date | null. Range mode: DateRange | null. Multi mode: Date[]. Week mode: Date (week start Monday). */
+  selected?: Date | DateRange | Date[] | null;
   /** Called when the user picks a date or range. */
   onSelect?: (date: Date | DateRange | null) => void;
+  /** Called when multi-select dates change. */
+  onDatesChange?: (dates: Date[]) => void;
+  /** Called when week changes via prev/next week buttons. */
+  onWeekChange?: (weekStart: Date) => void;
   /** Hide the built-in theme picker (useful if you control theme externally). */
   hideThemePicker?: boolean;
   /** Starting colors for the "Custom" theme (background, accent, text). */
@@ -186,6 +190,12 @@ interface CalendarProps {
   maxDate?: Date;
   /** Extra per-date disablement (e.g. non-working days). Disabled dates are greyed out and unselectable. */
   isDateDisabled?: (date: Date) => boolean;
+  /** Current week start date (Monday) for week-based navigation. */
+  weekStart?: Date;
+  /** Enable week navigation mode (shows week label, prev/next week buttons). */
+  weekMode?: boolean;
+  /** Additional dates to highlight (e.g., for multi-select display in week mode). */
+  highlightDates?: Date[];
 }
 
 export default function Calendar({
@@ -193,6 +203,8 @@ export default function Calendar({
   mode = "single",
   selected: controlledSelected,
   onSelect,
+  onDatesChange,
+  onWeekChange,
   hideThemePicker,
   defaultCustomColors,
   minYear,
@@ -200,6 +212,9 @@ export default function Calendar({
   minDate,
   maxDate,
   isDateDisabled,
+  weekStart: controlledWeekStart,
+  weekMode = false,
+  highlightDates,
 }: CalendarProps) {
   const [internalTheme, setInternalTheme] = useState<ThemeName>("light");
   const [customColors, setCustomColors] = useState<CustomColors>(
@@ -218,8 +233,24 @@ export default function Calendar({
   });
 
   // Internal selection state - supports both single date and range
-  const [internalSelected, setInternalSelected] = useState<Date | DateRange | null>(null);
+  const [internalSelected, setInternalSelected] = useState<Date | DateRange | Date[] | null>(null);
   const selected = controlledSelected ?? internalSelected;
+
+  // Multi-select state
+  const [internalMultiSelected, setInternalMultiSelected] = useState<Date[]>([]);
+  const multiSelected = Array.isArray(controlledSelected) ? controlledSelected : internalMultiSelected;
+
+  // Week navigation state
+  const [internalWeekStart, setInternalWeekStart] = useState<Date>(() => {
+    if (controlledWeekStart) return controlledWeekStart;
+    const now = new Date();
+    const day = now.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + mondayOffset);
+    return monday;
+  });
+  const weekStart = controlledWeekStart ?? internalWeekStart;
 
   // Range selection state
   const [rangeStart, setRangeStart] = useState<Date | null>(null);
@@ -275,6 +306,29 @@ export default function Calendar({
   const handleYearChange = (year: number) =>
     setCursor((c) => new Date(year, c.getMonth(), 1));
 
+  // Week navigation functions
+  const goToWeek = useCallback((delta: number) => {
+    setCursor((c) => {
+      const newCursor = new Date(c.getFullYear(), c.getMonth(), c.getDate() + delta * 7);
+      // Set to Monday of that week
+      const day = newCursor.getDay();
+      const mondayOffset = day === 0 ? -6 : 1 - day;
+      const monday = new Date(newCursor);
+      monday.setDate(newCursor.getDate() + mondayOffset);
+      setInternalWeekStart(monday);
+      onWeekChange?.(monday);
+      return monday;
+    });
+  }, [onWeekChange]);
+
+  const getWeekLabel = (weekStartDate: Date): string => {
+    const endDate = new Date(weekStartDate);
+    endDate.setDate(weekStartDate.getDate() + 6);
+    const startStr = weekStartDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const endStr = endDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    return `${startStr} – ${endStr}`;
+  };
+
   const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const isDisabled = (date: Date) =>
     (minDate && dayStart(date) < dayStart(minDate)) ||
@@ -320,6 +374,24 @@ export default function Calendar({
     return dayStart(date) >= dayStart(range.from) && dayStart(date) <= dayStart(range.to);
   };
 
+  const isSelectedMulti = (date: Date): boolean => {
+    if (mode !== "multi") return false;
+    return multiSelected.some((d) => isSameDay(date, d));
+  };
+
+  const isWeekSelected = (date: Date): boolean => {
+    if (mode !== "week") return false;
+    const weekStartDate = weekStart;
+    const weekEndDate = new Date(weekStartDate);
+    weekEndDate.setDate(weekStartDate.getDate() + 6);
+    return dayStart(date) >= dayStart(weekStartDate) && dayStart(date) <= dayStart(weekEndDate);
+  };
+
+  const isHighlighted = (date: Date): boolean => {
+    if (!highlightDates || highlightDates.length === 0) return false;
+    return highlightDates.some((d) => isSameDay(date, d));
+  };
+
   // Handle mouse events for drag selection
   const handleMouseDown = (date: Date) => {
     if (isDisabled(date) || mode !== "range") return;
@@ -349,13 +421,43 @@ export default function Calendar({
     setHoverDate(null);
   };
 
-  // Handle click (single or shift+click for range)
-  const handleClick = (date: Date, shiftKey: boolean) => {
+  // Handle click (single or shift+click for range, double-click/Ctrl+click for multi)
+  const handleClick = (date: Date, shiftKey: boolean, ctrlKey: boolean = false, isDoubleClick: boolean = false) => {
     if (isDisabled(date)) return;
 
     if (mode === "single") {
       setInternalSelected(date);
       onSelect?.(date);
+      return;
+    }
+
+    if (mode === "multi") {
+      // Double-click or Ctrl+Click to toggle multi-selection
+      if (isDoubleClick || ctrlKey) {
+        const newMultiSelected = isSelectedMulti(date)
+          ? multiSelected.filter((d) => !isSameDay(d, date))
+          : [...multiSelected, date];
+        setInternalMultiSelected(newMultiSelected);
+        onDatesChange?.(newMultiSelected);
+      } else {
+        // Single click in multi mode = replace with single date (like single mode)
+        setInternalMultiSelected([date]);
+        onDatesChange?.([date]);
+        onSelect?.(date);
+      }
+      return;
+    }
+
+    if (mode === "week") {
+      // Click in week mode selects the week
+      const day = date.getDay();
+      const mondayOffset = day === 0 ? -6 : 1 - day;
+      const monday = new Date(date);
+      monday.setDate(date.getDate() + mondayOffset);
+      setInternalWeekStart(monday);
+      setInternalSelected(monday);
+      onWeekChange?.(monday);
+      onSelect?.(monday);
       return;
     }
 
@@ -406,11 +508,21 @@ export default function Calendar({
   useEffect(() => {
     if (controlledSelected !== undefined) {
       setInternalSelected(controlledSelected);
+      if (Array.isArray(controlledSelected)) {
+        setInternalMultiSelected(controlledSelected);
+      }
       setRangeStart(null);
       setHoverDate(null);
       setIsDragging(false);
     }
   }, [controlledSelected]);
+
+  // Sync week start when controlled prop changes
+  useEffect(() => {
+    if (controlledWeekStart !== undefined) {
+      setInternalWeekStart(controlledWeekStart);
+    }
+  }, [controlledWeekStart]);
 
   return (
     <div
@@ -422,38 +534,48 @@ export default function Calendar({
       <div className="cal-card">
         <div className="cal-header">
           <button
-            aria-label="Previous month"
+            aria-label={weekMode ? "Previous week" : "Previous month"}
             className="cal-nav-btn"
-            onClick={() => goToMonth(-1)}
+            onClick={weekMode ? () => goToWeek(-1) : () => goToMonth(-1)}
           >
             <ChevronLeft size={18} />
           </button>
           <div className="cal-month-year-selects">
-            <select
-              className="cal-select"
-              value={cursor.getMonth()}
-              onChange={(e) => handleMonthChange(Number(e.target.value))}
-              aria-label="Select month"
-            >
-              {MONTH_NAMES.map((m, i) => (
-                <option key={m} value={i}>{m}</option>
-              ))}
-            </select>
-            <select
-              className="cal-select"
-              value={cursor.getFullYear()}
-              onChange={(e) => handleYearChange(Number(e.target.value))}
-              aria-label="Select year"
-            >
-              {yearOptions.map((y) => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
+            {weekMode ? (
+              <>
+                <span className="cal-week-label" style={{fontWeight: 600, fontSize: '13px', color: 'var(--cal-text)'}}>
+                  {getWeekLabel(weekStart)}
+                </span>
+              </>
+            ) : (
+              <>
+                <select
+                  className="cal-select"
+                  value={cursor.getMonth()}
+                  onChange={(e) => handleMonthChange(Number(e.target.value))}
+                  aria-label="Select month"
+                >
+                  {MONTH_NAMES.map((m, i) => (
+                    <option key={m} value={i}>{m}</option>
+                  ))}
+                </select>
+                <select
+                  className="cal-select"
+                  value={cursor.getFullYear()}
+                  onChange={(e) => handleYearChange(Number(e.target.value))}
+                  aria-label="Select year"
+                >
+                  {yearOptions.map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </>
+            )}
           </div>
           <button
-            aria-label="Next month"
+            aria-label={weekMode ? "Next week" : "Next month"}
             className="cal-nav-btn"
-            onClick={() => goToMonth(1)}
+            onClick={weekMode ? () => goToWeek(1) : () => goToMonth(1)}
           >
             <ChevronRight size={18} />
           </button>
@@ -471,6 +593,9 @@ export default function Calendar({
             const disabled = isDisabled(date);
             const selectedSingle = isSelectedSingle(date);
             const selectedRange = isSelectedRange(date);
+            const selectedMulti = isSelectedMulti(date);
+            const weekSelected = isWeekSelected(date);
+            const highlighted = isHighlighted(date);
             const inRange = isInRange(date);
             const rangeStart = isRangeStart(date);
             const rangeEnd = isRangeEnd(date);
@@ -478,7 +603,8 @@ export default function Calendar({
             return (
               <button
                 key={i}
-                onClick={(e) => handleClick(date, e.shiftKey)}
+                onClick={(e) => handleClick(date, e.shiftKey, e.ctrlKey || e.metaKey, false)}
+                onDoubleClick={(e) => handleClick(date, e.shiftKey, e.ctrlKey || e.metaKey, true)}
                 onMouseDown={() => handleMouseDown(date)}
                 onMouseEnter={() => handleMouseEnter(date)}
                 onKeyDown={(e) => handleKeyDown(e, date)}
@@ -486,7 +612,10 @@ export default function Calendar({
                 className="cal-day"
                 data-in-month={inMonth}
                 data-today={isToday}
-                data-selected={selectedSingle || selectedRange}
+                data-selected={selectedSingle || selectedRange || selectedMulti || weekSelected || highlighted}
+                data-multi-selected={selectedMulti}
+                data-week-selected={weekSelected}
+                data-highlighted={highlighted}
                 data-range-start={rangeStart}
                 data-range-end={rangeEnd}
                 data-in-range={inRange}
@@ -571,7 +700,9 @@ export default function Calendar({
       <style>{`
         .cal-root {
           --radius: 14px;
-          display: inline-block;
+          display: block;
+          width: 100%;
+          height: 100%;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
         }
         .cal-card {
@@ -580,15 +711,28 @@ export default function Calendar({
           border-radius: var(--radius);
           box-shadow: var(--cal-shadow);
           padding: 18px;
-          width: 320px;
+          width: 100%;
+          height: 100%;
+          min-width: 280px;
+          min-height: 320px;
           color: var(--cal-text);
           transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+          box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
         }
         .cal-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
           margin-bottom: 14px;
+          flex-shrink: 0;
+        }
+        .cal-week-label {
+          font-weight: 600;
+          font-size: 13px;
+          color: var(--cal-text);
+          white-space: nowrap;
         }
         .cal-month-year-selects {
           display: flex;
@@ -636,6 +780,7 @@ export default function Calendar({
           display: grid;
           grid-template-columns: repeat(7, 1fr);
           margin-bottom: 4px;
+          flex-shrink: 0;
         }
         .cal-weekday {
           font-size: 11px;
@@ -650,6 +795,8 @@ export default function Calendar({
           display: grid;
           grid-template-columns: repeat(7, 1fr);
           gap: 2px;
+          flex: 1;
+          min-height: 0;
         }
         .cal-day {
           position: relative;
@@ -704,6 +851,31 @@ export default function Calendar({
         }
         .cal-day[data-range-start="true"][data-range-end="true"] {
           border-radius: 8px;
+        }
+        /* Multi selection */
+        .cal-day[data-multi-selected="true"] {
+          background: var(--cal-accent);
+          color: var(--cal-accent-text);
+          font-weight: 600;
+          box-shadow: 0 0 0 2px var(--cal-accent);
+        }
+        /* Week selection */
+        .cal-day[data-week-selected="true"] {
+          background: var(--cal-range-bg);
+          border-radius: 0;
+        }
+        .cal-day[data-week-selected="true"]:first-child {
+          border-radius: 8px 0 0 8px;
+        }
+        .cal-day[data-week-selected="true"]:last-child {
+          border-radius: 0 8px 8px 0;
+        }
+        /* Highlighted dates (for multi-select display in week mode) */
+        .cal-day[data-highlighted="true"] {
+          background: var(--cal-range-bg);
+          box-shadow: inset 0 0 0 2px var(--cal-accent);
+          color: var(--cal-accent);
+          font-weight: 600;
         }
         /* Disabled state */
         .cal-day[data-disabled="true"] {

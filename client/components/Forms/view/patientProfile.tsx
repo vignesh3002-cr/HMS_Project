@@ -3,15 +3,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   UserRound,
   Droplet,
-  VenusAndMars,
   Calendar,
   MapPin,
   Phone,
-  MoreVertical,
-  Heart,
-  Thermometer,
-  Weight,
-  Activity,
+  Mail,
   Loader2,
 } from "lucide-react";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
@@ -26,14 +21,18 @@ import type { FilterField } from "@/components/Filter/types";
 import { filterDataByValues } from "@/components/Filter/utils";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
 import HmsTable from "@/components/hms/HmsTable";
+import { AppointmentActionMenu } from "@/components/hms/AppointmentActionMenu";
+import PatientVitalsPanel from "@/components/hms/PatientVitalsPanel";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { useToast } from "@/hooks/use-toast";
 import { usePermission } from "@/context/PermissionContext";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 
-const statusVariant: Record<string, "blue" | "green" | "rose" | "amber"> = {
+const statusVariant: Record<string, "blue" | "green" | "rose" | "amber" | "purple"> = {
   Schedule: "blue",
+  "Checked In": "amber",
+  "In Consultation": "purple",
   Completed: "green",
   Cancelled: "rose",
 };
@@ -56,6 +55,8 @@ function mapAppointment(a: AppointmentRecord) {
   const status =
     statusRaw === "completed" ? "Completed" :
     statusRaw === "cancelled" ? "Cancelled" :
+    statusRaw === "checked_in" ? "Checked In" :
+    statusRaw === "in_consultation" ? "In Consultation" :
     "Schedule";
 
   return {
@@ -67,82 +68,6 @@ function mapAppointment(a: AppointmentRecord) {
     department: a.department_master?.department_name || a.department || "—",
     status: status as "Schedule" | "Completed" | "Cancelled",
   };
-}
-
-function CardMenu({
-  status,
-  onView,
-  onEdit,
-  onCancel,
-}: {
-  status: string;
-  onView: () => void;
-  onEdit: () => void;
-  onCancel: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const { can } = usePermission();
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  if (!can("appointment.read") && !can("appointment.update") && !can("appointment.cancel")) return null;
-
-  const isCancelled = status.toLowerCase() === "cancelled";
-
-  return (
-    <div className="relative inline-block text-left" ref={wrapperRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center justify-center p-1.5 border border-[#E5E7EB] rounded-md hover:border-[#00488D] transition-colors"
-      >
-        <MoreVertical className="w-4 h-4 text-[#6B7280]" />
-      </button>
-
-      <div
-        className={`absolute right-0 top-full mt-1 w-44 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-40 transition-all duration-150 ${
-          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
-        }`}
-      >
-        {can("appointment.read") && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onView(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
-          >
-            View Appointment
-          </button>
-        )}
-        {can("appointment.update") && !isCancelled && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onEdit(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
-          >
-            Edit Appointment
-          </button>
-        )}
-        {can("appointment.cancel") && !isCancelled && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onCancel(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-red-600 hover:bg-red-50"
-          >
-            Cancel Appointment
-          </button>
-        )}
-      </div>
-    </div>
-  );
 }
 
 export default function PatientProfile() {
@@ -267,6 +192,7 @@ export default function PatientProfile() {
 
   const [cancelTarget, setCancelTarget] = useState<ReturnType<typeof mapAppointment> | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+  const [vitalsOpen, setVitalsOpen] = useState(false);
 
   const handleCancelAppointment = (target: ReturnType<typeof mapAppointment>) => {
     setCancelReason("");
@@ -371,7 +297,7 @@ export default function PatientProfile() {
           </div>
 
           {/* About & Vital Signs Grid */}
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[0.9fr_1.1fr]">
             {/* About Card */}
             <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm p-6">
               <h2 className="mb-6 flex items-center gap-2 text-lg font-semibold text-slate-900">
@@ -399,18 +325,16 @@ export default function PatientProfile() {
                   </div>
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0 border border-blue-100">
-                      <VenusAndMars className="h-4 w-4 text-blue-500" />
+                      <Phone className="h-4 w-4 text-blue-500" />
                     </div>
                     <div>
-                      <p className="text-xs text-slate-500 mb-0.5">Gender</p>
-                      <p className="text-sm font-medium text-slate-900">{patient.patient_gender ?? "—"}</p>
+                      <p className="text-xs text-slate-500 mb-0.5">Phone</p>
+                      <p className="text-sm font-medium text-slate-900">{patient.patient_primary_mobile || "—"}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center shrink-0 border border-slate-100">
-                      <svg className="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-                      </svg>
+                      <Mail className="h-4 w-4 text-slate-500" />
                     </div>
                     <div>
                       <p className="text-xs text-slate-500 mb-0.5">Email</p>
@@ -421,88 +345,7 @@ export default function PatientProfile() {
             </div>
 
             {/* Vital Signs Card */}
-            <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm p-6">
-              <h2 className="mb-6 flex items-center gap-2 text-lg font-semibold text-slate-900">
-                <Activity className="h-5 w-5 text-slate-400" />
-                Vital Signs
-              </h2>
-              <div className="grid grid-cols-2 gap-6 md:grid-cols-3">
-                <div className="flex items-start gap-3">
-                  <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[#EFF6FF]">
-                    <div className="h-4 w-4 rounded-full border-2 border-blue-500 opacity-70" />
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs text-slate-500">Blood Pressure</p>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                      <p className="text-sm font-semibold text-slate-900">100/67 <span className="text-xs font-normal text-slate-500">mmHg</span></p>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[#FEF2F2]">
-                    <Heart className="h-4 w-4 text-red-400" />
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs text-slate-500">Heart Rate</p>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                      <p className="text-sm font-semibold text-slate-900">89 <span className="text-xs font-normal text-slate-500">Bpm</span></p>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[#ECFDF5]">
-                    <div className="h-4 w-4 rounded bg-green-200 opacity-50" />
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs text-slate-500">SPO2</p>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                      <p className="text-sm font-semibold text-slate-900">98 <span className="text-xs font-normal text-slate-500">%</span></p>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[#FFF7ED]">
-                    <Thermometer className="h-4 w-4 text-orange-400" />
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs text-slate-500">Temperature</p>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                      <p className="text-sm font-semibold text-slate-900">101 <span className="text-xs font-normal text-slate-500">C</span></p>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[#F0FDFA]">
-                    <svg className="h-4 w-4 text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-                    </svg>
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs text-slate-500">Respiratory Rate</p>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                      <p className="text-sm font-semibold text-slate-900">24 <span className="text-xs font-normal text-slate-500">rpm</span></p>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[#FAF5FF]">
-                    <Weight className="h-4 w-4 text-purple-400" />
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs text-slate-500">Weight</p>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                      <p className="text-sm font-semibold text-slate-900">62 <span className="text-xs font-normal text-slate-500">kg</span></p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <PatientVitalsPanel patientId={id} />
           </div>
 
           {/* Appointments Section */}
@@ -587,11 +430,17 @@ export default function PatientProfile() {
                 { key: "actions", label: "Actions", sortable: false, render: (apt) => {
                   const a = apt as ReturnType<typeof mapAppointment>;
                   return (
-                    <CardMenu
+                    <AppointmentActionMenu
                       status={a.status}
                       onView={() => handleView(a.id)}
                       onEdit={() => handleEdit(a.id)}
                       onCancel={() => handleCancelAppointment(a)}
+                      onCheckIn={() => {}}
+                      onCheckOut={() => {}}
+                      vitalsOpen={vitalsOpen}
+                      onVitalsOpenChange={setVitalsOpen}
+                      appointmentId={a.id}
+                      patientId={id}
                     />
                   );
                 }},

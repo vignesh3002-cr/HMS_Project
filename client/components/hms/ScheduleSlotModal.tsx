@@ -1,6 +1,7 @@
 import { forwardRef, useImperativeHandle, useState } from "react";
 import { Loader2 } from "lucide-react";
 import TimepickerWheel from "@/components/ui/timepicker-wheel";
+import type { ScheduleChangeMode } from "@/api/doctorSchedule.api";
 
 export interface ScheduleSlotBranchOption {
   branch_id: string;
@@ -29,7 +30,10 @@ export interface ScheduleSlotAddPayload {
   consultationMinutes?: string;
   transferReason?: string;
   departmentId?: string;
-  changeMode?: SlotChangeMode;
+  // Date-specific change (ADD / OVERRIDE / CANCEL) support. When present,
+  // the submit is a doctor_schedule_change rather than a template row.
+  changeMode?: ScheduleChangeMode;
+  changeId?: string | number | null;
 }
 
 export interface ScheduleSlotEditPayload {
@@ -48,7 +52,7 @@ export interface ScheduleSlotEditPayload {
   consultationMinutes?: string | number | null;
   transferReason?: string;
   departmentId?: string;
-  changeMode?: SlotChangeMode;
+  changeMode?: ScheduleChangeMode;
   changeId?: string | number | null;
 }
 
@@ -74,7 +78,7 @@ export interface ScheduleSlotCancelPayload {
   col: number;
   scheduleId: string | number | null;
   changeId?: string | number | null;
-  changeMode?: SlotChangeMode;
+  changeMode?: ScheduleChangeMode;
   info: string;
 }
 
@@ -85,7 +89,7 @@ export interface ScheduleSlotModalHandle {
     colIndex?: number | null,
     mode?: ScheduleSlotMode,
     date?: string,
-    changeMode?: SlotChangeMode,
+    changeMode?: ScheduleChangeMode,
   ) => void;
   openEditSlot: (payload: Omit<ScheduleSlotEditPayload, "row" | "col">) => void;
   openCancelSlot: (
@@ -96,7 +100,7 @@ export interface ScheduleSlotModalHandle {
     branch?: string,
     scheduleId?: string | number | null,
     changeId?: string | number | null,
-    changeMode?: SlotChangeMode,
+    changeMode?: ScheduleChangeMode,
   ) => void;
 }
 
@@ -135,7 +139,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
     const [slotEnd, setSlotEnd] = useState("");
     const [slotBranch, setSlotBranch] = useState("");
     const [slotMode, setSlotMode] = useState<ScheduleSlotMode>("weekly");
-    const [slotChangeMode, setSlotChangeMode] = useState<SlotChangeMode | undefined>(undefined);
+    const [slotChangeMode, setSlotChangeMode] = useState<ScheduleChangeMode>("ADD");
     const [slotDepartment, setSlotDepartment] = useState("");
     const [slotEffectiveDate, setSlotEffectiveDate] = useState(() => toDateInputValue(new Date()));
     const [slotConsultationMinutes, setSlotConsultationMinutes] = useState("");
@@ -147,12 +151,12 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
     const [cancelSlotInfo, setCancelSlotInfo] = useState("");
     const [cancelScheduleId, setCancelScheduleId] = useState<string | number | null>(null);
     const [cancelChangeId, setCancelChangeId] = useState<string | number | null>(null);
-    const [cancelChangeMode, setCancelChangeMode] = useState<SlotChangeMode | undefined>(undefined);
+    const [cancelChangeMode, setCancelChangeMode] = useState<ScheduleChangeMode | undefined>(undefined);
 
     const branchOptions = branches ?? [];
 
     useImperativeHandle(ref, () => ({
-      openAddSlot: (dayName = "", rowIndex = null, colIndex = null, mode = "weekly", date, changeMode) => {
+      openAddSlot: (dayName = "", rowIndex = null, colIndex = null, mode = "weekly", date, changeMode = "ADD") => {
         setEditingScheduleId(null);
         setEditingChangeId(null);
         setAddSlotDay(dayName);
@@ -162,7 +166,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
         setSlotEnd("");
         setSlotBranch(defaultBranchId ?? "");
         setSlotMode(mode);
-        setSlotChangeMode(changeMode);
+        setSlotChangeMode(mode === "date" ? changeMode : "ADD");
         setSlotDepartment(defaultDepartmentId ?? "");
         setSlotEffectiveDate(date || toDateInputValue(new Date()));
         setSlotConsultationMinutes(String(defaultConsultationMinutes));
@@ -170,7 +174,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
         setAddSlotOpen(true);
       },
       openEditSlot: ({ scheduleId, day, date, branchId, startTime, endTime, mode, departmentId, consultationMinutes, changeMode, changeId }) => {
-        setEditingScheduleId(scheduleId);
+        setEditingScheduleId(scheduleId ?? null);
         setEditingChangeId(changeId ?? null);
         setAddSlotDay(day);
         setAddSlotPos(null);
@@ -179,7 +183,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
         setSlotEnd(endTime);
         setSlotBranch(branchId);
         setSlotMode(mode);
-        setSlotChangeMode(changeMode);
+        setSlotChangeMode(mode === "date" ? changeMode ?? "ADD" : "ADD");
         setSlotDepartment(departmentId ?? "");
         setSlotEffectiveDate(date || toDateInputValue(new Date()));
         setSlotConsultationMinutes(
@@ -203,7 +207,9 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
     };
 
     const confirmAddSlot = async () => {
-      const isCancelChange = slotMode === "date" && slotChangeMode === "CANCEL";
+      const isDateChange = slotMode === "date";
+      const effectiveChangeMode: ScheduleChangeMode | undefined = isDateChange ? slotChangeMode : undefined;
+      const isCancelChange = effectiveChangeMode === "CANCEL";
 
       if (!addSlotDay || !slotDate || !slotBranch) {
         alert("Please select day, date and branch location.");
@@ -215,7 +221,9 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
       }
 
       const selectedBranch = branchOptions.find((b) => b.branch_id === slotBranch);
-      const timeLabel = `${formatTime12(slotStart)} - ${formatTime12(slotEnd)}`;
+      const timeLabel = isCancelChange
+        ? "Cancelled"
+        : `${formatTime12(slotStart)} - ${formatTime12(slotEnd)}`;
 
       const base = {
         day: addSlotDay,
@@ -228,10 +236,21 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
         endTime: isCancelChange ? "" : slotEnd,
         timeLabel,
         mode: slotMode,
-        changeMode: slotChangeMode,
+        changeMode: effectiveChangeMode,
       };
 
-      if (editingScheduleId !== null) {
+      if (editingChangeId !== null) {
+        const ok = await onUpdateSlot?.({
+          ...base,
+          scheduleId: editingScheduleId ?? 0,
+          changeId: editingChangeId,
+          effectiveDate: slotEffectiveDate,
+          consultationMinutes: slotConsultationMinutes,
+          transferReason: slotTransferReason.trim(),
+          departmentId: slotDepartment,
+        });
+        if (ok === false) return;
+      } else if (editingScheduleId !== null) {
         const ok = await onUpdateSlot?.({
           ...base,
           scheduleId: editingScheduleId,
@@ -306,6 +325,28 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
                 ))}
               </div>
 
+              {/* Change type for a specific date (ADD / OVERRIDE / CANCEL) */}
+              {slotMode === "date" && (
+                <div className="flex gap-2 mb-4">
+                  {(["ADD", "OVERRIDE", "CANCEL"] as ScheduleChangeMode[]).map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setSlotChangeMode(c)}
+                      className={`flex-1 py-2 rounded-[7px] text-[11px] font-semibold border transition-colors ${
+                        slotChangeMode === c
+                          ? c === "CANCEL"
+                            ? "bg-[#ff453a] text-white border-[#ff453a]"
+                            : "bg-[#004a91] text-white border-[#004a91]"
+                          : "bg-white text-[#555e6c] border-[#dfe4ea]"
+                      }`}
+                    >
+                      {c === "ADD" ? "Add" : c === "OVERRIDE" ? "Override" : "Cancel day"}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div className="flex flex-col gap-3 mb-6">
                 <div>
                   <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
@@ -338,35 +379,6 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
                       onChange={(e) => setSlotDate(e.target.value)}
                       className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
                     />
-                  </div>
-                )}
-
-                {slotMode === "date" && (
-                  <div>
-                    <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                      CHANGE TYPE
-                    </label>
-
-                    <div className="flex gap-2">
-                      {(["ADD", "OVERRIDE", "CANCEL"] as SlotChangeMode[]).map((m) => (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => setSlotChangeMode(m)}
-                          className={`flex-1 py-2 rounded-[7px] text-[11px] font-semibold border transition-colors ${
-                            slotChangeMode === m
-                              ? m === "CANCEL"
-                                ? "bg-[#ff453a] text-white border-[#ff453a]"
-                                : m === "OVERRIDE"
-                                ? "bg-[#b45309] text-white border-[#b45309]"
-                                : "bg-[#087d53] text-white border-[#087d53]"
-                              : "bg-white text-[#555e6c] border-[#dfe4ea]"
-                          }`}
-                        >
-                          {m === "ADD" ? "Add" : m === "OVERRIDE" ? "Override" : "Cancel"}
-                        </button>
-                      ))}
-                    </div>
                   </div>
                 )}
 
@@ -441,34 +453,11 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
                         ))}
                       </select>
                     </div>
+                  </>
+                )}
 
-                    <div>
-                      <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                        EFFECTIVE DATE
-                      </label>
-
-                      <input
-                        type="date"
-                        min={toDateInputValue(new Date())}
-                        value={slotEffectiveDate}
-                        onChange={(e) => setSlotEffectiveDate(e.target.value)}
-                        className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                        CONSULTATION MINUTES
-                      </label>
-
-                      <input
-                        type="number"
-                        min={1}
-                        value={slotConsultationMinutes}
-                        onChange={(e) => setSlotConsultationMinutes(e.target.value)}
-                        className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
-                      />
-                    </div>
+                {slotMode !== "date" && (
+                  <>
 
                     <div>
                       <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
@@ -543,7 +532,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
                 >
                   Cancel Slot
                 </button>
-              </div>
+              </div> 
             </div>
           </div>
         )}

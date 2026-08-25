@@ -40,6 +40,7 @@ function toDisplayRole(roleType: BackendRoleType): string {
     .join(" ");
 }
 
+
 function toBackendRole(displayRole: string): BackendRoleType {
   if (displayRole === "Lab Technician") return "LAB_TECHNICIAN";
   if (displayRole === "Branch Admin") return "BRANCH_ADMIN";
