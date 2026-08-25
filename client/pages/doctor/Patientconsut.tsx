@@ -1075,7 +1075,10 @@ const Consultation: React.FC = () => {
 
                 {/* USER */}
 
-                <div className="flex items-center gap-3">
+                <button
+                  onClick={() => navigate("/doctor/profile")}
+                  className="flex items-center gap-3 cursor-pointer"
+                >
 
                   <div className="text-sm font-bold leading-5 text-slate-700">
                     HMS
@@ -1085,7 +1088,7 @@ const Consultation: React.FC = () => {
                     DR
                   </div>
 
-                </div>
+                </button>
 
               </div>
 
