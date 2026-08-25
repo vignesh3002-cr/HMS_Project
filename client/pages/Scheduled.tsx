@@ -23,7 +23,6 @@ import ScheduleSlotModal, {
 import { employeeApi, type EmployeeDetailResponse, type DoctorScheduleRecord } from "@/api/employee.api";
 import { appointmentApi, type AvailableSlotsResult } from "@/api/appointment.api";
 import { doctorLeaveApi } from "@/api/doctorLeave.api";
-import { departmentApi, type Department } from "@/api/department.api";
 import {
   doctorScheduleApi,
   type ScheduleChangeMode,
@@ -249,7 +248,6 @@ export default function DoctorProfile() {
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
   const [isToCalendarOpen, setIsToCalendarOpen] = useState(false);
   const [savingSlot, setSavingSlot] = useState(false);
-  const [departments, setDepartments] = useState<Department[]>([]);
   const [pendingTransfer, setPendingTransfer] = useState<{
     transferId: string;
     appointments: TransferAppointmentSummary[];
@@ -353,13 +351,6 @@ export default function DoctorProfile() {
 
     return map;
   }, [approvedLeaves]);
-
-  useEffect(() => {
-    departmentApi
-      .getAll()
-      .then((res) => setDepartments(res.data?.data ?? []))
-      .catch((err) => console.error("[Doctor Profile] Failed to load departments:", err));
-  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -799,7 +790,6 @@ export default function DoctorProfile() {
       effectiveDate,
       consultationMinutes,
       transferReason,
-      departmentId,
     } = payload;
 
     if (!id || !branchId) {
@@ -2072,9 +2062,7 @@ const applyLeaveNow = async (queueConflicts: boolean) => {
       <ScheduleSlotModal
         ref={slotModalRef}
         branches={doctorDetail?.branches?.filter((b) => b.status === 1) ?? []}
-        departments={departments}
         defaultConsultationMinutes={doctorDetail?.doctorProfile?.consultation_minutes ?? 20}
-        defaultDepartmentId={doctorEmployee?.department_id ?? ""}
         onAddSlot={handleAddSlot}
         onUpdateSlot={handleUpdateSlot}
         onCancelSlot={handleCancelSlot}

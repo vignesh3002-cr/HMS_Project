@@ -1793,6 +1793,8 @@ const LabReview: React.FC<{
 }> = ({
   embedded = false,
   patientId,
+  appointmentId,
+  branchId,
   encounterNo,
   pendingTests = [],
   onOrdered,
