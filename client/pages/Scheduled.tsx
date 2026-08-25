@@ -23,7 +23,6 @@ import ScheduleSlotModal, {
 import { employeeApi, type EmployeeDetailResponse, type DoctorScheduleRecord } from "@/api/employee.api";
 import { appointmentApi, type AvailableSlotsResult } from "@/api/appointment.api";
 import { doctorLeaveApi } from "@/api/doctorLeave.api";
-import { departmentApi, type Department } from "@/api/department.api";
 import {
   doctorScheduleApi,
   type ScheduleChangeMode,
@@ -249,7 +248,6 @@ export default function DoctorProfile() {
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
   const [isToCalendarOpen, setIsToCalendarOpen] = useState(false);
   const [savingSlot, setSavingSlot] = useState(false);
-  const [departments, setDepartments] = useState<Department[]>([]);
   const [pendingTransfer, setPendingTransfer] = useState<{
     transferId: string;
     appointments: TransferAppointmentSummary[];
@@ -331,13 +329,6 @@ export default function DoctorProfile() {
 
     return map;
   }, [approvedLeaves]);
-
-  useEffect(() => {
-    departmentApi
-      .getAll()
-      .then((res) => setDepartments(res.data?.data ?? []))
-      .catch((err) => console.error("[Doctor Profile] Failed to load departments:", err));
-  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -725,7 +716,6 @@ export default function DoctorProfile() {
       effectiveDate,
       consultationMinutes,
       transferReason,
-      departmentId,
     } = payload;
     if (!id || !day || !branchId || !startTime || !endTime) {
       showAlert("Please select day, start time, end time and branch location.");
@@ -739,10 +729,6 @@ export default function DoctorProfile() {
       showAlert("Transfer reason is required.");
       return false;
     }
-    if (!departmentId) {
-      showAlert("Please select a department.");
-      return false;
-    }
 
     const consultationMinutesValue =
       Number(consultationMinutes) || (doctorDetail?.doctorProfile?.consultation_minutes ?? 20);
@@ -752,7 +738,7 @@ export default function DoctorProfile() {
       const res = await doctorTransferApi.initiateTransfer(id, {
         mode: "ADD_BRANCH",
         new_branch_id: branchId,
-        new_department_id: departmentId,
+        new_department_id: doctorEmployee?.department_id || "",
         effective_date: effectiveDate,
         transfer_reason: transferReason.trim(),
         consultation_minutes: consultationMinutesValue,
@@ -853,7 +839,6 @@ export default function DoctorProfile() {
       effectiveDate,
       consultationMinutes,
       transferReason,
-      departmentId,
     } = payload;
 
     if (!id || scheduleId === null) {
@@ -915,10 +900,6 @@ export default function DoctorProfile() {
       showAlert("Transfer reason is required.");
       return false;
     }
-    if (!departmentId) {
-      showAlert("Please select a department.");
-      return false;
-    }
 
     setSavingSlot(true);
     try {
@@ -930,7 +911,7 @@ export default function DoctorProfile() {
         mode: "ADD_BRANCH",
         close_schedule_ids: [Number(scheduleId)],
         new_branch_id: branchId,
-        new_department_id: departmentId,
+        new_department_id: doctorEmployee?.department_id || "",
         effective_date: effectiveDate,
         transfer_reason: transferReason.trim(),
         consultation_minutes: consultationMinutesValue,
@@ -1548,7 +1529,6 @@ const applyLeaveNow = async (queueConflicts: boolean) => {
                               mode: "date",
                               changeMode: (changeMode as ScheduleChangeMode) || "OVERRIDE",
                               changeId: changeId ?? null,
-                              departmentId: doctorEmployee?.department_id || "",
                               consultationMinutes:
                                 doctorSchedules.find((s) => String(s.schedule_id) === String(scheduleId))
                                   ?.consultation_minutes,
@@ -1564,9 +1544,8 @@ const applyLeaveNow = async (queueConflicts: boolean) => {
                             startTime: startTime || "",
                             endTime: endTime || "",
                             timeLabel: text,
-                            mode: "weekly",
-                            departmentId: doctorEmployee?.department_id || "",
-                            consultationMinutes:
+                             mode: "weekly",
+                             consultationMinutes:
                               doctorSchedules.find((s) => String(s.schedule_id) === String(scheduleId))
                                 ?.consultation_minutes,
                           });
@@ -2318,9 +2297,7 @@ const applyLeaveNow = async (queueConflicts: boolean) => {
       <ScheduleSlotModal
         ref={slotModalRef}
         branches={doctorDetail?.branches?.filter((b) => b.status === 1) ?? []}
-        departments={departments}
         defaultConsultationMinutes={doctorDetail?.doctorProfile?.consultation_minutes ?? 20}
-        defaultDepartmentId={doctorEmployee?.department_id ?? ""}
         onAddSlot={handleAddSlot}
         onUpdateSlot={handleUpdateSlot}
         onCancelSlot={handleCancelSlot}

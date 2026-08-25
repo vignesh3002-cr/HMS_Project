@@ -28,7 +28,6 @@ export interface ScheduleSlotAddPayload {
   effectiveDate?: string;
   consultationMinutes?: string;
   transferReason?: string;
-  departmentId?: string;
   changeMode?: SlotChangeMode;
 }
 
@@ -47,7 +46,6 @@ export interface ScheduleSlotEditPayload {
   effectiveDate?: string;
   consultationMinutes?: string | number | null;
   transferReason?: string;
-  departmentId?: string;
   changeMode?: SlotChangeMode;
   changeId?: string | number | null;
 }
@@ -102,9 +100,7 @@ export interface ScheduleSlotModalHandle {
 
 interface ScheduleSlotModalProps {
   branches?: ScheduleSlotBranchOption[];
-  departments?: { department_id: string; department_name: string }[];
   defaultConsultationMinutes?: number;
-  defaultDepartmentId?: string;
   defaultBranchId?: string;
   hideDate?: boolean;
   onAddSlot: (payload: ScheduleSlotAddPayload) => Promise<boolean> | boolean;
@@ -124,7 +120,7 @@ const formatTime12 = (time: string) => {
 
 const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalProps>(
   function ScheduleSlotModal(
-    { branches, departments = [], defaultConsultationMinutes = 20, defaultDepartmentId = "", defaultBranchId = "", hideDate = false, onAddSlot, onUpdateSlot, onCancelSlot, isSubmitting = false },
+    { branches, defaultConsultationMinutes = 20, defaultBranchId = "", hideDate = false, onAddSlot, onUpdateSlot, onCancelSlot, isSubmitting = false },
     ref,
   ) {
     const [addSlotOpen, setAddSlotOpen] = useState(false);
@@ -136,7 +132,6 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
     const [slotBranch, setSlotBranch] = useState("");
     const [slotMode, setSlotMode] = useState<ScheduleSlotMode>("weekly");
     const [slotChangeMode, setSlotChangeMode] = useState<SlotChangeMode | undefined>(undefined);
-    const [slotDepartment, setSlotDepartment] = useState("");
     const [slotEffectiveDate, setSlotEffectiveDate] = useState(() => toDateInputValue(new Date()));
     const [slotConsultationMinutes, setSlotConsultationMinutes] = useState("");
     const [slotTransferReason, setSlotTransferReason] = useState("");
@@ -163,13 +158,12 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
         setSlotBranch(defaultBranchId ?? "");
         setSlotMode(mode);
         setSlotChangeMode(changeMode);
-        setSlotDepartment(defaultDepartmentId ?? "");
         setSlotEffectiveDate(date || toDateInputValue(new Date()));
         setSlotConsultationMinutes(String(defaultConsultationMinutes));
         setSlotTransferReason("");
         setAddSlotOpen(true);
       },
-      openEditSlot: ({ scheduleId, day, date, branchId, startTime, endTime, mode, departmentId, consultationMinutes, changeMode, changeId }) => {
+      openEditSlot: ({ scheduleId, day, date, branchId, startTime, endTime, mode, consultationMinutes, changeMode, changeId }) => {
         setEditingScheduleId(scheduleId);
         setEditingChangeId(changeId ?? null);
         setAddSlotDay(day);
@@ -180,7 +174,6 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
         setSlotBranch(branchId);
         setSlotMode(mode);
         setSlotChangeMode(changeMode);
-        setSlotDepartment(departmentId ?? "");
         setSlotEffectiveDate(date || toDateInputValue(new Date()));
         setSlotConsultationMinutes(
           consultationMinutes != null ? String(consultationMinutes) : String(defaultConsultationMinutes),
@@ -239,7 +232,6 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
           effectiveDate: slotEffectiveDate,
           consultationMinutes: slotConsultationMinutes,
           transferReason: slotTransferReason.trim(),
-          departmentId: slotDepartment,
         });
         if (ok === false) return;
       } else {
@@ -248,7 +240,6 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
           effectiveDate: slotEffectiveDate,
           consultationMinutes: slotConsultationMinutes,
           transferReason: slotTransferReason.trim(),
-          departmentId: slotDepartment,
         });
         if (ok === false) return;
       }
@@ -423,25 +414,6 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
 
                 {!(slotMode === "date" && slotChangeMode === "CANCEL") && (
                   <>
-                    <div>
-                      <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                        DEPARTMENT
-                      </label>
-
-                      <select
-                        value={slotDepartment}
-                        onChange={(e) => setSlotDepartment(e.target.value)}
-                        className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
-                      >
-                        <option value="">Select department</option>
-                        {departments.map((d) => (
-                          <option key={d.department_id} value={d.department_id}>
-                            {d.department_name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
                     <div>
                       <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
                         EFFECTIVE DATE
