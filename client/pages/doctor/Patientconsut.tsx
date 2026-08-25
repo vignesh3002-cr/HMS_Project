@@ -30,6 +30,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "../../components/ui/popover";
+import { MultiSelectDropdown } from "../../components/ui/multi-select-dropdown";
 
 const formatPickedDate = (date: Date) => {
   const day = String(date.getDate()).padStart(2, "0");
@@ -2309,7 +2310,9 @@ type FormData = {
   histomorphology: string;
   cancerStage: string;
   grade: string;
-  tnmStage: string;
+  tStage: string;
+  nStage: string;
+  mStage: string;
   icdCode: string;
   notes: string;
 };
@@ -2398,7 +2401,9 @@ const Diagnosis: React.FC<{
     histomorphology: "",
     cancerStage: "",
     grade: "",
-    tnmStage: "",
+    tStage: "",
+    nStage: "",
+    mStage: "",
     icdCode: "",
     notes: "",
   });
@@ -2428,7 +2433,11 @@ const Diagnosis: React.FC<{
   const [subtypes, setSubtypes] = useState<CancerSubtypeItem[]>([]);
   const [stageLabels, setStageLabels] = useState<string[]>([]);
   const [tnmStages, setTnmStages] = useState<string[]>([]);
+  const [tOptions, setTOptions] = useState<string[]>([]);
+  const [nOptions, setNOptions] = useState<string[]>([]);
+  const [mOptions, setMOptions] = useState<string[]>([]);
   const [grades, setGrades] = useState<string[]>([]);
+  const [metastasisSites, setMetastasisSites] = useState<string[]>([]);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
   const [diagnosisError, setDiagnosisError] = useState("");
   const [savingDiagnosis, setSavingDiagnosis] = useState(false);
@@ -2511,7 +2520,11 @@ const Diagnosis: React.FC<{
     setDiagnosisLoading(true);
     setDiagnosisError("");
     setTnmStages([]);
+    setTOptions([]);
+    setNOptions([]);
+    setMOptions([]);
     setGrades([]);
+    setMetastasisSites([]);
 
     API.get<{ success: boolean; data: StagingReferenceItem[] }>(
       "/oncology/reference/staging",
@@ -2555,6 +2568,41 @@ const Diagnosis: React.FC<{
           }
         }
         setTnmStages(tnmOptions.sort());
+
+        const expandTnmRange = (token: string): string[] => {
+          const rangeMatch = token.match(/^([TNM])(\d+)([a-z])?-([a-z\d]+)$/i);
+          if (!rangeMatch) return [token];
+          const prefix = rangeMatch[1].toUpperCase();
+          const startNum = parseInt(rangeMatch[2], 10);
+          const startLetter = rangeMatch[3] || "";
+          const endStr = rangeMatch[4];
+          const results: string[] = [];
+          const endNum = parseInt(endStr, 10);
+          if (!startLetter && !isNaN(endNum)) {
+            for (let i = startNum; i <= endNum; i++) results.push(`${prefix}${i}`);
+          } else if (startLetter && endStr.length === 1) {
+            const startCode = startLetter.charCodeAt(0);
+            const endCode = endStr.charCodeAt(0);
+            for (let c = startCode; c <= endCode; c++) results.push(`${prefix}${startNum}${String.fromCharCode(c)}`);
+          }
+          return results.length > 0 ? results : [token];
+        };
+
+        const tSet = new Set<string>();
+        const nSet = new Set<string>();
+        const mSet = new Set<string>();
+        for (const option of tnmOptions) {
+          const parts = option.split(/\s+/);
+          for (const part of parts) {
+            if (/^T\d/i.test(part)) expandTnmRange(part).forEach((v) => tSet.add(v));
+            else if (/^N\d/i.test(part) || /^N[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => nSet.add(v));
+            else if (/^M\d/i.test(part) || /^M[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => mSet.add(v));
+          }
+        }
+        setTOptions([...tSet].sort());
+        setNOptions([...nSet].sort());
+        setMOptions([...mSet].sort());
+
         setGrades(gradeOptions.sort());
         if (!resetStageSelection) return;
         setFormData((previous) => ({
@@ -2718,19 +2766,9 @@ const Diagnosis: React.FC<{
       return;
     }
 
-    let tStage: string | null = null;
-    let nStage: string | null = null;
-    let mStage: string | null = null;
-
-    if (/^T/i.test(formData.tnmStage)) {
-      const [t, n, m] = formData.tnmStage.trim().split(/\s+/);
-      tStage = t ?? null;
-      nStage = n ?? null;
-      mStage = m ?? null;
-    } else if (formData.tnmStage) {
-      const m = formData.tnmStage.trim().split(/\s+/).pop() ?? null;
-      mStage = m && /^M/i.test(m) ? m : null;
-    }
+    const tStage: string | null = formData.tStage || null;
+    const nStage: string | null = formData.nStage || null;
+    const mStage: string | null = formData.mStage || null;
 
     const normalizedIcd = formData.icdCode.trim().toUpperCase();
     let catalog = diagnosisCatalogRef.current;
@@ -2775,6 +2813,7 @@ const Diagnosis: React.FC<{
         t_stage: tStage,
         n_stage: nStage,
         m_stage: mStage,
+        metastasis_sites: mStage?.trim().toUpperCase().startsWith("M1") && metastasisSites.length > 0 ? metastasisSites : null,
       });
 
       const created = response.data?.data;
@@ -2989,42 +3028,132 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
             </div>
           </div>
 
-          {/* TNM Stage */}
+          {/* T Stage */}
           <div>
             <label
-              htmlFor="tnmStage"
+              htmlFor="tStage"
               className="mb-2 block text-sm font-semibold text-gray-600"
             >
-              TNM Stage
+              T Stage
             </label>
 
             <div className="relative">
               <select
-                id="tnmStage"
-                name="tnmStage"
-                value={formData.tnmStage}
+                id="tStage"
+                name="tStage"
+                value={formData.tStage}
                 onChange={handleChange}
                 className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
               >
                 <option value="">
                   {diagnosisLoading
                     ? "Loading"
-                    : "Select TNM Stage"}
+                    : "Select T Stage"}
                 </option>
 
-                {tnmStages.map((stage) => (
-                  <option key={stage} value={stage}>
-                    {stage}
+                {tOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
                   </option>
                 ))}
               </select>
 
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
                 <ChevronDownIcon />
-                
               </div>
             </div>
           </div>
+
+          {/* N Stage */}
+          <div>
+            <label
+              htmlFor="nStage"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              N Stage
+            </label>
+
+            <div className="relative">
+              <select
+                id="nStage"
+                name="nStage"
+                value={formData.nStage}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  {diagnosisLoading
+                    ? "Loading"
+                    : "Select N Stage"}
+                </option>
+
+                {nOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* M Stage */}
+          <div>
+            <label
+              htmlFor="mStage"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              M Stage
+            </label>
+
+            <div className="relative">
+              <select
+                id="mStage"
+                name="mStage"
+                value={formData.mStage}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  {diagnosisLoading
+                    ? "Loading"
+                    : "Select M Stage"}
+                </option>
+
+                {mOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Metastasis Sites - shown when M stage is M1+ */}
+          {formData.mStage.trim().toUpperCase().startsWith("M1") && (
+            <div className="lg:col-span-2">
+              <label className="mb-2 block text-sm font-semibold text-gray-600">
+                Metastasis Sites
+              </label>
+              <MultiSelectDropdown
+                options={[
+                  "Bone", "Liver", "Lung", "Brain", "Lymph Nodes",
+                  "Adrenal Gland", "Peritoneum", "Pleura", "Skin",
+                  "Contralateral Adrenal", "Ovary", "Other"
+                ]}
+                value={metastasisSites}
+                onValueChange={setMetastasisSites}
+                placeholder="Select metastasis site(s)"
+              />
+            </div>
+          )}
 
           {/* ICD Code */}
           <div>
