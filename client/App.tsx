@@ -48,6 +48,7 @@ import Appointments from "./pages/Appointments";
 import Departments from "./pages/Departments";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
+import Notifications from "./pages/Notifications";
 import Patients from "./pages/Patients";
 import ProtocolMaster from "./pages/ProtocolMaster";
 import CreateProtocol from "@/components/Forms/CreateProtocol";
@@ -164,6 +165,15 @@ const protectedRoutes = [
   {
     path: "/security",
     element: <Security />,
+  },
+
+  // ----------------------------------------------------------
+  // Notifications (system-wide change log)
+  // ----------------------------------------------------------
+
+  {
+    path: "/notifications",
+    element: <Notifications />,
   },
 
   // ----------------------------------------------------------

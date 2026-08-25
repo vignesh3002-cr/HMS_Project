@@ -199,6 +199,13 @@ function formatScheduleRange(start?: string | null, end?: string | null) {
   return `${formatTime(start)} - ${formatTime(end)}`;
 }
 
+function isBeforeToday(dateStr: string): boolean {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const apptDate = new Date(dateStr);
+  return apptDate < today;
+}
+
 function timeAgo(iso: string): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "";
@@ -370,6 +377,8 @@ export default function DoctorDashboard() {
       setTotalAppointments(appointmentsResponse.data.data.total);
       setCancelledAppointments(cancelledResponse.data.data.total);
       setTotalPatientsToday(checkedInResponse.data.data.totalPatients);
+
+      // Show ALL change notifications — no status filtering here.
       setNotifications(notificationsResponse.data.data.notifications);
       setUnreadCount(notificationsResponse.data.data.unreadCount);
 
@@ -398,6 +407,7 @@ export default function DoctorDashboard() {
             visit_type: item.Patient_visit_type || "",
           })
         )
+        .filter((a): a is Appointment => a !== null)
         // Sort by appointment_time ascending
         .sort((a, b) => {
           const timeA = a.appointmentTime || "";
