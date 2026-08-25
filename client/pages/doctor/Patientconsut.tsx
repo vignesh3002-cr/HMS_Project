@@ -13,6 +13,10 @@ import { employeeApi } from "../../api/employee.api";
 import { appointmentApi } from "../../api/appointment.api";
 import { getUser } from "../../utils/token";
 import {
+  doctorDashboardApi,
+  type DoctorNotificationItem,
+} from "../../api/doctorDashboard.api";
+import {
   patientApi,
   type PatientRecord,
 } from "../../api/patient.api";
@@ -618,6 +622,105 @@ const Consultation: React.FC = () => {
   };
 
   /* ============================================================
+     NOTIFICATIONS
+  ============================================================ */
+
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [notifItems, setNotifItems] = useState<DoctorNotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [doctorEmployeeId, setDoctorEmployeeId] = useState<string | null>(null);
+  const notificationRef = useRef<HTMLDivElement>(null);
+
+  const notifTimeAgo = (iso: string): string => {
+    const then = new Date(iso).getTime();
+    if (Number.isNaN(then)) return "";
+    const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+    if (seconds < 60) return "Just now";
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  };
+
+  const notifFormatDate = (value: string) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleDateString("en-US", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  const notifFormatTime = (value: string) => {
+    if (!value) return "";
+    const timeMatch = value.match(
+      /(?:T|\s)?(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?/
+    );
+    if (timeMatch) {
+      let hour = Number(timeMatch[1]);
+      const minute = timeMatch[2];
+      const suffix = hour >= 12 ? "PM" : "AM";
+      hour = hour % 12 || 12;
+      return `${String(hour).padStart(2, "0")}:${minute} ${suffix}`;
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  useEffect(() => {
+    const user = getUser();
+    const empId = user?.employee_id;
+    if (!empId) return;
+    setDoctorEmployeeId(empId);
+    let cancelled = false;
+    doctorDashboardApi
+      .getNotifications(empId)
+      .then((res) => {
+        if (cancelled) return;
+        setNotifItems(res.data.data.notifications);
+        setUnreadCount(res.data.data.unreadCount);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (notificationOpen && unreadCount > 0 && doctorEmployeeId) {
+      setUnreadCount(0);
+      doctorDashboardApi
+        .markNotificationsRead(doctorEmployeeId)
+        .catch(() => {});
+    }
+  }, [notificationOpen, unreadCount, doctorEmployeeId]);
+
+  useEffect(() => {
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (notificationRef.current && !notificationRef.current.contains(target)) {
+        setNotificationOpen(false);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setNotificationOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
+
+  /* ============================================================
      LOAD DRAFT
   ============================================================ */
 
@@ -1117,23 +1220,198 @@ const Consultation: React.FC = () => {
 
                 {/* NOTIFICATION */}
 
-                <div className="relative h-6 w-6">
-
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="#94a3b8"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-6 w-6"
+                <div className="relative" ref={notificationRef}>
+                  <button
+                    type="button"
+                    aria-label="Notifications"
+                    onClick={() => setNotificationOpen((v) => !v)}
+                    className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none"
                   >
-                    <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
-                    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-                  </svg>
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="h-5 w-5"
+                    >
+                      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+                      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                    </svg>
 
-                  <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500" />
+                    {unreadCount > 0 && (
+                      <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#003ec7] px-1 text-[10px] font-bold leading-none text-white">
+                        {unreadCount > 9 ? "9+" : unreadCount}
+                      </span>
+                    )}
+                  </button>
 
+                  {notificationOpen && (
+                    <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
+                      <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
+                        <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">
+                          Notifications
+                        </h1>
+                        <div className="flex shrink-0 items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setNotifItems((prev) =>
+                                prev.map((n) => ({ ...n, status: "READ" }))
+                              )
+                            }
+                            className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
+                          >
+                            Mark all as read
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNotifItems([])}
+                            disabled={notifItems.length === 0}
+                            className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            Clear all
+                          </button>
+                        </div>
+                      </header>
+
+                      <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
+                        {notifItems.length === 0 ? (
+                          <p className="py-6 text-center text-xs text-[#434656]">
+                            No new notifications
+                          </p>
+                        ) : (
+                          notifItems.map((item, index) => {
+                            const patient =
+                              item.appointment_history?.patient_bio_data;
+                            const patientName = [
+                              patient?.patient_first_name,
+                              patient?.patient_middle_name,
+                              patient?.patient_last_name,
+                            ]
+                              .filter(Boolean)
+                              .join(" ") || "A patient";
+
+                            const isBooking =
+                              item.notification_type === "BOOKING";
+                            const appointment =
+                              item.appointment_history;
+                            const isUnread = item.status === "UNREAD";
+
+                            return (
+                              <article
+                                key={item.notification_id}
+                                className="relative flex gap-3 rounded-lg px-2 py-3 transition-colors"
+                              >
+                                {isUnread && (
+                                  <span className="absolute left-0 top-5 h-2 w-2 rounded-full bg-[#003ec7]" />
+                                )}
+
+                                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f0eaff]">
+                                  <svg
+                                    viewBox="0 0 24 24"
+                                    className="h-5 w-5 text-[#7046c9]"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.8"
+                                  >
+                                    <rect
+                                      x="3"
+                                      y="5"
+                                      width="18"
+                                      height="16"
+                                      rx="2"
+                                    />
+                                    <path
+                                      d="M16 3v4M8 3v4M3 10h18"
+                                      strokeLinecap="round"
+                                    />
+                                    <path
+                                      d="M8 14h3M8 17h5"
+                                      strokeLinecap="round"
+                                    />
+                                  </svg>
+                                </div>
+
+                                <div className="min-w-0 flex-1">
+                                  <div className="mb-1 flex items-start justify-between gap-3">
+                                    <h3 className="truncate text-xs font-semibold tracking-[0.02em] text-[#131b2e]">
+                                      {isBooking ? (
+                                        <>
+                                          <span className="font-semibold text-[#131b2e]">
+                                            {patientName}
+                                          </span>{" "}
+                                          booked an appointment
+                                          {appointment
+                                            ? ` for ${notifFormatDate(appointment.appointment_date)} at ${notifFormatTime(appointment.appointment_time)}`
+                                            : ""}
+                                          .
+                                        </>
+                                      ) : (
+                                        <>
+                                          <span className="font-semibold text-[#131b2e]">
+                                            {patientName}
+                                          </span>{" "}
+                                          checked in.
+                                        </>
+                                      )}
+                                    </h3>
+
+                                    <div className="flex shrink-0 items-center gap-2">
+                                      <span
+                                        className={[
+                                          "text-[11px] font-medium leading-[14px]",
+                                          isUnread
+                                            ? "text-[#003ec7]"
+                                            : "text-[#434656]",
+                                        ].join(" ")}
+                                      >
+                                        {notifTimeAgo(item.created_at)}
+                                      </span>
+
+                                      {isUnread && (
+                                        <span
+                                          aria-label="Unread indicator"
+                                          className="h-2 w-2 rounded-full bg-[#003ec7]"
+                                        />
+                                      )}
+
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setNotifItems((prev) =>
+                                            prev.filter(
+                                              (n) =>
+                                                n.notification_id !==
+                                                item.notification_id
+                                            )
+                                          )
+                                        }
+                                        aria-label="Delete notification"
+                                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
+                                      >
+                                        <svg
+                                          viewBox="0 0 24 24"
+                                          className="h-3.5 w-3.5 fill-none stroke-current"
+                                          strokeWidth="2"
+                                        >
+                                          <path
+                                            d="M6 6l12 12M18 6L6 18"
+                                            strokeLinecap="round"
+                                          />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </article>
+                            );
+                          })
+                        )}
+                      </main>
+                    </div>
+                  )}
                 </div>
 
                 {/* USER */}
