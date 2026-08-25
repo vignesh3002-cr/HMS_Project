@@ -130,7 +130,14 @@ function formatAppointmentTimeConditional(record: Appointment): string {
   return record.time;
 }
 
-function mapAppointmentRecord(record: AppointmentRecord, index: number): Appointment {
+function isBeforeToday(dateStr: string): boolean {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const apptDate = new Date(dateStr);
+  return apptDate < today;
+}
+
+function mapAppointmentRecord(record: AppointmentRecord, index: number): Appointment | null {
   const patientName = formatPatientName(record.patient_bio_data);
   const doctorName = formatDoctorName(record.employees);
 
@@ -140,6 +147,15 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
     ? (timeMs % 86400000 + 86400000) % 86400000
     : 0;
   const sortDate = (isNaN(dateMs) ? 0 : dateMs) + timeOfDayMs;
+
+  const effectiveStatus = getEffectiveAppointmentStatus(record);
+  const isCancelled = effectiveStatus === "CANCELLED";
+  const apptDate = record.appointment_date;
+
+  // Only show: SCHEDULED, RESCHEDULED, CANCELLED (up to yesterday)
+  const allowedStatuses = new Set(["SCHEDULED", "RESCHEDULED", "CANCELLED"]);
+  if (!allowedStatuses.has(effectiveStatus)) return null;
+  if (isCancelled && !isBeforeToday(apptDate)) return null;
 
   return {
     id: record.appointment_id,
@@ -155,7 +171,7 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
     date: formatAppointmentDate(record.appointment_date),
     time: formatAppointmentTime(record.appointment_time),
     sortDate,
-    status: STATUS_LABELS[getEffectiveAppointmentStatus(record)] ?? (record.status || "Unknown"),
+    status: STATUS_LABELS[effectiveStatus] ?? (record.status || "Unknown"),
   };
 }
 
@@ -283,8 +299,9 @@ const AppointmentSchedule: React.FC = () => {
         limit: 100,
       });
       const records = res.data?.data?.appointments || [];
-      setAppointments(records.map(mapAppointmentRecord));
-      if (records.length === 0) {
+      const mapped = records.map(mapAppointmentRecord).filter((a): a is Appointment => a !== null);
+      setAppointments(mapped);
+      if (mapped.length === 0) {
         toast({
           title: "No appointment records found",
           description: "The appointments API returned no records.",

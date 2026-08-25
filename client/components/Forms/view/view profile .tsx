@@ -20,7 +20,7 @@ import { branchApi, type BranchDetail } from "@/api/branch.api";
 import { employeeApi, EmployeeDetailResponse } from "@/api/employee.api";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import Security from "@/components/Forms/view/Security";
-import Notifications from "@/components/Forms/view/Notification";
+import NotificationSettings from "@/components/Forms/view/NotificationSettings";
 import { getUser } from "@/utils/token";
 import { addAccountActivity } from "@/utils/accountActivity";
 import { useBranchFilter } from "@/context/BranchFilterContext";
@@ -314,7 +314,7 @@ const Profile = () => {
               {activeMenu === "Security" ? (
                 <Security embedded />
               ) : activeMenu === "Notification" ? (
-                <Notifications />
+                <NotificationSettings />
               ) : (
                 <>
                   <h2 className="hms-heading mb-8">Account</h2>

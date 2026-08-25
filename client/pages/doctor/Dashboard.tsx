@@ -200,6 +200,13 @@ function formatScheduleRange(start?: string | null, end?: string | null) {
   return `${formatTime(start)} - ${formatTime(end)}`;
 }
 
+function isBeforeToday(dateStr: string): boolean {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const apptDate = new Date(dateStr);
+  return apptDate < today;
+}
+
 function timeAgo(iso: string): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "";
@@ -360,33 +367,47 @@ export default function DoctorDashboard() {
       setTotalAppointments(appointmentsResponse.data.data.total);
       setCancelledAppointments(cancelledResponse.data.data.total);
       setTotalPatientsToday(checkedInResponse.data.data.totalPatients);
+
+      // Show ALL change notifications — no status filtering here.
       setNotifications(notificationsResponse.data.data.notifications);
       setUnreadCount(notificationsResponse.data.data.unreadCount);
 
       const mappedAppointments = appointmentsResponse.data.data.appointments
         .map(
-          (item: DashboardAppointment): Appointment => ({
-            patientId: item.patient_bio_data?.patient_id || "",
-            patient: [
-              item.patient_bio_data?.patient_first_name,
-              item.patient_bio_data?.patient_middle_name,
-              item.patient_bio_data?.patient_last_name,
-            ]
-              .filter(Boolean)
-              .join(" ") || "Unknown Patient",
-            image:
-              "https://www.figma.com/api/mcp/asset/0174143d-d6a1-4d40-96d6-22a8b499a788.png",
-            dateTime: `${formatDate(item.appointment_date)} - ${formatTime(
-              item.appointment_time
-            )}`,
-            appointmentDate: item.appointment_date,
-            appointmentTime: item.appointment_time,
-            phone: item.patient_bio_data?.patient_primary_mobile || "-",
-            status: (item.status === "NOT_CHECKED_IN" ? "Not Checked In" : item.status) as AppointmentStatus,
-            appointmentId: item.appointment_id,
-            originalStatus: item.status,
-          })
+          (item: DashboardAppointment): Appointment | null => {
+            const effectiveStatus = item.status === "NOT_CHECKED_IN" ? "Not Checked In" : item.status;
+            const isCancelled = item.status === "CANCELLED";
+            const apptDate = item.appointment_date;
+
+            // Only show: SCHEDULED, RESCHEDULED, CANCELLED (up to yesterday)
+            const allowedStatuses = new Set(["SCHEDULED", "RESCHEDULED", "CANCELLED"]);
+            if (!allowedStatuses.has(item.status)) return null;
+            if (isCancelled && !isBeforeToday(apptDate)) return null;
+
+            return {
+              patientId: item.patient_bio_data?.patient_id || "",
+              patient: [
+                item.patient_bio_data?.patient_first_name,
+                item.patient_bio_data?.patient_middle_name,
+                item.patient_bio_data?.patient_last_name,
+              ]
+                .filter(Boolean)
+                .join(" ") || "Unknown Patient",
+              image:
+                "https://www.figma.com/api/mcp/asset/0174143d-d6a1-4d40-96d6-22a8b499a788.png",
+              dateTime: `${formatDate(item.appointment_date)} - ${formatTime(
+                item.appointment_time
+              )}`,
+              appointmentDate: item.appointment_date,
+              appointmentTime: item.appointment_time,
+              phone: item.patient_bio_data?.patient_primary_mobile || "-",
+              status: effectiveStatus as AppointmentStatus,
+              appointmentId: item.appointment_id,
+              originalStatus: item.status,
+            };
+          }
         )
+        .filter((a): a is Appointment => a !== null)
         // Sort by appointment_time ascending
         .sort((a, b) => {
           const timeA = a.appointmentTime || "";

@@ -185,6 +185,13 @@ function formatAppointmentStatus(status: string | null): string {
     .join(" ");
 }
 
+function isBeforeToday(dateStr: string): boolean {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const apptDate = new Date(dateStr);
+  return apptDate < today;
+}
+
 function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
   const patientPalette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const doctorPalette = AVATAR_PALETTE[(index + 1) % AVATAR_PALETTE.length];
@@ -198,6 +205,15 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
   const doctorName = doctor
     ? `${doctor.first_name} ${doctor.middle_name ? doctor.middle_name + " " : ""}${doctor.last_name}`.trim()
     : doc.doctor_name || "Unassigned";
+
+  const effectiveStatus = getEffectiveAppointmentStatus(doc);
+  const isCancelled = effectiveStatus === "CANCELLED";
+  const apptDate = doc.appointment_date;
+
+  // Only show: SCHEDULED, RESCHEDULED, CANCELLED (up to yesterday)
+  const allowedStatuses = new Set(["SCHEDULED", "RESCHEDULED", "CANCELLED"]);
+  if (!allowedStatuses.has(effectiveStatus)) return null;
+  if (isCancelled && !isBeforeToday(apptDate)) return null;
 
   return {
     id: doc.appointment_id,
@@ -215,7 +231,7 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
     reason: doc.reason_for_visit || "—",
     date: formatDateOnly(doc.appointment_date),
     time: formatTimeOnly(doc.appointment_time),
-    status: formatAppointmentStatus(getEffectiveAppointmentStatus(doc)),
+    status: formatAppointmentStatus(effectiveStatus),
   };
 }
 
@@ -539,8 +555,9 @@ export default function Dashboard() {
       // Store previous count before updating
       prevAppointmentsRef.current = appointmentCount;
 
-      setRealAppointments(rows.map(mapAppointmentRecord));
-      setAppointmentCount(res.data?.data?.total ?? rows.length);
+      const mapped = rows.map(mapAppointmentRecord).filter((a): a is NonNullable<typeof a> => a !== null);
+      setRealAppointments(mapped);
+      setAppointmentCount(mapped.length);
     } catch (err: any) {
       console.error("[Dashboard] Failed to load appointments:", err);
       toast({

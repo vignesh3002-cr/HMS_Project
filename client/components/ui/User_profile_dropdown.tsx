@@ -85,14 +85,15 @@ export function UserProfileDropdown({
         <div className="py-2 border-b border-[#E5E7EB]">
           <h3 className="px-4 py-1 text-xs font-semibold text-[#777587] uppercase tracking-wider">Preferences</h3>
           <div className="px-2 mt-1 space-y-0.5">
-            <a
-              href="#"
-              className="flex items-center gap-3 px-3 py-2 rounded-lg text-[#464555] hover:bg-[#D3E4FE] hover:text-[#3525CD] transition-colors group"
+            <button
+              type="button"
+              onClick={() => navigate("/notifications")}
+              className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[#464555] hover:bg-[#D3E4FE] hover:text-[#3525CD] transition-colors group"
             >
               <Bell size={18} className="group-hover:text-[#3525CD] transition-colors" />
-              <span className="text-sm flex-1">Notifications</span>
+              <span className="text-sm flex-1 text-left">Notifications</span>
               <div className="w-2 h-2 rounded-full bg-[#4F46E5] mr-1" />
-            </a>
+            </button>
             <a
               href="#"
               className="flex items-center gap-3 px-3 py-2 rounded-lg text-[#464555] hover:bg-[#D3E4FE] hover:text-[#3525CD] transition-colors group"

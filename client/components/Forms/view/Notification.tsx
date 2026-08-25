@@ -27,6 +27,12 @@ const DISMISSED_NOTIFICATIONS_KEY =
 const NOTIFICATION_SNAPSHOT_KEY =
   "hms_notification_snapshot_v2";
 
+const LAST_SEEN_KEY =
+  "hms_notifications_last_seen";
+
+const EVENT_CACHE_KEY =
+  "hms_notification_events_v1";
+
 const POLLING_INTERVAL = 5000;
 
 /* -------------------------------------------------------------------------- */
@@ -54,6 +60,106 @@ function saveDismissedIds(
     localStorage.setItem(
       DISMISSED_NOTIFICATIONS_KEY,
       JSON.stringify(Array.from(ids))
+    );
+  } catch {
+    // Ignore localStorage errors.
+  }
+}
+
+function loadLastSeen(): number {
+  try {
+    const raw = localStorage.getItem(
+      LAST_SEEN_KEY
+    );
+
+    const value = raw
+      ? Number(raw)
+      : 0;
+
+    return Number.isFinite(value)
+      ? value
+      : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveLastSeen(timestamp: number) {
+  try {
+    localStorage.setItem(
+      LAST_SEEN_KEY,
+      String(timestamp)
+    );
+  } catch {
+    // Ignore localStorage errors.
+  }
+}
+
+/*
+ * Detected events are cached so the red dot
+ * survives page navigation and reloads until
+ * the bell button is clicked.
+ */
+function loadCachedItems(): NotificationItem[] {
+  try {
+    const raw = localStorage.getItem(
+      EVENT_CACHE_KEY
+    );
+
+    if (!raw) {
+      return [];
+    }
+
+    const parsed =
+      JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    const now = new Date();
+
+    return parsed.filter(
+      (item) =>
+        item &&
+        typeof item.id ===
+          "string" &&
+        typeof item.createdAt ===
+          "number" &&
+        typeof item.title ===
+          "string" &&
+        isSameDay(
+          new Date(
+            item.createdAt
+          ),
+          now
+        )
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveCachedItems(
+  items: NotificationItem[]
+) {
+  try {
+    const capped = items
+      .slice(0, 300)
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        message: item.message,
+        time: item.time,
+        createdAt: item.createdAt,
+        role: item.role,
+        action: item.action,
+        recordId: item.recordId,
+      }));
+
+    localStorage.setItem(
+      EVENT_CACHE_KEY,
+      JSON.stringify(capped)
     );
   } catch {
     // Ignore localStorage errors.
@@ -142,6 +248,7 @@ type NotificationItem = {
   role: NotificationRole;
   action?: NotificationAction;
   unread?: boolean;
+  recordId?: string;
 };
 
 type GenericRecord = Record<
@@ -819,7 +926,56 @@ function createNotification(
     createdAt,
     role,
     action,
+    recordId,
   };
+}
+
+/*
+ * Adds a notification derived from the record's
+ * own created/updated timestamp, but only when
+ * it happened today.
+ */
+function pushDerivedItem(
+  items: NotificationItem[],
+  role: NotificationRole,
+  action: NotificationAction,
+  recordId: string,
+  name: string,
+  timestampStr?: string | null
+) {
+  if (!timestampStr || !recordId) {
+    return;
+  }
+
+  const timestamp =
+    new Date(timestampStr).getTime();
+
+  if (
+    Number.isNaN(timestamp) ||
+    !isSameDay(
+      new Date(timestamp),
+      new Date()
+    )
+  ) {
+    return;
+  }
+
+  const item = createNotification(
+    role,
+    action,
+    name,
+    recordId
+  );
+
+  /*
+   * Unique per occurrence so a repeated
+   * change counts as unread again.
+   */
+  item.id = `derived-${role}-${action}-${recordId}-${timestamp}`;
+
+  item.createdAt = timestamp;
+
+  items.push(item);
 }
 
 function accountActivityToNotification(
@@ -845,7 +1001,7 @@ export default function Notifications() {
     notifications,
     setNotifications,
   ] = useState<NotificationItem[]>(
-    []
+    loadCachedItems()
   );
 
   const [
@@ -856,16 +1012,21 @@ export default function Notifications() {
   );
 
   const [
-    readIds,
-    setReadIds,
-  ] = useState<Set<string>>(
-    new Set()
+    lastSeenMs,
+    setLastSeenMs,
+  ] = useState<number>(
+    loadLastSeen()
   );
 
   const [
     isLoading,
     setIsLoading,
   ] = useState(true);
+
+  const [
+    ,
+    setTimeTick,
+  ] = useState(0);
 
   const [
     error,
@@ -1022,156 +1183,6 @@ export default function Notifications() {
 
         const previousSnapshot =
           previousSnapshotRef.current;
-
-        /* ---------------------------------------------------------------- */
-        /* FIRST LOAD                                                        */
-        /* ---------------------------------------------------------------- */
-
-        if (!previousSnapshot) {
-          /*
-           * Keep your existing behavior:
-           * records with created_at from backend
-           * are displayed as created notifications.
-           */
-
-          const initialItems: NotificationItem[] =
-            [];
-
-          employees.forEach(
-            (employee: EmployeeRecord) => {
-              const role =
-                roleTypeToNotificationRole(
-                  employee
-                    .user_table
-                    ?.role_type
-                );
-
-              const createdAtStr =
-                employee
-                  .user_table
-                  ?.created_at;
-
-              if (!createdAtStr) {
-                return;
-              }
-
-              const createdAt =
-                new Date(
-                  createdAtStr
-                ).getTime();
-
-              if (
-                Number.isNaN(createdAt)
-              ) {
-                return;
-              }
-
-              const name =
-                formatEmployeeName(
-                  employee
-                ) || "Employee";
-
-              initialItems.push({
-                id: `employee-${employee.employee_id}-created`,
-                title:
-                  ROLE_TITLES[
-                    role
-                  ],
-                message:
-                  `${name} was added as ${
-                    role === "doctor"
-                      ? "a doctor"
-                      : role ===
-                        "admin"
-                      ? "an admin"
-                      : "staff"
-                  }.`,
-                time:
-                  timeAgo(
-                    createdAt
-                  ),
-                createdAt,
-                role,
-                action:
-                  "CREATE",
-              });
-            }
-          );
-
-          patients.forEach(
-            (patient: PatientRecord) => {
-              const createdAtStr =
-                patient
-                  .user_table
-                  ?.created_at;
-
-              if (!createdAtStr) {
-                return;
-              }
-
-              const createdAt =
-                new Date(
-                  createdAtStr
-                ).getTime();
-
-              if (
-                Number.isNaN(createdAt)
-              ) {
-                return;
-              }
-
-              const name =
-                formatPatientName(
-                  patient
-                ) || "Patient";
-
-              initialItems.push({
-                id: `patient-${patient.patient_id}-created`,
-                title:
-                  "New Patient Registered",
-                message:
-                  `${name} was registered as a patient.`,
-                time:
-                  timeAgo(
-                    createdAt
-                  ),
-                createdAt,
-                role: "patient",
-                action:
-                  "CREATE",
-              });
-            }
-          );
-
-          initialItems.sort(
-            (a, b) =>
-              b.createdAt -
-              a.createdAt
-          );
-
-          const filtered =
-            initialItems.filter(
-              (item) =>
-                !dismissedIdsRef.current.has(
-                  item.id
-                )
-            );
-
-          setNotifications(
-            filtered
-          );
-
-          previousSnapshotRef.current =
-            currentSnapshot;
-
-          saveSnapshot(
-            currentSnapshot
-          );
-
-          setIsLoading(false);
-
-          return;
-        }
 
         /* ---------------------------------------------------------------- */
         /* DETECT CHANGES                                                   */
@@ -1548,46 +1559,218 @@ export default function Notifications() {
         );
 
         /* ---------------------------------------------------------------- */
-        /* ADD NEW EVENTS TO EXISTING LIST                                  */
+        /* BUILD TODAY'S FULL CHANGE LIST FROM RECORD TIMESTAMPS            */
         /* ---------------------------------------------------------------- */
 
-        if (
-          newEvents.length > 0
-        ) {
-          setNotifications(
-            (existing) => {
-              const combined = [
-                ...newEvents,
-                ...existing,
-              ];
+        const derivedItems: NotificationItem[] =
+          [];
 
-              const unique =
-                Array.from(
-                  new Map(
-                    combined.map(
-                      (item) => [
-                        item.id,
-                        item,
-                      ]
-                    )
-                  ).values()
-                );
-
-              unique.sort(
-                (a, b) =>
-                  b.createdAt -
-                  a.createdAt
+        employees.forEach(
+          (employee: EmployeeRecord) => {
+            const role =
+              roleTypeToNotificationRole(
+                employee.user_table
+                  ?.role_type
               );
 
-              return unique.filter(
-                (item) =>
-                  !dismissedIdsRef.current.has(
+            const name =
+              formatEmployeeName(
+                employee
+              ) || "Employee";
+
+            const recordId = String(
+              employee.employee_id ?? ""
+            );
+
+            pushDerivedItem(
+              derivedItems,
+              role,
+              "CREATE",
+              recordId,
+              name,
+              employee.user_table
+                ?.created_at
+            );
+
+            pushDerivedItem(
+              derivedItems,
+              role,
+              "UPDATE",
+              recordId,
+              name,
+              (employee as any)
+                .user_table
+                ?.updated_at ||
+                (employee as any)
+                  .updated_at ||
+                (employee as any)
+                  .updatedAt
+            );
+          }
+        );
+
+        patients.forEach(
+          (patient: PatientRecord) => {
+            const name =
+              formatPatientName(
+                patient
+              ) || "Patient";
+
+            const recordId = String(
+              patient.patient_id ?? ""
+            );
+
+            pushDerivedItem(
+              derivedItems,
+              "patient",
+              "CREATE",
+              recordId,
+              name,
+              patient.user_table
+                ?.created_at
+            );
+
+            pushDerivedItem(
+              derivedItems,
+              "patient",
+              "UPDATE",
+              recordId,
+              name,
+              (patient as any)
+                .user_table
+                ?.updated_at ||
+                (patient as any)
+                  .updated_at ||
+                (patient as any)
+                  .updatedAt
+            );
+          }
+        );
+
+        appointments.forEach(
+          (
+            appointment: GenericRecord,
+            index: number
+          ) => {
+            const recordId =
+              getRecordId(
+                appointment,
+                "appointment",
+                index
+              );
+
+            const name =
+              getGenericName(
+                appointment,
+                `Appointment #${recordId}`
+              );
+
+            pushDerivedItem(
+              derivedItems,
+              "appointment",
+              "CREATE",
+              recordId,
+              name,
+              appointment.created_at ||
+                appointment.createdAt
+            );
+
+            pushDerivedItem(
+              derivedItems,
+              "appointment",
+              "UPDATE",
+              recordId,
+              name,
+              appointment.updated_at ||
+                appointment.updatedAt
+            );
+          }
+        );
+
+        /* ---------------------------------------------------------------- */
+        /* COMBINE: LIVE EVENTS + ALL OF TODAY'S CHANGES                    */
+        /* ---------------------------------------------------------------- */
+
+        setNotifications(
+          (existing) => {
+            /*
+             * Keep everything already detected this
+             * session (creates/updates/deletes) so a
+             * notification never disappears on its own.
+             * Occurrence ids are unique, so nothing
+             * duplicates; fresher entries win below.
+             */
+            const combined = [
+              ...existing,
+              ...newEvents,
+              ...derivedItems,
+            ];
+
+            const unique =
+              Array.from(
+                new Map(
+                  combined.map(
+                    (item) => [
+                      item.id,
+                      item,
+                    ]
+                  )
+                ).values()
+              );
+
+            unique.sort(
+              (a, b) =>
+                b.createdAt -
+                a.createdAt
+            );
+
+            /*
+             * Drop live duplicates of changes that
+             * record timestamps already cover
+             * (same record, action and minute).
+             */
+            const derivedKeys =
+              new Set(
+                derivedItems.map(
+                  (item) =>
+                    `${item.role}|${item.action}|${item.recordId}|${Math.floor(
+                      item.createdAt /
+                        60000
+                    )}`
+                )
+              );
+
+            return unique.filter(
+              (item) => {
+                if (
+                  dismissedIdsRef.current.has(
                     item.id
                   )
-              );
-            }
-          );
-        }
+                ) {
+                  return false;
+                }
+
+                if (
+                  item.id.startsWith(
+                    "event-"
+                  ) &&
+                  item.action !==
+                    "DELETE" &&
+                  derivedKeys.has(
+                    `${item.role}|${item.action}|${item.recordId}|${Math.floor(
+                      item.createdAt /
+                        60000
+                    )}`
+                  )
+                ) {
+                  return false;
+                }
+
+                return true;
+              }
+            );
+          }
+        );
 
         setIsLoading(false);
       } catch (err) {
@@ -1611,6 +1794,25 @@ export default function Notifications() {
   useEffect(() => {
     fetchNotifications();
   }, [fetchNotifications]);
+
+  /*
+   * Re-render every 30s so relative
+   * times stay accurate.
+   */
+  useEffect(() => {
+    const interval =
+      window.setInterval(() => {
+        setTimeTick(
+          (tick) => tick + 1
+        );
+      }, 30000);
+
+    return () => {
+      window.clearInterval(
+        interval
+      );
+    };
+  }, []);
 
   /* ------------------------------------------------------------------------ */
   /* AUTOMATIC REFRESH                                                        */
@@ -1672,15 +1874,12 @@ export default function Notifications() {
 
   const markAllAsRead =
     useCallback(() => {
-      setReadIds(
-        new Set(
-          [...accountItems, ...notifications].map(
-            (notification) =>
-              notification.id
-          )
-        )
-      );
-    }, [accountItems, notifications]);
+      const now = Date.now();
+
+      setLastSeenMs(now);
+
+      saveLastSeen(now);
+    }, []);
 
   /* ------------------------------------------------------------------------ */
   /* REMOVE                                                                   */
@@ -1703,15 +1902,6 @@ export default function Notifications() {
               item.id !== id
           )
       );
-
-      setReadIds((ids) => {
-        const next =
-          new Set(ids);
-
-        next.delete(id);
-
-        return next;
-      });
     },
     []
   );
@@ -1735,7 +1925,11 @@ export default function Notifications() {
 
     setNotifications([]);
 
-    setReadIds(new Set());
+    const now = Date.now();
+
+    setLastSeenMs(now);
+
+    saveLastSeen(now);
   }, [notifications]);
 
   /* ------------------------------------------------------------------------ */
@@ -1744,26 +1938,8 @@ export default function Notifications() {
 
   const {
     todayItems,
-    yesterdayItems,
-    earlierItems,
   } = useMemo(() => {
     const now = new Date();
-
-    const yesterday =
-      new Date(now);
-
-    yesterday.setDate(
-      now.getDate() - 1
-    );
-
-    const today: NotificationItem[] =
-      [];
-
-    const yesterdayList: NotificationItem[] =
-      [];
-
-    const earlier: NotificationItem[] =
-      [];
 
     const allItems = [
       ...accountItems,
@@ -1774,40 +1950,21 @@ export default function Notifications() {
         a.createdAt
     );
 
-    allItems.forEach(
-      (item) => {
-        const date =
+    /*
+     * Only today's changes are shown.
+     */
+    const today =
+      allItems.filter((item) =>
+        isSameDay(
           new Date(
             item.createdAt
-          );
-
-        if (
-          isSameDay(
-            date,
-            now
-          )
-        ) {
-          today.push(item);
-        } else if (
-          isSameDay(
-            date,
-            yesterday
-          )
-        ) {
-          yesterdayList.push(
-            item
-          );
-        } else {
-          earlier.push(item);
-        }
-      }
-    );
+          ),
+          now
+        )
+      );
 
     return {
       todayItems: today,
-      yesterdayItems:
-        yesterdayList,
-      earlierItems: earlier,
     };
   }, [accountItems, notifications]);
 
@@ -1821,9 +1978,8 @@ export default function Notifications() {
         item: NotificationItem
       ) => {
         const unread =
-          !readIds.has(
-            item.id
-          );
+          item.createdAt >
+          lastSeenMs;
 
         return (
           <article
@@ -1853,7 +2009,7 @@ export default function Notifications() {
                         : "text-[#434656]",
                     ].join(" ")}
                   >
-                    {item.time}
+                    {timeAgo(item.createdAt)}
                   </span>
 
                   {unread && (
@@ -1897,15 +2053,75 @@ export default function Notifications() {
         );
       },
       [
-        readIds,
+        lastSeenMs,
         removeNotification,
       ]
     );
 
   const hasAny =
-    todayItems.length > 0 ||
-    yesterdayItems.length > 0 ||
-    earlierItems.length > 0;
+    todayItems.length > 0;
+
+  /*
+   * Persist detected events so the red dot
+   * survives navigation and reloads until
+   * the bell is clicked.
+   */
+  useEffect(() => {
+    saveCachedItems(
+      notifications
+    );
+  }, [notifications]);
+
+  /*
+   * Broadcast unread state so the header
+   * bell can show/hide its dot. Anything newer
+   * than the last-seen timestamp is unread.
+   */
+  useEffect(() => {
+    const hasUnread = [
+      ...accountItems,
+      ...notifications,
+    ].some(
+      (item) =>
+        item.createdAt > lastSeenMs
+    );
+
+    window.dispatchEvent(
+      new CustomEvent(
+        "hms-unread-changed",
+        {
+          detail: hasUnread,
+        }
+      )
+    );
+  }, [
+    accountItems,
+    notifications,
+    lastSeenMs,
+  ]);
+
+  /*
+   * Opening the bell popover marks
+   * everything as read.
+   */
+  useEffect(() => {
+    const handleView =
+      () => {
+        markAllAsRead();
+      };
+
+    window.addEventListener(
+      "hms-view-notifications",
+      handleView
+    );
+
+    return () => {
+      window.removeEventListener(
+        "hms-view-notifications",
+        handleView
+      );
+    };
+  }, [markAllAsRead]);
 
   /* ------------------------------------------------------------------------ */
   /* UI                                                                       */
@@ -1983,53 +2199,6 @@ export default function Notifications() {
             </section>
           )}
 
-        {!isLoading &&
-          yesterdayItems.length >
-            0 && (
-            <>
-              {todayItems.length >
-                0 && (
-                <div className="ml-16 h-px w-[calc(100%-4rem)] rounded-full bg-[#c3c5d9]" />
-              )}
-
-              <section>
-                <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-[#434656]">
-                  Yesterday
-                </h2>
-
-                <div className="flex flex-col gap-1">
-                  {yesterdayItems.map(
-                    renderNotification
-                  )}
-                </div>
-              </section>
-            </>
-          )}
-
-        {!isLoading &&
-          earlierItems.length >
-            0 && (
-            <>
-              {(todayItems.length >
-                0 ||
-                yesterdayItems.length >
-                  0) && (
-                <div className="ml-16 h-px w-[calc(100%-4rem)] rounded-full bg-[#c3c5d9]" />
-              )}
-
-              <section>
-                <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-[#434656]">
-                  Earlier
-                </h2>
-
-                <div className="flex flex-col gap-1">
-                  {earlierItems.map(
-                    renderNotification
-                  )}
-                </div>
-              </section>
-            </>
-          )}
       </main>
     </div>
   );
