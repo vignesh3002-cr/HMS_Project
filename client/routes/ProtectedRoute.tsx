@@ -48,14 +48,20 @@ export default function ProtectedRoute({ children, permission }: Props) {
         setValid(false);
         return;
       }
-      // Background revalidation
+      // Background revalidation — only clear the token on actual 401,
+      // not on transient failures (Render cold-start, network blips).
       api.get("/auth/me").then(() => {
         cachedAuth = { valid: true, timestamp: Date.now() };
         setValid(true);
-      }).catch(() => {
-        remove();
-        cachedAuth = { valid: false, timestamp: Date.now() };
-        setValid(false);
+      }).catch((err) => {
+        if (err?.response?.status === 401) {
+          remove();
+          cachedAuth = { valid: false, timestamp: Date.now() };
+          setValid(false);
+        }
+        // For non-401 errors (timeout, network, 5xx) keep the cached
+        // auth so the user stays on the page — the next real API call
+        // will surface the actual problem via the axios 401 interceptor.
       });
       return;
     }
@@ -73,9 +79,16 @@ export default function ProtectedRoute({ children, permission }: Props) {
         cachedAuth = { valid: true, timestamp: Date.now() };
         setValid(true);
       } catch (error) {
-        remove();
-        cachedAuth = { valid: false, timestamp: Date.now() };
-        setValid(false);
+        if (error?.response?.status === 401) {
+          remove();
+          cachedAuth = { valid: false, timestamp: Date.now() };
+          setValid(false);
+        } else {
+          // Transient failure (cold-start, timeout, network) — keep
+          // the session alive so the user can interact with the app.
+          cachedAuth = { valid: true, timestamp: Date.now() };
+          setValid(true);
+        }
       }
       setLoading(false);
     };

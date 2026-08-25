@@ -181,56 +181,59 @@ const Profile = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeMenu, setActiveMenu] = useState("Account");
+  const [retryCount, setRetryCount] = useState(0);
+
+  const fetchProfile = async () => {
+    let isMounted = true;
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await employeeApi.getMe();
+      const data = res.data.data;
+      if (!isMounted) return;
+
+      setProfile(data);
+      setPhotoUrl(
+        data.employee.employee_photo_URL || data.employee.photo || ""
+      );
+      window.dispatchEvent(
+        new CustomEvent("profile-photo-updated", {
+          detail: data.employee.employee_photo_URL || data.employee.photo || "",
+        })
+      );
+      setForm({
+        first_name: data.employee.first_name || "",
+        last_name: data.employee.last_name || "",
+        username: (data as any).username || "",
+        email: data.employee.email || "",
+        mobile_no: data.employee.mobile_no || "",
+        current_address: data.employee.current_address || "",
+        employee_state: data.employee.employee_state || "",
+        employee_district: data.employee.employee_district || "",
+        employee_pincode: data.employee.employee_pincode
+          ? String(data.employee.employee_pincode)
+          : "",
+      });
+    } catch (err: any) {
+      if (!isMounted) return;
+      const msg = err?.response?.data?.message || "";
+      const isTransient = !err?.response || (err?.response?.status >= 500) || err?.code === "ECONNABORTED";
+      if (isTransient && retryCount < 2) {
+        const delay = (retryCount + 1) * 3000;
+        setTimeout(() => {
+          if (isMounted) setRetryCount((c) => c + 1);
+        }, delay);
+        return;
+      }
+      setError(msg || "Failed to load profile details.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    let isMounted = true;
-
-    const fetchProfile = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await employeeApi.getMe();
-        const data = res.data.data;
-        if (!isMounted) return;
-
-        setProfile(data);
-        setPhotoUrl(
-          data.employee.employee_photo_URL || data.employee.photo || ""
-        );
-        window.dispatchEvent(
-          new CustomEvent("profile-photo-updated", {
-            detail: data.employee.employee_photo_URL || data.employee.photo || "",
-          })
-        );
-        setForm({
-          first_name: data.employee.first_name || "",
-          last_name: data.employee.last_name || "",
-          username: (data as any).username || "",
-          email: data.employee.email || "",
-          mobile_no: data.employee.mobile_no || "",
-          current_address: data.employee.current_address || "",
-          employee_state: data.employee.employee_state || "",
-          employee_district: data.employee.employee_district || "",
-          employee_pincode: data.employee.employee_pincode
-            ? String(data.employee.employee_pincode)
-            : "",
-        });
-      } catch (err: any) {
-        if (isMounted) {
-          setError(
-            err?.response?.data?.message || "Failed to load profile details."
-          );
-        }
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    };
-
     fetchProfile();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  }, [retryCount]);
 
   const handleChange = (field: keyof ProfileFormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -324,8 +327,15 @@ const Profile = () => {
                   ) : (
                     <form className="space-y-10">
                   {error && (
-                    <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
-                      {error}
+                    <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2 flex items-center justify-between">
+                      <span>{error}</span>
+                      <button
+                        type="button"
+                        onClick={() => { setError(null); setRetryCount(0); }}
+                        className="ml-3 text-xs font-semibold text-blue-600 hover:underline shrink-0"
+                      >
+                        Retry
+                      </button>
                     </p>
                   )}
 
