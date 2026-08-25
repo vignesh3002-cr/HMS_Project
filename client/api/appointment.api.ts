@@ -12,6 +12,8 @@ export interface CreateAppointmentPayload {
   appointment_time: string;
   reason_for_visit?: string;
   patient_type?: string;
+  patient_visit_type?: string;
+  referred_by?: string;
 }
 
 export interface AvailableSlot {
@@ -51,10 +53,14 @@ export interface AppointmentRecord {
   token_number: number | null;
   status: string | null;
   reason_for_visit: string | null;
+  Patient_visit_type?: string | null;
   branch_id: string | null;
   department_id: string | null;
   employee_id: string | null;
   created_at: string | null;
+  patient_type: string | null;
+  patient_visit_type: string | null;
+  referred_by: string | null;
   patient_bio_data: {
     patient_id: string;
     patient_first_name: string;
@@ -101,6 +107,8 @@ export interface UpdateAppointmentPayload {
   appointment_time?: string;
   reason_for_visit?: string;
   referred_by?: string;
+  patient_type?: string;
+  patient_visit_type?: string;
 }
 
 export interface GetAppointmentsParams {
@@ -111,6 +119,7 @@ export interface GetAppointmentsParams {
   date?: string;
   dateFrom?: string;
   dateTo?: string;
+  excludeStatuses?: string;
   sortBy?: "appointment_date" | "created_at" | "token_number" | "status";
   sortOrder?: "asc" | "desc";
   page?: number;
@@ -159,10 +168,10 @@ export const appointmentApi = {
       params: { employeeId, date },
     }),
 
-  cancel: (appointmentNo: string, cancelReason: string) =>
+  cancel: (appointmentNo: string, cancelReason: string, cancelledBy?: string) =>
     API.delete<{ success: boolean; message: string; data: AppointmentRecord }>(
       `/appointments/${appointmentNo}`,
-      { data: { cancel_reason: cancelReason } },
+      { data: { cancel_reason: cancelReason, cancelled_by: cancelledBy } },
     ),
 
   getOne: (appointmentNo: string) =>
@@ -174,10 +183,10 @@ export const appointmentApi = {
       data,
     ),
 
-  updateStatus: (appointmentNo: string, status: string) =>
+  updateStatus: (appointmentNo: string, status: string, cancelReason?: string, cancelledBy?: string) =>
     API.patch<{ success: boolean; message: string; data: AppointmentRecord }>(
       `/appointments/${appointmentNo}/status`,
-      { status },
+      { status, cancel_reason: cancelReason, cancelled_by: cancelledBy },
     ),
 
   getAll: (params?: GetAppointmentsParams, config?: AxiosRequestConfig) =>

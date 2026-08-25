@@ -22,14 +22,17 @@ export interface EncounterRecord {
   clinical_notes: string | null;
   advice: string | null;
   follow_up_date: string | null;
-  height: number | null;
-  weight: number | null;
-  pulse: number | null;
-  systolic_bp: number | null;
-  diastolic_bp: number | null;
-  temperature: number | null;
-  respiratory_rate: number | null;
-  spo2: number | null;
+   height: number | null;
+   weight: number | null;
+   pulse: number | null;
+   systolic_bp: number | null;
+   diastolic_bp: number | null;
+   temperature: number | null;
+   respiratory_rate: number | null;
+   spo2: number | null;
+   blood_sugar: number | string | null;
+   pain_score: number | string | null;
+   BMI: number | string | null;
   checkin_time: string | null;
   checkout_time: string | null;
   closed_by: string | null;
@@ -81,6 +84,45 @@ export interface GetEncountersParams {
   limit?: number;
 }
 
+export interface PatientHistoryPayload {
+  patientId: string;
+  appointmentId?: string;
+  systolicBp?: number;
+  diastolicBp?: number;
+  pulse?: number;
+  respiratoryRate?: number;
+  temperature?: number;
+  oxygenSaturation?: number;
+  bloodSugar?: string;
+  weight?: number;
+  height?: number;
+  painScore?: number;
+  severity?: number;
+  clinicalNotes?: string;
+}
+
+export interface PatientHistoryResponse {
+  patientHistoryId: string;
+  patientId: string;
+  appointmentId: string | null;
+  visitDate: string;
+  systolicBp: number | null;
+  diastolicBp: number | null;
+  pulse: number | null;
+  respiratoryRate: number | null;
+  temperature: number | null;
+  oxygenSaturation: number | null;
+  bloodSugar: string | null;
+  weight: number | null;
+  height: number | null;
+  bmi: number | null;
+  painScore: number | null;
+  severity: number | null;
+  visitType: string;
+  visitStatus: string;
+  clinicalNotes: string | null;
+}
+
 export const encounterApi = {
   create: (data: CreateEncounterPayload) =>
     API.post<{ success: boolean; message: string; data: EncounterRecord }>("/encounters", data),
@@ -122,4 +164,7 @@ export const encounterApi = {
       `/encounters/${encounterNo}/close`,
       { closedBy },
     ),
+
+  createPatientHistory: (data: PatientHistoryPayload) =>
+    API.post<{ success: boolean; data: PatientHistoryResponse }>("/patients/history", data),
 };

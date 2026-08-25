@@ -31,7 +31,6 @@ const STATUS_LABELS: Record<string, string> = {
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
   NO_SHOW: "No Show",
-  NOT_CHECKED_IN: "Not Checked In",
   RESCHEDULED: "Rescheduled",
   RESCHEDULE_REQUIRED: "Reschedule Required",
   TRANSFER_REVIEW_REQUIRED: "Transfer Review Required",

@@ -41,7 +41,6 @@ type AppointmentStatus =
   | "Reschedule"
   | "In Consultation"
   | "No Show"
-  | "Not Checked In"
   | "Transfer Review"
   | "Reschedule Required";
 
@@ -70,7 +69,6 @@ const STATUS_TO_DISPLAY: Record<string, AppointmentStatus> = {
   COMPLETED: "Checked Out",
   CANCELLED: "Cancelled",
   NO_SHOW: "No Show",
-  NOT_CHECKED_IN: "Not Checked In",
   TRANSFER_REVIEW_REQUIRED: "Transfer Review",
   RESCHEDULE_REQUIRED: "Reschedule Required",
 };
@@ -205,7 +203,6 @@ const STATUS_STYLES: Record<AppointmentStatus, string> = {
   Reschedule: "bg-purple-50 text-purple-600",
   "In Consultation": "bg-cyan-50 text-cyan-600",
   "No Show": "bg-gray-50 text-gray-500",
-  "Not Checked In": "bg-gray-50 text-gray-600",
   "Transfer Review": "bg-indigo-50 text-indigo-600",
   "Reschedule Required": "bg-purple-50 text-purple-600",
 };
