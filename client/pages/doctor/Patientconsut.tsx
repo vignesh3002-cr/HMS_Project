@@ -1201,7 +1201,12 @@ const Consultation: React.FC = () => {
                     onNext={() => selectStep("SUMMARY")}
                   />
 ) : activeStep === "SUMMARY" ? (
-                  <Summary embedded patientId={patientDisplayId} />
+                  <Summary
+                    embedded
+                    patientId={patientDisplayId}
+                    appointmentId={consultationState?.appointmentId}
+                    encounterNo={encounter?.encounter_no}
+                  />
                 ) : (
                   <>
                     {/* =================================================
@@ -1793,6 +1798,8 @@ const LabReview: React.FC<{
 }> = ({
   embedded = false,
   patientId,
+  appointmentId,
+  branchId,
   encounterNo,
   pendingTests = [],
   onOrdered,
@@ -7465,6 +7472,7 @@ const TreatmentPlan: React.FC<{
 
 type SummaryPlanItem = {
   chemotherapy_plan_item_id: string;
+  medicine_id?: string | null;
   drug_role: string | null;
   protocol_dose: number | null;
   protocol_dose_unit: string | null;
@@ -7477,11 +7485,21 @@ type SummaryPlanItem = {
   cycle_day?: number | null;
   administration_day?: number | null;
   medicine_master: {
+    medicine_id?: string | null;
     medicine_name: string;
     generic_name: string | null;
     dosage_form: string | null;
     unit: string | null;
   } | null;
+};
+
+type PrescriptionMedicinePayload = {
+  medicine_id: string;
+  dosage?: string;
+  unit?: string;
+  route?: string;
+  frequency?: string;
+  instruction?: string;
 };
 
 type StagingDetailRecord = {
@@ -7552,9 +7570,16 @@ type DischargeRow = {
   duration: string;
 };
 
-const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
+const Summary: React.FC<{
+  embedded?: boolean;
+  patientId?: string;
+  appointmentId?: string;
+  encounterNo?: string;
+}> = ({
   embedded = false,
   patientId,
+  appointmentId,
+  encounterNo,
 }) => {
   const location = useLocation();
   const statePatientId = (
@@ -7822,9 +7847,121 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
     URL.revokeObjectURL(url);
   };
 
-  const handleSubmitSummary = () => {
-    if (!resolvedPatientId) return;
-    localStorage.removeItem(`hms_diagnosis_form_${resolvedPatientId}`);
+  const [submittingSummary, setSubmittingSummary] = useState(false);
+  const [summarySubmitted, setSummarySubmitted] = useState(false);
+  const [summarySubmitMessage, setSummarySubmitMessage] = useState("");
+
+  /* ------------------------------------------------------------
+     PRESCRIPTION (POST /api/prescriptions)
+     Created on Submit against the current appointment's OPEN
+     encounter, with every medicine on the chemotherapy plan:
+     PRIMARY (chemo orders) + PREMEDICATION + SUPPORTIVE /
+     POSTMEDICATION (discharge). Duplicate medicine ids are skipped
+     - the backend rejects duplicates within one prescription.
+  ------------------------------------------------------------ */
+
+  const buildPrescriptionMedicines = (): PrescriptionMedicinePayload[] => {
+    const seenMedicineIds = new Set<string>();
+    const medicines: PrescriptionMedicinePayload[] = [];
+
+    for (const item of planItems) {
+      const medicineId =
+        item.medicine_id ?? item.medicine_master?.medicine_id ?? "";
+      if (!medicineId || seenMedicineIds.has(medicineId)) continue;
+      seenMedicineIds.add(medicineId);
+
+      const instructionParts = [
+        item.remarks ?? "",
+        item.formulation ? `Formulation: ${item.formulation}` : "",
+        item.dilution_volume
+          ? `Dilution volume: ${item.dilution_volume}`
+          : "",
+        item.cycle_day != null ? `Cycle day ${item.cycle_day}` : "",
+      ].filter(Boolean);
+
+      const unit =
+        item.protocol_dose_unit || item.medicine_master?.unit || "";
+
+      medicines.push({
+        medicine_id: medicineId,
+        ...(item.protocol_dose != null
+          ? { dosage: String(item.protocol_dose) }
+          : {}),
+        ...(unit ? { unit } : {}),
+        ...(item.administration_route
+          ? { route: item.administration_route }
+          : {}),
+        ...(item.frequency ? { frequency: item.frequency } : {}),
+        ...(instructionParts.length > 0
+          ? { instruction: instructionParts.join(" | ") }
+          : {}),
+      });
+    }
+
+    return medicines;
+  };
+
+  const handleSubmitSummary = async () => {
+    if (submittingSummary) return;
+
+    if (!resolvedPatientId) {
+      setSummarySubmitMessage(
+        "Patient is not selected. Open this page from a patient consultation to continue."
+      );
+      return;
+    }
+
+    try {
+      setSubmittingSummary(true);
+      setSummarySubmitMessage("");
+
+      let targetEncounterNo = encounterNo ?? "";
+
+      if (!targetEncounterNo) {
+        const { encounter: found } = await findActiveEncounter(
+          resolvedPatientId,
+          appointmentId
+        );
+        targetEncounterNo = found?.encounter_no ?? "";
+      }
+
+      if (!targetEncounterNo) {
+        setSummarySubmitMessage(
+          "No active encounter found for this appointment. A prescription can only be created against an open encounter."
+        );
+        return;
+      }
+
+      const medicines = buildPrescriptionMedicines();
+
+      if (medicines.length === 0) {
+        setSummarySubmitMessage(
+          "No medicines found in the chemotherapy plan. Complete the Treatment Plan step first."
+        );
+        return;
+      }
+
+      await API.post("/prescriptions", {
+        encounter_no: targetEncounterNo,
+        ...(plan?.diagnosis_id ? { diagnosis_id: plan.diagnosis_id } : {}),
+        medicines,
+      });
+
+      localStorage.removeItem(`hms_diagnosis_form_${resolvedPatientId}`);
+      setSummarySubmitted(true);
+      setSummarySubmitMessage(
+        "Prescription created successfully for this visit."
+      );
+    } catch (error: any) {
+      console.error("Failed to create prescription:", error);
+      setSummarySubmitMessage(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to create the prescription. Please try again."
+      );
+    } finally {
+      setSubmittingSummary(false);
+    }
   };
 
   const Step = ({
@@ -8128,13 +8265,23 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
       {/* ===================================================
           ACTION BUTTONS
       ==================================================== */}
+      {summarySubmitMessage && (
+        <div
+          className={`mb-4 flex justify-end ${
+            summarySubmitted ? "text-green-600" : "text-red-600"
+          } text-sm font-medium`}
+        >
+          {summarySubmitMessage}
+        </div>
+      )}
       <div className="mb-8 flex flex-wrap justify-end gap-4">
         <button
           type="button"
           onClick={handleSubmitSummary}
-          className="rounded-md bg-[#5624D0] px-8 py-3 font-medium text-white shadow-sm transition-colors hover:bg-[#4a1fb5]"
+          disabled={submittingSummary}
+          className="rounded-md bg-[#5624D0] px-8 py-3 font-medium text-white shadow-sm transition-colors hover:bg-[#4a1fb5] disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Submit
+          {submittingSummary ? "Submitting…" : summarySubmitted ? "Submitted" : "Submit"}
         </button>
 
         <button
