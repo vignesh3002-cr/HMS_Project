@@ -1045,6 +1045,9 @@ export default function Notifications() {
       loadSnapshot()
     );
 
+  const consecutiveFailuresRef =
+    useRef<number>(0);
+
   /* ------------------------------------------------------------------------ */
   /* FETCH APPOINTMENTS                                                       */
   /* ------------------------------------------------------------------------ */
@@ -1773,15 +1776,23 @@ export default function Notifications() {
         );
 
         setIsLoading(false);
+        consecutiveFailuresRef.current = 0;
+        setError(null);
       } catch (err) {
         console.error(
           "Notification fetch error:",
           err
         );
 
-        setError(
-          "Couldn't load notifications from the server."
-        );
+        consecutiveFailuresRef.current += 1;
+
+        if (
+          consecutiveFailuresRef.current >= 3
+        ) {
+          setError(
+            "Couldn't load notifications from the server."
+          );
+        }
 
         setIsLoading(false);
       }
