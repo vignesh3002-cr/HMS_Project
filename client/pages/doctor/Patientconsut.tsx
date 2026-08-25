@@ -437,7 +437,7 @@ const Consultation: React.FC = () => {
   const patientPhoto = patient?.patient_photo_url || "";
 
   const patientAgeSex = patient
-    ? `${patient.patient_age ?? "â€”"} Y / ${patient.patient_gender ?? ""}`
+    ? `${patient.patient_age ?? ""} Y / ${patient.patient_gender ?? ""}`
     : "";
 
   const patientDisplayId = patient?.patient_id || "";
@@ -1332,7 +1332,7 @@ const Consultation: React.FC = () => {
                     <div className="flex flex-col gap-4">
 
                       {/* PERFORMANCE STATUS / SYMPTOMS / ALLERGIES /
-                          COMORBIDITIES â€” backed by the Clinical Details
+                          COMORBIDITIES ” backed by the Clinical Details
                           API (see components/hms/ClinicalDetailsSection.tsx) */}
 
                       {encounterError && (
@@ -1607,8 +1607,8 @@ export default Consultation;
 
 /* ============================================================
    LAB REVIEW COMPONENT
-   (combined from client/pages/doctor/labreview.tsx â€”
-    renamed App â†’ LabReview, duplicate React/useState import
+   (combined from client/pages/doctor/labreview.tsx ”
+    renamed App ’ LabReview, duplicate React/useState import
     removed so it can live in this file)
 ============================================================ */
 
@@ -1993,7 +1993,7 @@ const LabReview: React.FC<{
             disabled={savingObservations}
             className="flex items-center gap-2 rounded-xl bg-[#2563EB] px-8 py-3 text-[15px] font-bold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {savingObservations ? "Savingâ€¦" : "Proceed to Treatment Plan"}
+            {savingObservations ? "Saving" : "Proceed to Treatment Plan"}
             <ArrowRightIcon />
           </button>
         </div>
@@ -2004,8 +2004,8 @@ const LabReview: React.FC<{
 
 /* ============================================================
    DIAGNOSIS COMPONENT
-   (combined from client/pages/doctor/diagonisis.tsx â€”
-    renamed App â†’ Diagnosis, duplicate React import removed,
+   (combined from client/pages/doctor/diagonisis.tsx ”
+    renamed App ’ Diagnosis, duplicate React import removed,
     CheckIcon / BackIcon / NotificationIcon reused from above)
 ============================================================ */
 
@@ -2237,7 +2237,7 @@ const Diagnosis: React.FC<{
           const criteria = (item.tnm_criteria ?? "")
             .replace(/\([^)]*\)/g, " ")
             .replace(/\s+/g, " ")
-            .replace(/\s*[-â€“]\s*$/g, "")
+            .replace(/\s*[-“]\s*$/g, "")
             .trim();
           if (criteria && /(\b[TNM]\d|\bAny\s+[TNM])/i.test(criteria)) {
             if (!tnmOptions.includes(criteria)) tnmOptions.push(criteria);
@@ -2252,7 +2252,7 @@ const Diagnosis: React.FC<{
             .filter((value): value is string => Boolean(value))
             .join(" ");
           for (const match of gradeSource.matchAll(
-            /grade\s+group\s*[\d\-â€“]+|grade\s+[\d\-â€“]+/gi
+            /grade\s+group\s*[\d\-“]+|grade\s+[\d\-“]+/gi
           )) {
             const grade = match[0]
               .replace(/\s+/g, " ")
@@ -2579,7 +2579,7 @@ const Diagnosis: React.FC<{
                 className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
               >
                 <option value="">
-                  {diagnosisLoading ? "Loadingâ€¦" : "Select Sub Type"}
+                  {diagnosisLoading ? "Loading" : "Select Sub Type"}
                 </option>
 
                 {subtypes.map((subtype) => (
@@ -2642,7 +2642,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
               >
                 <option value="">
                   {diagnosisLoading
-                    ? "Loadingâ€¦"
+                    ? "Loading"
                     : "Select Cancer Stage"}
                 </option>
 
@@ -2678,7 +2678,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
               >
                 <option value="">
                   {diagnosisLoading
-                    ? "Loadingâ€¦"
+                    ? "Loading"
                     : "Select Grade"}
                 </option>
 
@@ -2714,7 +2714,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
               >
                 <option value="">
                   {diagnosisLoading
-                    ? "Loadingâ€¦"
+                    ? "Loading"
                     : "Select TNM Stage"}
                 </option>
 
@@ -2749,7 +2749,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
               onChange={handleChange}
               placeholder={
                 diagnosisLoading
-                  ? "Loading diagnosisâ€¦"
+                  ? "Loading diagnosis"
                   : "Enter ICD code"
               }
               className="block w-full rounded-md border-gray-300 px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:ring-[#1d4ed8]"
@@ -2910,8 +2910,8 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
 
 /* ============================================================
    DISCHARGE MEDICATION COMPONENT
-   (combined from client/pages/doctor/discharge.tsx â€”
-    renamed PatientDischargeMedication â†’ DischargeMedication,
+   (combined from client/pages/doctor/discharge.tsx 
+    renamed PatientDischargeMedication  DischargeMedication,
     Medication type renamed to DischargeMedicationItem to avoid
     clashing with the Medication interface above, duplicate
     React import and icon definitions removed,
@@ -3354,7 +3354,7 @@ if (embedded) {
           className="flex items-center gap-2 rounded-md bg-[#1d4ed8] px-8 py-3 font-bold text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <DoubleArrowIcon />
-          {savingMeds ? "Savingâ€¦" : "Next"}
+          {savingMeds ? "Saving" : "Next"}
         </button>
       </div>
     </div>
@@ -3641,7 +3641,7 @@ if (embedded) {
 
 /* ============================================================
    CHEMOTHERAPY ORDER COMPONENT
-   (combined from client/pages/doctor/chemo.tsx â€”
+   (combined from client/pages/doctor/chemo.tsx 
     renamed App-style component ChemotherapyOrder to the same
     embedded pattern as LabReview / Diagnosis / DischargeMedication,
     icons moved inside the component to avoid colliding with the
@@ -4092,7 +4092,7 @@ const ChemotherapyOrder: React.FC<{
           setCycleDay(
             latestCycle
               ? `Cycle ${latestCycle.cycle_number} / Day ${
-                  latestCycle.cycle_day ?? "â€”"
+                  latestCycle.cycle_day ?? ""
                 }`
               : "Cycle 1 / Day 1"
           );
@@ -4600,7 +4600,7 @@ const ChemotherapyOrder: React.FC<{
                 className="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <SaveIcon />
-                {savingOrder ? "Savingâ€¦" : "Save"}
+                {savingOrder ? "Saving" : "Save"}
               </button>
             </div>
           </div>
@@ -4647,7 +4647,7 @@ const ChemotherapyOrder: React.FC<{
                         colSpan={5}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
-                        Loading chemotherapy ordersâ€¦
+                        Loading chemotherapy orders
                       </td>
                     </tr>
                   )}
@@ -4749,7 +4749,7 @@ const ChemotherapyOrder: React.FC<{
                                 disabled={savingEdit}
                                 className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                               >
-                                {savingEdit ? "Savingâ€¦" : "Save"}
+                                {savingEdit ? "Saving" : "Save"}
                               </button>
 
                               <button
@@ -4859,7 +4859,7 @@ const ChemotherapyOrder: React.FC<{
                         colSpan={5}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
-                        Loading premedicationâ€¦
+                        Loading premedication
                       </td>
                     </tr>
                   )}
@@ -4963,7 +4963,7 @@ const ChemotherapyOrder: React.FC<{
                                 disabled={savingEdit}
                                 className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                               >
-                                {savingEdit ? "Savingâ€¦" : "Save"}
+                                {savingEdit ? "Saving" : "Save"}
                               </button>
 
                               <button
@@ -5181,8 +5181,8 @@ const ChemotherapyOrder: React.FC<{
 
 /* ============================================================
    FOLLOW UP COMPONENT
-   (combined from client/pages/doctor/Follow.tsx â€”
-    renamed FollowUpScreen â†’ FollowUp, duplicate React import
+   (combined from client/pages/doctor/Follow.tsx 
+    renamed FollowUpScreen  FollowUp, duplicate React import
     removed, icons scoped inside the component to avoid
     colliding with the module-level icons above, embedded prop
     added so it can live in this file, original Follow.tsx file
@@ -5669,7 +5669,7 @@ const FollowUp: React.FC<{
           className="inline-flex items-center justify-center rounded-lg border border-transparent bg-[#2557D6] px-8 py-3 text-base font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <DoubleArrowIcon />
-          {submittingFollowUp ? "Submittingâ€¦" : "Submit"}
+          {submittingFollowUp ? "Submitting" : "Submit"}
         </button>
       </div>
     </>
@@ -5975,7 +5975,7 @@ const FollowUp: React.FC<{
 
 /* ============================================================
    TREATMENT PLAN COMPONENT
-   (combined from client/pages/doctor/Treatement.tsx â€”
+   (combined from client/pages/doctor/Treatement.tsx 
     TreatmentPlan given the same embedded pattern as
     LabReview / Diagnosis / ChemotherapyOrder,
     icons kept scoped inside the component to avoid colliding
@@ -6788,7 +6788,7 @@ const TreatmentPlan: React.FC<{
             >
               <option value="">
                 {protocolsLoading
-                  ? "Loading protocolsâ€¦"
+                  ? "Loading protocols"
                   : "Select Protocol"}
               </option>
 
@@ -6862,7 +6862,7 @@ const TreatmentPlan: React.FC<{
           className="flex items-center rounded-lg bg-[#1d4ed8] px-6 py-2.5 font-semibold text-white transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <DoubleArrowIcon />
-          {saving ? "Savingâ€¦" : "Next"}
+          {saving ? "Saving" : "Next"}
         </button>
 
       </div>
@@ -7162,8 +7162,8 @@ const TreatmentPlan: React.FC<{
 
 /* ============================================================
    SUMMARY COMPONENT
-   (combined from client/pages/doctor/summary.tsx â€”
-    renamed PatientSummary â†’ Summary, Step helper moved inside
+   (combined from client/pages/doctor/summary.tsx 
+    renamed PatientSummary  Summary, Step helper moved inside
     the component to avoid colliding with other names in this
     file, embedded prop added so it can live in this file,
     original summary.tsx file left untouched)
@@ -7495,7 +7495,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
     const cycles = plan?.chemotherapy_cycle ?? [];
     const latest = cycles[cycles.length - 1];
     const cycleLabel = latest
-      ? `Cycle ${latest.cycle_number} / Day ${latest.cycle_day ?? "â€”"}`
+      ? `Cycle ${latest.cycle_number} / Day ${latest.cycle_day ?? ""}`
       : "";
     const status = plan?.treatment_status
       ? ` (${plan.treatment_status})`
@@ -7601,8 +7601,8 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
     y += 8;
     doc.setFontSize(9);
     doc.setTextColor(15, 23, 42);
-    doc.text(`Next Visit Date: ${nextVisitDate || "â€”"}`, 40, y);
-    doc.text(`Next Cycle: ${nextCycle || "â€”"}`, 300, y);
+    doc.text(`Next Visit Date: ${nextVisitDate || ""}`, 40, y);
+    doc.text(`Next Cycle: ${nextCycle || ""}`, 300, y);
 
     const blob = doc.output("blob");
     const url = URL.createObjectURL(blob);
@@ -7633,7 +7633,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
           active ? "bg-green-500" : "bg-slate-400"
         }`}
       >
-        âœ“
+        
       </div>
 
       <span
@@ -7704,7 +7704,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
 
                 <p className="flex items-center gap-2 text-sm text-slate-500">
                   {stage}
-                  <span className="text-slate-400">â—·</span>
+                  <span className="text-slate-400"></span>
                 </p>
               </div>
 
@@ -7725,7 +7725,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
 
                 <p className="flex items-center gap-2 text-sm text-slate-500">
                   {protocol}
-                  <span className="text-slate-400">â—·</span>
+                  <span className="text-slate-400"></span>
                 </p>
               </div>
 
@@ -7927,7 +7927,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
 
               <p className="flex items-center gap-2 text-slate-600">
                 {nextCycle}
-                <span className="text-slate-400">â—·</span>
+                <span className="text-slate-400"></span>
               </p>
             </div>
           </section>
@@ -7995,7 +7995,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
           {/* Phone */}
           <div className="flex items-center gap-4">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-400">
-              <span className="text-sm">â˜Ž</span>
+              <span className="text-sm"></span>
             </div>
 
             <div>
@@ -8012,7 +8012,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
           {/* Email */}
           <div className="flex items-center gap-4">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-400">
-              <span className="text-sm">âœ‰</span>
+              <span className="text-sm"></span>
             </div>
 
             <div>
@@ -8083,7 +8083,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
               className="text-slate-500 transition-colors hover:text-slate-700"
               aria-label="Back"
             >
-              <span className="text-lg">â†</span>
+              <span className="text-lg"></span>
             </button>
 
             <h1 className="text-xl font-semibold text-slate-800">
@@ -8098,7 +8098,7 @@ const Summary: React.FC<{ embedded?: boolean; patientId?: string }> = ({
               className="relative text-slate-500 transition-colors hover:text-slate-700"
               aria-label="Notifications"
             >
-              <span className="text-xl">â™§</span>
+              <span className="text-xl"></span>
 
               <span className="absolute right-0 top-0 h-2 w-2 rounded-full border border-white bg-red-500" />
             </button>
