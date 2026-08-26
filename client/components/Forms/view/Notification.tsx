@@ -54,42 +54,96 @@ const POLLING_INTERVAL = 5000;
  * which never matched the local-browser experience where a branch was
  * already selected.
  */
-let cachedFeedBranchIds: string[] | undefined;
+let cachedFeedBranchIds: string[] | null | undefined;
 
-const resolveFeedBranchIds =
-  async (): Promise<string[]> => {
-    const selected = getActiveBranchId();
-    if (selected) return [selected];
-
-    if (cachedFeedBranchIds !== undefined) {
+/*
+ * This account's own active branch mappings (/employees/me), cached for
+ * the session. Returns null when they cannot be resolved (no employee
+ * record, network failure) so the caller can fall back to the login-time
+ * branch_id.
+ */
+const getMappedBranchIds =
+  async (): Promise<string[] | null> => {
+    if (
+      cachedFeedBranchIds !==
+      undefined
+    ) {
       return cachedFeedBranchIds;
     }
 
-    let resolved: string[] = [];
-
     try {
-      const me = await employeeApi.getMe();
-      const mapped = (me.data?.data?.branches ?? [])
-        .map(
-          (b: { branch_id?: string | null }) =>
-            b?.branch_id
-        )
-        .filter(
-          (id: string | null | undefined): id is string =>
-            Boolean(id)
-        );
-      resolved = Array.from(new Set(mapped));
+      const me =
+        await employeeApi.getMe();
+      const mapped = (
+        me.data?.data?.branches ??
+        []
+      ).map(
+        (b: {
+          branch_id?: string | null;
+        }) => b?.branch_id
+      ).filter(
+        (
+          id:
+            | string
+            | null
+            | undefined
+        ): id is string => Boolean(id)
+      );
+      cachedFeedBranchIds = Array.from(
+        new Set(mapped)
+      );
     } catch {
-      resolved = [];
+      return null;
     }
 
-    if (resolved.length === 0) {
-      const loginBranchId = getUser()?.branch_id;
-      if (loginBranchId) resolved = [loginBranchId];
-    }
-
-    cachedFeedBranchIds = resolved;
     return cachedFeedBranchIds;
+  };
+
+const resolveFeedBranchIds =
+  async (): Promise<string[]> => {
+    const selected =
+      getActiveBranchId();
+
+    if (selected) {
+      /*
+       * Trust the selector unless it points at a
+       * branch this account no longer maps to. A
+       * stale hms_selected_branch_id (left behind
+       * by an earlier session/account on the same
+       * origin, or a mapping removed later) would
+       * otherwise get 403 "Forbidden. You don't
+       * have access to this branch." on every
+       * scoped list call forever, keeping the bell
+       * permanently empty on the deployed origin.
+       * Accounts with no mappings at all (top-level
+       * admins) keep any selection.
+       */
+      const mapped =
+        await getMappedBranchIds();
+      if (
+        !mapped ||
+        mapped.length === 0 ||
+        mapped.includes(selected)
+      ) {
+        return [selected];
+      }
+      return mapped;
+    }
+
+    const mapped =
+      await getMappedBranchIds();
+
+    if (mapped && mapped.length > 0) {
+      return mapped;
+    }
+
+    const loginBranchId =
+      getUser()?.branch_id;
+    if (loginBranchId) {
+      return [loginBranchId];
+    }
+
+    return [];
   };
 
 /*
