@@ -12,6 +12,7 @@ import API, { getActiveBranchId } from "../../api/axios";
 import { employeeApi } from "../../api/employee.api";
 import { appointmentApi } from "../../api/appointment.api";
 import { getUser } from "../../utils/token";
+import { computeBmi, computeBsa } from "../../utils/vitals";
 import {
   doctorDashboardApi,
   type DoctorNotificationItem,
@@ -161,23 +162,18 @@ const buildMeasurements = (
   const height = vitalNum(encounter?.height);
   const weight = vitalNum(encounter?.weight);
 
-  const bsa =
-    height !== null && weight !== null && height > 0 && weight > 0
-      ? Math.sqrt((height * weight) / 3600).toFixed(2)
-      : "";
+  const bsaValue = computeBsa(height, weight);
 
   const storedBmi = vitalNum(encounter?.BMI);
   const bmi =
     storedBmi !== null
       ? String(storedBmi)
-      : height !== null && weight !== null && height > 0
-        ? (weight / Math.pow(height / 100, 2)).toFixed(1)
-        : "";
+      : String(computeBmi(height, weight) ?? "");
 
   return {
     height: height !== null ? `${height} cm` : "",
     weight: weight !== null ? `${weight} kg` : "",
-    bsa: bsa ? `${bsa} m²` : "",
+    bsa: bsaValue !== null ? `${bsaValue} m²` : "",
     bmi,
   };
 };
