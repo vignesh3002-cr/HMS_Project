@@ -2853,6 +2853,33 @@ const Diagnosis: React.FC<{
 
   const [cancerTypes, setCancerTypes] = useState<CancerTypeItem[]>([]);
   const [subtypes, setSubtypes] = useState<CancerSubtypeItem[]>([]);
+
+  /* Sync the diagnosis selection (cancer_type_id + subtype_id) to
+     localStorage so downstream steps (Treatment Plan) can read the
+     IDs to query regimen protocols from the backend. */
+  useEffect(() => {
+    if (!formData.type || !formData.subType) return;
+
+    const matchedType = cancerTypes.find(
+      (item) => item.cancer_type === formData.type
+    );
+    const matchedSubtype = subtypes.find(
+      (item) => item.subtype_name === formData.subType
+    );
+
+    if (matchedType && matchedSubtype) {
+      localStorage.setItem(
+        "hms_diagnosis_selection",
+        JSON.stringify({
+          cancer_type_id: matchedType.cancer_type_id,
+          subtype_id: matchedSubtype.subtype_id,
+          cancer_type: matchedType.cancer_type,
+          subtype_name: matchedSubtype.subtype_name,
+        })
+      );
+    }
+  }, [formData.type, formData.subType, cancerTypes, subtypes]);
+
   const [stageLabels, setStageLabels] = useState<string[]>([]);
   const [tnmStages, setTnmStages] = useState<string[]>([]);
   const [tOptions, setTOptions] = useState<string[]>([]);
@@ -4552,6 +4579,7 @@ const ChemotherapyOrder: React.FC<{
     startDate: false,
     drugs: false,
     premedication: false,
+    supportive: false,
   });
 
   const protocolRef = useRef<RegimenProtocolDetail | null>(null);
@@ -4651,6 +4679,7 @@ const ChemotherapyOrder: React.FC<{
         startDate?: string;
         drugs?: Drug[];
         premedicationDrugs?: Drug[];
+        supportiveDrugs?: Drug[];
       };
 
       if (data.cycleDay) {
@@ -4675,6 +4704,14 @@ const ChemotherapyOrder: React.FC<{
         setPremedicationDrugs(data.premedicationDrugs);
         userTouched.current.premedication = true;
       }
+
+      if (
+        Array.isArray(data.supportiveDrugs) &&
+        data.supportiveDrugs.length > 0
+      ) {
+        setSupportiveDrugs(data.supportiveDrugs);
+        userTouched.current.supportive = true;
+      }
     } catch (error) {
       console.error("Failed to restore chemotherapy order draft:", error);
     }
@@ -4691,6 +4728,9 @@ const ChemotherapyOrder: React.FC<{
         premedicationDrugs: userTouched.current.premedication
           ? premedicationDrugs
           : [],
+        supportiveDrugs: userTouched.current.supportive
+          ? supportiveDrugs
+          : [],
       })
     );
   }, [
@@ -4698,6 +4738,7 @@ const ChemotherapyOrder: React.FC<{
     startDate,
     drugs,
     premedicationDrugs,
+    supportiveDrugs,
     orderDraftKey,
     resolvedPatientId,
   ]);
@@ -4812,6 +4853,11 @@ const ChemotherapyOrder: React.FC<{
             .filter((item) => item.drug_role === "PREMEDICATION")
             .map(toDrug)
         );
+        setSupportiveDrugs(
+          items
+            .filter((item) => item.drug_role === "SUPPORTIVE")
+            .map(toDrug)
+        );
         protocolRef.current = protocol;
         applyNextCycle(protocol, latestCycleRef.current, savedStartDate);
       } catch (error) {
@@ -4910,6 +4956,11 @@ const ChemotherapyOrder: React.FC<{
               .filter((item) => item.drug_role === "PREMEDICATION")
               .map(toPlanDrug)
           );
+          setSupportiveDrugs(
+            planItems
+              .filter((item) => item.drug_role === "SUPPORTIVE")
+              .map(toPlanDrug)
+          );
 
           const protocolId =
             plan.chemotherapy_regimen_protocol?.protocol_id;
@@ -4938,40 +4989,7 @@ const ChemotherapyOrder: React.FC<{
 
   useEffect(() => {
     if (!resolvedPatientId) return;
-    let cancelled = false;
-
-    API.get<{ success: boolean; data: Array<{
-      medicine_id: string;
-      medicine_name: string;
-      generic_name: string | null;
-      medicine_category: string | null;
-      medicine_type: string | null;
-      dosage_form: string | null;
-      unit: string | null;
-      strength: string | null;
-      route: string | null;
-    }> }>("/chemotherapy/supportive-medicines")
-      .then((response) => {
-        if (cancelled) return;
-        const meds = response.data.data;
-        setSupportiveDrugs(
-          meds.map((med, index) => ({
-            id: index,
-            name: med.medicine_name,
-            form: med.dosage_form || "",
-            dose: med.strength || "",
-            unit: med.unit || "",
-            volume: "",
-          }))
-        );
-      })
-      .catch((error) => {
-        console.error("Failed to load supportive medicines:", error);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    setSupportiveDrugs([]);
   }, [resolvedPatientId]);
 
   const handleAddDrug = () => {
@@ -6967,9 +6985,9 @@ const TreatmentPlan: React.FC<{
         }
       }
 
-      if (!cancerTypeId || !subtypeId) {
+      if (!cancerTypeId) {
         setProtocolsError(
-          "Cancer type and sub type not found. Complete the Diagnosis step first."
+          "Cancer type not found. Complete the Diagnosis step first."
         );
         return;
       }
