@@ -1091,7 +1091,7 @@ export default function Notifications() {
 
   const fetchAppointments =
     useCallback(async (feedBranchId?: string): Promise<
-      GenericRecord[]
+      GenericRecord[] | null
     > => {
       try {
         const pageSize = 100;
@@ -1162,8 +1162,17 @@ export default function Notifications() {
         /*
          * Appointment API failure should NOT
          * break employee/patient notifications.
+         *
+         * Returns null (not an empty array): an
+         * empty array is indistinguishable from
+         * "every appointment was deleted" and
+         * used to flood the feed with false
+         * DELETE events, then false CREATE
+         * events on the next successful poll —
+         * Render cold starts on the deployed
+         * site made this happen regularly.
          */
-        return [];
+        return null;
       }
     }, []);
 
@@ -1214,9 +1223,26 @@ export default function Notifications() {
           patientsRes.data?.data
             ?.patients || [];
 
+        /*
+         * A failed appointments fetch returns null.
+         * Keep the previous appointments snapshot
+         * and skip this cycle's appointment diff so
+         * no false create/delete events are ever
+         * generated from missing data — the feed
+         * only ever reflects real changes.
+         */
+        const appointmentsFetched =
+          appointments !== null;
+
+        const safeAppointments =
+          appointments ?? [];
+
         /* ---------------------------------------------------------------- */
         /* BUILD CURRENT SNAPSHOT                                            */
         /* ---------------------------------------------------------------- */
+
+        const previousSnapshot =
+          previousSnapshotRef.current;
 
         const currentSnapshot: StoredSnapshot =
           {
@@ -1231,13 +1257,13 @@ export default function Notifications() {
               ),
 
             appointments:
-              buildAppointmentSnapshot(
-                appointments
-              ),
+              appointmentsFetched
+                ? buildAppointmentSnapshot(
+                    safeAppointments
+                  )
+                : previousSnapshot
+                  ?.appointments ?? [],
           };
-
-        const previousSnapshot =
-          previousSnapshotRef.current;
 
         /* ---------------------------------------------------------------- */
         /* DETECT CHANGES                                                   */
@@ -1521,6 +1547,7 @@ export default function Notifications() {
         /* APPOINTMENT CREATE / UPDATE / DELETE                            */
         /* ---------------------------------------------------------------- */
 
+        if (appointmentsFetched) {
         const previousAppointments =
           previousSnapshot.appointments;
 
@@ -1601,6 +1628,7 @@ export default function Notifications() {
             }
           }
         );
+        }
 
         /* ---------------------------------------------------------------- */
         /* SAVE NEW SNAPSHOT                                                */
@@ -1702,7 +1730,7 @@ export default function Notifications() {
           }
         );
 
-        appointments.forEach(
+        safeAppointments.forEach(
           (
             appointment: GenericRecord,
             index: number
