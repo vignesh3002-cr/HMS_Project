@@ -16,6 +16,8 @@ import {
 import {
   appointmentApi,
 } from "@/api/appointment.api";
+import { getActiveBranchId } from "@/api/axios";
+import { getUser } from "@/utils/token";
 import {
   getAccountActivity,
   type AccountActivity,
@@ -34,6 +36,41 @@ const EVENT_CACHE_KEY =
   "hms_notification_events_v1";
 
 const POLLING_INTERVAL = 5000;
+
+/*
+ * Branch resolution for the notification feed. On a fresh origin (e.g.
+ * first visit to the deployed site) nothing is stored under
+ * hms_selected_branch_id, so these list requests went out without an
+ * x-branch-id header and branch-restricted roles got 403 "Please select
+ * a branch first." on every poll — the bell stayed empty forever. Fall
+ * back to the caller's own first active branch mapping (/employees/me),
+ * then the login-time branch_id, and send it as an explicit branchId
+ * query param which branchScope accepts in place of the header.
+ */
+let cachedFeedBranchId: string | null | undefined;
+
+const resolveFeedBranchId =
+  async (): Promise<string | undefined> => {
+    const selected = getActiveBranchId();
+    if (selected) return selected;
+
+    if (cachedFeedBranchId !== undefined) {
+      return cachedFeedBranchId ?? undefined;
+    }
+
+    try {
+      const me = await employeeApi.getMe();
+      cachedFeedBranchId =
+        me.data?.data?.branches?.[0]?.branch_id ||
+        getUser()?.branch_id ||
+        null;
+    } catch {
+      cachedFeedBranchId =
+        getUser()?.branch_id || null;
+    }
+
+    return cachedFeedBranchId ?? undefined;
+  };
 
 /* -------------------------------------------------------------------------- */
 /* STORAGE                                                                    */
@@ -1053,8 +1090,8 @@ export default function Notifications() {
   /* ------------------------------------------------------------------------ */
 
   const fetchAppointments =
-    useCallback(async (): Promise<
-      GenericRecord[]
+    useCallback(async (feedBranchId?: string): Promise<
+      GenericRecord[] | null
     > => {
       try {
         const pageSize = 100;
@@ -1067,6 +1104,9 @@ export default function Notifications() {
             page: 1,
             sortBy,
             sortOrder,
+            ...(feedBranchId
+              ? { branchId: feedBranchId }
+              : {}),
           });
 
         const total =
@@ -1099,6 +1139,9 @@ export default function Notifications() {
               page,
               sortBy,
               sortOrder,
+              ...(feedBranchId
+                ? { branchId: feedBranchId }
+                : {}),
             });
 
           all = all.concat(
@@ -1119,8 +1162,17 @@ export default function Notifications() {
         /*
          * Appointment API failure should NOT
          * break employee/patient notifications.
+         *
+         * Returns null (not an empty array): an
+         * empty array is indistinguishable from
+         * "every appointment was deleted" and
+         * used to flood the feed with false
+         * DELETE events, then false CREATE
+         * events on the next successful poll —
+         * Render cold starts on the deployed
+         * site made this happen regularly.
          */
-        return [];
+        return null;
       }
     }, []);
 
@@ -1133,6 +1185,9 @@ export default function Notifications() {
       setError(null);
 
       try {
+        const feedBranchId =
+          await resolveFeedBranchId();
+
         const [
           employeesRes,
           patientsRes,
@@ -1141,13 +1196,19 @@ export default function Notifications() {
           await Promise.all([
             employeeApi.getAll({
               limit: 1000,
+              ...(feedBranchId
+                ? { branchId: feedBranchId }
+                : {}),
             }),
 
             patientApi.getAll({
               limit: 1000,
+              ...(feedBranchId
+                ? { branchId: feedBranchId }
+                : {}),
             }),
 
-            fetchAppointments(),
+            fetchAppointments(feedBranchId),
           ]);
 
         /* ---------------------------------------------------------------- */
@@ -1162,9 +1223,26 @@ export default function Notifications() {
           patientsRes.data?.data
             ?.patients || [];
 
+        /*
+         * A failed appointments fetch returns null.
+         * Keep the previous appointments snapshot
+         * and skip this cycle's appointment diff so
+         * no false create/delete events are ever
+         * generated from missing data — the feed
+         * only ever reflects real changes.
+         */
+        const appointmentsFetched =
+          appointments !== null;
+
+        const safeAppointments =
+          appointments ?? [];
+
         /* ---------------------------------------------------------------- */
         /* BUILD CURRENT SNAPSHOT                                            */
         /* ---------------------------------------------------------------- */
+
+        const previousSnapshot =
+          previousSnapshotRef.current;
 
         const currentSnapshot: StoredSnapshot =
           {
@@ -1179,13 +1257,13 @@ export default function Notifications() {
               ),
 
             appointments:
-              buildAppointmentSnapshot(
-                appointments
-              ),
+              appointmentsFetched
+                ? buildAppointmentSnapshot(
+                    safeAppointments
+                  )
+                : previousSnapshot
+                  ?.appointments ?? [],
           };
-
-        const previousSnapshot =
-          previousSnapshotRef.current;
 
         /* ---------------------------------------------------------------- */
         /* DETECT CHANGES                                                   */
@@ -1469,6 +1547,7 @@ export default function Notifications() {
         /* APPOINTMENT CREATE / UPDATE / DELETE                            */
         /* ---------------------------------------------------------------- */
 
+        if (appointmentsFetched) {
         const previousAppointments =
           previousSnapshot.appointments;
 
@@ -1549,6 +1628,7 @@ export default function Notifications() {
             }
           }
         );
+        }
 
         /* ---------------------------------------------------------------- */
         /* SAVE NEW SNAPSHOT                                                */
@@ -1650,7 +1730,7 @@ export default function Notifications() {
           }
         );
 
-        appointments.forEach(
+        safeAppointments.forEach(
           (
             appointment: GenericRecord,
             index: number
