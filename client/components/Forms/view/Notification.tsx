@@ -1479,8 +1479,28 @@ export default function Notifications() {
         /* BUILD CURRENT SNAPSHOT                                            */
         /* ---------------------------------------------------------------- */
 
+        /*
+         * First-ever fetch (nothing stored yet):
+         * start from an empty baseline instead of
+         * crashing on null below — a null snapshot
+         * used to throw on every poll, killing the
+         * whole feed and the red dot on fresh
+         * browsers (first visit to the deployed
+         * site). isFirstCycle also keeps existing
+         * records from firing a false "created"
+         * flood; today's real changes still come
+         * through the record-timestamp pass below.
+         */
+        const isFirstCycle =
+          previousSnapshotRef.current ===
+          null;
+
         const previousSnapshot =
-          previousSnapshotRef.current;
+          previousSnapshotRef.current ?? {
+            employees: [],
+            patients: [],
+            appointments: [],
+          };
 
         const currentSnapshot: StoredSnapshot =
           {
@@ -1550,6 +1570,7 @@ export default function Notifications() {
          * CREATED / UPDATED
          */
 
+        if (!isFirstCycle)
         currentEmployees.forEach(
           (current) => {
             const previous =
@@ -1732,6 +1753,7 @@ export default function Notifications() {
             )
           );
 
+        if (!isFirstCycle)
         currentPatients.forEach(
           (current) => {
             const previous =
@@ -1818,6 +1840,7 @@ export default function Notifications() {
             )
           );
 
+        if (!isFirstCycle)
         currentAppointments.forEach(
           (current) => {
             const previous =
