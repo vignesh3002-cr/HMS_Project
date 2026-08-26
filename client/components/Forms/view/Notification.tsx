@@ -35,7 +35,7 @@ const LAST_SEEN_KEY =
 const EVENT_CACHE_KEY =
   "hms_notification_events_v1";
 
-const POLLING_INTERVAL = 5000;
+const POLLING_INTERVAL = 30000;
 
 /*
  * Branch resolution for the notification feed. On a fresh origin (e.g.
@@ -160,26 +160,54 @@ const fetchAcrossBranches = async <
     branchId: string | undefined
   ) => Promise<T>,
   extract: (res: T) => R[]
-): Promise<R[]> => {
+): Promise<R[] | null> => {
+  /*
+   * Returns null when EVERY attempt failed so
+   * the caller can keep the previous snapshot
+   * instead of mistaking a network failure for
+   * "all records deleted" (which would wipe the
+   * feed and fire false DELETE events).
+   */
   if (branchIds.length <= 1) {
-    const res = await call(branchIds[0]);
-    return extract(res);
+    try {
+      const res = await call(
+        branchIds[0]
+      );
+      return extract(res);
+    } catch {
+      return null;
+    }
   }
 
   const perBranch =
     await Promise.all(
       branchIds.map((branchId) =>
         call(branchId)
-          .then((res) => extract(res))
-          .catch(() => [] as R[])
+          .then((res) => ({
+            ok: true as const,
+            list: extract(res),
+          }))
+          .catch(() => ({
+            ok: false as const,
+            list: [] as R[],
+          }))
       )
     );
+
+  if (
+    !perBranch.some(
+      (attempt) => attempt.ok
+    )
+  ) {
+    return null;
+  }
 
   const seen = new Set<string>();
   const merged: R[] = [];
 
-  for (const list of perBranch) {
-    for (const item of list) {
+  for (const attempt of perBranch) {
+    if (!attempt.ok) continue;
+    for (const item of attempt.list) {
       const key = String(
         (item as any)?.id ??
           (item as any)?.employee_id ??
@@ -1339,6 +1367,36 @@ export default function Notifications() {
     useCallback(async () => {
       setError(null);
 
+      /*
+       * One shared failure recorder: the banner only
+       * appears after 3 consecutive cycles where
+       * EVERY source failed. A single flaky source
+       * must never blank a feed the other sources
+       * are still feeding.
+       */
+      const registerFailureCycle = (
+        err?: any
+      ) => {
+        consecutiveFailuresRef.current += 1;
+
+        if (
+          consecutiveFailuresRef.current >= 3
+        ) {
+          const status =
+            err?.response?.status;
+          const serverMessage =
+            err?.response?.data?.message;
+
+          setError(
+            serverMessage
+              ? `Couldn't load notifications${
+                  status ? ` (${status})` : ""
+                }: ${serverMessage}`
+              : "Couldn't load notifications from the server."
+          );
+        }
+      };
+
       try {
         const feedBranchIds =
           await resolveFeedBranchIds();
@@ -1362,7 +1420,7 @@ export default function Notifications() {
                 (res.data?.data
                   ?.employees ??
                   []) as any[]
-            ),
+            ).catch(() => null),
 
             fetchAcrossBranches(
               feedBranchIds,
@@ -1377,7 +1435,7 @@ export default function Notifications() {
                 (res.data?.data
                   ?.patients ??
                   []) as any[]
-            ),
+            ).catch(() => null),
 
             fetchAppointments(
               feedBranchIds
@@ -1398,6 +1456,25 @@ export default function Notifications() {
         const safeAppointments =
           appointments ?? [];
 
+        /*
+         * Same isolation for employees/patients:
+         * a failed source keeps its previous
+         * snapshot slice and skips this cycle's
+         * diff so no false create/delete events
+         * are ever generated from missing data.
+         */
+        const employeesFetched =
+          employees !== null;
+
+        const patientsFetched =
+          patients !== null;
+
+        const safeEmployees =
+          employees ?? [];
+
+        const safePatients =
+          patients ?? [];
+
         /* ---------------------------------------------------------------- */
         /* BUILD CURRENT SNAPSHOT                                            */
         /* ---------------------------------------------------------------- */
@@ -1408,14 +1485,20 @@ export default function Notifications() {
         const currentSnapshot: StoredSnapshot =
           {
             employees:
-              buildEmployeeSnapshot(
-                employees
-              ),
+              employeesFetched
+                ? buildEmployeeSnapshot(
+                    safeEmployees
+                  )
+                : previousSnapshot
+                  ?.employees ?? [],
 
             patients:
-              buildPatientSnapshot(
-                patients
-              ),
+              patientsFetched
+                ? buildPatientSnapshot(
+                    safePatients
+                  )
+                : previousSnapshot
+                  ?.patients ?? [],
 
             appointments:
               appointmentsFetched
@@ -1483,7 +1566,7 @@ export default function Notifications() {
                * Find employee from API.
                */
               const employee =
-                employees.find(
+                safeEmployees.find(
                   (
                     e: EmployeeRecord,
                     index: number
@@ -1523,7 +1606,7 @@ export default function Notifications() {
               current.fingerprint
             ) {
               const employee =
-                employees.find(
+                safeEmployees.find(
                   (
                     e: EmployeeRecord,
                     index: number
@@ -1809,7 +1892,7 @@ export default function Notifications() {
         const derivedItems: NotificationItem[] =
           [];
 
-        employees.forEach(
+        safeEmployees.forEach(
           (employee: EmployeeRecord) => {
             const role =
               roleTypeToNotificationRole(
@@ -1853,7 +1936,7 @@ export default function Notifications() {
           }
         );
 
-        patients.forEach(
+        safePatients.forEach(
           (patient: PatientRecord) => {
             const name =
               formatPatientName(
@@ -2017,39 +2100,33 @@ export default function Notifications() {
         );
 
         setIsLoading(false);
-        consecutiveFailuresRef.current = 0;
-        setError(null);
+
+        if (
+          employeesFetched ||
+          patientsFetched ||
+          appointmentsFetched
+        ) {
+          /*
+           * At least one source fed the cycle —
+           * healthy. Reset the failure streak.
+           */
+          consecutiveFailuresRef.current = 0;
+          setError(null);
+        } else {
+          /*
+           * Every source failed this cycle — count
+           * it so the banner still appears after
+           * 3 consecutive dead cycles.
+           */
+          registerFailureCycle();
+        }
       } catch (err) {
         console.error(
           "Notification fetch error:",
           err
         );
 
-        consecutiveFailuresRef.current += 1;
-
-        if (
-          consecutiveFailuresRef.current >= 3
-        ) {
-          /*
-           * Surface the server's actual reason
-           * (branch scope, permissions, network)
-           * instead of a generic message so a
-           * failing feed is diagnosable — and
-           * actionable — from the popover itself.
-           */
-          const status =
-            err?.response?.status;
-          const serverMessage =
-            err?.response?.data?.message;
-
-          setError(
-            serverMessage
-              ? `Couldn't load notifications${
-                  status ? ` (${status})` : ""
-                }: ${serverMessage}`
-              : "Couldn't load notifications from the server."
-          );
-        }
+        registerFailureCycle(err);
 
         setIsLoading(false);
       }
@@ -2089,6 +2166,15 @@ export default function Notifications() {
   useEffect(() => {
     const interval =
       window.setInterval(() => {
+        /*
+         * Skip polls while the tab is hidden —
+         * the next tick after returning refetches
+         * everything missed.
+         */
+        if (document.hidden) {
+          return;
+        }
+
         fetchNotifications();
       }, POLLING_INTERVAL);
 
