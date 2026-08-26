@@ -2052,10 +2052,10 @@ className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text
 premedicationItems.map((item, index) => (
 <tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
 <td className="py-2">{index + 1}</td>
-<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
-<td className="py-2 whitespace-nowrap">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
-<td className="py-2 whitespace-nowrap">{item.administration_route ?? "—"}</td>
-<td className="py-2 whitespace-nowrap">{item.frequency ?? item.remarks ?? "—"}</td>
+<td className="py-2 font-medium text-[#1e293b]">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
+<td className="py-2">{item.administration_route ?? "—"}</td>
+<td className="py-2">{item.frequency ?? item.remarks ?? "—"}</td>
 <td className="py-2 text-right"><StatusBadge>{item.drug_role || "PREMEDICATION"}</StatusBadge></td>
 </tr>
 ))
@@ -3080,6 +3080,9 @@ function DischargeDetailsPortal({
     null
   );
   const [reactionCount, setReactionCount] = useState(0);
+  const [dischargeAllergies, setDischargeAllergies] = useState<
+    PatientAllergyRecord[]
+  >([]);
 
   // Recent details for THIS selected patient via
   // /chemotherapy/plans/preview?staging_detail_id=<latest staging detail>.
@@ -3164,6 +3167,31 @@ function DischargeDetailsPortal({
       cancelled = true;
     };
   }, [patientId]);
+
+  useEffect(() => {
+    if (!patientId) {
+      setDischargeAllergies([]);
+      return;
+    }
+    let cancelled = false;
+    API.get<{ success: boolean; data: PatientAllergyRecord[] }>(
+      `/clinical-details/patients/${patientId}/allergies`
+    )
+      .then((response) => {
+        if (!cancelled) setDischargeAllergies(response.data?.data ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setDischargeAllergies([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
+
+  const dischargeAllergyNames = dischargeAllergies
+    .map((item) => item.allergy_master?.substance_name)
+    .filter(Boolean)
+    .join(", ");
 
   const orderSummaryDiagnosis = planPreview
     ? [planPreview.cancer_type, planPreview.cancer_subtype]
@@ -3668,6 +3696,20 @@ className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text
 </div>
 </div>
 {/* END: Patient Header Card */}
+{/* BEGIN: Alerts Banner */}
+<div className="flex items-center justify-between text-sm mb-8 border-b border-[#e2e8f0] pb-4">
+<div className="flex items-center space-x-8">
+<div className="flex items-center">
+<i className="fa-solid fa-triangle-exclamation text-[#ef4444] mr-2"></i>
+<span className="text-[#ef4444] font-semibold">Allergy:</span> <span className="ml-1 text-[#1e293b]">{dischargeAllergyNames || "—"}</span>
+</div>
+<div className="flex items-center">
+<i className="fa-solid fa-clock-rotate-left text-[#f59e0b] mr-2"></i>
+<span className="text-[#f59e0b] font-semibold">Previous Cycle:</span> <span className="ml-1 text-[#1e293b]">{dischargePlan?.completed_cycles ? `Cycle ${dischargePlan.completed_cycles} completed` : "—"}</span>
+</div>
+</div>
+</div>
+{/* END: Alerts Banner */}
 {/* BEGIN: Tabs */}
 <div className="border-b border-[#e2e8f0] mb-6">
 <nav className="flex space-x-8">

@@ -391,6 +391,29 @@ const Consultation: React.FC = () => {
   const [activeStep, setActiveStep] = useState("CONSULTATION");
   const [proceeding, setProceeding] = useState(false);
 
+  const STEP_ORDER = [
+    "CONSULTATION",
+    "LAB REPORT REVIEW",
+    "DIAGNOSIS",
+    "TREATMENT PLAN",
+    "CHEMOTHERAPY ORDER",
+    "DISCHARGE MEDICATION",
+    "FOLLOW UP",
+    "SUMMARY",
+  ];
+
+  const [completedSteps, setCompletedSteps] = useState<Set<string>>(
+    new Set()
+  );
+
+  const markStepCompleted = (stepName: string) => {
+    setCompletedSteps((prev) => {
+      const next = new Set(prev);
+      next.add(stepName);
+      return next;
+    });
+  };
+
   const [orderedTestIds, setOrderedTestIds] = useState<Set<string>>(
     new Set()
   );
@@ -862,6 +885,13 @@ const Consultation: React.FC = () => {
       return;
     }
 
+    if (!consultationNotes.trim()) {
+      showToast(
+        "Please select or enter the important field in the previous form."
+      );
+      return;
+    }
+
     try {
       setProceeding(true);
 
@@ -874,6 +904,7 @@ const Consultation: React.FC = () => {
 
       showToast("Consultation saved");
 
+      markStepCompleted("CONSULTATION");
       selectStep("LAB REPORT REVIEW");
     } catch (error: any) {
       console.error("Failed to save consultation details:", error);
@@ -892,6 +923,20 @@ const Consultation: React.FC = () => {
   ============================================================ */
 
   const selectStep = (name: string) => {
+    const currentIndex = STEP_ORDER.indexOf(activeStep);
+    const targetIndex = STEP_ORDER.indexOf(name);
+
+    if (targetIndex > currentIndex) {
+      for (let i = currentIndex; i < targetIndex; i++) {
+        if (!completedSteps.has(STEP_ORDER[i])) {
+          showToast(
+            "Please select or enter the important field in the previous form."
+          );
+          return;
+        }
+      }
+    }
+
     setActiveStep(name);
 
     if (name === "LAB REPORT REVIEW") {
@@ -900,7 +945,7 @@ const Consultation: React.FC = () => {
     }
 
     setShowLabReview(false);
-    showToast(name);
+    if (name !== activeStep) showToast(name);
   };
 
   /* ============================================================
@@ -1510,26 +1555,26 @@ const Consultation: React.FC = () => {
                     encounterNo={encounter?.encounter_no}
                     pendingTests={pendingLabTests}
                     onOrdered={handleTestsOrdered}
-                    onNext={() => selectStep("DIAGNOSIS")}
+                    onNext={() => { markStepCompleted("LAB REPORT REVIEW"); selectStep("DIAGNOSIS"); }}
                   />
                 ) : activeStep === "DIAGNOSIS" ? (
                   <Diagnosis
                     embedded
                     patientId={patientDisplayId}
-                    onNext={() => selectStep("TREATMENT PLAN")}
+                    onNext={() => { markStepCompleted("DIAGNOSIS"); selectStep("TREATMENT PLAN"); }}
                   />
                 ) : activeStep === "TREATMENT PLAN" ? (
                   <TreatmentPlan
                     embedded
                     patientId={patientDisplayId}
                     measurements={measurements}
-                    onNext={() => selectStep("CHEMOTHERAPY ORDER")}
+                    onNext={() => { markStepCompleted("TREATMENT PLAN"); selectStep("CHEMOTHERAPY ORDER"); }}
                   />
                 ) : activeStep === "CHEMOTHERAPY ORDER" ? (
                   <ChemotherapyOrder
                     embedded
                     patientId={patientDisplayId}
-                    onNext={() => selectStep("DISCHARGE MEDICATION")}
+                    onNext={() => { markStepCompleted("CHEMOTHERAPY ORDER"); selectStep("DISCHARGE MEDICATION"); }}
                   />
                 ) : activeStep === "DISCHARGE MEDICATION" ? (
                   <DischargeMedication
@@ -1539,14 +1584,14 @@ const Consultation: React.FC = () => {
                     branchId={consultationState?.branchId}
                     encounterNo={encounter?.encounter_no}
                     measurements={measurements}
-                    onNext={() => selectStep("FOLLOW UP")}
+                    onNext={() => { markStepCompleted("DISCHARGE MEDICATION"); selectStep("FOLLOW UP"); }}
                   />
                 ) : activeStep === "FOLLOW UP" ? (
                   <FollowUp
                     embedded
                     patientId={patientDisplayId}
                     measurements={measurements}
-                    onNext={() => selectStep("SUMMARY")}
+                    onNext={() => { markStepCompleted("FOLLOW UP"); selectStep("SUMMARY"); }}
                   />
 ) : activeStep === "SUMMARY" ? (
                   <Summary
@@ -2301,6 +2346,13 @@ const LabReview: React.FC<{
 
   const handleProceed = async () => {
     if (savingObservations) return;
+
+    if (!observations.trim()) {
+      window.alert(
+        "Please select or enter the important field in the previous form."
+      );
+      return;
+    }
 
     try {
       setSavingObservations(true);
@@ -3123,13 +3175,13 @@ const Diagnosis: React.FC<{
 
     if (!formData.type || !formData.subType) {
       setDiagnosisError(
-        "Please select a cancer type and sub type before continuing."
+        "Please select or enter the important field in the previous form."
       );
       return;
     }
 
     if (!formData.cancerStage) {
-      setDiagnosisError("Please select a cancer stage before continuing.");
+      setDiagnosisError("Please select or enter the important field in the previous form.");
       return;
     }
 
@@ -3997,6 +4049,14 @@ const DischargeMedication: React.FC<{
   const handleNext = async () => {
     if (savingMeds) return;
 
+    const hasMedications = medications.some((item) => item.drugName.trim());
+    if (!hasMedications) {
+      setMedsError(
+        "Please select or enter the important field in the previous form."
+      );
+      return;
+    }
+
     try {
       setSavingMeds(true);
       setMedsError("");
@@ -4766,7 +4826,7 @@ const ChemotherapyOrder: React.FC<{
         : "";
 
     if (!plannedDate) {
-      setPlanError("Please pick a valid start date before saving.");
+      setPlanError("Please select or enter the important field in the previous form.");
       return;
     }
 
@@ -5295,7 +5355,7 @@ const ChemotherapyOrder: React.FC<{
   );
 
   const content = (
-    <div className="w-full max-w-6xl space-y-8">
+    <div className="w-full space-y-8">
       {/* ================= ORDER CONTAINER ================= */}
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
         {/* ================= FORM HEADER ================= */}
@@ -5926,7 +5986,7 @@ const ChemotherapyOrder: React.FC<{
 
       {/* ================= MAIN ================= */}
       <main className="flex min-h-[calc(100vh-73px)] flex-grow justify-center p-8">
-        <div className="w-full max-w-6xl space-y-8">
+        <div className="w-full space-y-8">
           {/* ================= STEPPER ================= */}
           <nav
             aria-label="Progress"
@@ -6115,7 +6175,7 @@ const FollowUp: React.FC<{
 
     if (!followupDate) {
       setFollowUpError(
-        "Please pick a valid Next Visit Date before submitting."
+        "Please select or enter the important field in the previous form."
       );
       return;
     }
@@ -7039,7 +7099,7 @@ const TreatmentPlan: React.FC<{
 
     if (!treatmentIntent) {
       setSaveError(
-        "Please select a treatment intent before continuing."
+        "Please select or enter the important field in the previous form."
       );
       return;
     }
@@ -7051,13 +7111,13 @@ const TreatmentPlan: React.FC<{
     if (isChemotherapySelected) {
       if (!plannedStartDate) {
         setSaveError(
-          "Please set a planned start date before continuing."
+          "Please select or enter the important field in the previous form."
         );
         return;
       }
 
       if (!protocol) {
-        setSaveError("Please select a protocol before continuing.");
+        setSaveError("Please select or enter the important field in the previous form.");
         return;
       }
 
@@ -8107,11 +8167,13 @@ const Summary: React.FC<{
   patientId?: string;
   appointmentId?: string;
   encounterNo?: string;
+  measurements?: MeasurementValues;
 }> = ({
   embedded = false,
   patientId,
   appointmentId,
   encounterNo,
+  measurements = { height: "", weight: "", bsa: "", bmi: "" },
 }) => {
   const location = useLocation();
   const statePatientId = (
