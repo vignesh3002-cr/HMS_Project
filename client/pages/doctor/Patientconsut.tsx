@@ -402,8 +402,15 @@ const Consultation: React.FC = () => {
     "SUMMARY",
   ];
 
+  const DIRECT_ACCESS_STEPS = [
+    "DISCHARGE MEDICATION",
+    "CHEMOTHERAPY ORDER",
+    "FOLLOW UP",
+    "DIAGNOSIS",
+  ];
+
   const [completedSteps, setCompletedSteps] = useState<Set<string>>(
-    new Set()
+    () => new Set(["CONSULTATION", "LAB REPORT REVIEW"])
   );
 
   const markStepCompleted = (stepName: string) => {
@@ -885,13 +892,6 @@ const Consultation: React.FC = () => {
       return;
     }
 
-    if (!consultationNotes.trim()) {
-      showToast(
-        "Please select or enter the important field in the previous form."
-      );
-      return;
-    }
-
     try {
       setProceeding(true);
 
@@ -926,7 +926,7 @@ const Consultation: React.FC = () => {
     const currentIndex = STEP_ORDER.indexOf(activeStep);
     const targetIndex = STEP_ORDER.indexOf(name);
 
-    if (targetIndex > currentIndex) {
+    if (targetIndex > currentIndex && !DIRECT_ACCESS_STEPS.includes(name)) {
       for (let i = currentIndex; i < targetIndex; i++) {
         if (!completedSteps.has(STEP_ORDER[i])) {
           showToast(
@@ -2347,13 +2347,6 @@ const LabReview: React.FC<{
   const handleProceed = async () => {
     if (savingObservations) return;
 
-    if (!observations.trim()) {
-      window.alert(
-        "Please select or enter the important field in the previous form."
-      );
-      return;
-    }
-
     try {
       setSavingObservations(true);
 
@@ -3173,103 +3166,25 @@ const Diagnosis: React.FC<{
       return;
     }
 
-    if (!formData.type || !formData.subType) {
+    const hasAnyData =
+      formData.type ||
+      formData.subType ||
+      formData.cancerStage ||
+      formData.tStage ||
+      formData.nStage ||
+      formData.mStage ||
+      formData.icdCode.trim() ||
+      formData.notes.trim();
+
+    if (!hasAnyData) {
       setDiagnosisError(
         "Please select or enter the important field in the previous form."
       );
       return;
     }
 
-    if (!formData.cancerStage) {
-      setDiagnosisError("Please select or enter the important field in the previous form.");
-      return;
-    }
-
-    const cancerType = cancerTypes.find(
-      (item) => item.cancer_type === formData.type
-    );
-    const subtype = subtypes.find(
-      (item) => item.subtype_name === formData.subType
-    );
-
-    if (!cancerType || !subtype) {
-      setDiagnosisError(
-        "Selected cancer type or sub type is invalid. Please re-select."
-      );
-      return;
-    }
-
-    const tStage: string | null = formData.tStage || null;
-    const nStage: string | null = formData.nStage || null;
-    const mStage: string | null = formData.mStage || null;
-
-    const normalizedIcd = formData.icdCode.trim().toUpperCase();
-    let catalog = diagnosisCatalogRef.current;
-
-    if (catalog.length === 0) {
-      try {
-        catalog = await loadDiagnosisCatalog();
-        diagnosisCatalogRef.current = catalog;
-      } catch (error) {
-        console.error("Failed to load diagnosis catalog:", error);
-      }
-    }
-
-    const matched = catalog.find(
-      (entry) => (entry.icd_code ?? "").toUpperCase() === normalizedIcd
-    );
-    const diagnosisId = matched?.diagnosis_id ?? catalog[0]?.diagnosis_id ?? "";
-
-    if (!diagnosisId) {
-      setDiagnosisError(
-        "Could not resolve a diagnosis entry for this patient. Please try again."
-      );
-      return;
-    }
-
-    setSavingDiagnosis(true);
     setDiagnosisError("");
-
-    try {
-      const response = await API.post<{
-        success: boolean;
-        data: {
-          staging_detail_id: string;
-          data?: { diagnosis_id?: string };
-        };
-      }>("/oncology/staging-details", {
-        patient_id: resolvedPatientId,
-        diagnosis_id: diagnosisId,
-        cancer_type_id: cancerType.cancer_type_id,
-        cancer_subtype_id: subtype.subtype_id,
-        clinical_stage: formData.cancerStage,
-        t_stage: tStage,
-        n_stage: nStage,
-        m_stage: mStage,
-        metastasis_sites: mStage?.trim().toUpperCase().startsWith("M1") && metastasisSites.length > 0 ? metastasisSites : null,
-      });
-
-      const created = response.data?.data;
-      localStorage.setItem(
-        "hms_diagnosis_selection",
-        JSON.stringify({
-          cancer_type_id: cancerType.cancer_type_id,
-          subtype_id: subtype.subtype_id,
-          staging_detail_id: created?.staging_detail_id ?? "",
-          diagnosis_id: created?.data?.diagnosis_id ?? diagnosisId,
-        })
-      );
-
-      onNext?.();
-    } catch (error: any) {
-      console.error("Failed to save staging details:", error);
-      setDiagnosisError(
-        error?.response?.data?.message ||
-          "Failed to save staging details. Please try again."
-      );
-    } finally {
-      setSavingDiagnosis(false);
-    }
+    onNext?.();
   };
 
   const handleBack = () => {
@@ -3425,7 +3340,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
             </div>
           </div>
 
-          {/* Grade */}
+          {/* Grade 
           <div>
             <label
               htmlFor="grade"
@@ -3459,7 +3374,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                 <ChevronDownIcon />
               </div>
             </div>
-          </div>
+          </div>*/}
 
           {/* T Stage */}
           <div>
@@ -4634,6 +4549,7 @@ const ChemotherapyOrder: React.FC<{
   const [premedicationDrugs, setPremedicationDrugs] = useState<Drug[]>(
     []
   );
+  const [supportiveDrugs, setSupportiveDrugs] = useState<Drug[]>([]);
 
   const userTouched = useRef({
     cycleDay: false,
@@ -4793,6 +4709,7 @@ const ChemotherapyOrder: React.FC<{
   const tabs = [
     "Chemotherapy Orders",
     "Premedication",
+    "Supportive",
     "Hydration",
     "Admin Instructions",
   ];
@@ -4807,49 +4724,17 @@ const ChemotherapyOrder: React.FC<{
       return;
     }
 
-    if (!planIdRef.current) {
+    const hasAnyData = cycleDay.trim() || startDate.trim();
+
+    if (!hasAnyData) {
       setPlanError(
-        "No chemotherapy plan found for this patient. Complete the Treatment Plan step first."
+        "Please select or enter the important field in the previous form."
       );
       return;
     }
 
-    const cycleMatch = cycleDay.match(/Cycle\s+(\d+)/i);
-    const cycleNumber = cycleMatch ? Number(cycleMatch[1]) : 1;
-
-    const isoMatch = startDate.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
-    const dmyMatch = startDate.trim().match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
-    const plannedDate = isoMatch
-      ? `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`
-      : dmyMatch
-        ? `${dmyMatch[3]}-${dmyMatch[2].padStart(2, "0")}-${dmyMatch[1].padStart(2, "0")}`
-        : "";
-
-    if (!plannedDate) {
-      setPlanError("Please select or enter the important field in the previous form.");
-      return;
-    }
-
-    try {
-      setSavingOrder(true);
-      setPlanError("");
-
-      await API.post(`/chemotherapy/plans/${planIdRef.current}/cycles`, {
-        cycle_number: cycleNumber,
-        planned_date: plannedDate,
-      });
-
-      onNext?.();
-    } catch (error: any) {
-      console.error("Failed to save chemotherapy order:", error);
-      setPlanError(
-        error?.response?.data?.message ||
-          error?.message ||
-          "Failed to save the chemotherapy order. Please try again."
-      );
-    } finally {
-      setSavingOrder(false);
-    }
+    setPlanError("");
+    onNext?.();
   };
 
   const formatDateDMY = (value?: string | null) => {
@@ -5048,6 +4933,44 @@ const ChemotherapyOrder: React.FC<{
       })
       .finally(() => {
         if (!cancelled) setPlanLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId]);
+
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    let cancelled = false;
+
+    API.get<{ success: boolean; data: Array<{
+      medicine_id: string;
+      medicine_name: string;
+      generic_name: string | null;
+      medicine_category: string | null;
+      medicine_type: string | null;
+      dosage_form: string | null;
+      unit: string | null;
+      strength: string | null;
+      route: string | null;
+    }> }>("/chemotherapy/supportive-medicines")
+      .then((response) => {
+        if (cancelled) return;
+        const meds = response.data.data;
+        setSupportiveDrugs(
+          meds.map((med, index) => ({
+            id: index,
+            name: med.medicine_name,
+            form: med.dosage_form || "",
+            dose: med.strength || "",
+            unit: med.unit || "",
+            volume: "",
+          }))
+        );
+      })
+      .catch((error) => {
+        console.error("Failed to load supportive medicines:", error);
       });
 
     return () => {
@@ -5918,6 +5841,92 @@ const ChemotherapyOrder: React.FC<{
               </table>
             </div>
           </div>
+        ) : activeTab === "Supportive" ? (
+          <div className="p-8">
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="py-4 pl-6 pr-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Drug Name
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Form
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Dose
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Unit
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-gray-200 bg-white">
+                  {planLoading && (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className="px-6 py-8 text-center text-sm text-gray-500"
+                      >
+                        Loading supportive drugs
+                      </td>
+                    </tr>
+                  )}
+
+                  {!planLoading &&
+                    !planError &&
+                    supportiveDrugs.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          className="px-6 py-8 text-center text-sm text-gray-500"
+                        >
+                          No supportive drugs found for this protocol.
+                        </td>
+                      </tr>
+                    )}
+
+                  {planError && (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className="px-6 py-8 text-center text-sm text-red-500"
+                      >
+                        {planError}
+                      </td>
+                    </tr>
+                  )}
+
+                  {supportiveDrugs.map((drug) => (
+                    <tr
+                      key={drug.id}
+                      className="transition-colors hover:bg-gray-50"
+                    >
+                      <td className="whitespace-nowrap py-5 pl-6 pr-3 text-base font-medium text-gray-900">
+                        {drug.name}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-500">
+                        {drug.form}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-900">
+                        {drug.dose}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
+                        {drug.unit}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : (
           /* Other Tabs */
           <div className="flex min-h-[300px] items-center justify-center p-8">
@@ -6164,88 +6173,17 @@ const FollowUp: React.FC<{
       return;
     }
 
-    const trimmedDate = nextVisitDate.trim();
-    const isoMatch = trimmedDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    const dmyMatch = trimmedDate.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
-    const followupDate = isoMatch
-      ? `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`
-      : dmyMatch
-        ? `${dmyMatch[3]}-${dmyMatch[2].padStart(2, "0")}-${dmyMatch[1].padStart(2, "0")}`
-        : "";
+    const hasAnyData = nextVisitDate.trim() || nextCycle || plan || notes.trim();
 
-    if (!followupDate) {
+    if (!hasAnyData) {
       setFollowUpError(
         "Please select or enter the important field in the previous form."
       );
       return;
     }
 
-    try {
-      setSubmittingFollowUp(true);
-      setFollowUpError("");
-
-      const branchId =
-        getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
-      const plansResponse = await API.get<{
-        success: boolean;
-        data: ChemotherapyPlan[];
-      }>("/chemotherapy/plans", {
-        params: { patient_id: resolvedPatientId, branchId },
-      });
-      const planId =
-        plansResponse.data.data?.[0]?.chemotherapy_plan_id ?? "";
-
-      if (!planId) {
-        setFollowUpError(
-          "No chemotherapy plan found for this patient. Complete the earlier steps first."
-        );
-        return;
-      }
-
-      const cyclesResponse = await API.get<{
-        success: boolean;
-        data: {
-          chemotherapy_cycle_id: string;
-          cycle_number: number;
-        }[];
-      }>(`/chemotherapy/plans/${planId}/cycles`);
-      const cycles = cyclesResponse.data.data ?? [];
-      const latestCycle = cycles[cycles.length - 1];
-
-      if (!latestCycle?.chemotherapy_cycle_id) {
-        setFollowUpError(
-          "No chemotherapy cycle found. Complete the Chemotherapy Order step first."
-        );
-        return;
-      }
-
-      const payload: Record<string, string> = {
-        followup_date: followupDate,
-      };
-
-      const noteParts = [plan ? `Plan: ${plan}` : "", notes.trim()].filter(
-        Boolean
-      );
-      if (noteParts.length > 0) {
-        payload.followup_notes = noteParts.join("\n");
-      }
-
-      await API.post(
-        `/chemotherapy/cycles/${latestCycle.chemotherapy_cycle_id}/followup`,
-        payload
-      );
-
-      onNext?.();
-    } catch (error: any) {
-      console.error("Failed to submit follow-up:", error);
-      setFollowUpError(
-        error?.response?.data?.message ||
-          error?.message ||
-          "Failed to submit the follow-up. Please try again."
-      );
-    } finally {
-      setSubmittingFollowUp(false);
-    }
+    setFollowUpError("");
+    onNext?.();
   };
 
   const handleViewProfile = () => {
@@ -7097,164 +7035,23 @@ const TreatmentPlan: React.FC<{
       return;
     }
 
-    if (!treatmentIntent) {
+    const hasAnyData =
+      treatmentIntent ||
+      treatmentTypes.length > 0 ||
+      plannedStartDate ||
+      protocol ||
+      lineOfTherapy ||
+      remarks.trim();
+
+    if (!hasAnyData) {
       setSaveError(
         "Please select or enter the important field in the previous form."
       );
       return;
     }
 
-    /* Chemo-only requirements - these inputs are hidden when
-       Chemotherapy is not part of the selected treatment types. */
-    let treatmentStartDate = "";
-
-    if (isChemotherapySelected) {
-      if (!plannedStartDate) {
-        setSaveError(
-          "Please select or enter the important field in the previous form."
-        );
-        return;
-      }
-
-      if (!protocol) {
-        setSaveError("Please select or enter the important field in the previous form.");
-        return;
-      }
-
-      const dateMatch = plannedStartDate
-        .trim()
-        .match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-      treatmentStartDate = dateMatch
-        ? `${dateMatch[3]}-${dateMatch[2].padStart(2, "0")}-${dateMatch[1].padStart(2, "0")}`
-        : plannedStartDate.trim();
-
-      if (!/^\d{4}-\d{2}-\d{2}/.test(treatmentStartDate)) {
-        setSaveError(
-          "Planned start date is not a valid date (use DD-MM-YYYY or YYYY-MM-DD)."
-        );
-        return;
-      }
-    }
-
-    setSaving(true);
     setSaveError("");
-
-    try {
-      /* A chemotherapy plan is only created when Chemotherapy is
-         ticked; other treatment types continue to the next step. */
-      if (!isChemotherapySelected) {
-        setActiveStep(3);
-        onNext?.();
-        return;
-      }
-
-      const saved = localStorage.getItem("hms_diagnosis_selection");
-      let stagingDetailId = "";
-      let diagnosisId = "";
-
-      if (saved) {
-        try {
-          const selection = JSON.parse(saved);
-          stagingDetailId = selection?.staging_detail_id ?? "";
-          diagnosisId = selection?.diagnosis_id ?? "";
-        } catch (error) {
-          console.error("Failed to parse diagnosis selection:", error);
-        }
-      }
-
-      if (!stagingDetailId || !diagnosisId) {
-        try {
-          const stagingResponse = await API.get<{
-            success: boolean;
-            data: {
-              staging_detail_id: string;
-              diagnosis_id: string | null;
-            }[];
-          }>("/oncology/staging-details", {
-            params: { patient_id: resolvedPatientId, limit: 1 },
-          });
-          const latest = stagingResponse.data?.data?.[0];
-          stagingDetailId = latest?.staging_detail_id ?? "";
-          diagnosisId = latest?.diagnosis_id ?? "";
-        } catch (error) {
-          console.error("Failed to load staging details:", error);
-        }
-      }
-
-      if (!stagingDetailId || !diagnosisId) {
-        setSaveError(
-          "Diagnosis has not been saved yet. Complete the Diagnosis step first."
-        );
-        return;
-      }
-
-      let employeeId = getUser()?.employee_id ?? null;
-
-      if (!employeeId) {
-        const me = await API.get<{
-          success: boolean;
-          user?: { employee_id?: string | null };
-        }>("/auth/me");
-        employeeId = me.data?.user?.employee_id ?? null;
-      }
-
-      if (!employeeId) {
-        throw new Error(
-          "Could not resolve the logged-in doctor. Please log in again."
-        );
-      }
-
-      const employeeResponse = await employeeApi.getOne(employeeId);
-      const departmentId =
-        employeeResponse.data?.data?.employee?.department_id ?? "";
-
-      if (!departmentId) {
-        throw new Error(
-          "Could not resolve the doctor's department. Please try again."
-        );
-      }
-
-      const branchId =
-        getActiveBranchId() ||
-        employeeResponse.data?.data?.employee?.branch_id ||
-        "";
-
-      await API.post("/chemotherapy/plans", {
-        patient_id: resolvedPatientId,
-        staging_detail_id: stagingDetailId,
-        diagnosis_id: diagnosisId,
-        employee_id: employeeId,
-        department_id: departmentId,
-        branch_id: branchId,
-        protocol_id: protocol,
-        treatment_intent: treatmentIntent,
-        treatment_start_date: treatmentStartDate,
-        remarks: remarks || null,
-        confirm_suggested_therapy: true,
-      });
-
-      alert("Treatment plan saved successfully.");
-
-      setActiveStep(3);
-      onNext?.();
-    } catch (error: any) {
-      console.error("Failed to save treatment plan:", error);
-      setSaveError(
-        error?.response?.data?.message ||
-          error?.message ||
-          "Failed to save the treatment plan. Please try again."
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleBack = () => {
-    window.history.back();
-  };
-
-  const handleViewProfile = () => {
-    console.log("View Full Profile clicked");
+    onNext?.();
   };
 
   /* =========================================================
