@@ -16,6 +16,8 @@ import {
 import {
   appointmentApi,
 } from "@/api/appointment.api";
+import { getActiveBranchId } from "@/api/axios";
+import { getUser } from "@/utils/token";
 import {
   getAccountActivity,
   type AccountActivity,
@@ -34,6 +36,165 @@ const EVENT_CACHE_KEY =
   "hms_notification_events_v1";
 
 const POLLING_INTERVAL = 5000;
+
+/*
+ * Branch resolution for the notification feed. On a fresh origin (e.g.
+ * first visit to the deployed site) nothing is stored under
+ * hms_selected_branch_id, so these list requests went out without an
+ * x-branch-id header and branch-restricted roles got 403 "Please select
+ * a branch first." on every poll — the bell stayed empty forever. Fall
+ * back to the caller's own active branch mappings (/employees/me), then
+ * the login-time branch_id, and send them as explicit branchId query
+ * params which branchScope accepts in place of the header.
+ *
+ * When several mappings exist, EVERY mapped branch is fed and the lists
+ * merged — scoping to just the first mapping silently hid all activity
+ * from the caller's other branches (e.g. an ADMIN mapped to two branches
+ * saw an empty bell because today's changes happened in the other one),
+ * which never matched the local-browser experience where a branch was
+ * already selected.
+ */
+let cachedFeedBranchIds: string[] | null | undefined;
+
+/*
+ * This account's own active branch mappings (/employees/me), cached for
+ * the session. Returns null when they cannot be resolved (no employee
+ * record, network failure) so the caller can fall back to the login-time
+ * branch_id.
+ */
+const getMappedBranchIds =
+  async (): Promise<string[] | null> => {
+    if (
+      cachedFeedBranchIds !==
+      undefined
+    ) {
+      return cachedFeedBranchIds;
+    }
+
+    try {
+      const me =
+        await employeeApi.getMe();
+      const mapped = (
+        me.data?.data?.branches ??
+        []
+      ).map(
+        (b: {
+          branch_id?: string | null;
+        }) => b?.branch_id
+      ).filter(
+        (
+          id:
+            | string
+            | null
+            | undefined
+        ): id is string => Boolean(id)
+      );
+      cachedFeedBranchIds = Array.from(
+        new Set(mapped)
+      );
+    } catch {
+      return null;
+    }
+
+    return cachedFeedBranchIds;
+  };
+
+const resolveFeedBranchIds =
+  async (): Promise<string[]> => {
+    const selected =
+      getActiveBranchId();
+
+    if (selected) {
+      /*
+       * Trust the selector unless it points at a
+       * branch this account no longer maps to. A
+       * stale hms_selected_branch_id (left behind
+       * by an earlier session/account on the same
+       * origin, or a mapping removed later) would
+       * otherwise get 403 "Forbidden. You don't
+       * have access to this branch." on every
+       * scoped list call forever, keeping the bell
+       * permanently empty on the deployed origin.
+       * Accounts with no mappings at all (top-level
+       * admins) keep any selection.
+       */
+      const mapped =
+        await getMappedBranchIds();
+      if (
+        !mapped ||
+        mapped.length === 0 ||
+        mapped.includes(selected)
+      ) {
+        return [selected];
+      }
+      return mapped;
+    }
+
+    const mapped =
+      await getMappedBranchIds();
+
+    if (mapped && mapped.length > 0) {
+      return mapped;
+    }
+
+    const loginBranchId =
+      getUser()?.branch_id;
+    if (loginBranchId) {
+      return [loginBranchId];
+    }
+
+    return [];
+  };
+
+/*
+ * Runs one list call per resolved branch (parallel) and merges the
+ * arrays. With zero or one branch this degrades to the plain single
+ * call — identical to the pre-multi-branch behavior.
+ */
+const fetchAcrossBranches = async <
+  T,
+  R extends { id?: unknown },
+>(
+  branchIds: string[],
+  call: (
+    branchId: string | undefined
+  ) => Promise<T>,
+  extract: (res: T) => R[]
+): Promise<R[]> => {
+  if (branchIds.length <= 1) {
+    const res = await call(branchIds[0]);
+    return extract(res);
+  }
+
+  const perBranch =
+    await Promise.all(
+      branchIds.map((branchId) =>
+        call(branchId)
+          .then((res) => extract(res))
+          .catch(() => [] as R[])
+      )
+    );
+
+  const seen = new Set<string>();
+  const merged: R[] = [];
+
+  for (const list of perBranch) {
+    for (const item of list) {
+      const key = String(
+        (item as any)?.id ??
+          (item as any)?.employee_id ??
+          (item as any)?.patient_id ??
+          (item as any)?.appointment_id ??
+          JSON.stringify(item)
+      );
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+  }
+
+  return merged;
+};
 
 /* -------------------------------------------------------------------------- */
 /* STORAGE                                                                    */
@@ -1052,77 +1213,123 @@ export default function Notifications() {
   /* FETCH APPOINTMENTS                                                       */
   /* ------------------------------------------------------------------------ */
 
-  const fetchAppointments =
-    useCallback(async (): Promise<
+  const fetchAppointmentsForBranch =
+    useCallback(async (feedBranchId?: string): Promise<
       GenericRecord[]
     > => {
-      try {
-        const pageSize = 100;
-        const sortBy = "created_at";
-        const sortOrder = "desc";
+      const pageSize = 100;
+      const sortBy = "created_at";
+      const sortOrder = "desc";
 
-        const firstPage =
+      const firstPage =
+        await appointmentApi.getAll({
+          limit: pageSize,
+          page: 1,
+          sortBy,
+          sortOrder,
+          ...(feedBranchId
+            ? { branchId: feedBranchId }
+            : {}),
+        });
+
+      const total =
+        firstPage.data?.data
+          ?.total || 0;
+
+      const totalPages = Math.ceil(
+        total / pageSize
+      );
+
+      let all = extractArray(
+        firstPage,
+        [
+          "appointments",
+          "appointment",
+          "data",
+          "results",
+        ]
+      );
+
+      for (
+        let page = 2;
+        page <= totalPages &&
+        all.length < 2000;
+        page++
+      ) {
+        const response =
           await appointmentApi.getAll({
             limit: pageSize,
-            page: 1,
+            page,
             sortBy,
             sortOrder,
+            ...(feedBranchId
+              ? { branchId: feedBranchId }
+              : {}),
           });
 
-        const total =
-          firstPage.data?.data
-            ?.total || 0;
-
-        const totalPages = Math.ceil(
-          total / pageSize
+        all = all.concat(
+          extractArray(
+            response,
+            [
+              "appointments",
+              "appointment",
+              "data",
+              "results",
+            ]
+          )
         );
+      }
 
-        let all = extractArray(
-          firstPage,
-          [
-            "appointments",
-            "appointment",
-            "data",
-            "results",
-          ]
-        );
+      return all;
+    }, []);
 
-        for (
-          let page = 2;
-          page <= totalPages &&
-          all.length < 2000;
-          page++
-        ) {
-          const response =
-            await appointmentApi.getAll({
-              limit: pageSize,
-              page,
-              sortBy,
-              sortOrder,
-            });
-
-          all = all.concat(
-            extractArray(
-              response,
-              [
-                "appointments",
-                "appointment",
-                "data",
-                "results",
-              ]
-            )
+  const fetchAppointments =
+    useCallback(async (feedBranchIds: string[]): Promise<
+      GenericRecord[] | null
+    > => {
+      try {
+        if (feedBranchIds.length <= 1) {
+          return await fetchAppointmentsForBranch(
+            feedBranchIds[0]
           );
         }
 
-        return all;
+        /*
+         * Several mapped branches and no explicit
+         * selection: page each branch in parallel.
+         * A single branch failing must not sink the
+         * whole appointments feed, so per-branch
+         * failures degrade to an empty list while a
+         * TOTAL failure (below) still returns null
+         * so the snapshot logic can skip the diff.
+         */
+        const perBranch =
+          await Promise.all(
+            feedBranchIds.map((branchId) =>
+              fetchAppointmentsForBranch(
+                branchId
+              ).catch(() => [])
+            )
+          );
+
+        return perBranch.flat();
       } catch {
         /*
          * Appointment API failure should NOT
          * break employee/patient notifications.
+         *
+         * Returns null (not an empty array): an
+         * empty array is indistinguishable from
+         * "every appointment was deleted" and
+         * used to flood the feed with false
+         * DELETE events, then false CREATE
+         * events on the next successful poll —
+         * Render cold starts on the deployed
+         * site made this happen regularly.
          */
-        return [];
+        return null;
       }
-    }, []);
+    }, [fetchAppointmentsForBranch]);
 
   /* ------------------------------------------------------------------------ */
   /* MAIN FETCH                                                               */
@@ -1133,38 +1340,70 @@ export default function Notifications() {
       setError(null);
 
       try {
+        const feedBranchIds =
+          await resolveFeedBranchIds();
+
         const [
-          employeesRes,
-          patientsRes,
+          employees,
+          patients,
           appointments,
         ] =
           await Promise.all([
-            employeeApi.getAll({
-              limit: 1000,
-            }),
+            fetchAcrossBranches(
+              feedBranchIds,
+              (branchId) =>
+                employeeApi.getAll({
+                  limit: 1000,
+                  ...(branchId
+                    ? { branchId }
+                    : {}),
+                }),
+              (res) =>
+                (res.data?.data
+                  ?.employees ??
+                  []) as any[]
+            ),
 
-            patientApi.getAll({
-              limit: 1000,
-            }),
+            fetchAcrossBranches(
+              feedBranchIds,
+              (branchId) =>
+                patientApi.getAll({
+                  limit: 1000,
+                  ...(branchId
+                    ? { branchId }
+                    : {}),
+                }),
+              (res) =>
+                (res.data?.data
+                  ?.patients ??
+                  []) as any[]
+            ),
 
-            fetchAppointments(),
+            fetchAppointments(
+              feedBranchIds
+            ),
           ]);
 
-        /* ---------------------------------------------------------------- */
-        /* GET CURRENT DATA                                                  */
-        /* ---------------------------------------------------------------- */
+        /*
+         * A failed appointments fetch returns null.
+         * Keep the previous appointments snapshot
+         * and skip this cycle's appointment diff so
+         * no false create/delete events are ever
+         * generated from missing data — the feed
+         * only ever reflects real changes.
+         */
+        const appointmentsFetched =
+          appointments !== null;
 
-        const employees =
-          employeesRes.data?.data
-            ?.employees || [];
-
-        const patients =
-          patientsRes.data?.data
-            ?.patients || [];
+        const safeAppointments =
+          appointments ?? [];
 
         /* ---------------------------------------------------------------- */
         /* BUILD CURRENT SNAPSHOT                                            */
         /* ---------------------------------------------------------------- */
+
+        const previousSnapshot =
+          previousSnapshotRef.current;
 
         const currentSnapshot: StoredSnapshot =
           {
@@ -1179,13 +1418,13 @@ export default function Notifications() {
               ),
 
             appointments:
-              buildAppointmentSnapshot(
-                appointments
-              ),
+              appointmentsFetched
+                ? buildAppointmentSnapshot(
+                    safeAppointments
+                  )
+                : previousSnapshot
+                  ?.appointments ?? [],
           };
-
-        const previousSnapshot =
-          previousSnapshotRef.current;
 
         /* ---------------------------------------------------------------- */
         /* DETECT CHANGES                                                   */
@@ -1469,6 +1708,7 @@ export default function Notifications() {
         /* APPOINTMENT CREATE / UPDATE / DELETE                            */
         /* ---------------------------------------------------------------- */
 
+        if (appointmentsFetched) {
         const previousAppointments =
           previousSnapshot.appointments;
 
@@ -1549,6 +1789,7 @@ export default function Notifications() {
             }
           }
         );
+        }
 
         /* ---------------------------------------------------------------- */
         /* SAVE NEW SNAPSHOT                                                */
@@ -1650,7 +1891,7 @@ export default function Notifications() {
           }
         );
 
-        appointments.forEach(
+        safeAppointments.forEach(
           (
             appointment: GenericRecord,
             index: number
@@ -1789,8 +2030,24 @@ export default function Notifications() {
         if (
           consecutiveFailuresRef.current >= 3
         ) {
+          /*
+           * Surface the server's actual reason
+           * (branch scope, permissions, network)
+           * instead of a generic message so a
+           * failing feed is diagnosable — and
+           * actionable — from the popover itself.
+           */
+          const status =
+            err?.response?.status;
+          const serverMessage =
+            err?.response?.data?.message;
+
           setError(
-            "Couldn't load notifications from the server."
+            serverMessage
+              ? `Couldn't load notifications${
+                  status ? ` (${status})` : ""
+                }: ${serverMessage}`
+              : "Couldn't load notifications from the server."
           );
         }
 

@@ -27,6 +27,7 @@ interface Appointment {
   appointmentId: string;
   originalStatus: string;
   visit_type: string;
+  hasEncounter: boolean;
 }
 
 const fallbackHospital = "HMS Main Hospital";
@@ -405,6 +406,7 @@ export default function DoctorDashboard() {
             appointmentId: item.appointment_id,
             originalStatus: item.status,
             visit_type: item.Patient_visit_type || "",
+            hasEncounter: false,
           })
         )
         .filter((a): a is Appointment => a !== null)
@@ -415,7 +417,23 @@ export default function DoctorDashboard() {
           return timeA.localeCompare(timeB);
         });
 
-      setDashboardAppointments(mappedAppointments);
+      const encounterChecks = await Promise.all(
+        mappedAppointments.map((appointment) =>
+          encounterApi
+            .getByAppointment(appointment.appointmentId)
+            .then((response) => Boolean(response.data?.data?.encounter_no))
+            .catch(() => false)
+        )
+      );
+
+      const appointmentsWithEncounters = mappedAppointments.map(
+        (appointment, index) => ({
+          ...appointment,
+          hasEncounter: encounterChecks[index],
+        })
+      );
+
+      setDashboardAppointments(appointmentsWithEncounters);
     } catch (error: any) {
       console.error("Failed to load doctor dashboard:", error);
       setDashboardError(
@@ -1046,7 +1064,7 @@ export default function DoctorDashboard() {
                       </td>
 
                       <td className="h-[50px] border-b border-slate-100 px-4 py-2 text-center">
-                        {(appointment.originalStatus === "SCHEDULED"|| appointment.originalStatus === "RESCHEDULED" || appointment.originalStatus === "NOT_CHECKED_IN") && (
+                        {(appointment.originalStatus === "SCHEDULED"|| appointment.originalStatus === "RESCHEDULED" || appointment.originalStatus === "NOT_CHECKED_IN") && !appointment.hasEncounter && (
                           <button
                             type="button"
                             onClick={() => handleCheckIn(appointment.appointmentId)}
@@ -1066,7 +1084,7 @@ export default function DoctorDashboard() {
                           )}
                           </button>
                         )}
-                        {(appointment.originalStatus === "IN_CONSULTATION" || appointment.originalStatus==="CHECKED_IN") && (
+                        {((appointment.originalStatus === "IN_CONSULTATION" || appointment.originalStatus==="CHECKED_IN") || appointment.hasEncounter) && (
                           <button
                             type="button"
                             className="inline-flex items-center justify-center px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 transition-colors"
