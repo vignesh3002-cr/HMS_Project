@@ -43,34 +43,104 @@ const POLLING_INTERVAL = 5000;
  * hms_selected_branch_id, so these list requests went out without an
  * x-branch-id header and branch-restricted roles got 403 "Please select
  * a branch first." on every poll — the bell stayed empty forever. Fall
- * back to the caller's own first active branch mapping (/employees/me),
- * then the login-time branch_id, and send it as an explicit branchId
- * query param which branchScope accepts in place of the header.
+ * back to the caller's own active branch mappings (/employees/me), then
+ * the login-time branch_id, and send them as explicit branchId query
+ * params which branchScope accepts in place of the header.
+ *
+ * When several mappings exist, EVERY mapped branch is fed and the lists
+ * merged — scoping to just the first mapping silently hid all activity
+ * from the caller's other branches (e.g. an ADMIN mapped to two branches
+ * saw an empty bell because today's changes happened in the other one),
+ * which never matched the local-browser experience where a branch was
+ * already selected.
  */
-let cachedFeedBranchId: string | null | undefined;
+let cachedFeedBranchIds: string[] | undefined;
 
-const resolveFeedBranchId =
-  async (): Promise<string | undefined> => {
+const resolveFeedBranchIds =
+  async (): Promise<string[]> => {
     const selected = getActiveBranchId();
-    if (selected) return selected;
+    if (selected) return [selected];
 
-    if (cachedFeedBranchId !== undefined) {
-      return cachedFeedBranchId ?? undefined;
+    if (cachedFeedBranchIds !== undefined) {
+      return cachedFeedBranchIds;
     }
+
+    let resolved: string[] = [];
 
     try {
       const me = await employeeApi.getMe();
-      cachedFeedBranchId =
-        me.data?.data?.branches?.[0]?.branch_id ||
-        getUser()?.branch_id ||
-        null;
+      const mapped = (me.data?.data?.branches ?? [])
+        .map(
+          (b: { branch_id?: string | null }) =>
+            b?.branch_id
+        )
+        .filter(
+          (id: string | null | undefined): id is string =>
+            Boolean(id)
+        );
+      resolved = Array.from(new Set(mapped));
     } catch {
-      cachedFeedBranchId =
-        getUser()?.branch_id || null;
+      resolved = [];
     }
 
-    return cachedFeedBranchId ?? undefined;
+    if (resolved.length === 0) {
+      const loginBranchId = getUser()?.branch_id;
+      if (loginBranchId) resolved = [loginBranchId];
+    }
+
+    cachedFeedBranchIds = resolved;
+    return cachedFeedBranchIds;
   };
+
+/*
+ * Runs one list call per resolved branch (parallel) and merges the
+ * arrays. With zero or one branch this degrades to the plain single
+ * call — identical to the pre-multi-branch behavior.
+ */
+const fetchAcrossBranches = async <
+  T,
+  R extends { id?: unknown },
+>(
+  branchIds: string[],
+  call: (
+    branchId: string | undefined
+  ) => Promise<T>,
+  extract: (res: T) => R[]
+): Promise<R[]> => {
+  if (branchIds.length <= 1) {
+    const res = await call(branchIds[0]);
+    return extract(res);
+  }
+
+  const perBranch =
+    await Promise.all(
+      branchIds.map((branchId) =>
+        call(branchId)
+          .then((res) => extract(res))
+          .catch(() => [] as R[])
+      )
+    );
+
+  const seen = new Set<string>();
+  const merged: R[] = [];
+
+  for (const list of perBranch) {
+    for (const item of list) {
+      const key = String(
+        (item as any)?.id ??
+          (item as any)?.employee_id ??
+          (item as any)?.patient_id ??
+          (item as any)?.appointment_id ??
+          JSON.stringify(item)
+      );
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+  }
+
+  return merged;
+};
 
 /* -------------------------------------------------------------------------- */
 /* STORAGE                                                                    */
@@ -1089,19 +1159,53 @@ export default function Notifications() {
   /* FETCH APPOINTMENTS                                                       */
   /* ------------------------------------------------------------------------ */
 
-  const fetchAppointments =
+  const fetchAppointmentsForBranch =
     useCallback(async (feedBranchId?: string): Promise<
-      GenericRecord[] | null
+      GenericRecord[]
     > => {
-      try {
-        const pageSize = 100;
-        const sortBy = "created_at";
-        const sortOrder = "desc";
+      const pageSize = 100;
+      const sortBy = "created_at";
+      const sortOrder = "desc";
 
-        const firstPage =
+      const firstPage =
+        await appointmentApi.getAll({
+          limit: pageSize,
+          page: 1,
+          sortBy,
+          sortOrder,
+          ...(feedBranchId
+            ? { branchId: feedBranchId }
+            : {}),
+        });
+
+      const total =
+        firstPage.data?.data
+          ?.total || 0;
+
+      const totalPages = Math.ceil(
+        total / pageSize
+      );
+
+      let all = extractArray(
+        firstPage,
+        [
+          "appointments",
+          "appointment",
+          "data",
+          "results",
+        ]
+      );
+
+      for (
+        let page = 2;
+        page <= totalPages &&
+        all.length < 2000;
+        page++
+      ) {
+        const response =
           await appointmentApi.getAll({
             limit: pageSize,
-            page: 1,
+            page,
             sortBy,
             sortOrder,
             ...(feedBranchId
@@ -1109,55 +1213,52 @@ export default function Notifications() {
               : {}),
           });
 
-        const total =
-          firstPage.data?.data
-            ?.total || 0;
-
-        const totalPages = Math.ceil(
-          total / pageSize
+        all = all.concat(
+          extractArray(
+            response,
+            [
+              "appointments",
+              "appointment",
+              "data",
+              "results",
+            ]
+          )
         );
+      }
 
-        let all = extractArray(
-          firstPage,
-          [
-            "appointments",
-            "appointment",
-            "data",
-            "results",
-          ]
-        );
+      return all;
+    }, []);
 
-        for (
-          let page = 2;
-          page <= totalPages &&
-          all.length < 2000;
-          page++
-        ) {
-          const response =
-            await appointmentApi.getAll({
-              limit: pageSize,
-              page,
-              sortBy,
-              sortOrder,
-              ...(feedBranchId
-                ? { branchId: feedBranchId }
-                : {}),
-            });
-
-          all = all.concat(
-            extractArray(
-              response,
-              [
-                "appointments",
-                "appointment",
-                "data",
-                "results",
-              ]
-            )
+  const fetchAppointments =
+    useCallback(async (feedBranchIds: string[]): Promise<
+      GenericRecord[] | null
+    > => {
+      try {
+        if (feedBranchIds.length <= 1) {
+          return await fetchAppointmentsForBranch(
+            feedBranchIds[0]
           );
         }
 
-        return all;
+        /*
+         * Several mapped branches and no explicit
+         * selection: page each branch in parallel.
+         * A single branch failing must not sink the
+         * whole appointments feed, so per-branch
+         * failures degrade to an empty list while a
+         * TOTAL failure (below) still returns null
+         * so the snapshot logic can skip the diff.
+         */
+        const perBranch =
+          await Promise.all(
+            feedBranchIds.map((branchId) =>
+              fetchAppointmentsForBranch(
+                branchId
+              ).catch(() => [])
+            )
+          );
+
+        return perBranch.flat();
       } catch {
         /*
          * Appointment API failure should NOT
@@ -1174,7 +1275,7 @@ export default function Notifications() {
          */
         return null;
       }
-    }, []);
+    }, [fetchAppointmentsForBranch]);
 
   /* ------------------------------------------------------------------------ */
   /* MAIN FETCH                                                               */
@@ -1185,43 +1286,49 @@ export default function Notifications() {
       setError(null);
 
       try {
-        const feedBranchId =
-          await resolveFeedBranchId();
+        const feedBranchIds =
+          await resolveFeedBranchIds();
 
         const [
-          employeesRes,
-          patientsRes,
+          employees,
+          patients,
           appointments,
         ] =
           await Promise.all([
-            employeeApi.getAll({
-              limit: 1000,
-              ...(feedBranchId
-                ? { branchId: feedBranchId }
-                : {}),
-            }),
+            fetchAcrossBranches(
+              feedBranchIds,
+              (branchId) =>
+                employeeApi.getAll({
+                  limit: 1000,
+                  ...(branchId
+                    ? { branchId }
+                    : {}),
+                }),
+              (res) =>
+                (res.data?.data
+                  ?.employees ??
+                  []) as any[]
+            ),
 
-            patientApi.getAll({
-              limit: 1000,
-              ...(feedBranchId
-                ? { branchId: feedBranchId }
-                : {}),
-            }),
+            fetchAcrossBranches(
+              feedBranchIds,
+              (branchId) =>
+                patientApi.getAll({
+                  limit: 1000,
+                  ...(branchId
+                    ? { branchId }
+                    : {}),
+                }),
+              (res) =>
+                (res.data?.data
+                  ?.patients ??
+                  []) as any[]
+            ),
 
-            fetchAppointments(feedBranchId),
+            fetchAppointments(
+              feedBranchIds
+            ),
           ]);
-
-        /* ---------------------------------------------------------------- */
-        /* GET CURRENT DATA                                                  */
-        /* ---------------------------------------------------------------- */
-
-        const employees =
-          employeesRes.data?.data
-            ?.employees || [];
-
-        const patients =
-          patientsRes.data?.data
-            ?.patients || [];
 
         /*
          * A failed appointments fetch returns null.
