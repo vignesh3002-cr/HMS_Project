@@ -1976,8 +1976,24 @@ export default function Notifications() {
         if (
           consecutiveFailuresRef.current >= 3
         ) {
+          /*
+           * Surface the server's actual reason
+           * (branch scope, permissions, network)
+           * instead of a generic message so a
+           * failing feed is diagnosable — and
+           * actionable — from the popover itself.
+           */
+          const status =
+            err?.response?.status;
+          const serverMessage =
+            err?.response?.data?.message;
+
           setError(
-            "Couldn't load notifications from the server."
+            serverMessage
+              ? `Couldn't load notifications${
+                  status ? ` (${status})` : ""
+                }: ${serverMessage}`
+              : "Couldn't load notifications from the server."
           );
         }
 
