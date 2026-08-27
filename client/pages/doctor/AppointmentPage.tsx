@@ -20,13 +20,13 @@ import {
 import { encounterApi } from "../../api/encounter.api";
 import {
   doctorDashboardApi,
-  type DoctorNotificationItem,
 } from "../../api/doctorDashboard.api";
 import { employeeApi } from "../../api/employee.api";
 import API, { getActiveBranchId } from "../../api/axios";
 import { getUser } from "../../utils/token";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -202,8 +202,322 @@ function toPatient(a: AppointmentRecord): Patient | null {
   };
 }
 
+const PAGE_SIZE = 9;
+
+const AVATAR_PALETTE = [
+  { bg: "bg-orange-50", text: "text-orange-500" },
+  { bg: "bg-blue-50", text: "text-blue-500" },
+  { bg: "bg-emerald-50", text: "text-emerald-500" },
+  { bg: "bg-purple-50", text: "text-purple-500" },
+  { bg: "bg-pink-50", text: "text-pink-500" },
+  { bg: "bg-amber-50", text: "text-amber-600" },
+];
+
+function getAvatarColor(name: string) {
+  const index = name.charCodeAt(0) % AVATAR_PALETTE.length;
+  return AVATAR_PALETTE[index];
+}
+
+const STATUS_STYLES: Record<AppointmentStatus, string> = {
+  "Checked Out": "bg-emerald-50 text-emerald-600",
+  Confirmed: "bg-blue-50 text-blue-600",
+  "Checked In": "bg-amber-50 text-amber-600",
+  Cancelled: "bg-red-50 text-red-500",
+  Reschedule: "bg-purple-50 text-purple-600",
+  "In Consultation": "bg-cyan-50 text-cyan-600",
+  "No Show": "bg-gray-50 text-gray-500",
+  "Transfer Review": "bg-indigo-50 text-indigo-600",
+  "Reschedule Required": "bg-purple-50 text-purple-600",
+};
+
+interface ToolbarProps {
+  totalPatients: number;
+  view: "grid" | "list";
+  onViewChange: (view: "grid" | "list") => void;
+  search: string;
+  onSearchChange: (value: string) => void;
+  selectedDateKey: string | null;
+  onShiftDate: (days: number) => void;
+  onJumpToToday: () => void;
+  statusFilter: string;
+  onStatusFilterChange: (status: string) => void;
+}
+
+const STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: "SCHEDULED", label: "Confirmed" },
+  { value: "CHECKED_IN", label: "Checked In" },
+  { value: "IN_CONSULTATION", label: "In Consultation" },
+  { value: "COMPLETED", label: "Checked Out" },
+  { value: "CANCELLED", label: "Cancelled" },
+  { value: "NO_SHOW", label: "No Show" },
+  { value: "RESCHEDULED", label: "Reschedule" },
+];
+
+function AppointmentToolbar({
+  totalPatients,
+  view,
+  onViewChange,
+  search,
+  onSearchChange,
+  selectedDateKey,
+  onShiftDate,
+  onJumpToToday,
+  statusFilter,
+  onStatusFilterChange,
+}: ToolbarProps) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const todayKey = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  })();
+
+  const anchorKey = selectedDateKey ?? todayKey;
+
+  return (
+    <div className="flex items-center justify-between gap-4 flex-wrap px-5 py-3 border-b border-[rgba(194,198,212,0.10)]">
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-semibold tracking-[1.2px] uppercase text-[#424752]">
+          Appointment
+        </span>
+
+        <span className="px-2.5 py-1 rounded-full bg-[#EEF2FF] text-[#4F46E5] text-[10px] font-semibold">
+          Total Patients : {totalPatients}
+        </span>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap justify-end">
+        {/* Search */}
+        <div className="relative">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search..."
+            className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[200px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[250px]"
+          />
+          <svg
+            className="absolute left-2 top-1/2 -translate-y-1/2"
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+          >
+            <path
+              d="M11.0667 11.5713L6.86667 7.3713C6.53333 7.638 6.15 7.8491 5.71667 8.0046C5.28333 8.1602 4.82222 8.238 4.33333 8.238C3.12222 8.238 2.09722 7.8185 1.25833 6.9796C0.419444 6.1407 0 5.1157 0 3.90462C0 2.69351.419444 1.66851 1.25833.82962C2.09722-.00927 3.12222-.42871 4.33333-.42871C5.54444-.42871 6.56944-.00927 7.40833.82962C8.24722 1.66851 8.66667 2.69351 8.66667 3.90462C8.66667 4.3935 8.58889 4.8546 8.43333 5.288C8.27778 5.7213 8.06667 6.1046 7.8 6.438L12 10.638L11.0667 11.5713ZM4.33333 6.9046C5.16667 6.9046 5.875 6.613 6.45833 6.0296C7.04167 5.4463 7.33333 4.738 7.33333 3.90462C7.33333 3.07129 7.04167 2.36296 6.45833 1.77962C5.875 1.19629 5.16667.90462 4.33333.90462C3.5.90462 2.79167 1.19629 2.20833 1.77962C1.625 2.36296 1.33333 3.07129 1.33333 3.90462C1.33333 4.738 1.625 5.4463 2.20833 6.0296C2.79167 6.613 3.5 6.9046 4.33333 6.9046Z"
+              fill="#424752"
+            />
+          </svg>
+        </div>
+
+        {/* View toggle */}
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={() => onViewChange("list")}
+            aria-label="List view"
+            aria-pressed={view === "list"}
+            className={`flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 ${
+              view === "list"
+                ? "bg-[#00488D] text-white"
+                : "bg-white text-[#424752] hover:bg-[#F2F4F6]"
+            }`}
+          >
+            <svg
+              className="w-3.5 h-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onViewChange("grid")}
+            aria-label="Grid view"
+            aria-pressed={view === "grid"}
+            className={`flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 ${
+              view === "grid"
+                ? "bg-[#00488D] text-white"
+                : "bg-white text-[#424752] hover:bg-[#F2F4F6]"
+            }`}
+          >
+            <svg
+              className="w-3.5 h-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <rect x="3" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="3" width="7" height="7" rx="1.5" />
+              <rect x="3" y="14" width="7" height="7" rx="1.5" />
+              <rect x="14" y="14" width="7" height="7" rx="1.5" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Date nav */}
+        <div className="flex items-center">
+          <button
+            type="button"
+            aria-label="Previous day"
+            onClick={() => onShiftDate(-1)}
+            className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+          >
+            <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
+              <path
+                d="M5 1L1 5L5 9"
+                stroke="black"
+                strokeWidth="1.33"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            onClick={onJumpToToday}
+            title="Jump to today"
+            className={`flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6] ${
+              selectedDateKey === todayKey
+                ? "bg-[#EEF2FF] text-[#4F46E5]"
+                : "bg-white"
+            }`}
+          >
+            {selectedDateKey
+              ? (() => {
+                  const [y, m, d] = selectedDateKey.split("-").map(Number);
+                  return new Date(y, m - 1, d).toLocaleDateString("en-GB", {
+                    day: "2-digit",
+                    month: "short",
+                  });
+                })()
+              : "All dates"}
+          </button>
+
+          <button
+            type="button"
+            aria-label="Next day"
+            onClick={() => onShiftDate(1)}
+            className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+          >
+            <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
+              <path
+                d="M1 1L5 5L1 9"
+                stroke="black"
+                strokeWidth="1.33"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+
+        {/* Status filter */}
+        <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-opacity ${
+                statusFilter
+                  ? "bg-[#062f6e] text-white"
+                  : "bg-[#004785] text-white hover:opacity-90"
+              }`}
+            >
+              <svg
+                className="w-3.5 h-3.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M4 5h16l-6 8v5l-4 2v-7L4 5z" />
+              </svg>
+              {statusFilter
+                ? STATUS_FILTER_OPTIONS.find(
+                    (option) => option.value === statusFilter,
+                  )?.label ?? "Filters"
+                : "Filters"}
+            </button>
+          </PopoverTrigger>
+
+          <PopoverContent align="end" className="w-52 p-1 border-[#E5E7EB]">
+            <button
+              type="button"
+              onClick={() => {
+                onStatusFilterChange("");
+                setFiltersOpen(false);
+              }}
+              className={`w-full text-left px-3 py-1.5 text-xs rounded-md transition-colors ${
+                statusFilter === ""
+                  ? "bg-blue-50 font-semibold text-blue-700"
+                  : "text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              All statuses
+            </button>
+            {STATUS_FILTER_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => {
+                  onStatusFilterChange(option.value);
+                  setFiltersOpen(false);
+                }}
+                className={`w-full text-left px-3 py-1.5 text-xs rounded-md transition-colors ${
+                  statusFilter === option.value
+                    ? "bg-blue-50 font-semibold text-blue-700"
+                    : "text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
+      </div>
+    </div>
+  );
+}
+
+const COLUMNS: { key: string; label: string }[] = [
+  { key: "name", label: "Name" },
+  { key: "age", label: "Age/Gender" },
+  { key: "phone", label: "Mobile" },
+  { key: "bloodGroup", label: "Blood Group" },
+  { key: "appointmentDate", label: "Appointment" },
+  { key: "status", label: "Status" },
+];
+
+function SortIcon({ direction }: { direction?: "asc" | "desc" | null }) {
+  return (
+    <svg
+      className={`w-3 h-3 inline ml-1 ${
+        direction ? "text-blue-600" : "text-gray-300"
+      }`}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      {direction === "asc" ? (
+        <path d="M8 15l4-6 4 6" />
+      ) : direction === "desc" ? (
+        <path d="M8 9l4 6 4-6" />
+      ) : (
+        <path d="M8 9l4-4 4 4M8 15l4 4 4-4" />
+      )}
+    </svg>
+  );
+}
+
 // Statuses that allow the Check In transition (mirrors the dashboard).
-const CHECKIN_STATUSES = ["SCHEDULED", "RESCHEDULED", "NOT_CHECKED_IN"];
+const CHECKIN_STATUSES = ["SCHEDULED", "RESCHEDULED"];
 // Statuses that can proceed to the consultation screen.
 const PROCEED_STATUSES = ["CHECKED_IN", "IN_CONSULTATION"];
 // Statuses that can no longer be cancelled.
@@ -214,7 +528,6 @@ const NON_EDITABLE_STATUSES = [
   "COMPLETED",
   "CANCELLED",
   "NO_SHOW",
-  "NOT_CHECKED_IN",
 ];
 
 interface PatientActionProps {
@@ -708,10 +1021,8 @@ export default function AppointmentPage() {
   const handleCheckIn = async (patient: Patient): Promise<void> => {
     try {
       setActionBusyId(patient.id);
-      await appointmentApi.updateStatus(
-        patient.id,
-        "IN_CONSULTATION",
-      );
+
+
       await encounterApi.create({
         appointment_id: patient.id,
       });
@@ -830,70 +1141,8 @@ export default function AppointmentPage() {
   };
 
   /* =======================================================
-     HEADER NOTIFICATIONS
+     HEADER NOTIFICATIONS - Using global BellNotificationButton
      ======================================================= */
-
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [notifications, setNotifications] = useState<DoctorNotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const notificationRef = useRef<HTMLDivElement>(null);
-
-  const bellEmployeeId =
-    targetDoctorId ?? getUser()?.employee_id ?? null;
-
-  useEffect(() => {
-    if (!bellEmployeeId) return;
-
-    let cancelled = false;
-
-    const load = () => {
-      doctorDashboardApi
-        .getNotifications(bellEmployeeId)
-        .then((res) => {
-          if (cancelled) return;
-          setNotifications(res.data?.data?.notifications ?? []);
-          setUnreadCount(res.data?.data?.unreadCount ?? 0);
-        })
-        .catch(() => {});
-    };
-
-    load();
-    const intervalId = window.setInterval(load, 10000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [bellEmployeeId]);
-
-  useEffect(() => {
-    if (
-      notificationsOpen &&
-      unreadCount > 0 &&
-      bellEmployeeId
-    ) {
-      setUnreadCount(0);
-      doctorDashboardApi
-        .markNotificationsRead(bellEmployeeId)
-        .catch(() => {});
-    }
-  }, [notificationsOpen, unreadCount, bellEmployeeId]);
-
-  useEffect(() => {
-    const handleClick = (event: MouseEvent) => {
-      if (
-        !notificationRef.current?.contains(
-          event.target as Node,
-        )
-      ) {
-        setNotificationsOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClick);
-    return () =>
-      document.removeEventListener("mousedown", handleClick);
-  }, []);
 
   function timeAgo(iso: string): string {
     const then = new Date(iso).getTime();
@@ -1150,77 +1399,8 @@ export default function AppointmentPage() {
             </div>
           </div>
 
-          {/* ==================== NOTIFICATION BELL ==================== */}
-          <div className="relative" ref={notificationRef}>
-            <button
-              type="button"
-              aria-label="Notifications"
-              onClick={() => setNotificationsOpen((value) => !value)}
-              className="relative w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500"
-            >
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-                <path d="M13.7 21a2 2 0 01-3.4 0" />
-              </svg>
-              {unreadCount > 0 && (
-                <span className="absolute top-0 right-0 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-bold leading-none text-white">
-                  {unreadCount > 9 ? "9+" : unreadCount}
-                </span>
-              )}
-            </button>
-
-            {notificationsOpen && (
-              <div className="absolute right-0 top-12 z-50 w-[300px] rounded-xl border border-gray-200 bg-white p-4 shadow-xl">
-                <h3 className="mb-2 text-sm font-semibold text-gray-800">Notifications</h3>
-                {notifications.length === 0 ? (
-                  <div className="py-5 text-center text-xs text-gray-400">No new notifications</div>
-                ) : (
-                  <div className="max-h-[300px] overflow-y-auto">
-                    {notifications.map((item, index) => {
-                      const patientBio = item.appointment_history?.patient_bio_data;
-                      const patientName = [
-                        patientBio?.patient_first_name,
-                        patientBio?.patient_middle_name,
-                        patientBio?.patient_last_name,
-                      ].filter(Boolean).join(" ") || "A patient";
-                      const isBooking = item.notification_type === "BOOKING";
-
-                      return (
-                        <div
-                          key={item.notification_id}
-                          className={`py-2.5 text-xs text-gray-600 ${
-                            index < notifications.length - 1 ? "border-b border-gray-100" : ""
-                          }`}
-                        >
-                          <p className="leading-4">
-                            {item.status === "UNREAD" && (
-                              <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-blue-500 align-middle" />
-                            )}
-                            {isBooking ? (
-                              <>
-                                <span className="font-semibold text-gray-800">{patientName}</span>{" "}
-                                booked an appointment
-                                {item.appointment_history
-                                  ? ` for ${new Date(item.appointment_history.appointment_date).toLocaleDateString("en-GB")}`
-                                  : ""}
-                                .
-                              </>
-                            ) : (
-                              <>
-                                <span className="font-semibold text-gray-800">{patientName}</span>{" "}
-                                checked in.
-                              </>
-                            )}
-                          </p>
-                          <span className="text-[10px] text-gray-400">{timeAgo(item.created_at)}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          {/* ==================== NOTIFICATION BELL (Global) ==================== */}
+          <BellNotificationButton size="sm" />
 
           {/* ==================== MAIN CARD ==================== */}
           <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col transition-all duration-300 hover:shadow-md">

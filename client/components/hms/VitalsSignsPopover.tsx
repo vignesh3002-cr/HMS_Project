@@ -22,6 +22,8 @@ interface VitalsSignsPopoverProps {
   onOpenChange: (open: boolean) => void;
   appointmentId?: string;
   patientId?: string;
+  /** Fired after vitals were successfully created/updated so parents can refresh their lists. */
+  onSaved?: () => void;
 }
 
 type Tone = "danger" | "warning" | "success" | "purple" | "accent";
@@ -117,7 +119,7 @@ function VitalLine({
   );
 }
 
-const VitalsSignsPopover = ({ open, onOpenChange, appointmentId, patientId }: VitalsSignsPopoverProps) => {
+const VitalsSignsPopover = ({ open, onOpenChange, appointmentId, patientId, onSaved }: VitalsSignsPopoverProps) => {
   const { toast } = useToast();
   const [bpSystolic, setBpSystolic] = useState("");
   const [bpDiastolic, setBpDiastolic] = useState("");
@@ -164,8 +166,8 @@ const VitalsSignsPopover = ({ open, onOpenChange, appointmentId, patientId }: Vi
     const loadExistingVitals = async () => {
       setIsLoadingVitals(true);
       try {
-        const res = await encounterApi.getAll({ appointmentId, limit: 1 });
-        const record = res.data?.data?.encounters?.[0];
+        const res = await encounterApi.getByAppointment(appointmentId);
+        const record = res.data?.data;
         if (!record || cancelled) return;
         setBpSystolic(valueToInput(record.systolic_bp));
         setBpDiastolic(valueToInput(record.diastolic_bp));
@@ -309,8 +311,8 @@ const VitalsSignsPopover = ({ open, onOpenChange, appointmentId, patientId }: Vi
           title: "Vitals updated",
           description: `BP ${bpSystolic || "--"}/${bpDiastolic || "--"} • HR ${heartRate || "--"} • Temp ${temperature || "--"}°${tempUnit}`,
         });
-      } else {
-        const payload: PatientHistoryPayload = {
+        onSaved?.();
+      } else {        const payload: PatientHistoryPayload = {
           patientId,
           appointmentId,
           systolicBp: numOrNull(bpSystolic),
@@ -332,6 +334,7 @@ const VitalsSignsPopover = ({ open, onOpenChange, appointmentId, patientId }: Vi
           title: "Vitals recorded",
           description: `BP ${bpSystolic || "--"}/${bpDiastolic || "--"} • HR ${heartRate || "--"} • Temp ${temperature || "--"}°${tempUnit}`,
         });
+        onSaved?.();
       }
 
       reset();

@@ -17,6 +17,7 @@ import {
   useBranchFilter,
 } from "../../context/BranchFilterContext";
 import { computeBsa } from "../../utils/vitals";
+import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 
 interface ConsultationState {
   patientId?: string;
@@ -152,7 +153,6 @@ const MedicationPortal: React.FC<{
   const [activeTab, setActiveTab] = useState<Tab>("Medications");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showDischargeDashboard, setShowDischargeDashboard] = useState(false);
-  const [notifOpen, setNotifOpen] = useState(false);
 
   /* Recent medication details for THIS selected patient, sourced from
      the fetched chemotherapy plan (GET /chemotherapy/plans?patient_id=). */
@@ -248,31 +248,7 @@ const MedicationPortal: React.FC<{
            
           </div>
           <div className="flex items-center gap-5">
-            <div className="relative">
-              <button
-                type="button"
-                aria-label="Notifications"
-                onClick={() => setNotifOpen((v) => !v)}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]"
-              >
-                <i className="fa-regular fa-bell text-xl" />
-                <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-[#003ec7]" />
-              </button>
-              {notifOpen && (
-                <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-                  <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-                    <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]">Mark all as read</button>
-                      <button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40">Clear all</button>
-                    </div>
-                  </header>
-                  <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-                    <p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
-                  </main>
-                </div>
-              )}
-            </div>
+            <BellNotificationButton size="md" />
             <div className="flex items-center gap-2 border-l border-slate-200 pl-5">
               <span className="font-bold text-[#0052cc]">HMS</span>
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-700 text-white">
@@ -1341,7 +1317,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [selectedCycle, setSelectedCycle] = useState(1);
   const [showMedicationPortal, setShowMedicationPortal] = useState(false);
   const [showDischargePortal, setShowDischargePortal] = useState(false);
-  const [notifOpen, setNotifOpen] = useState(false);
+
   const [savedPlan, setSavedPlan] = useState<SummaryPlan | null>(null);
   const [planNotice, setPlanNotice] = useState("");
   const [regimenProtocol, setRegimenProtocol] = useState<any | null>(null);
@@ -2012,31 +1988,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 
 </div>
 <div className="flex items-center space-x-6">
-<div className="relative">
-<button
-type="button"
-aria-label="Notifications"
-onClick={() => setNotifOpen((v) => !v)}
-className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]"
->
-<i className="fa-regular fa-bell text-xl"></i>
-<span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-[#003ec7]"></span>
-</button>
-{notifOpen && (
-<div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-<header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-<h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
-<div className="flex shrink-0 items-center gap-3">
-<button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]">Mark all as read</button>
-<button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40">Clear all</button>
-</div>
-</header>
-<main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-<p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
-</main>
-</div>
-)}
-</div>
+<BellNotificationButton size="md" />
 <div className="flex items-center space-x-3 cursor-pointer pl-6 border-l border-[#e2e8f0]">
 <span className="text-sm font-bold text-[#1d4ed8]">HMS</span>
 <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white">
@@ -2660,7 +2612,7 @@ const HistoryDashboard: React.FC<{
   const [cycleDetails, setCycleDetails] = useState<ChemoCycleDetail[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
-  const [notifOpen, setNotifOpen] = useState(false);
+
 
   /* Real treatment history for THIS selected patient:
      latest chemo plan (GET /chemotherapy/plans?patient_id=) plus
@@ -3419,33 +3371,7 @@ const HistoryDashboard: React.FC<{
           
 
           <div className="flex items-center gap-6">
-            <div className="relative">
-              <button
-                type="button"
-                aria-label="Notifications"
-                onClick={() => setNotifOpen((v) => !v)}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]"
-              >
-                <i className="fa-regular fa-bell text-lg" />
-              </button>
-
-              <div className="absolute -top-1 -right-1 w-2 h-2 bg-[#003ec7] rounded-full border border-white" />
-
-              {notifOpen && (
-                <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-                  <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-                    <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]">Mark all as read</button>
-                      <button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40">Clear all</button>
-                    </div>
-                  </header>
-                  <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-                    <p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
-                  </main>
-                </div>
-              )}
-            </div>
+            <BellNotificationButton size="md" />
 
             <span className="text-blue-600 font-semibold text-sm">
               HMS
@@ -3513,7 +3439,7 @@ function DischargeDetailsPortal({
   const [planPreviewError, setPlanPreviewError] = useState("");
   const [patient, setPatient] = useState<PatientRecord | null>(null);
   const [dischargePlan, setDischargePlan] = useState<SummaryPlan | null>(null);
-  const [notifOpen, setNotifOpen] = useState(false);
+
 
   /* Latest vitals (encounter + chemo merged, one shared fetch set)
      - also supplies the drug-reaction count for this portal.
@@ -3975,31 +3901,7 @@ function DischargeDetailsPortal({
 
 </div>
 <div className="flex items-center space-x-6">
-<div className="relative">
-<button
-type="button"
-aria-label="Notifications"
-onClick={() => setNotifOpen((v) => !v)}
-className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]"
->
-<i className="fa-regular fa-bell text-xl"></i>
-<span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-[#003ec7]"></span>
-</button>
-{notifOpen && (
-<div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-<header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-<h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
-<div className="flex shrink-0 items-center gap-3">
-<button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]">Mark all as read</button>
-<button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40">Clear all</button>
-</div>
-</header>
-<main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-<p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
-</main>
-</div>
-)}
-</div>
+<BellNotificationButton size="md" />
 <div className="flex items-center space-x-3 cursor-pointer pl-6 border-l border-[#e2e8f0]">
 <span className="text-sm font-bold text-[#1d4ed8]">HMS</span>
 <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white">
@@ -4532,7 +4434,7 @@ const PatientNotesDocuments: React.FC<{
   const [labTab, setLabTab] = useState("Chemistry");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [notifOpen, setNotifOpen] = useState(false);
+
   const [notesPlan, setNotesPlan] = useState<SummaryPlan | null>(null);
   const [notesAllergies, setNotesAllergies] = useState<PatientAllergyRecord[]>(
     []
@@ -5121,33 +5023,7 @@ const PatientNotesDocuments: React.FC<{
           {/* Header Actions */}
           <div className="flex items-center space-x-4">
             {/* Notification */}
-            <div className="relative">
-              <button
-                type="button"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]"
-                aria-label="Notifications"
-                onClick={() => setNotifOpen((v) => !v)}
-              >
-                <i className="fa-regular fa-bell" />
-
-                <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-[#003ec7] ring-2 ring-white" />
-              </button>
-
-              {notifOpen && (
-                <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-                  <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-                    <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]">Mark all as read</button>
-                      <button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40">Clear all</button>
-                    </div>
-                  </header>
-                  <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-                    <p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
-                  </main>
-                </div>
-              )}
-            </div>
+            <BellNotificationButton size="md" />
 
             {/* HMS */}
             <span className="rounded bg-blue-50 px-2 py-1 text-sm font-medium text-blue-600">

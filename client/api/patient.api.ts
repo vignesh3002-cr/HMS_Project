@@ -74,6 +74,10 @@ export interface UpdatePatientPayload {
   marital_status?: string;
   nationality?: string;
   patient_type?: string;
+  patient_state?: string;
+  patient_district?: string;
+  patient_area?: string;
+  patient_pincode?: number;
   current_address?: string;
   emergency_name?: string;
   emergency_relation?: string;

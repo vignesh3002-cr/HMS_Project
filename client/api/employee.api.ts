@@ -192,6 +192,7 @@ export interface AddScheduleSlotPayload {
   shift_name?: string;
   start_time: string;
   end_time: string;
+  consultation_minutes?: number;
   // Day-specific schedules: set effective_from === effective_to to the target
   // date. Omit (or null) for a repeating weekly template row.
   effective_from?: string | null;
@@ -204,6 +205,7 @@ export interface UpdateScheduleSlotPayload {
   shift_name?: string;
   start_time: string;
   end_time: string;
+  consultation_minutes?: number;
   effective_from?: string | null;
   effective_to?: string | null;
 }
@@ -307,7 +309,7 @@ export const employeeApi = {
     API.post<AddScheduleSlotResponse>(`/doctor-schedule/recurring/slot/${employeeId}`, data),
 
   updateScheduleSlot: (employeeId: string, scheduleId: string | number, data: UpdateScheduleSlotPayload) =>
-    API.put<AddScheduleSlotResponse>(`/employees/${employeeId}/schedules/${scheduleId}`, data),
+    API.put<AddScheduleSlotResponse>(`/doctor-schedule/recurring/slot/${employeeId}/${scheduleId}`, data),
 
   // Soft-deletes the schedule row via the backend's
   // DELETE /employees/:employeeId/:schedule_id endpoint, which flips

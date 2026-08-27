@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   UserRound,
@@ -8,6 +8,7 @@ import {
   Phone,
   Mail,
   Loader2,
+  ArrowLeft,
 } from "lucide-react";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -23,27 +24,47 @@ import { QuickAddFab } from "@/components/hms/QuickAddFab";
 import HmsTable from "@/components/hms/HmsTable";
 import { AppointmentActionMenu } from "@/components/hms/AppointmentActionMenu";
 import PatientVitalsPanel from "@/components/hms/PatientVitalsPanel";
+import { getDepartmentColors } from "@/components/hms/DepartmentBadge";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { encounterApi } from "@/api/encounter.api";
 import { useToast } from "@/hooks/use-toast";
 import { usePermission } from "@/context/PermissionContext";
+import { getUser } from "@/utils/token";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 
-const statusVariant: Record<string, "blue" | "green" | "rose" | "amber" | "purple"> = {
+const statusVariant: Record<string, "blue" | "green" | "rose" | "amber" | "purple" | "teal"> = {
   Schedule: "blue",
+  Rescheduled: "teal",
+  "Reschedule Required": "amber",
   "Checked In": "amber",
   "In Consultation": "purple",
   Completed: "green",
   Cancelled: "rose",
 };
 
+// appointment_time is stored as a UTC-anchored wall-time value, so it must
+// be read with UTC getters (same convention as Appointments.tsx) to show
+// the booked wall time as hh:mm AM/PM.
+function formatAppointmentTime(time: string | null | undefined): string {
+  if (!time) return "—";
+  const t = new Date(time);
+  if (isNaN(t.getTime())) return "—";
+  const minutes = String(t.getUTCMinutes()).padStart(2, "0");
+  const period = t.getUTCHours() >= 12 ? "PM" : "AM";
+  const hours12 = t.getUTCHours() % 12 || 12;
+  return `${String(hours12).padStart(2, "0")}:${minutes} ${period}`;
+}
+
 function mapAppointment(a: AppointmentRecord) {
   const doctorName = a.employees
     ? [a.employees.first_name, a.employees.middle_name, a.employees.last_name].filter(Boolean).join(" ")
     : "—";
+  const deptName = a.department_master?.department_name ?? a.department ?? null;
+  const { bg: deptBg, text: deptColor } = getDepartmentColors(deptName);
 
   let date = "—";
-  let time = a.appointment_time || "—";
+  let time = formatAppointmentTime(a.appointment_time);
   if (a.appointment_date) {
     const d = new Date(a.appointment_date);
     if (!isNaN(d.getTime())) {
@@ -57,6 +78,8 @@ function mapAppointment(a: AppointmentRecord) {
     statusRaw === "cancelled" ? "Cancelled" :
     statusRaw === "checked_in" ? "Checked In" :
     statusRaw === "in_consultation" ? "In Consultation" :
+    statusRaw === "rescheduled" ? "Rescheduled" :
+    statusRaw === "reschedule_required" ? "Reschedule Required" :
     "Schedule";
 
   return {
@@ -66,7 +89,8 @@ function mapAppointment(a: AppointmentRecord) {
     doctor: doctorName,
     doctorId: a.employee_id || "—",
     department: a.department_master?.department_name || a.department || "—",
-    status: status as "Schedule" | "Completed" | "Cancelled",
+    status: status as "Schedule" | "Rescheduled" | "Reschedule Required" | "Completed" | "Cancelled",
+    appointmentDateISO: a.appointment_date,
   };
 }
 
@@ -78,6 +102,9 @@ export default function PatientProfile() {
   const [patient, setPatient] = useState<PatientRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [appointments, setAppointments] = useState<ReturnType<typeof mapAppointment>[]>([]);
+  // Bumped whenever an embedded action (e.g. vitals save) changes data so
+  // PatientVitalsPanel remounts and re-fetches its encounters immediately.
+  const [vitalsPanelVersion, setVitalsPanelVersion] = useState(0);
 
   useEffect(() => {
     if (!id) return;
@@ -88,13 +115,19 @@ export default function PatientProfile() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  useEffect(() => {
+  const fetchAppointments = useCallback(async () => {
     if (!id) return;
-    appointmentApi
-      .getAll({ patientId: id })
-      .then((res) => setAppointments(res.data.data.appointments.map(mapAppointment)))
-      .catch(() => {});
+    try {
+      const res = await appointmentApi.getAll({ patientId: id });
+      setAppointments(res.data.data.appointments.map(mapAppointment));
+    } catch {
+      // Keep any previously loaded rows on failure rather than wiping them.
+    }
   }, [id]);
+
+  useEffect(() => {
+    fetchAppointments();
+  }, [fetchAppointments]);
 
   function fullName(p: PatientRecord) {
     return [p.patient_first_name, p.patient_middle_name, p.patient_last_name].filter(Boolean).join(" ");
@@ -141,6 +174,8 @@ export default function PatientProfile() {
     { id: "department", label: "Department", type: "text", placeholder: "Search department" },
     { id: "status", label: "Status", type: "multiselect", options: [
       { label: "Schedule", value: "Schedule" },
+      { label: "Rescheduled", value: "Rescheduled" },
+      { label: "Reschedule Required", value: "Reschedule Required" },
       { label: "Completed", value: "Completed" },
       { label: "Cancelled", value: "Cancelled" },
     ]},
@@ -192,14 +227,14 @@ export default function PatientProfile() {
 
   const [cancelTarget, setCancelTarget] = useState<ReturnType<typeof mapAppointment> | null>(null);
   const [cancelReason, setCancelReason] = useState("");
-  const [vitalsOpen, setVitalsOpen] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const handleCancelAppointment = (target: ReturnType<typeof mapAppointment>) => {
     setCancelReason("");
     setCancelTarget(target);
   };
 
-  const handleConfirmCancelAppointment = () => {
+  const handleConfirmCancelAppointment = async () => {
     if (!cancelTarget) return;
 
     if (!cancelReason.trim()) {
@@ -207,17 +242,73 @@ export default function PatientProfile() {
       return;
     }
 
-    setAppointments((prev) =>
-      prev.map((apt) =>
-        apt === cancelTarget ? { ...apt, status: "Cancelled" } : apt,
-      ),
-    );
-    toast({
-      title: "Appointment cancelled",
-      description: `Appointment ${cancelTarget.id} has been cancelled.`,
-    });
-    setCancelTarget(null);
-    setCancelReason("");
+    setIsCancelling(true);
+    try {
+      await appointmentApi.cancel(
+        cancelTarget.id,
+        cancelReason.trim(),
+        getUser()?.employee_id ?? "",
+      );
+      toast({
+        title: "Appointment cancelled",
+        description: `Appointment ${cancelTarget.id} has been cancelled.`,
+      });
+      setCancelTarget(null);
+      setCancelReason("");
+      await fetchAppointments();
+      setVitalsPanelVersion((v) => v + 1);
+    } catch (err: any) {
+      toast({
+        title: "Failed to cancel appointment",
+        description: err.response?.data?.message || "Couldn't reach the appointments API.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  const handleCheckIn = async (appointmentId: string) => {
+    try {
+      await appointmentApi.updateStatus(appointmentId, "CHECKED_IN");
+      await encounterApi.create({ appointment_id: appointmentId });
+      await fetchAppointments();
+      setVitalsPanelVersion((v) => v + 1);
+      toast({
+        title: "Patient checked in",
+        description: `Appointment ${appointmentId} checked in and encounter created.`,
+      });
+    } catch (err: any) {
+      console.error("[Patient Profile] Check-in error:", err);
+      toast({
+        title: "Check-in failed",
+        description: err.response?.data?.message || "Failed to check in patient.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCheckOut = async (appointmentId: string) => {
+    try {
+      const encounters = await encounterApi.getByAppointment(appointmentId);
+      const encounter = encounters.data?.data;
+      if (encounter) {
+        await encounterApi.close(encounter.encounter_no, "DOCTOR");
+      }
+      await fetchAppointments();
+      setVitalsPanelVersion((v) => v + 1);
+      toast({
+        title: "Patient checked out",
+        description: `Appointment ${appointmentId} checked out.`,
+      });
+    } catch (err: any) {
+      console.error("[Patient Profile] Check-out error:", err);
+      toast({
+        title: "Check-out failed",
+        description: err.response?.data?.message || "Failed to check out patient.",
+        variant: "destructive",
+      });
+    }
   };
 
   if (loading) {
@@ -243,10 +334,23 @@ export default function PatientProfile() {
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
       <div className="flex flex-col flex-1 min-w-0">
         <main className="flex flex-col gap-6 p-6 md:p-8">
+          {/* Back Button */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate(-1)}
+              title="Go back"
+              aria-label="Go back"
+              className="w-9 h-9 flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <span className="text-sm back-button text-[#424752]">Back</span>
+          </div>
+
           {/* Patient Header Card */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 relative overflow-hidden">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-2 relative overflow-hidden">
             <div className="absolute top-0 right-0 w-1/3 h-full bg-slate-50 opacity-50 rounded-l-full transform translate-x-1/4 -translate-y-1/4 pointer-events-none" />
-            <div className="relative z-10 flex flex-col items-start gap-6 md:flex-row md:items-center md:justify-between">
+            <div className="relative z-10 flex flex-col items-start gap-6 p-4 md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-6">
                   <AvatarUpload
                     value={patient.patient_photo_url}
@@ -280,7 +384,10 @@ export default function PatientProfile() {
                 </div>
               </div>
               <div className="z-10 flex w-full flex-col items-center gap-4 md:w-auto md:flex-row">
-                <div className="flex flex-col items-center gap-1 sm:items-stretch">
+                <div className="flex flex-col items-center gap-11 sm:items-stretch">
+                  <a href="#" className="text-center text-sm font-semibold text-[#00488D] hover:underline">
+                    View Full Record
+                  </a>
                   <Button
                     className="flex w-full items-center gap-2 bg-[#004785] hover:bg-[#003a6b] sm:w-auto"
                     onClick={() => navigate("/appointments/book", { state: { patient } })}
@@ -288,9 +395,6 @@ export default function PatientProfile() {
                     <Calendar className="h-4 w-4" />
                     Book Appointment
                   </Button>
-                  <a href="#" className="text-center text-sm font-semibold text-[#00488D] hover:underline">
-                    View Full Record
-                  </a>
                 </div>
               </div>
             </div>
@@ -345,7 +449,7 @@ export default function PatientProfile() {
             </div>
 
             {/* Vital Signs Card */}
-            <PatientVitalsPanel patientId={id} />
+            <PatientVitalsPanel key={`vitals-${vitalsPanelVersion}`} patientId={id} />
           </div>
 
           {/* Appointments Section */}
@@ -412,7 +516,7 @@ export default function PatientProfile() {
                   const a = apt as any;
                   return (
                     <div className="flex items-center gap-3">
-                      <div className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text" style={{ backgroundColor: "#D6E3FF", color: "#00488D" }}>
+                      <div className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text" style={{ backgroundColor: a.doctorAvatarBg ?? "#D6E3FF", color: a.doctorAvatarColor ?? "#00488D" }}>
                         {a.doctor.split(" ").slice(1).map((w: string) => w[0]).join("")}
                       </div>
                       <div>
@@ -432,13 +536,16 @@ export default function PatientProfile() {
                   return (
                     <AppointmentActionMenu
                       status={a.status}
+                      appointmentDateISO={a.appointmentDateISO}
                       onView={() => handleView(a.id)}
                       onEdit={() => handleEdit(a.id)}
                       onCancel={() => handleCancelAppointment(a)}
-                      onCheckIn={() => {}}
-                      onCheckOut={() => {}}
-                      vitalsOpen={vitalsOpen}
-                      onVitalsOpenChange={setVitalsOpen}
+                      onCheckIn={() => handleCheckIn(a.id)}
+                      onCheckOut={() => handleCheckOut(a.id)}
+                      onVitalsSaved={() => {
+                        fetchAppointments();
+                        setVitalsPanelVersion((v) => v + 1);
+                      }}
                       appointmentId={a.id}
                       patientId={id}
                     />
@@ -477,6 +584,7 @@ export default function PatientProfile() {
         }
         confirmText="Cancel Appointment"
         cancelText="Keep Appointment"
+        loading={isCancelling}
         onConfirm={handleConfirmCancelAppointment}
         onCancel={() => setCancelTarget(null)}
       >

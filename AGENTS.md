@@ -240,6 +240,26 @@ const data: MyRouteResponse = await response.json();
  - Follow-up: first real check-in after the guard fix crashed with misleading Prisma "Argument `branch` is missing" - actual cause was encounter_type: null in the create payload (service sent appointment.Patient_type! but Patient_type is String? on appointment_history and the late-checked-in appointment had null; encounter.encounter_type is non-nullable @default("OPD") in schema.prisma). Latent until #11 because such appointments never reached encounter creation before. Fixed with encounter_type: appointment.Patient_type ?? ENCOUNTER_TYPE_DEFAULT (constant was already imported unused; value matches column default). No migration needed.
  - NOTE: backend runs via `pnpm dev` = ts-node src/server.ts with NO hot-reload - backend edits require manual restart or they never go live (this bit twice).
 
+<<<<<<< HEAD
+### 12. Scheduled.tsx restored from backup.tsx + HMS restyle
+ - Restored logic dropped when the redesigned page came in: ScheduleSlotModal mount (Add/Edit/Delete slot flows were dead without it), Pending Transfer dialog (affected appointments + Transfer/Reschedule-queue/Cancel actions + replacement doctor select), Leave Confirm / Leave Success / Leave Conflicts AlertDialogs.
+ - Fixed missing Sun icon import (compile error); removed dead custom-calendar leftovers (calendarDays/MONTH_NAMES/buildCalendarDays/previousMonth/nextMonth/toggledDates/parseDate/isSameDay), unused icons and DepartmentPill/StatusBadge imports; removed unused todaySlots/isSlotsLoading fetch effect (appointmentApi import dropped with it).
+ - alert() replaced with useToast toasts; error paths pass variant destructive.
+ - HMS design pass: Manrope + #F7F9FB bg, cards rounded-xl border #E5E7EB shadow-sm, primary buttons #004785 hover #003A6B active:scale-[0.98], accents #00488D/#D6E3FF, hovers #F2F4F6, segmented Day/Week tab control, grid header de-gradiented, day-column mini buttons invert on hover, slot blocks semantic green/blue/orange with hover lift + press scale, Availability header shows weekChanges spinner, Available/Unavailable pill driven by doctorIsAvailable. Ported dialogs styled to match ConfirmationDialog look.
+ - CalendarPicker From/To onSelect guarded with instanceof Date (DateRange union fix).
+
+### 13. Vitals popup scoping + full action-menu wiring (Appointments / Dashboard / patientProfile)
+ - AppointmentActionMenu now owns its vitals popover state internally (vitalsOpen/onVitalsOpenChange props deleted); previously ONE shared page-level boolean opened every "In Consultation" row's popover simultaneously, each bound to a different encounter.
+ - New onVitalsSaved prop -> VitalsSignsPopover onSaved fires after successful create/update; parents (Appointments/Dashboard/patientProfile) refetch their lists so updated vitals show instantly.
+ - VitalsSignsPopover prefill switched from branch-scoped GET /encounters?appointmentId to the mapping-checked GET /encounters/by-appointment/:id (exact single encounter, no 403s when no branch selected).
+ - Dashboard cancel fixed: it omitted cancelled_by, which cancelAppointmentValidation hard-requires -> every dashboard cancel returned 400 "Cancelled by is required". Now sends logged-in employee_id like Appointments.tsx.
+ - patientProfile menu fully wired (was stubs): real Check In (updateStatus + encounterApi.create + refetch), Check Out (encounterApi.getByAppointment + close + refetch), and persisting Cancel via appointmentApi.cancel + refetch (was local-state-only). ConfirmationDialog loading prop wired. PatientVitalsPanel remounts via version key after saves/cancellations so the side card refreshes immediately.
+
+### 14. Auto-cancel job for elapsed appointment days (backend)
+ - New HMS_Backend/HMS_Backend/src/jobs/appointment-status.job.ts: sweeps SCHEDULED/RESCHEDULED appointments whose appointment_date is strictly before today(IST) and flips them to CANCELLED with cancelled_at=now(), cancelled_by="Auto cancelled", cancel_reason="Auto-cancelled: appointment day has passed", notification_status=NOT_REQUIRED - identical write shape to the manual cancel flow so audit consumers cannot distinguish handling.
+ - IST day boundary via the same fixed UTC+5:30 offset convention as AddAppointment.tsx; single batched updateMany scoped ONLY to those two statuses (terminal + in-clinical + workflow-flag states are filtered out and can never be touched); re-entrancy guard; startup run self-heals missed days, then every 5 min (interval.unref).
+ - Wired in server.ts before app.listen. Backend restart required to activate (ts-node has no hot reload). Frontend needs no changes - CANCELLED already blocks actions, releases Assigned Doctor on Patients, and frees slots.
+=======
 ### 12. Latest vitals on patient-details pages (encounters/latest wiring)
  - Backend already had GET /api/encounters/latest?patientId=&limit= (HMS_Backend-main/src/modules/encounter/encounter.routes.ts:50, NO branchScope; service scopes to caller's ACTIVE user_branch_mapping, top-level admins see all, zero mappings -> empty array). It had zero frontend consumers.
  - client/api/encounter.api.ts: added encounterApi.getLatest(patientId, limit?) wrapper.
@@ -255,3 +275,4 @@ const data: MyRouteResponse = await response.json();
  - New client/utils/vitals.ts: computeBsa (Mosteller, sqrt(h_cm*w_kg/3600), 2dp) and computeBmi (kg/m^2, 1dp); both null-safe on missing/non-positive inputs.
  - useLatestPatientVitals: bsa now falls back to computeBsa(heightValue, weightValue) when no recorded chemotherapy body_surface_area exists (recorded value wins) - BSA populates in both portals' header strips for encounter-only patients. Stale "BSA chemo-only" comments updated.
  - Patientconsut.tsx buildMeasurements deduped onto computeBsa/computeBmi (identical output formatting preserved).
+>>>>>>> bdd54fda5d78f132f726b747b1b2db2c3e99ac3c

@@ -15,13 +15,16 @@ import { getUser } from "../../utils/token";
 import { computeBmi, computeBsa } from "../../utils/vitals";
 import {
   doctorDashboardApi,
-  type DoctorNotificationItem,
 } from "../../api/doctorDashboard.api";
 import {
   patientApi,
   type PatientRecord,
 } from "../../api/patient.api";
 import {
+
+
+
+  
   encounterApi,
   type EncounterRecord,
 } from "../../api/encounter.api";
@@ -42,6 +45,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "../../components/ui/popover";
+import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import { MultiSelectDropdown } from "../../components/ui/multi-select-dropdown";
 
 const formatPickedDate = (date: Date) => {
@@ -712,104 +716,9 @@ const Consultation: React.FC = () => {
     }, 2200);
   };
 
-  /* ============================================================
-     NOTIFICATIONS
-  ============================================================ */
-
-  const [notificationOpen, setNotificationOpen] = useState(false);
-  const [notifItems, setNotifItems] = useState<DoctorNotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [doctorEmployeeId, setDoctorEmployeeId] = useState<string | null>(null);
-  const notificationRef = useRef<HTMLDivElement>(null);
-
-  const notifTimeAgo = (iso: string): string => {
-    const then = new Date(iso).getTime();
-    if (Number.isNaN(then)) return "";
-    const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
-    if (seconds < 60) return "Just now";
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  };
-
-  const notifFormatDate = (value: string) => {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleDateString("en-US", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  };
-
-  const notifFormatTime = (value: string) => {
-    if (!value) return "";
-    const timeMatch = value.match(
-      /(?:T|\s)?(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?/
-    );
-    if (timeMatch) {
-      let hour = Number(timeMatch[1]);
-      const minute = timeMatch[2];
-      const suffix = hour >= 12 ? "PM" : "AM";
-      hour = hour % 12 || 12;
-      return `${String(hour).padStart(2, "0")}:${minute} ${suffix}`;
-    }
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  useEffect(() => {
-    const user = getUser();
-    const empId = user?.employee_id;
-    if (!empId) return;
-    setDoctorEmployeeId(empId);
-    let cancelled = false;
-    doctorDashboardApi
-      .getNotifications(empId)
-      .then((res) => {
-        if (cancelled) return;
-        setNotifItems(res.data.data.notifications);
-        setUnreadCount(res.data.data.unreadCount);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (notificationOpen && unreadCount > 0 && doctorEmployeeId) {
-      setUnreadCount(0);
-      doctorDashboardApi
-        .markNotificationsRead(doctorEmployeeId)
-        .catch(() => {});
-    }
-  }, [notificationOpen, unreadCount, doctorEmployeeId]);
-
-  useEffect(() => {
-    const handleClick = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (notificationRef.current && !notificationRef.current.contains(target)) {
-        setNotificationOpen(false);
-      }
-    };
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setNotificationOpen(false);
-    };
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, []);
+/* ============================================================
+     NOTIFICATIONS - Using global BellNotificationButton
+   ============================================================ */
 
   /* ============================================================
      LOAD DRAFT
@@ -1360,201 +1269,9 @@ const Consultation: React.FC = () => {
 
               <div className="flex items-center gap-6">
 
-                {/* NOTIFICATION */}
+                {/* NOTIFICATION (Global) */}
 
-                <div className="relative" ref={notificationRef}>
-                  <button
-                    type="button"
-                    aria-label="Notifications"
-                    onClick={() => setNotificationOpen((v) => !v)}
-                    className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none"
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="h-5 w-5"
-                    >
-                      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
-                      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-                    </svg>
-
-                    {unreadCount > 0 && (
-                      <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#003ec7] px-1 text-[10px] font-bold leading-none text-white">
-                        {unreadCount > 9 ? "9+" : unreadCount}
-                      </span>
-                    )}
-                  </button>
-
-                  {notificationOpen && (
-                    <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-                      <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-                        <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">
-                          Notifications
-                        </h1>
-                        <div className="flex shrink-0 items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setNotifItems((prev) =>
-                                prev.map((n) => ({ ...n, status: "READ" }))
-                              )
-                            }
-                            className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
-                          >
-                            Mark all as read
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setNotifItems([])}
-                            disabled={notifItems.length === 0}
-                            className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            Clear all
-                          </button>
-                        </div>
-                      </header>
-
-                      <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-                        {notifItems.length === 0 ? (
-                          <p className="py-6 text-center text-xs text-[#434656]">
-                            No new notifications
-                          </p>
-                        ) : (
-                          notifItems.map((item, index) => {
-                            const patient =
-                              item.appointment_history?.patient_bio_data;
-                            const patientName = [
-                              patient?.patient_first_name,
-                              patient?.patient_middle_name,
-                              patient?.patient_last_name,
-                            ]
-                              .filter(Boolean)
-                              .join(" ") || "A patient";
-
-                            const isBooking =
-                              item.notification_type === "BOOKING";
-                            const appointment =
-                              item.appointment_history;
-                            const isUnread = item.status === "UNREAD";
-
-                            return (
-                              <article
-                                key={item.notification_id}
-                                className="relative flex gap-3 rounded-lg px-2 py-3 transition-colors"
-                              >
-                                {isUnread && (
-                                  <span className="absolute left-0 top-5 h-2 w-2 rounded-full bg-[#003ec7]" />
-                                )}
-
-                                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f0eaff]">
-                                  <svg
-                                    viewBox="0 0 24 24"
-                                    className="h-5 w-5 text-[#7046c9]"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="1.8"
-                                  >
-                                    <rect
-                                      x="3"
-                                      y="5"
-                                      width="18"
-                                      height="16"
-                                      rx="2"
-                                    />
-                                    <path
-                                      d="M16 3v4M8 3v4M3 10h18"
-                                      strokeLinecap="round"
-                                    />
-                                    <path
-                                      d="M8 14h3M8 17h5"
-                                      strokeLinecap="round"
-                                    />
-                                  </svg>
-                                </div>
-
-                                <div className="min-w-0 flex-1">
-                                  <div className="mb-1 flex items-start justify-between gap-3">
-                                    <h3 className="truncate text-xs font-semibold tracking-[0.02em] text-[#131b2e]">
-                                      {isBooking ? (
-                                        <>
-                                          <span className="font-semibold text-[#131b2e]">
-                                            {patientName}
-                                          </span>{" "}
-                                          booked an appointment
-                                          {appointment
-                                            ? ` for ${notifFormatDate(appointment.appointment_date)} at ${notifFormatTime(appointment.appointment_time)}`
-                                            : ""}
-                                          .
-                                        </>
-                                      ) : (
-                                        <>
-                                          <span className="font-semibold text-[#131b2e]">
-                                            {patientName}
-                                          </span>{" "}
-                                          checked in.
-                                        </>
-                                      )}
-                                    </h3>
-
-                                    <div className="flex shrink-0 items-center gap-2">
-                                      <span
-                                        className={[
-                                          "text-[11px] font-medium leading-[14px]",
-                                          isUnread
-                                            ? "text-[#003ec7]"
-                                            : "text-[#434656]",
-                                        ].join(" ")}
-                                      >
-                                        {notifTimeAgo(item.created_at)}
-                                      </span>
-
-                                      {isUnread && (
-                                        <span
-                                          aria-label="Unread indicator"
-                                          className="h-2 w-2 rounded-full bg-[#003ec7]"
-                                        />
-                                      )}
-
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setNotifItems((prev) =>
-                                            prev.filter(
-                                              (n) =>
-                                                n.notification_id !==
-                                                item.notification_id
-                                            )
-                                          )
-                                        }
-                                        aria-label="Delete notification"
-                                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
-                                      >
-                                        <svg
-                                          viewBox="0 0 24 24"
-                                          className="h-3.5 w-3.5 fill-none stroke-current"
-                                          strokeWidth="2"
-                                        >
-                                          <path
-                                            d="M6 6l12 12M18 6L6 18"
-                                            strokeLinecap="round"
-                                          />
-                                        </svg>
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                              </article>
-                            );
-                          })
-                        )}
-                      </main>
-                    </div>
-                  )}
-                </div>
+                <BellNotificationButton size="md" />
 
                 {/* USER */}
 
@@ -2954,6 +2671,33 @@ const Diagnosis: React.FC<{
 
   const [cancerTypes, setCancerTypes] = useState<CancerTypeItem[]>([]);
   const [subtypes, setSubtypes] = useState<CancerSubtypeItem[]>([]);
+
+  /* Sync the diagnosis selection (cancer_type_id + subtype_id) to
+     localStorage so downstream steps (Treatment Plan) can read the
+     IDs to query regimen protocols from the backend. */
+  useEffect(() => {
+    if (!formData.type || !formData.subType) return;
+
+    const matchedType = cancerTypes.find(
+      (item) => item.cancer_type === formData.type
+    );
+    const matchedSubtype = subtypes.find(
+      (item) => item.subtype_name === formData.subType
+    );
+
+    if (matchedType && matchedSubtype) {
+      localStorage.setItem(
+        "hms_diagnosis_selection",
+        JSON.stringify({
+          cancer_type_id: matchedType.cancer_type_id,
+          subtype_id: matchedSubtype.subtype_id,
+          cancer_type: matchedType.cancer_type,
+          subtype_name: matchedSubtype.subtype_name,
+        })
+      );
+    }
+  }, [formData.type, formData.subType, cancerTypes, subtypes]);
+
   const [stageLabels, setStageLabels] = useState<string[]>([]);
   const [tnmStages, setTnmStages] = useState<string[]>([]);
   const [tOptions, setTOptions] = useState<string[]>([]);
@@ -2964,7 +2708,6 @@ const Diagnosis: React.FC<{
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
   const [diagnosisError, setDiagnosisError] = useState("");
   const [savingDiagnosis, setSavingDiagnosis] = useState(false);
-  const [notificationOpen, setNotificationOpen] = useState(false);
 
   const diagnosisRequestRef = useRef(0);
   const stagingRequestRef = useRef(0);
@@ -3693,45 +3436,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
 
           {/* Notification + User */}
           <div className="flex items-center gap-4 sm:gap-6">
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() =>
-                  setNotificationOpen((previous) => !previous)
-                }
-                aria-label="Notifications"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none"
-              >
-                <NotificationIcon />
-
-                <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-[#003ec7] ring-2 ring-white" />
-              </button>
-
-              {notificationOpen && (
-                <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-                  <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-                    <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <button
-                        type="button"
-                        className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
-                      >
-                        Mark all as read
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Clear all
-                      </button>
-                    </div>
-                  </header>
-                  <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-                    <p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
-                  </main>
-                </div>
-              )}
-            </div>
+            <BellNotificationButton size="md" />
 
             <div className="flex items-center gap-3">
               <span className="hidden text-sm font-semibold text-gray-700 sm:block">
@@ -4554,10 +4259,12 @@ type Drug = {
   unit: string;
   volume: string;
   planItemId?: string;
+  medicineId?: string;
 };
 
 type ChemotherapyPlanItem = {
   chemotherapy_plan_item_id: string;
+  medicine_id: string;
   drug_role: string | null;
   protocol_dose: number | null;
   protocol_dose_unit: string | null;
@@ -4653,6 +4360,7 @@ const ChemotherapyOrder: React.FC<{
     startDate: false,
     drugs: false,
     premedication: false,
+    supportive: false,
   });
 
   const protocolRef = useRef<RegimenProtocolDetail | null>(null);
@@ -4752,6 +4460,7 @@ const ChemotherapyOrder: React.FC<{
         startDate?: string;
         drugs?: Drug[];
         premedicationDrugs?: Drug[];
+        supportiveDrugs?: Drug[];
       };
 
       if (data.cycleDay) {
@@ -4776,6 +4485,14 @@ const ChemotherapyOrder: React.FC<{
         setPremedicationDrugs(data.premedicationDrugs);
         userTouched.current.premedication = true;
       }
+
+      if (
+        Array.isArray(data.supportiveDrugs) &&
+        data.supportiveDrugs.length > 0
+      ) {
+        setSupportiveDrugs(data.supportiveDrugs);
+        userTouched.current.supportive = true;
+      }
     } catch (error) {
       console.error("Failed to restore chemotherapy order draft:", error);
     }
@@ -4792,6 +4509,9 @@ const ChemotherapyOrder: React.FC<{
         premedicationDrugs: userTouched.current.premedication
           ? premedicationDrugs
           : [],
+        supportiveDrugs: userTouched.current.supportive
+          ? supportiveDrugs
+          : [],
       })
     );
   }, [
@@ -4799,6 +4519,7 @@ const ChemotherapyOrder: React.FC<{
     startDate,
     drugs,
     premedicationDrugs,
+    supportiveDrugs,
     orderDraftKey,
     resolvedPatientId,
   ]);
@@ -4901,6 +4622,7 @@ const ChemotherapyOrder: React.FC<{
             item.medicine_master?.unit ||
             "",
           volume: "",
+          medicineId: item.medicine_id,
         });
 
         setDrugs(
@@ -4910,7 +4632,12 @@ const ChemotherapyOrder: React.FC<{
         );
         setPremedicationDrugs(
           items
-            .filter((item) => item.drug_role === "PREMEDICATION")
+            .filter((item) => item.drug_role?.toUpperCase() === "PREMEDICATION")
+            .map(toDrug)
+        );
+        setSupportiveDrugs(
+          items
+            .filter((item) => item.drug_role === "SUPPORTIVE")
             .map(toDrug)
         );
         protocolRef.current = protocol;
@@ -4948,6 +4675,9 @@ const ChemotherapyOrder: React.FC<{
 
         planIdRef.current = plan.chemotherapy_plan_id;
 
+        const planItems = plan.chemotherapy_plan_items ?? [];
+        planItemsRef.current = planItems;
+
         if (!userTouched.current.startDate) {
           setStartDate(formatDateDMY(plan.treatment_start_date));
         }
@@ -4974,8 +4704,6 @@ const ChemotherapyOrder: React.FC<{
           setProtocolName(
             plan.protocol_name || plan.regimen_name || ""
           );
-          const planItems = plan.chemotherapy_plan_items ?? [];
-          planItemsRef.current = planItems;
           const toPlanDrug = (
             item: ChemotherapyPlanItem,
             index: number
@@ -4999,6 +4727,7 @@ const ChemotherapyOrder: React.FC<{
               item.dilution_volume != null
                 ? `${item.dilution_volume}`
                 : "",
+            medicineId: item.medicine_id,
           });
 
           setDrugs(
@@ -5008,7 +4737,15 @@ const ChemotherapyOrder: React.FC<{
           );
           setPremedicationDrugs(
             planItems
-              .filter((item) => item.drug_role === "PREMEDICATION")
+              .filter((item) => item.drug_role?.toUpperCase() === "PREMEDICATION")
+
+
+
+              .map(toPlanDrug)
+          );
+          setSupportiveDrugs(
+            planItems
+              .filter((item) => item.drug_role === "SUPPORTIVE")
               .map(toPlanDrug)
           );
 
@@ -5039,40 +4776,7 @@ const ChemotherapyOrder: React.FC<{
 
   useEffect(() => {
     if (!resolvedPatientId) return;
-    let cancelled = false;
-
-    API.get<{ success: boolean; data: Array<{
-      medicine_id: string;
-      medicine_name: string;
-      generic_name: string | null;
-      medicine_category: string | null;
-      medicine_type: string | null;
-      dosage_form: string | null;
-      unit: string | null;
-      strength: string | null;
-      route: string | null;
-    }> }>("/chemotherapy/supportive-medicines")
-      .then((response) => {
-        if (cancelled) return;
-        const meds = response.data.data;
-        setSupportiveDrugs(
-          meds.map((med, index) => ({
-            id: index,
-            name: med.medicine_name,
-            form: med.dosage_form || "",
-            dose: med.strength || "",
-            unit: med.unit || "",
-            volume: "",
-          }))
-        );
-      })
-      .catch((error) => {
-        console.error("Failed to load supportive medicines:", error);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    setSupportiveDrugs([]);
   }, [resolvedPatientId]);
 
   const handleAddDrug = () => {
@@ -5146,22 +4850,73 @@ const ChemotherapyOrder: React.FC<{
 
   const resolvePlanItemId = (
     kind: "drug" | "premedication",
-    name: string
+    name: string,
+    medicineId?: string
   ) => {
     const role = kind === "drug" ? "PRIMARY" : "PREMEDICATION";
     const normalizedName = name.trim().toLowerCase();
 
-    const matched = planItemsRef.current.find(
+    // 1. Exact medicine_id match within same role
+    if (medicineId) {
+      const byId = planItemsRef.current.find(
+        (item) =>
+          item.medicine_id === medicineId &&
+          item.drug_role?.toUpperCase() === role
+      );
+      if (byId) return byId.chemotherapy_plan_item_id;
+
+      // 2. Exact medicine_id match across any role
+      const byIdAnyRole = planItemsRef.current.find(
+        (item) => item.medicine_id === medicineId
+      );
+      if (byIdAnyRole) return byIdAnyRole.chemotherapy_plan_item_id;
+    }
+
+    // 3. Name match within same role
+    const candidates = planItemsRef.current.filter(
       (item) =>
-        (!item.drug_role || item.drug_role === role) &&
-        (
-          item.medicine_master?.medicine_name ||
-          item.medicine_master?.generic_name ||
-          ""
-        )
-          .trim()
-          .toLowerCase() === normalizedName
+        !item.drug_role || item.drug_role.toUpperCase() === role
     );
+
+    let matched =
+      candidates.find(
+        (item) =>
+          (
+            item.medicine_master?.medicine_name ||
+            item.medicine_master?.generic_name ||
+            ""
+          )
+            .trim()
+            .toLowerCase() === normalizedName
+      );
+
+    // 4. Name match across any role
+    if (!matched) {
+      matched = planItemsRef.current.find(
+        (item) =>
+          (
+            item.medicine_master?.medicine_name ||
+            item.medicine_master?.generic_name ||
+            ""
+          )
+            .trim()
+            .toLowerCase() === normalizedName
+      );
+    }
+
+    // 5. Partial name match
+    if (!matched && normalizedName) {
+      matched = planItemsRef.current.find(
+        (item) => {
+          const item_name = (
+            item.medicine_master?.medicine_name ||
+            item.medicine_master?.generic_name ||
+            ""
+          ).trim().toLowerCase();
+          return item_name.includes(normalizedName) || normalizedName.includes(item_name);
+        }
+      );
+    }
 
     return matched?.chemotherapy_plan_item_id ?? "";
   };
@@ -5185,11 +4940,50 @@ const ChemotherapyOrder: React.FC<{
       if (planIdRef.current) {
         planItemId =
           editDraft.planItemId ||
-          resolvePlanItemId(editingRow.kind, editDraft.name);
+          resolvePlanItemId(editingRow.kind, editDraft.name, editDraft.medicineId);
+
+        if (!planItemId && editDraft.medicineId) {
+          try {
+            const createRes = await API.post(
+              `/chemotherapy/plans/${planIdRef.current}/items`,
+              {
+                medicine_id: editDraft.medicineId,
+                drug_role: editingRow.kind === "drug" ? "PRIMARY" : "PREMEDICATION",
+                drug_sequence: planItemsRef.current.length + 1,
+                dosage: trimmedDose === "" ? null : Number(trimmedDose),
+                dosage_unit: editDraft.unit.trim() || null,
+              }
+            );
+            const planData = createRes.data?.data;
+            const newItems: ChemotherapyPlanItem[] = planData?.chemotherapy_plan_items ?? [];
+            const created = newItems.find(
+              (i) => i.medicine_id === editDraft.medicineId
+            );
+            if (created) {
+              planItemId = created.chemotherapy_plan_item_id;
+              editDraft.planItemId = planItemId;
+              planItemsRef.current = newItems;
+            }
+          } catch (createErr: any) {
+            console.error("Failed to create plan item:", createErr);
+          }
+        }
 
         if (!planItemId) {
+          console.error("resolvePlanItemId failed:", {
+            kind: editingRow.kind,
+            name: editDraft.name,
+            medicineId: editDraft.medicineId,
+            planItemCount: planItemsRef.current.length,
+            planItems: planItemsRef.current.map((i) => ({
+              id: i.chemotherapy_plan_item_id,
+              medicineId: i.medicine_id,
+              name: i.medicine_master?.medicine_name,
+              role: i.drug_role,
+            })),
+          });
           throw new Error(
-            "Could not match this medication to the patient's chemotherapy plan."
+            "Could not match this medication to the patient's chemotherapy plan. The plan may not have been saved yet — complete the Treatment Plan step first."
           );
         }
 
@@ -5590,32 +5384,12 @@ const ChemotherapyOrder: React.FC<{
                           key={drug.id}
                           className="bg-blue-50/40 transition-colors"
                         >
-                          <td className="px-3 py-3 pl-6 pr-3">
-                            <input
-                              type="text"
-                              value={editDraft.name}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "name",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[160px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 pl-6 pr-3 text-base font-medium text-gray-900">
+                            {editDraft.name}
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.form}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "form",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[120px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-gray-500">
+                            {editDraft.form}
                           </td>
 
                           <td className="px-3 py-3">
@@ -5632,18 +5406,8 @@ const ChemotherapyOrder: React.FC<{
                             />
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.unit}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "unit",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-blue-500">
+                            {editDraft.unit}
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
@@ -5804,32 +5568,12 @@ const ChemotherapyOrder: React.FC<{
                           key={drug.id}
                           className="bg-blue-50/40 transition-colors"
                         >
-                          <td className="px-3 py-3 pl-6 pr-3">
-                            <input
-                              type="text"
-                              value={editDraft.name}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "name",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[160px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 pl-6 pr-3 text-base font-medium text-gray-900">
+                            {editDraft.name}
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.form}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "form",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[120px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-gray-500">
+                            {editDraft.form}
                           </td>
 
                           <td className="px-3 py-3">
@@ -5846,18 +5590,8 @@ const ChemotherapyOrder: React.FC<{
                             />
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.unit}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "unit",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-blue-500">
+                            {editDraft.unit}
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
@@ -7068,9 +6802,9 @@ const TreatmentPlan: React.FC<{
         }
       }
 
-      if (!cancerTypeId || !subtypeId) {
+      if (!cancerTypeId) {
         setProtocolsError(
-          "Cancer type and sub type not found. Complete the Diagnosis step first."
+          "Cancer type not found. Complete the Diagnosis step first."
         );
         return;
       }

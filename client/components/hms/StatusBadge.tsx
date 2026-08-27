@@ -12,6 +12,7 @@ export type StatusTone =
   | "purple"
   | "emerald"
   | "gray"
+  | "teal"
   | "rose";
 
 type StatusBadgeProps = {
@@ -31,6 +32,7 @@ const toneClasses: Record<StatusTone, { container: string; dot: string }> = {
   purple:   { container: "bg-purple-50 text-purple-600", dot: "bg-purple-500" },
   emerald:  { container: "bg-emerald-50 text-emerald-600", dot: "bg-emerald-500" },
   gray:     { container: "bg-gray-100 text-gray-600", dot: "bg-gray-400" },
+  teal:     { container: "bg-teal-50 text-teal-600", dot: "bg-teal-500" },
   rose:     { container: "bg-rose-50 text-rose-600", dot: "bg-rose-500" },
 };
 
@@ -42,7 +44,7 @@ const statusToneMap: Record<string, StatusTone> = {
   booked: "blue",
   confirmed: "green",
   cancelled: "red",
-  rescheduled: "amber",
+  rescheduled: "teal",
   "in consultation": "purple",
   completed: "emerald",
   "no show": "gray",

@@ -2477,28 +2477,7 @@ export default function Notifications() {
     lastSeenMs,
   ]);
 
-  /*
-   * Opening the bell popover marks
-   * everything as read.
-   */
-  useEffect(() => {
-    const handleView =
-      () => {
-        markAllAsRead();
-      };
-
-    window.addEventListener(
-      "hms-view-notifications",
-      handleView
-    );
-
-    return () => {
-      window.removeEventListener(
-        "hms-view-notifications",
-        handleView
-      );
-    };
-  }, [markAllAsRead]);
+  // Red dot only clears via explicit "Mark all read" or "Clear all" button clicks.
 
   /* ------------------------------------------------------------------------ */
   /* UI                                                                       */

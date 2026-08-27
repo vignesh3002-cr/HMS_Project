@@ -117,6 +117,7 @@ interface ScheduleEntry {
   start_time: string;
   end_time: string;
   branch_id: string;
+  consultation_minutes: string;
 }
 
 function deriveShiftName(startTime: string): string {
@@ -725,6 +726,7 @@ export default function AddEmployee() {
 
         if (roleType === "DOCTOR") {
           setRemovedScheduleIds([]);
+          const profile: any = payload?.doctorProfile;
           const dbSchedules: any[] = payload?.doctorSchedules || [];
           if (dbSchedules.length > 0) {
             const loadedSchedule = dbSchedules.map((s: any) => ({
@@ -733,13 +735,14 @@ export default function AddEmployee() {
               start_time: toTimeInputValue(s.start_time) || "09:00",
               end_time: toTimeInputValue(s.end_time) || "17:00",
               branch_id: s.branch_id || "",
+              consultation_minutes: s.consultation_minutes ? String(s.consultation_minutes) : String(profile?.consultation_minutes || "20"),
             }));
             setSchedule(loadedSchedule);
             initialScheduleRef.current = loadedSchedule;
           } else {
             initialScheduleRef.current = [];
           }
-          const profile: any = payload?.doctorProfile;
+          
           if (profile?.consultation_minutes) {
             setConsultationMinutes(String(profile.consultation_minutes));
           }
@@ -852,7 +855,7 @@ export default function AddEmployee() {
     const id = `slot-${nextSlotId.current++}`;
     setSchedule((p) => [
       ...p,
-      { id, day_of_week: "", start_time: "09:00", end_time: "17:00", branch_id: "" },
+      { id, day_of_week: "", start_time: "09:00", end_time: "17:00", branch_id: "", consultation_minutes: "20" },
     ]);
   };
 
@@ -996,7 +999,9 @@ export default function AddEmployee() {
         license_no: formData.docLicenseNo || undefined,
         doctor_bio: formData.doctorBio || undefined,
         joining_date: formData.joiningDate,
-        consultation_minutes: Number(consultationMinutes) || 20,
+        consultation_minutes: formData.roleType === "DOCTOR" && schedule.length > 0
+          ? Number(schedule[0].consultation_minutes) || Number(consultationMinutes) || 20
+          : Number(consultationMinutes) || 20,
         working_hours:
           formData.roleType === "DOCTOR" && !scheduleUnchanged ? workingHours : undefined,
       };
@@ -1189,11 +1194,11 @@ export default function AddEmployee() {
     }
 
     if (formData.roleType === "DOCTOR") {
-      const bad = schedule.find((s) => !s.day_of_week || !s.start_time || !s.end_time);
+      const bad = schedule.find((s) => !s.day_of_week || !s.start_time || !s.end_time || !s.consultation_minutes || Number(s.consultation_minutes) < 1);
       if (bad) {
         toast({
           title: "Incomplete schedule",
-          description: "Please select a day, start time and end time for every schedule time slot.",
+          description: "Please select a day, start time, end time and consultation minutes for every schedule time slot.",
           variant: "destructive",
         });
         return;
@@ -2079,7 +2084,7 @@ export default function AddEmployee() {
 
           {/* ── Doctor Bio ── */}
           <AnimatePresence>
-            {isMedical && (
+            {formData.roleType === "DOCTOR" && (
               <motion.div
                 key="doctor-bio-section"
                 layout
@@ -2092,7 +2097,7 @@ export default function AddEmployee() {
                   title="Doctor Bio"
                   sub="A brief professional biography for the employee profile."
                 >
-                  <div className="max-w-2xl">
+                  <div className="w-full">
                     <label className={labelCls}>
                       Bio <Req />
                     </label>
@@ -2100,8 +2105,8 @@ export default function AddEmployee() {
                       name="doctorBio"
                       placeholder="Brief professional biography (max 200 characters)"
                       maxLength={200}
-                      rows={2}
-                      className={inputCls + " resize-y h-auto min-h-[96px]"}
+                      rows={3}
+                      className={inputCls + " resize-y"}
                       value={formData.doctorBio}
                       onChange={handleChange}
                       disabled={submitting || !roleConfig}
@@ -2130,21 +2135,6 @@ export default function AddEmployee() {
                   title="Schedule and time slots"
                   sub="Weekly working hours — shown only for the Doctor role."
                 >
-                  {/* Consultation minutes */}
-                  <div className="mb-5 max-w-[200px]">
-                    <label className={labelCls}>
-                      Consultation minutes <Req />
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      className={inputCls}
-                      value={consultationMinutes}
-                      onChange={(e) => setConsultationMinutes(e.target.value)}
-                      disabled={submitting}
-                    />
-                  </div>
-
                   {schedule.length === 0 && (
                     <p className="text-[13px] text-gray-400 mb-3">
                       No time slots added yet.
@@ -2170,7 +2160,7 @@ export default function AddEmployee() {
                             value={entry.day_of_week}
                             onValueChange={(v) => updateSlot(entry.id, "day_of_week", v)}
                             placeholder="Select day"
-                            disabled={submitting}
+                            disabled={submitting || isEditMode}
                           />
                         </div>
 
@@ -2183,7 +2173,7 @@ export default function AddEmployee() {
                             value={entry.start_time}
                             onChange={(v) => updateSlot(entry.id, "start_time", v)}
                             placeholder="Start time"
-                            disabled={submitting}
+                            disabled={submitting || isEditMode}
                           />
                         </div>
 
@@ -2196,7 +2186,22 @@ export default function AddEmployee() {
                             value={entry.end_time}
                             onChange={(v) => updateSlot(entry.id, "end_time", v)}
                             placeholder="End time"
-                            disabled={submitting}
+                            disabled={submitting || isEditMode}
+                          />
+                        </div>
+
+                        {/* Consultation minutes */}
+                        <div className="flex flex-col">
+                          <label className="text-[10.5px] font-bold text-blue-600 uppercase tracking-[0.04em] mb-1.5">
+                            Consultation min <Req />
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            className={inputCls + " !h-9 !w-[90px]"}
+                            value={entry.consultation_minutes}
+                            onChange={(e) => updateSlot(entry.id, "consultation_minutes", e.target.value)}
+                            disabled={submitting || isEditMode}
                           />
                         </div>
 
@@ -2217,7 +2222,7 @@ export default function AddEmployee() {
                             value={entry.branch_id}
                             onValueChange={(v) => updateSlot(entry.id, "branch_id", v)}
                             placeholder="Select branch"
-                            disabled={submitting || branches.length === 0}
+                            disabled={submitting || branches.length === 0 || isEditMode}
                           />
                         </div>
 
@@ -2225,7 +2230,7 @@ export default function AddEmployee() {
                         <button
                           type="button"
                           onClick={() => removeSlot(entry.id)}
-                          disabled={submitting}
+                          disabled={submitting || isEditMode}
                           className="w-8 h-8 flex items-center justify-center rounded-[6px] border border-red-300 bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50"
                           aria-label="Remove time slot"
                         >
@@ -2238,11 +2243,11 @@ export default function AddEmployee() {
                   <button
                     type="button"
                     onClick={addSlot}
-                    disabled={submitting}
+                    disabled={submitting || isEditMode}
                     className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-semibold text-blue-600 border border-blue-200 rounded-[10px] bg-white hover:bg-blue-50 transition-colors disabled:opacity-50"
                   >
                     <Plus className="w-4 h-4" />
-                    Add time slot
+                    Add time slot <Req />
                   </button>
                 </Section>
               </motion.div>
