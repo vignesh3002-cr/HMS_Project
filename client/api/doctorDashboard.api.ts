@@ -66,6 +66,7 @@ export interface DashboardAppointment {
   appointment_no?: string;
   appointment_date: string;
   appointment_time: string;
+  Patient_visit_type?: string;
   status: string;
   patient_bio_data?: {
     patient_id?: string;

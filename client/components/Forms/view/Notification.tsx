@@ -16,6 +16,12 @@ import {
 import {
   appointmentApi,
 } from "@/api/appointment.api";
+import { getActiveBranchId } from "@/api/axios";
+import { getUser } from "@/utils/token";
+import {
+  getAccountActivity,
+  type AccountActivity,
+} from "@/utils/accountActivity";
 
 const DISMISSED_NOTIFICATIONS_KEY =
   "hms_dismissed_notifications";
@@ -23,7 +29,200 @@ const DISMISSED_NOTIFICATIONS_KEY =
 const NOTIFICATION_SNAPSHOT_KEY =
   "hms_notification_snapshot_v2";
 
-const POLLING_INTERVAL = 5000;
+const LAST_SEEN_KEY =
+  "hms_notifications_last_seen";
+
+const EVENT_CACHE_KEY =
+  "hms_notification_events_v1";
+
+const POLLING_INTERVAL = 30000;
+
+/*
+ * Branch resolution for the notification feed. On a fresh origin (e.g.
+ * first visit to the deployed site) nothing is stored under
+ * hms_selected_branch_id, so these list requests went out without an
+ * x-branch-id header and branch-restricted roles got 403 "Please select
+ * a branch first." on every poll — the bell stayed empty forever. Fall
+ * back to the caller's own active branch mappings (/employees/me), then
+ * the login-time branch_id, and send them as explicit branchId query
+ * params which branchScope accepts in place of the header.
+ *
+ * When several mappings exist, EVERY mapped branch is fed and the lists
+ * merged — scoping to just the first mapping silently hid all activity
+ * from the caller's other branches (e.g. an ADMIN mapped to two branches
+ * saw an empty bell because today's changes happened in the other one),
+ * which never matched the local-browser experience where a branch was
+ * already selected.
+ */
+let cachedFeedBranchIds: string[] | null | undefined;
+
+/*
+ * This account's own active branch mappings (/employees/me), cached for
+ * the session. Returns null when they cannot be resolved (no employee
+ * record, network failure) so the caller can fall back to the login-time
+ * branch_id.
+ */
+const getMappedBranchIds =
+  async (): Promise<string[] | null> => {
+    if (
+      cachedFeedBranchIds !==
+      undefined
+    ) {
+      return cachedFeedBranchIds;
+    }
+
+    try {
+      const me =
+        await employeeApi.getMe();
+      const mapped = (
+        me.data?.data?.branches ??
+        []
+      ).map(
+        (b: {
+          branch_id?: string | null;
+        }) => b?.branch_id
+      ).filter(
+        (
+          id:
+            | string
+            | null
+            | undefined
+        ): id is string => Boolean(id)
+      );
+      cachedFeedBranchIds = Array.from(
+        new Set(mapped)
+      );
+    } catch {
+      return null;
+    }
+
+    return cachedFeedBranchIds;
+  };
+
+const resolveFeedBranchIds =
+  async (): Promise<string[]> => {
+    const selected =
+      getActiveBranchId();
+
+    if (selected) {
+      /*
+       * Trust the selector unless it points at a
+       * branch this account no longer maps to. A
+       * stale hms_selected_branch_id (left behind
+       * by an earlier session/account on the same
+       * origin, or a mapping removed later) would
+       * otherwise get 403 "Forbidden. You don't
+       * have access to this branch." on every
+       * scoped list call forever, keeping the bell
+       * permanently empty on the deployed origin.
+       * Accounts with no mappings at all (top-level
+       * admins) keep any selection.
+       */
+      const mapped =
+        await getMappedBranchIds();
+      if (
+        !mapped ||
+        mapped.length === 0 ||
+        mapped.includes(selected)
+      ) {
+        return [selected];
+      }
+      return mapped;
+    }
+
+    const mapped =
+      await getMappedBranchIds();
+
+    if (mapped && mapped.length > 0) {
+      return mapped;
+    }
+
+    const loginBranchId =
+      getUser()?.branch_id;
+    if (loginBranchId) {
+      return [loginBranchId];
+    }
+
+    return [];
+  };
+
+/*
+ * Runs one list call per resolved branch (parallel) and merges the
+ * arrays. With zero or one branch this degrades to the plain single
+ * call — identical to the pre-multi-branch behavior.
+ */
+const fetchAcrossBranches = async <
+  T,
+  R extends { id?: unknown },
+>(
+  branchIds: string[],
+  call: (
+    branchId: string | undefined
+  ) => Promise<T>,
+  extract: (res: T) => R[]
+): Promise<R[] | null> => {
+  /*
+   * Returns null when EVERY attempt failed so
+   * the caller can keep the previous snapshot
+   * instead of mistaking a network failure for
+   * "all records deleted" (which would wipe the
+   * feed and fire false DELETE events).
+   */
+  if (branchIds.length <= 1) {
+    try {
+      const res = await call(
+        branchIds[0]
+      );
+      return extract(res);
+    } catch {
+      return null;
+    }
+  }
+
+  const perBranch =
+    await Promise.all(
+      branchIds.map((branchId) =>
+        call(branchId)
+          .then((res) => ({
+            ok: true as const,
+            list: extract(res),
+          }))
+          .catch(() => ({
+            ok: false as const,
+            list: [] as R[],
+          }))
+      )
+    );
+
+  if (
+    !perBranch.some(
+      (attempt) => attempt.ok
+    )
+  ) {
+    return null;
+  }
+
+  const seen = new Set<string>();
+  const merged: R[] = [];
+
+  for (const attempt of perBranch) {
+    if (!attempt.ok) continue;
+    for (const item of attempt.list) {
+      const key = String(
+        (item as any)?.id ??
+          (item as any)?.employee_id ??
+          (item as any)?.patient_id ??
+          (item as any)?.appointment_id ??
+          JSON.stringify(item)
+      );
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+  }
+
+  return merged;
+};
 
 /* -------------------------------------------------------------------------- */
 /* STORAGE                                                                    */
@@ -50,6 +249,106 @@ function saveDismissedIds(
     localStorage.setItem(
       DISMISSED_NOTIFICATIONS_KEY,
       JSON.stringify(Array.from(ids))
+    );
+  } catch {
+    // Ignore localStorage errors.
+  }
+}
+
+function loadLastSeen(): number {
+  try {
+    const raw = localStorage.getItem(
+      LAST_SEEN_KEY
+    );
+
+    const value = raw
+      ? Number(raw)
+      : 0;
+
+    return Number.isFinite(value)
+      ? value
+      : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveLastSeen(timestamp: number) {
+  try {
+    localStorage.setItem(
+      LAST_SEEN_KEY,
+      String(timestamp)
+    );
+  } catch {
+    // Ignore localStorage errors.
+  }
+}
+
+/*
+ * Detected events are cached so the red dot
+ * survives page navigation and reloads until
+ * the bell button is clicked.
+ */
+function loadCachedItems(): NotificationItem[] {
+  try {
+    const raw = localStorage.getItem(
+      EVENT_CACHE_KEY
+    );
+
+    if (!raw) {
+      return [];
+    }
+
+    const parsed =
+      JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    const now = new Date();
+
+    return parsed.filter(
+      (item) =>
+        item &&
+        typeof item.id ===
+          "string" &&
+        typeof item.createdAt ===
+          "number" &&
+        typeof item.title ===
+          "string" &&
+        isSameDay(
+          new Date(
+            item.createdAt
+          ),
+          now
+        )
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveCachedItems(
+  items: NotificationItem[]
+) {
+  try {
+    const capped = items
+      .slice(0, 300)
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        message: item.message,
+        time: item.time,
+        createdAt: item.createdAt,
+        role: item.role,
+        action: item.action,
+        recordId: item.recordId,
+      }));
+
+    localStorage.setItem(
+      EVENT_CACHE_KEY,
+      JSON.stringify(capped)
     );
   } catch {
     // Ignore localStorage errors.
@@ -121,7 +420,8 @@ type NotificationRole =
   | "staff"
   | "admin"
   | "patient"
-  | "appointment";
+  | "appointment"
+  | "account";
 
 type NotificationAction =
   | "CREATE"
@@ -137,6 +437,7 @@ type NotificationItem = {
   role: NotificationRole;
   action?: NotificationAction;
   unread?: boolean;
+  recordId?: string;
 };
 
 type GenericRecord = Record<
@@ -158,6 +459,7 @@ const ROLE_TITLES: Record<
   patient: "New Patient Registered",
   appointment:
     "New Appointment Created",
+  account: "Account Updated",
 };
 
 /* -------------------------------------------------------------------------- */
@@ -434,6 +736,30 @@ const Icon = ({
           />
           <path
             d="M8 14h3M8 17h5"
+            strokeLinecap="round"
+          />
+        </svg>
+      </div>
+    );
+  }
+
+  if (role === "account") {
+    return (
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e9efff]">
+        <svg
+          viewBox="0 0 24 24"
+          className="h-5 w-5 text-[#003ec7]"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+        >
+          <path
+            d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M10.3 21a1.94 1.94 0 0 0 3.4 0"
             strokeLinecap="round"
           />
         </svg>
@@ -789,6 +1115,69 @@ function createNotification(
     createdAt,
     role,
     action,
+    recordId,
+  };
+}
+
+/*
+ * Adds a notification derived from the record's
+ * own created/updated timestamp, but only when
+ * it happened today.
+ */
+function pushDerivedItem(
+  items: NotificationItem[],
+  role: NotificationRole,
+  action: NotificationAction,
+  recordId: string,
+  name: string,
+  timestampStr?: string | null
+) {
+  if (!timestampStr || !recordId) {
+    return;
+  }
+
+  const timestamp =
+    new Date(timestampStr).getTime();
+
+  if (
+    Number.isNaN(timestamp) ||
+    !isSameDay(
+      new Date(timestamp),
+      new Date()
+    )
+  ) {
+    return;
+  }
+
+  const item = createNotification(
+    role,
+    action,
+    name,
+    recordId
+  );
+
+  /*
+   * Unique per occurrence so a repeated
+   * change counts as unread again.
+   */
+  item.id = `derived-${role}-${action}-${recordId}-${timestamp}`;
+
+  item.createdAt = timestamp;
+
+  items.push(item);
+}
+
+function accountActivityToNotification(
+  activity: AccountActivity
+): NotificationItem {
+  return {
+    id: `account-${activity.id}`,
+    title: activity.title,
+    message: activity.message,
+    time: timeAgo(activity.createdAt),
+    createdAt: activity.createdAt,
+    role: "account",
+    action: "UPDATE",
   };
 }
 
@@ -801,20 +1190,32 @@ export default function Notifications() {
     notifications,
     setNotifications,
   ] = useState<NotificationItem[]>(
+    loadCachedItems()
+  );
+
+  const [
+    accountItems,
+    setAccountItems,
+  ] = useState<NotificationItem[]>(
     []
   );
 
   const [
-    readIds,
-    setReadIds,
-  ] = useState<Set<string>>(
-    new Set()
+    lastSeenMs,
+    setLastSeenMs,
+  ] = useState<number>(
+    loadLastSeen()
   );
 
   const [
     isLoading,
     setIsLoading,
   ] = useState(true);
+
+  const [
+    ,
+    setTimeTick,
+  ] = useState(0);
 
   const [
     error,
@@ -833,81 +1234,130 @@ export default function Notifications() {
       loadSnapshot()
     );
 
+  const consecutiveFailuresRef =
+    useRef<number>(0);
+
   /* ------------------------------------------------------------------------ */
   /* FETCH APPOINTMENTS                                                       */
   /* ------------------------------------------------------------------------ */
 
-  const fetchAppointments =
-    useCallback(async (): Promise<
+  const fetchAppointmentsForBranch =
+    useCallback(async (feedBranchId?: string): Promise<
       GenericRecord[]
     > => {
-      try {
-        const pageSize = 100;
-        const sortBy = "created_at";
-        const sortOrder = "desc";
+      const pageSize = 100;
+      const sortBy = "created_at";
+      const sortOrder = "desc";
 
-        const firstPage =
+      const firstPage =
+        await appointmentApi.getAll({
+          limit: pageSize,
+          page: 1,
+          sortBy,
+          sortOrder,
+          ...(feedBranchId
+            ? { branchId: feedBranchId }
+            : {}),
+        });
+
+      const total =
+        firstPage.data?.data
+          ?.total || 0;
+
+      const totalPages = Math.ceil(
+        total / pageSize
+      );
+
+      let all = extractArray(
+        firstPage,
+        [
+          "appointments",
+          "appointment",
+          "data",
+          "results",
+        ]
+      );
+
+      for (
+        let page = 2;
+        page <= totalPages &&
+        all.length < 2000;
+        page++
+      ) {
+        const response =
           await appointmentApi.getAll({
             limit: pageSize,
-            page: 1,
+            page,
             sortBy,
             sortOrder,
+            ...(feedBranchId
+              ? { branchId: feedBranchId }
+              : {}),
           });
 
-        const total =
-          firstPage.data?.data
-            ?.total || 0;
-
-        const totalPages = Math.ceil(
-          total / pageSize
+        all = all.concat(
+          extractArray(
+            response,
+            [
+              "appointments",
+              "appointment",
+              "data",
+              "results",
+            ]
+          )
         );
+      }
 
-        let all = extractArray(
-          firstPage,
-          [
-            "appointments",
-            "appointment",
-            "data",
-            "results",
-          ]
-        );
+      return all;
+    }, []);
 
-        for (
-          let page = 2;
-          page <= totalPages &&
-          all.length < 2000;
-          page++
-        ) {
-          const response =
-            await appointmentApi.getAll({
-              limit: pageSize,
-              page,
-              sortBy,
-              sortOrder,
-            });
-
-          all = all.concat(
-            extractArray(
-              response,
-              [
-                "appointments",
-                "appointment",
-                "data",
-                "results",
-              ]
-            )
+  const fetchAppointments =
+    useCallback(async (feedBranchIds: string[]): Promise<
+      GenericRecord[] | null
+    > => {
+      try {
+        if (feedBranchIds.length <= 1) {
+          return await fetchAppointmentsForBranch(
+            feedBranchIds[0]
           );
         }
 
-        return all;
+        /*
+         * Several mapped branches and no explicit
+         * selection: page each branch in parallel.
+         * A single branch failing must not sink the
+         * whole appointments feed, so per-branch
+         * failures degrade to an empty list while a
+         * TOTAL failure (below) still returns null
+         * so the snapshot logic can skip the diff.
+         */
+        const perBranch =
+          await Promise.all(
+            feedBranchIds.map((branchId) =>
+              fetchAppointmentsForBranch(
+                branchId
+              ).catch(() => [])
+            )
+          );
+
+        return perBranch.flat();
       } catch {
         /*
          * Appointment API failure should NOT
          * break employee/patient notifications.
+         *
+         * Returns null (not an empty array): an
+         * empty array is indistinguishable from
+         * "every appointment was deleted" and
+         * used to flood the feed with false
+         * DELETE events, then false CREATE
+         * events on the next successful poll —
+         * Render cold starts on the deployed
+         * site made this happen regularly.
          */
-        return [];
+        return null;
       }
-    }, []);
+    }, [fetchAppointmentsForBranch]);
 
   /* ------------------------------------------------------------------------ */
   /* MAIN FETCH                                                               */
@@ -917,210 +1367,167 @@ export default function Notifications() {
     useCallback(async () => {
       setError(null);
 
+      /*
+       * One shared failure recorder: the banner only
+       * appears after 3 consecutive cycles where
+       * EVERY source failed. A single flaky source
+       * must never blank a feed the other sources
+       * are still feeding.
+       */
+      const registerFailureCycle = (
+        err?: any
+      ) => {
+        consecutiveFailuresRef.current += 1;
+
+        if (
+          consecutiveFailuresRef.current >= 3
+        ) {
+          const status =
+            err?.response?.status;
+          const serverMessage =
+            err?.response?.data?.message;
+
+          setError(
+            serverMessage
+              ? `Couldn't load notifications${
+                  status ? ` (${status})` : ""
+                }: ${serverMessage}`
+              : "Couldn't load notifications from the server."
+          );
+        }
+      };
+
       try {
+        const feedBranchIds =
+          await resolveFeedBranchIds();
+
         const [
-          employeesRes,
-          patientsRes,
+          employees,
+          patients,
           appointments,
         ] =
           await Promise.all([
-            employeeApi.getAll({
-              limit: 1000,
-            }),
+            fetchAcrossBranches(
+              feedBranchIds,
+              (branchId) =>
+                employeeApi.getAll({
+                  limit: 1000,
+                  ...(branchId
+                    ? { branchId }
+                    : {}),
+                }),
+              (res) =>
+                (res.data?.data
+                  ?.employees ??
+                  []) as any[]
+            ).catch(() => null),
 
-            patientApi.getAll({
-              limit: 1000,
-            }),
+            fetchAcrossBranches(
+              feedBranchIds,
+              (branchId) =>
+                patientApi.getAll({
+                  limit: 1000,
+                  ...(branchId
+                    ? { branchId }
+                    : {}),
+                }),
+              (res) =>
+                (res.data?.data
+                  ?.patients ??
+                  []) as any[]
+            ).catch(() => null),
 
-            fetchAppointments(),
+            fetchAppointments(
+              feedBranchIds
+            ),
           ]);
 
-        /* ---------------------------------------------------------------- */
-        /* GET CURRENT DATA                                                  */
-        /* ---------------------------------------------------------------- */
+        /*
+         * A failed appointments fetch returns null.
+         * Keep the previous appointments snapshot
+         * and skip this cycle's appointment diff so
+         * no false create/delete events are ever
+         * generated from missing data — the feed
+         * only ever reflects real changes.
+         */
+        const appointmentsFetched =
+          appointments !== null;
 
-        const employees =
-          employeesRes.data?.data
-            ?.employees || [];
+        const safeAppointments =
+          appointments ?? [];
 
-        const patients =
-          patientsRes.data?.data
-            ?.patients || [];
+        /*
+         * Same isolation for employees/patients:
+         * a failed source keeps its previous
+         * snapshot slice and skips this cycle's
+         * diff so no false create/delete events
+         * are ever generated from missing data.
+         */
+        const employeesFetched =
+          employees !== null;
+
+        const patientsFetched =
+          patients !== null;
+
+        const safeEmployees =
+          employees ?? [];
+
+        const safePatients =
+          patients ?? [];
 
         /* ---------------------------------------------------------------- */
         /* BUILD CURRENT SNAPSHOT                                            */
         /* ---------------------------------------------------------------- */
 
+        /*
+         * First-ever fetch (nothing stored yet):
+         * start from an empty baseline instead of
+         * crashing on null below — a null snapshot
+         * used to throw on every poll, killing the
+         * whole feed and the red dot on fresh
+         * browsers (first visit to the deployed
+         * site). isFirstCycle also keeps existing
+         * records from firing a false "created"
+         * flood; today's real changes still come
+         * through the record-timestamp pass below.
+         */
+        const isFirstCycle =
+          previousSnapshotRef.current ===
+          null;
+
+        const previousSnapshot =
+          previousSnapshotRef.current ?? {
+            employees: [],
+            patients: [],
+            appointments: [],
+          };
+
         const currentSnapshot: StoredSnapshot =
           {
             employees:
-              buildEmployeeSnapshot(
-                employees
-              ),
+              employeesFetched
+                ? buildEmployeeSnapshot(
+                    safeEmployees
+                  )
+                : previousSnapshot
+                  ?.employees ?? [],
 
             patients:
-              buildPatientSnapshot(
-                patients
-              ),
+              patientsFetched
+                ? buildPatientSnapshot(
+                    safePatients
+                  )
+                : previousSnapshot
+                  ?.patients ?? [],
 
             appointments:
-              buildAppointmentSnapshot(
-                appointments
-              ),
+              appointmentsFetched
+                ? buildAppointmentSnapshot(
+                    safeAppointments
+                  )
+                : previousSnapshot
+                  ?.appointments ?? [],
           };
-
-        const previousSnapshot =
-          previousSnapshotRef.current;
-
-        /* ---------------------------------------------------------------- */
-        /* FIRST LOAD                                                        */
-        /* ---------------------------------------------------------------- */
-
-        if (!previousSnapshot) {
-          /*
-           * Keep your existing behavior:
-           * records with created_at from backend
-           * are displayed as created notifications.
-           */
-
-          const initialItems: NotificationItem[] =
-            [];
-
-          employees.forEach(
-            (employee: EmployeeRecord) => {
-              const role =
-                roleTypeToNotificationRole(
-                  employee
-                    .user_table
-                    ?.role_type
-                );
-
-              const createdAtStr =
-                employee
-                  .user_table
-                  ?.created_at;
-
-              if (!createdAtStr) {
-                return;
-              }
-
-              const createdAt =
-                new Date(
-                  createdAtStr
-                ).getTime();
-
-              if (
-                Number.isNaN(createdAt)
-              ) {
-                return;
-              }
-
-              const name =
-                formatEmployeeName(
-                  employee
-                ) || "Employee";
-
-              initialItems.push({
-                id: `employee-${employee.employee_id}-created`,
-                title:
-                  ROLE_TITLES[
-                    role
-                  ],
-                message:
-                  `${name} was added as ${
-                    role === "doctor"
-                      ? "a doctor"
-                      : role ===
-                        "admin"
-                      ? "an admin"
-                      : "staff"
-                  }.`,
-                time:
-                  timeAgo(
-                    createdAt
-                  ),
-                createdAt,
-                role,
-                action:
-                  "CREATE",
-              });
-            }
-          );
-
-          patients.forEach(
-            (patient: PatientRecord) => {
-              const createdAtStr =
-                patient
-                  .user_table
-                  ?.created_at;
-
-              if (!createdAtStr) {
-                return;
-              }
-
-              const createdAt =
-                new Date(
-                  createdAtStr
-                ).getTime();
-
-              if (
-                Number.isNaN(createdAt)
-              ) {
-                return;
-              }
-
-              const name =
-                formatPatientName(
-                  patient
-                ) || "Patient";
-
-              initialItems.push({
-                id: `patient-${patient.patient_id}-created`,
-                title:
-                  "New Patient Registered",
-                message:
-                  `${name} was registered as a patient.`,
-                time:
-                  timeAgo(
-                    createdAt
-                  ),
-                createdAt,
-                role: "patient",
-                action:
-                  "CREATE",
-              });
-            }
-          );
-
-          initialItems.sort(
-            (a, b) =>
-              b.createdAt -
-              a.createdAt
-          );
-
-          const filtered =
-            initialItems.filter(
-              (item) =>
-                !dismissedIdsRef.current.has(
-                  item.id
-                )
-            );
-
-          setNotifications(
-            filtered
-          );
-
-          previousSnapshotRef.current =
-            currentSnapshot;
-
-          saveSnapshot(
-            currentSnapshot
-          );
-
-          setIsLoading(false);
-
-          return;
-        }
 
         /* ---------------------------------------------------------------- */
         /* DETECT CHANGES                                                   */
@@ -1163,6 +1570,7 @@ export default function Notifications() {
          * CREATED / UPDATED
          */
 
+        if (!isFirstCycle)
         currentEmployees.forEach(
           (current) => {
             const previous =
@@ -1179,7 +1587,7 @@ export default function Notifications() {
                * Find employee from API.
                */
               const employee =
-                employees.find(
+                safeEmployees.find(
                   (
                     e: EmployeeRecord,
                     index: number
@@ -1219,7 +1627,7 @@ export default function Notifications() {
               current.fingerprint
             ) {
               const employee =
-                employees.find(
+                safeEmployees.find(
                   (
                     e: EmployeeRecord,
                     index: number
@@ -1345,6 +1753,7 @@ export default function Notifications() {
             )
           );
 
+        if (!isFirstCycle)
         currentPatients.forEach(
           (current) => {
             const previous =
@@ -1404,6 +1813,7 @@ export default function Notifications() {
         /* APPOINTMENT CREATE / UPDATE / DELETE                            */
         /* ---------------------------------------------------------------- */
 
+        if (appointmentsFetched) {
         const previousAppointments =
           previousSnapshot.appointments;
 
@@ -1430,6 +1840,7 @@ export default function Notifications() {
             )
           );
 
+        if (!isFirstCycle)
         currentAppointments.forEach(
           (current) => {
             const previous =
@@ -1484,6 +1895,7 @@ export default function Notifications() {
             }
           }
         );
+        }
 
         /* ---------------------------------------------------------------- */
         /* SAVE NEW SNAPSHOT                                                */
@@ -1497,57 +1909,247 @@ export default function Notifications() {
         );
 
         /* ---------------------------------------------------------------- */
-        /* ADD NEW EVENTS TO EXISTING LIST                                  */
+        /* BUILD TODAY'S FULL CHANGE LIST FROM RECORD TIMESTAMPS            */
         /* ---------------------------------------------------------------- */
 
-        if (
-          newEvents.length > 0
-        ) {
-          setNotifications(
-            (existing) => {
-              const combined = [
-                ...newEvents,
-                ...existing,
-              ];
+        const derivedItems: NotificationItem[] =
+          [];
 
-              const unique =
-                Array.from(
-                  new Map(
-                    combined.map(
-                      (item) => [
-                        item.id,
-                        item,
-                      ]
-                    )
-                  ).values()
-                );
-
-              unique.sort(
-                (a, b) =>
-                  b.createdAt -
-                  a.createdAt
+        safeEmployees.forEach(
+          (employee: EmployeeRecord) => {
+            const role =
+              roleTypeToNotificationRole(
+                employee.user_table
+                  ?.role_type
               );
 
-              return unique.filter(
-                (item) =>
-                  !dismissedIdsRef.current.has(
+            const name =
+              formatEmployeeName(
+                employee
+              ) || "Employee";
+
+            const recordId = String(
+              employee.employee_id ?? ""
+            );
+
+            pushDerivedItem(
+              derivedItems,
+              role,
+              "CREATE",
+              recordId,
+              name,
+              employee.user_table
+                ?.created_at
+            );
+
+            pushDerivedItem(
+              derivedItems,
+              role,
+              "UPDATE",
+              recordId,
+              name,
+              (employee as any)
+                .user_table
+                ?.updated_at ||
+                (employee as any)
+                  .updated_at ||
+                (employee as any)
+                  .updatedAt
+            );
+          }
+        );
+
+        safePatients.forEach(
+          (patient: PatientRecord) => {
+            const name =
+              formatPatientName(
+                patient
+              ) || "Patient";
+
+            const recordId = String(
+              patient.patient_id ?? ""
+            );
+
+            pushDerivedItem(
+              derivedItems,
+              "patient",
+              "CREATE",
+              recordId,
+              name,
+              patient.user_table
+                ?.created_at
+            );
+
+            pushDerivedItem(
+              derivedItems,
+              "patient",
+              "UPDATE",
+              recordId,
+              name,
+              (patient as any)
+                .user_table
+                ?.updated_at ||
+                (patient as any)
+                  .updated_at ||
+                (patient as any)
+                  .updatedAt
+            );
+          }
+        );
+
+        safeAppointments.forEach(
+          (
+            appointment: GenericRecord,
+            index: number
+          ) => {
+            const recordId =
+              getRecordId(
+                appointment,
+                "appointment",
+                index
+              );
+
+            const name =
+              getGenericName(
+                appointment,
+                `Appointment #${recordId}`
+              );
+
+            pushDerivedItem(
+              derivedItems,
+              "appointment",
+              "CREATE",
+              recordId,
+              name,
+              appointment.created_at ||
+                appointment.createdAt
+            );
+
+            pushDerivedItem(
+              derivedItems,
+              "appointment",
+              "UPDATE",
+              recordId,
+              name,
+              appointment.updated_at ||
+                appointment.updatedAt
+            );
+          }
+        );
+
+        /* ---------------------------------------------------------------- */
+        /* COMBINE: LIVE EVENTS + ALL OF TODAY'S CHANGES                    */
+        /* ---------------------------------------------------------------- */
+
+        setNotifications(
+          (existing) => {
+            /*
+             * Keep everything already detected this
+             * session (creates/updates/deletes) so a
+             * notification never disappears on its own.
+             * Occurrence ids are unique, so nothing
+             * duplicates; fresher entries win below.
+             */
+            const combined = [
+              ...existing,
+              ...newEvents,
+              ...derivedItems,
+            ];
+
+            const unique =
+              Array.from(
+                new Map(
+                  combined.map(
+                    (item) => [
+                      item.id,
+                      item,
+                    ]
+                  )
+                ).values()
+              );
+
+            unique.sort(
+              (a, b) =>
+                b.createdAt -
+                a.createdAt
+            );
+
+            /*
+             * Drop live duplicates of changes that
+             * record timestamps already cover
+             * (same record, action and minute).
+             */
+            const derivedKeys =
+              new Set(
+                derivedItems.map(
+                  (item) =>
+                    `${item.role}|${item.action}|${item.recordId}|${Math.floor(
+                      item.createdAt /
+                        60000
+                    )}`
+                )
+              );
+
+            return unique.filter(
+              (item) => {
+                if (
+                  dismissedIdsRef.current.has(
                     item.id
                   )
-              );
-            }
-          );
-        }
+                ) {
+                  return false;
+                }
+
+                if (
+                  item.id.startsWith(
+                    "event-"
+                  ) &&
+                  item.action !==
+                    "DELETE" &&
+                  derivedKeys.has(
+                    `${item.role}|${item.action}|${item.recordId}|${Math.floor(
+                      item.createdAt /
+                        60000
+                    )}`
+                  )
+                ) {
+                  return false;
+                }
+
+                return true;
+              }
+            );
+          }
+        );
 
         setIsLoading(false);
+
+        if (
+          employeesFetched ||
+          patientsFetched ||
+          appointmentsFetched
+        ) {
+          /*
+           * At least one source fed the cycle —
+           * healthy. Reset the failure streak.
+           */
+          consecutiveFailuresRef.current = 0;
+          setError(null);
+        } else {
+          /*
+           * Every source failed this cycle — count
+           * it so the banner still appears after
+           * 3 consecutive dead cycles.
+           */
+          registerFailureCycle();
+        }
       } catch (err) {
         console.error(
           "Notification fetch error:",
           err
         );
 
-        setError(
-          "Couldn't load notifications from the server."
-        );
+        registerFailureCycle(err);
 
         setIsLoading(false);
       }
@@ -1561,6 +2163,25 @@ export default function Notifications() {
     fetchNotifications();
   }, [fetchNotifications]);
 
+  /*
+   * Re-render every 30s so relative
+   * times stay accurate.
+   */
+  useEffect(() => {
+    const interval =
+      window.setInterval(() => {
+        setTimeTick(
+          (tick) => tick + 1
+        );
+      }, 30000);
+
+    return () => {
+      window.clearInterval(
+        interval
+      );
+    };
+  }, []);
+
   /* ------------------------------------------------------------------------ */
   /* AUTOMATIC REFRESH                                                        */
   /* ------------------------------------------------------------------------ */
@@ -1568,6 +2189,15 @@ export default function Notifications() {
   useEffect(() => {
     const interval =
       window.setInterval(() => {
+        /*
+         * Skip polls while the tab is hidden —
+         * the next tick after returning refetches
+         * everything missed.
+         */
+        if (document.hidden) {
+          return;
+        }
+
         fetchNotifications();
       }, POLLING_INTERVAL);
 
@@ -1579,20 +2209,54 @@ export default function Notifications() {
   }, [fetchNotifications]);
 
   /* ------------------------------------------------------------------------ */
+  /* ACCOUNT ACTIVITY                                                         */
+  /* ------------------------------------------------------------------------ */
+
+  useEffect(() => {
+    const loadAccountActivity = () => {
+      setAccountItems(
+        getAccountActivity().map(
+          accountActivityToNotification
+        )
+      );
+    };
+
+    loadAccountActivity();
+    window.addEventListener(
+      "account-activity-updated",
+      loadAccountActivity
+    );
+    const onStorage = () => {
+      loadAccountActivity();
+    };
+    window.addEventListener(
+      "storage",
+      onStorage
+    );
+    return () => {
+      window.removeEventListener(
+        "account-activity-updated",
+        loadAccountActivity
+      );
+      window.removeEventListener(
+        "storage",
+        onStorage
+      );
+    };
+  }, []);
+
+  /* ------------------------------------------------------------------------ */
   /* MARK ALL READ                                                            */
   /* ------------------------------------------------------------------------ */
 
   const markAllAsRead =
     useCallback(() => {
-      setReadIds(
-        new Set(
-          notifications.map(
-            (notification) =>
-              notification.id
-          )
-        )
-      );
-    }, [notifications]);
+      const now = Date.now();
+
+      setLastSeenMs(now);
+
+      saveLastSeen(now);
+    }, []);
 
   /* ------------------------------------------------------------------------ */
   /* REMOVE                                                                   */
@@ -1615,15 +2279,6 @@ export default function Notifications() {
               item.id !== id
           )
       );
-
-      setReadIds((ids) => {
-        const next =
-          new Set(ids);
-
-        next.delete(id);
-
-        return next;
-      });
     },
     []
   );
@@ -1647,7 +2302,11 @@ export default function Notifications() {
 
     setNotifications([]);
 
-    setReadIds(new Set());
+    const now = Date.now();
+
+    setLastSeenMs(now);
+
+    saveLastSeen(now);
   }, [notifications]);
 
   /* ------------------------------------------------------------------------ */
@@ -1656,63 +2315,35 @@ export default function Notifications() {
 
   const {
     todayItems,
-    yesterdayItems,
-    earlierItems,
   } = useMemo(() => {
     const now = new Date();
 
-    const yesterday =
-      new Date(now);
-
-    yesterday.setDate(
-      now.getDate() - 1
+    const allItems = [
+      ...accountItems,
+      ...notifications,
+    ].sort(
+      (a, b) =>
+        b.createdAt -
+        a.createdAt
     );
 
-    const today: NotificationItem[] =
-      [];
-
-    const yesterdayList: NotificationItem[] =
-      [];
-
-    const earlier: NotificationItem[] =
-      [];
-
-    notifications.forEach(
-      (item) => {
-        const date =
+    /*
+     * Only today's changes are shown.
+     */
+    const today =
+      allItems.filter((item) =>
+        isSameDay(
           new Date(
             item.createdAt
-          );
-
-        if (
-          isSameDay(
-            date,
-            now
-          )
-        ) {
-          today.push(item);
-        } else if (
-          isSameDay(
-            date,
-            yesterday
-          )
-        ) {
-          yesterdayList.push(
-            item
-          );
-        } else {
-          earlier.push(item);
-        }
-      }
-    );
+          ),
+          now
+        )
+      );
 
     return {
       todayItems: today,
-      yesterdayItems:
-        yesterdayList,
-      earlierItems: earlier,
     };
-  }, [notifications]);
+  }, [accountItems, notifications]);
 
   /* ------------------------------------------------------------------------ */
   /* RENDER                                                                   */
@@ -1724,9 +2355,8 @@ export default function Notifications() {
         item: NotificationItem
       ) => {
         const unread =
-          !readIds.has(
-            item.id
-          );
+          item.createdAt >
+          lastSeenMs;
 
         return (
           <article
@@ -1756,7 +2386,7 @@ export default function Notifications() {
                         : "text-[#434656]",
                     ].join(" ")}
                   >
-                    {item.time}
+                    {timeAgo(item.createdAt)}
                   </span>
 
                   {unread && (
@@ -1766,27 +2396,29 @@ export default function Notifications() {
                     />
                   )}
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      removeNotification(
-                        item.id
-                      )
-                    }
-                    aria-label="Delete notification"
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      className="h-3.5 w-3.5 fill-none stroke-current"
-                      strokeWidth="2"
+                  {item.role !== "account" && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        removeNotification(
+                          item.id
+                        )
+                      }
+                      aria-label="Delete notification"
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
                     >
-                      <path
-                        d="M6 6l12 12M18 6L6 18"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </button>
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-3.5 w-3.5 fill-none stroke-current"
+                        strokeWidth="2"
+                      >
+                        <path
+                          d="M6 6l12 12M18 6L6 18"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1798,15 +2430,54 @@ export default function Notifications() {
         );
       },
       [
-        readIds,
+        lastSeenMs,
         removeNotification,
       ]
     );
 
   const hasAny =
-    todayItems.length > 0 ||
-    yesterdayItems.length > 0 ||
-    earlierItems.length > 0;
+    todayItems.length > 0;
+
+  /*
+   * Persist detected events so the red dot
+   * survives navigation and reloads until
+   * the bell is clicked.
+   */
+  useEffect(() => {
+    saveCachedItems(
+      notifications
+    );
+  }, [notifications]);
+
+  /*
+   * Broadcast unread state so the header
+   * bell can show/hide its dot. Anything newer
+   * than the last-seen timestamp is unread.
+   */
+  useEffect(() => {
+    const hasUnread = [
+      ...accountItems,
+      ...notifications,
+    ].some(
+      (item) =>
+        item.createdAt > lastSeenMs
+    );
+
+    window.dispatchEvent(
+      new CustomEvent(
+        "hms-unread-changed",
+        {
+          detail: hasUnread,
+        }
+      )
+    );
+  }, [
+    accountItems,
+    notifications,
+    lastSeenMs,
+  ]);
+
+  // Red dot only clears via explicit "Mark all read" or "Clear all" button clicks.
 
   /* ------------------------------------------------------------------------ */
   /* UI                                                                       */
@@ -1884,53 +2555,6 @@ export default function Notifications() {
             </section>
           )}
 
-        {!isLoading &&
-          yesterdayItems.length >
-            0 && (
-            <>
-              {todayItems.length >
-                0 && (
-                <div className="ml-16 h-px w-[calc(100%-4rem)] rounded-full bg-[#c3c5d9]" />
-              )}
-
-              <section>
-                <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-[#434656]">
-                  Yesterday
-                </h2>
-
-                <div className="flex flex-col gap-1">
-                  {yesterdayItems.map(
-                    renderNotification
-                  )}
-                </div>
-              </section>
-            </>
-          )}
-
-        {!isLoading &&
-          earlierItems.length >
-            0 && (
-            <>
-              {(todayItems.length >
-                0 ||
-                yesterdayItems.length >
-                  0) && (
-                <div className="ml-16 h-px w-[calc(100%-4rem)] rounded-full bg-[#c3c5d9]" />
-              )}
-
-              <section>
-                <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-[#434656]">
-                  Earlier
-                </h2>
-
-                <div className="flex flex-col gap-1">
-                  {earlierItems.map(
-                    renderNotification
-                  )}
-                </div>
-              </section>
-            </>
-          )}
       </main>
     </div>
   );

@@ -6,12 +6,14 @@ import { getUser } from "@/utils/token";
 import { cn } from "@/lib/utils";
 import { BranchSelector } from "@/components/hms/BranchSelector";
 import { BranchFilterProvider } from "@/context/BranchFilterContext";
+import { employeeApi } from "@/api/employee.api";
+import { clearAccountActivity } from "@/utils/accountActivity";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
 import { usePermission } from "@/context/PermissionContext";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import Notifications from "@/components/Forms/view/Notification";
+import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import {
   LayoutDashboard,
   Users,
@@ -108,6 +110,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
 
   const logout = () => {
     remove();
+    clearAccountActivity();
     localStorage.removeItem("user_info");
     navigate("/");
   };
@@ -127,6 +130,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
     branch_area: "",
     branch: "",
   });
+  const [adminPhoto, setAdminPhoto] = useState("");
 
   const { can, loading: permissionsLoading } = usePermission();
   const hasPermission = (perm?: string) => !perm || permissionsLoading || can(perm);
@@ -201,6 +205,36 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
     syncUserData();
     window.addEventListener("user-updated", syncUserData);
     return () => window.removeEventListener("user-updated", syncUserData);
+  }, []);
+
+  // Keep the sidebar / header avatar in sync with the logged-in user's
+  // profile photo. It is loaded once on mount and then updated live
+  // whenever the photo changes on the Account page (profile-photo-updated).
+  useEffect(() => {
+    let mounted = true;
+
+    const handlePhotoUpdate = (e: Event) => {
+      const url = (e as CustomEvent<string>).detail;
+      if (url) setAdminPhoto(url);
+    };
+
+    employeeApi
+      .getMe()
+      .then((res) => {
+        if (!mounted) return;
+        const emp = res.data?.data?.employee;
+        const url = emp?.employee_photo_URL || emp?.photo || "";
+        if (url) setAdminPhoto(url);
+      })
+      .catch(() => {
+        /* keep the placeholder avatar */
+      });
+
+    window.addEventListener("profile-photo-updated", handlePhotoUpdate);
+    return () => {
+      mounted = false;
+      window.removeEventListener("profile-photo-updated", handlePhotoUpdate);
+    };
   }, []);
 
   return (
@@ -333,7 +367,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
           <div className="pt-4">
             <div className="flex items-center gap-2 p-3 rounded-lg bg-[#F2F4F6]">
               <img
-                src="https://i.pravatar.cc/40"
+                src={adminPhoto || "https://i.pravatar.cc/40"}
                 alt="Admin"
                 className="w-8 h-8 rounded-xl object-cover"
               />
@@ -372,17 +406,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
             {/* RIGHT */}
             <div className="flex items-center gap-4">
               {/* NOTIFICATION */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <button className="relative p-2 rounded-full hover:bg-slate-100 transition-colors">
-                    <Bell size={18} className="text-[#334155]" />
-                    <span className="absolute top-1 right-1 w-2 h-2 bg-red-600 rounded-full"></span>
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[380px] overflow-hidden rounded-[16px] border border-[#E5E7EB] bg-white p-0 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.16)]" align="end">
-                  <Notifications />
-                </PopoverContent>
-              </Popover>
+              <BellNotificationButton size="md" />
 
               <div className="w-px h-6 bg-[rgba(194,198,212,0.30)]" />
 
@@ -390,6 +414,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
               <UserProfileDropdown
                 userName={userData.username || "HMS"}
                 userSubtext={userData.user_id || "Admin user"}
+                userAvatar={adminPhoto || undefined}
                 onLogout={() => setLogoutOpen(true)}
               />
             </div>

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 
 type Medication = {
   id: number;
@@ -86,22 +87,6 @@ const PatientDischargeMedication: React.FC = () => {
     >
       <path
         d="M19 12H5M12 19l-7-7 7-7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-
-  const BellIcon = () => (
-    <svg
-      className="h-6 w-6"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path
-        d="M18 8a6 6 0 00-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -322,15 +307,7 @@ const PatientDischargeMedication: React.FC = () => {
 
           <div className="flex items-center gap-6">
             {/* Notification */}
-            <button
-              type="button"
-              aria-label="Notifications"
-              className="relative rounded-full p-2 text-gray-500 transition-colors hover:bg-gray-100"
-            >
-              <BellIcon />
-
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full border-2 border-white bg-red-500" />
-            </button>
+            <BellNotificationButton size="md" />
 
             {/* User */}
             <div className="flex items-center gap-4 border-l border-gray-200 pl-6">

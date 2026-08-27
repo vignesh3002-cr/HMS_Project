@@ -20,6 +20,8 @@ import {
 import { AppLayout } from "@/components/layout/AppLayout";
 import DoctorLayout from "@/components/layout/DoctorLayout";
 import { PermissionProvider } from "@/context/PermissionContext";
+import { NotificationProvider } from "@/context/NotificationContext";
+import { getToken, getUser } from "@/utils/token";
 
 // ============================================================
 // FORMS
@@ -48,6 +50,7 @@ import Appointments from "./pages/Appointments";
 import Departments from "./pages/Departments";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
+import Notifications from "./pages/Notifications";
 import Patients from "./pages/Patients";
 import ProtocolMaster from "./pages/ProtocolMaster";
 import CreateProtocol from "@/components/Forms/CreateProtocol";
@@ -99,7 +102,6 @@ import {
   useLocation,
 } from "react-router-dom";
 
-import { getToken, getUser } from "./utils/token";
 import { LoadingScreen } from "./components/skeletons/LoadingScreen";
 
 // ============================================================
@@ -164,6 +166,15 @@ const protectedRoutes = [
   {
     path: "/security",
     element: <Security />,
+  },
+
+  // ----------------------------------------------------------
+  // Notifications (system-wide change log)
+  // ----------------------------------------------------------
+
+  {
+    path: "/notifications",
+    element: <Notifications />,
   },
 
   // ----------------------------------------------------------
@@ -443,8 +454,9 @@ const App = () => (
       <BrowserRouter>
 
         <PermissionProvider>
+          <NotificationProvider employeeId={getUser()?.employee_id ?? null}>
 
-          <RememberMeCheck />
+            <RememberMeCheck />
 
           <Routes>
 
@@ -610,7 +622,8 @@ const App = () => (
 
           </Routes>
 
-        </PermissionProvider>
+        </NotificationProvider>
+      </PermissionProvider>
 
       </BrowserRouter>
 

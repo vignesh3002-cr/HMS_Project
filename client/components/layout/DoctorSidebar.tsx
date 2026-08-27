@@ -6,10 +6,12 @@ import {
   FileText,
   CalendarCheck,
   LogOut,
+  Bell,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { remove } from "../../utils/token";
+import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 
 interface DoctorSidebarProps {
   activeItem?: string;
@@ -62,13 +64,18 @@ const DoctorSidebar: React.FC<DoctorSidebarProps> = ({
       
       {/* ================= HEADER ================= */}
       <div className="px-6 pt-7 pb-8">
-        <h1 className="text-[20px] font-bold text-[#0f3d91] leading-tight tracking-tight">
-          HMS Portal
-        </h1>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-[20px] font-bold text-[#0f3d91] leading-tight tracking-tight">
+              HMS Portal
+            </h1>
 
-        <p className="text-[11px] font-semibold text-gray-500 tracking-[1px] mt-1 uppercase">
-          Doctor Dashboard
-        </p>
+            <p className="text-[11px] font-semibold text-gray-500 tracking-[1px] mt-1 uppercase">
+              Doctor Dashboard
+            </p>
+          </div>
+          <BellNotificationButton size="sm" />
+        </div>
       </div>
 
       <ConfirmationDialog
