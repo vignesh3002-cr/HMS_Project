@@ -1523,6 +1523,8 @@ const Consultation: React.FC = () => {
                     embedded
                     patientId={patientDisplayId}
                     measurements={measurements}
+                    appointmentId={consultationState?.appointmentId}
+                    encounterNo={encounter?.encounter_no}
                     onNext={() => selectStep("CHEMOTHERAPY ORDER")}
                   />
                 ) : activeStep === "CHEMOTHERAPY ORDER" ? (
@@ -4575,6 +4577,57 @@ const ChemotherapyOrder: React.FC<{
     []
   );
 
+  const [currentCycleNumber, setCurrentCycleNumber] = useState<number | null>(null);
+
+  useEffect(() => {
+    const match = cycleDay.match(/Cycle\s+(\d+)/i);
+    if (match) {
+      const cycleNum = Number(match[1]);
+      setCurrentCycleNumber(cycleNum);
+    } else {
+      setCurrentCycleNumber(null);
+    }
+  }, [cycleDay]);
+
+  useEffect(() => {
+    if (!protocolRef.current) return;
+    const protocol = protocolRef.current;
+    const items = protocol.chemotherapy_regimen_protocol_items ?? [];
+    const toDrug = (item: RegimenProtocolDetail["chemotherapy_regimen_protocol_items"][number], index: number): Drug => ({
+      id: index,
+      name:
+        item.medicine_master?.medicine_name ||
+        item.medicine_master?.generic_name ||
+        "",
+      form:
+        item.medicine_master?.dosage_form ||
+        item.administration_route ||
+        "",
+      dose: item.dosage != null ? String(item.dosage) : "",
+      unit:
+        item.dosage_unit ||
+        item.medicine_master?.unit ||
+        "",
+      volume: "",
+    });
+
+    const filteredItems = items.filter((item) => {
+      if (currentCycleNumber === null) return true;
+      return item.cycle_day === currentCycleNumber;
+    });
+
+    setDrugs(
+      filteredItems
+        .filter((item) => item.drug_role === "PRIMARY")
+        .map(toDrug)
+    );
+    setPremedicationDrugs(
+      filteredItems
+        .filter((item) => item.drug_role === "PREMEDICATION")
+        .map(toDrug)
+    );
+  }, [currentCycleNumber]);
+
   const userTouched = useRef({
     cycleDay: false,
     startDate: false,
@@ -4612,7 +4665,7 @@ const ChemotherapyOrder: React.FC<{
     const interval =
       protocol.cycle_interval_days && protocol.cycle_interval_days > 0
         ? protocol.cycle_interval_days
-        : 21;
+        : null;
     const maxCycles =
       protocol.standard_cycles && protocol.standard_cycles > 0
         ? protocol.standard_cycles
@@ -4861,13 +4914,18 @@ const ChemotherapyOrder: React.FC<{
           volume: "",
         });
 
+        const filteredItems = items.filter((item) => {
+          if (currentCycleNumber === null) return true;
+          return item.cycle_day === currentCycleNumber;
+        });
+
         setDrugs(
-          items
+          filteredItems
             .filter((item) => item.drug_role === "PRIMARY")
             .map(toDrug)
         );
         setPremedicationDrugs(
-          items
+          filteredItems
             .filter((item) => item.drug_role === "PREMEDICATION")
             .map(toDrug)
         );
@@ -6835,7 +6893,9 @@ const TreatmentPlan: React.FC<{
   patientId?: string;
   measurements?: MeasurementValues;
   onNext?: () => void;
-}> = ({ embedded = false, patientId, measurements, onNext }) => {
+  appointmentId?: string;
+  encounterNo?: string;
+}> = ({ embedded = false, patientId, measurements, onNext, appointmentId, encounterNo }) => {
   const location = useLocation();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
@@ -7166,6 +7226,8 @@ const TreatmentPlan: React.FC<{
         employee_id: employeeId,
         department_id: departmentId,
         branch_id: branchId,
+        appointment_id: appointmentId || null,
+        encounter_no: encounterNo || null,
         protocol_id: protocol,
         treatment_intent: treatmentIntent,
         treatment_start_date: treatmentStartDate,
