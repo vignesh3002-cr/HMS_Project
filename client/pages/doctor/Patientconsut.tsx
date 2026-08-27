@@ -146,6 +146,10 @@ interface MeasurementValues {
   weight: string;
   bsa: string;
   bmi: string;
+  bp: string;
+  pulse: string;
+  temp: string;
+  spo2: string;
 }
 
 const vitalNum = (
@@ -157,24 +161,53 @@ const vitalNum = (
 };
 
 const buildMeasurements = (
-  encounter: EncounterRecord | null | undefined
+  encounter: EncounterRecord | null | undefined,
+  recentEncounters: EncounterRecord[] = []
 ): MeasurementValues => {
-  const height = vitalNum(encounter?.height);
-  const weight = vitalNum(encounter?.weight);
+  const getField = (field: keyof EncounterRecord) => {
+    // Prefer active encounter
+    const activeVal = (encounter as any)?.[field];
+    if (activeVal != null && activeVal !== "") return vitalNum(activeVal);
+    // Fallback to recent encounters per-field
+    for (const enc of recentEncounters) {
+      const v = (enc as any)?.[field];
+      if (v != null && v !== "") {
+        const n = vitalNum(v);
+        if (n !== null) return n;
+      }
+    }
+    return null;
+  };
+
+  const height = getField("height");
+  const weight = getField("weight");
+  const systolic = getField("systolic_bp");
+  const diastolic = getField("diastolic_bp");
+  const pulse = getField("pulse");
+  const temp = getField("temperature");
+  const spo2 = getField("spo2");
+  const bmiStored = getField("BMI");
 
   const bsaValue = computeBsa(height, weight);
-
-  const storedBmi = vitalNum(encounter?.BMI);
   const bmi =
-    storedBmi !== null
-      ? String(storedBmi)
+    bmiStored !== null
+      ? String(bmiStored)
       : String(computeBmi(height, weight) ?? "");
+
+  const bp =
+    systolic !== null && diastolic !== null
+      ? `${systolic}/${diastolic}`
+      : "";
 
   return {
     height: height !== null ? `${height} cm` : "",
     weight: weight !== null ? `${weight} kg` : "",
     bsa: bsaValue !== null ? `${bsaValue} m²` : "",
     bmi,
+    bp,
+    pulse: pulse !== null ? `${pulse} bpm` : "",
+    temp: temp !== null ? `${temp} °C` : "",
+    spo2: spo2 !== null ? `${spo2}%` : "",
   };
 };
 
@@ -434,6 +467,7 @@ const Consultation: React.FC = () => {
 
   const [encounter, setEncounter] = useState<EncounterRecord | null>(null);
   const [encounterError, setEncounterError] = useState("");
+  const [recentEncounters, setRecentEncounters] = useState<EncounterRecord[]>([]);
 
   const formatDateDMY = (value?: string | null) => {
     if (!value) return "";
@@ -496,7 +530,10 @@ const Consultation: React.FC = () => {
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
-    if (!patientId) return;
+    if (!patientId) {
+      setRecentEncounters([]);
+      return;
+    }
     let cancelled = false;
     setEncounterError("");
     findActiveEncounter(
@@ -524,6 +561,34 @@ const Consultation: React.FC = () => {
           setEncounterError(message);
         }
       });
+
+    // Load recent encounters for per-field vitals fallback
+    const loadRecent = async () => {
+      try {
+        const response = await encounterApi.getLatest(patientId, 10);
+        const rows = [...(response.data?.data?.encounters ?? [])].sort(
+          (a, b) =>
+            new Date(b.created_at ?? 0).getTime() -
+            new Date(a.created_at ?? 0).getTime()
+        );
+        if (!cancelled) setRecentEncounters(rows);
+      } catch (e) {
+        // Fallback to scoped list
+        try {
+          const response = await encounterApi.getAll({ patientId, limit: 10 });
+          const rows = [...(response.data?.data?.encounters ?? [])].sort(
+            (a, b) =>
+              new Date(b.created_at).getTime() -
+              new Date(a.created_at).getTime()
+          );
+          if (!cancelled) setRecentEncounters(rows);
+        } catch {
+          if (!cancelled) setRecentEncounters([]);
+        }
+      }
+    };
+    loadRecent();
+
     return () => {
       cancelled = true;
     };
@@ -633,7 +698,7 @@ const Consultation: React.FC = () => {
      LATEST VITALS (from the active encounter record)
   ============================================================ */
 
-  const measurements = useMemo(() => buildMeasurements(encounter), [encounter]);
+  const measurements = useMemo(() => buildMeasurements(encounter, recentEncounters), [encounter, recentEncounters]);
 
   /* ============================================================
      TOAST
@@ -1189,6 +1254,42 @@ const Consultation: React.FC = () => {
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
                     {measurements.bmi}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    BP
+                  </div>
+                  <div className="text-sm font-bold leading-5 text-slate-800">
+                    {measurements.bp}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    PULSE
+                  </div>
+                  <div className="text-sm font-bold leading-5 text-slate-800">
+                    {measurements.pulse}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    TEMP
+                  </div>
+                  <div className="text-sm font-bold leading-5 text-slate-800">
+                    {measurements.temp}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    SPO2
+                  </div>
+                  <div className="text-sm font-bold leading-5 text-slate-800">
+                    {measurements.spo2}
                   </div>
                 </div>
 
@@ -7966,7 +8067,7 @@ const Summary: React.FC<{
   patientId,
   appointmentId,
   encounterNo,
-  measurements = { height: "", weight: "", bsa: "", bmi: "" },
+  measurements = { height: "", weight: "", bsa: "", bmi: "", bp: "", pulse: "", temp: "", spo2: "" },
 }) => {
   const location = useLocation();
   const statePatientId = (

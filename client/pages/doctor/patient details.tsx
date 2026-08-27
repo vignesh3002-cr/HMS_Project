@@ -1111,11 +1111,13 @@ const formatLastChecked = (values: (string | null | undefined)[]) => {
 function useLatestPatientVitals(
   patientId?: string,
   /** Changes when the user picks a different branch - triggers refetch
-     so scoped calls use the fresh x-branch-id header. */
+      so scoped calls use the fresh x-branch-id header. */
   scopeKey?: string
 ): UseLatestPatientVitalsResult {
   const [latestEncounter, setLatestEncounter] =
     useState<EncounterRecord | null>(null);
+  const [encounterRows, setEncounterRows] =
+    useState<EncounterRecord[]>([]);
   const [latestChemoVitals, setLatestChemoVitals] =
     useState<ChemoVitalsEntry | null>(null);
   const [adverseEventCount, setAdverseEventCount] = useState(0);
@@ -1125,6 +1127,7 @@ function useLatestPatientVitals(
   useEffect(() => {
     if (!patientId) {
       setLatestEncounter(null);
+      setEncounterRows([]);
       setLatestChemoVitals(null);
       setAdverseEventCount(0);
       setScopeHint(false);
@@ -1150,10 +1153,17 @@ function useLatestPatientVitals(
        empty, so single-branch auto-scoping / a valid selection still
        shows vitals. */
     const loadEncounterVitals = async () => {
+      let rows: EncounterRecord[] = [];
       let latest: EncounterRecord | null = null;
       try {
-        const response = await encounterApi.getLatest(patientId, 1);
-        latest = response.data?.data?.encounters?.[0] ?? null;
+        const response = await encounterApi.getLatest(patientId, 20);
+        const encs = response.data?.data?.encounters ?? [];
+        rows = [...encs].sort(
+          (a, b) =>
+            new Date(b.created_at).getTime() -
+            new Date(a.created_at).getTime()
+        );
+        latest = rows[0] ?? null;
       } catch (error: any) {
         const message = error?.response?.data?.message;
         console.error(
@@ -1162,14 +1172,14 @@ function useLatestPatientVitals(
         );
         noteScopeError(message);
       }
-      if (!latest) {
+      if (!latest || rows.length === 0) {
         try {
           const response = await encounterApi.getAll({
             patientId,
-            limit: 10,
+            limit: 20,
           });
           if (cancelled) return;
-          const rows = [...(response.data?.data?.encounters ?? [])].sort(
+          rows = [...(response.data?.data?.encounters ?? [])].sort(
             (a, b) =>
               new Date(b.created_at).getTime() -
               new Date(a.created_at).getTime()
@@ -1184,7 +1194,10 @@ function useLatestPatientVitals(
           noteScopeError(message);
         }
       }
-      if (!cancelled) setLatestEncounter(latest);
+      if (!cancelled) {
+        setLatestEncounter(latest);
+        setEncounterRows(rows);
+      }
     };
     loadEncounterVitals();
 
@@ -1250,28 +1263,39 @@ function useLatestPatientVitals(
   const encNum = (value: number | string | null | undefined) =>
     num(value ?? null);
 
+  const firstNonNull = <T,>(rows: T[], getter: (r: T) => any) => {
+    for (const r of rows) {
+      const v = getter(r);
+      if (v !== null && v !== undefined && v !== "") return v;
+    }
+    return null;
+  };
+  const firstEncounterValue = (getter: (e: EncounterRecord) => any) => {
+    return firstNonNull(encounterRows, getter);
+  };
+
   const heightValue =
-    encNum(latestEncounter?.height) ?? num(latestChemoVitals?.height);
+    encNum(firstEncounterValue(e => e.height)) ?? num(latestChemoVitals?.height);
   const weightValue =
-    encNum(latestEncounter?.weight) ?? num(latestChemoVitals?.weight);
+    encNum(firstEncounterValue(e => e.weight)) ?? num(latestChemoVitals?.weight);
 
   const vitals: LatestPatientVitalsValues = {
     height: heightValue,
     weight: weightValue,
     bpSystolic:
-      encNum(latestEncounter?.systolic_bp) ??
+      encNum(firstEncounterValue(e => e.systolic_bp)) ??
       num(latestChemoVitals?.blood_pressure_systolic),
     bpDiastolic:
-      encNum(latestEncounter?.diastolic_bp) ??
+      encNum(firstEncounterValue(e => e.diastolic_bp)) ??
       num(latestChemoVitals?.blood_pressure_diastolic),
-    pulse: encNum(latestEncounter?.pulse) ?? num(latestChemoVitals?.pulse_rate),
+    pulse: encNum(firstEncounterValue(e => e.pulse)) ?? num(latestChemoVitals?.pulse_rate),
     temp:
-      encNum(latestEncounter?.temperature) ??
+      encNum(firstEncounterValue(e => e.temperature)) ??
       num(latestChemoVitals?.body_temperature),
-    spo2: encNum(latestEncounter?.spo2) ?? num(latestChemoVitals?.spo2),
-    bmi: encNum(latestEncounter?.BMI) ?? num(latestChemoVitals?.bmi),
+    spo2: encNum(firstEncounterValue(e => e.spo2)) ?? num(latestChemoVitals?.spo2),
+    bmi: encNum(firstEncounterValue(e => e.BMI)) ?? num(latestChemoVitals?.bmi),
     /* Recorded chemo value wins; otherwise derive from height & weight
-       (Mosteller - see utils/vitals.ts). */
+        (Mosteller - see utils/vitals.ts). */
     bsa:
       num(latestChemoVitals?.body_surface_area) ??
       computeBsa(heightValue, weightValue),
@@ -1320,6 +1344,13 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [savedPlan, setSavedPlan] = useState<SummaryPlan | null>(null);
   const [planNotice, setPlanNotice] = useState("");
+  const [regimenProtocol, setRegimenProtocol] = useState<any | null>(null);
+  const [regimenLoading, setRegimenLoading] = useState(false);
+  const [regimenError, setRegimenError] = useState("");
+  const [currentPlan, setCurrentPlan] = useState<any | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState("");
+  const [cycleMedications, setCycleMedications] = useState<any[]>([]);
   const [nextAppointment, setNextAppointment] = useState<{
     date: string;
     detail: string;
@@ -1398,6 +1429,100 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
       cancelled = true;
     };
   }, [consultationState?.patientId, activeTab, selectedBranchId]);
+
+  useEffect(() => {
+    const protocolId = savedPlan?.source_protocol_id;
+    if (!protocolId) {
+      setRegimenProtocol(null);
+      setRegimenError("");
+      return;
+    }
+    let cancelled = false;
+    const loadRegimenProtocol = async () => {
+      setRegimenLoading(true);
+      setRegimenError("");
+      try {
+        const response = await API.get<{ success: boolean; data: any }>(
+          `/chemotherapy/regimen-protocols/${encodeURIComponent(protocolId)}`
+        );
+        if (cancelled) return;
+        setRegimenProtocol(response.data?.data ?? null);
+      } catch (err: any) {
+        if (cancelled) return;
+        setRegimenError(err?.response?.data?.message ?? "Failed to load regimen protocol");
+        setRegimenProtocol(null);
+      } finally {
+        if (!cancelled) setRegimenLoading(false);
+      }
+    };
+    loadRegimenProtocol();
+    return () => {
+      cancelled = true;
+    };
+  }, [savedPlan?.source_protocol_id]);
+
+  useEffect(() => {
+    const planId = savedPlan?.chemotherapy_plan_id;
+    if (!planId) {
+      setCurrentPlan(null);
+      setPlanError("");
+      return;
+    }
+    let cancelled = false;
+    const loadPlanDetails = async () => {
+      setPlanLoading(true);
+      setPlanError("");
+      try {
+        const response = await API.get<{ success: boolean; data: any }>(
+          `/chemotherapy/plans/${encodeURIComponent(planId)}`
+        );
+        if (cancelled) return;
+        setCurrentPlan(response.data?.data ?? null);
+      } catch (err: any) {
+        if (cancelled) return;
+        setPlanError(err?.response?.data?.message ?? "Failed to load plan details");
+        setCurrentPlan(null);
+      } finally {
+        if (!cancelled) setPlanLoading(false);
+      }
+    };
+    loadPlanDetails();
+    return () => {
+      cancelled = true;
+    };
+  }, [savedPlan?.chemotherapy_plan_id]);
+
+  useEffect(() => {
+    const cycle = savedPlan?.chemotherapy_cycle?.find(
+      (c) => c.cycle_number === Number(selectedCycle)
+    );
+    if (!cycle?.chemotherapy_cycle_id) {
+      setCycleMedications([]);
+      return;
+    }
+    let cancelled = false;
+    const loadCycleMeds = async () => {
+      try {
+        const response = await API.get<{ success: boolean; data: any }>(
+          `/chemotherapy/cycles/${encodeURIComponent(cycle.chemotherapy_cycle_id)}`
+        );
+        if (cancelled) return;
+        console.log('Cycle meds response for', cycle.chemotherapy_cycle_id, response.data);
+        const items = response.data?.data?.chemotherapy_plan_items ?? response.data?.data?.items ?? response.data?.data?.chemotherapy_plan?.chemotherapy_plan_items ?? [];
+        if (items.length > 0) {
+          setCycleMedications(items);
+        } else {
+          // Fallback to plan items if cycle endpoint returns no items
+          setCycleMedications([]);
+        }
+      } catch (err) {
+        console.error('Failed to load cycle meds', err);
+        if (!cancelled) setCycleMedications([]);
+      }
+    };
+    loadCycleMeds();
+    return () => { cancelled = true; };
+  }, [selectedCycle, savedPlan?.chemotherapy_cycle]);
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
@@ -1608,15 +1733,61 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
      control (items without an explicit day belong to Day 1). */
   const selectedDayNumber =
     Number(selectedDay.replace("Day ", "")) || 1;
-  const premedicationItems = (savedPlan?.chemotherapy_plan_items ?? []).filter(
+  const currentCycleNumber =
+    Number(selectedCycle) || displayCycleNumber || 1;
+
+  // Use regimen protocol items if available, otherwise fall back to saved plan items
+  const protocolItemsRaw = regimenProtocol?.chemotherapy_regimen_protocol_items ?? [];
+  const mapProtocolItem = (item: any) => ({
+    chemotherapy_plan_item_id: item.id || item.protocol_item_id,
+    drug_role: item.drug_role,
+    medicine_master: item.medicine_master,
+    protocol_dose: item.patient_dose ? Number(item.patient_dose) : null,
+    protocol_dose_unit: item.patient_dose_unit,
+    administration_route: item.administration_detail ?? item.administration_route ?? '',
+    frequency: item.frequency ?? item.remarks ?? '',
+    remarks: item.remarks ?? '',
+    cycle_day: item.cycle_day,
+    administration_day: item.administration_day,
+    dilution_volume: '',
+  });
+  const protocolItems = protocolItemsRaw.map(mapProtocolItem);
+  const planItems = currentPlan?.chemotherapy_plan_items ?? [];
+  const savedItems = savedPlan?.chemotherapy_plan_items ?? [];
+  const sourceItems = cycleMedications.length > 0 ? cycleMedications : (protocolItems.length > 0 ? protocolItems : (planItems.length > 0 ? planItems : savedItems));
+
+  const matchesCycleAndDay = (item: any) => {
+    const itemAdminDay = item.administration_day ?? item.cycle_day ?? 1;
+    // When using per-cycle medications from /chemotherapy/cycles/:id, items are already scoped to the cycle
+    // so only filter by day. Otherwise filter by both cycle_day and day.
+    if (cycleMedications.length > 0) {
+      return itemAdminDay === selectedDayNumber;
+    }
+    const itemCycleDay = item.cycle_day ?? item.administration_day ?? 1;
+    // If cycle number maps to day within cycle, use cycle number as day filter
+    // This makes cycle 3 show items with cycle_day =3
+    return itemCycleDay === currentCycleNumber && itemAdminDay === selectedDayNumber;
+  };
+
+  const premedicationItems = sourceItems.filter(
     (item) =>
       (item.drug_role ?? "").toUpperCase() === "PREMEDICATION" &&
-      (item.cycle_day ?? item.administration_day ?? 1) === selectedDayNumber,
+      matchesCycleAndDay(item),
   );
-  const primaryChemoItems = (savedPlan?.chemotherapy_plan_items ?? []).filter(
+  const primaryChemoItems = sourceItems.filter(
     (item) =>
       (item.drug_role ?? "").toUpperCase() === "PRIMARY" &&
-      (item.cycle_day ?? item.administration_day ?? 1) === selectedDayNumber,
+      matchesCycleAndDay(item),
+  );
+  const supportiveItems = sourceItems.filter(
+    (item) => {
+      const role = (item.drug_role ?? "").toUpperCase();
+      return (
+        role !== "PREMEDICATION" &&
+        role !== "PRIMARY" &&
+        matchesCycleAndDay(item)
+      );
+    },
   );
 
   const planCycles = (savedPlan?.chemotherapy_cycle ?? []).filter(
@@ -2324,6 +2495,44 @@ primaryChemoItems.map((item, index) => (
 <td className="py-2">{item.administration_route ?? "—"}</td>
 <td className="py-2">{item.dilution_volume ?? "—"}</td>
 <td className="py-2 text-right"><StatusBadge>{item.drug_role || "ORDERED"}</StatusBadge></td>
+</tr>
+))
+)}
+</tbody>
+</table>
+</div>
+</div>
+<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden">
+<div className="px-5 py-4 border-b border-[#e2e8f0] flex items-center text-emerald-600">
+<i className="fa-solid fa-heart-pulse mr-2"></i>
+<h4 className="text-sm font-bold">Supportive Medicines</h4>
+</div>
+<div className="p-5">
+<table className="w-full text-left text-sm">
+<thead>
+<tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
+<th className="pb-2 font-semibold w-8">#</th>
+<th className="pb-2 font-semibold">DRUG</th>
+<th className="pb-2 font-semibold">DOSE</th>
+<th className="pb-2 font-semibold">ROUTE</th>
+<th className="pb-2 font-semibold">TIMING</th>
+<th className="pb-2 font-semibold text-right">STATUS</th>
+</tr>
+</thead>
+<tbody>
+{supportiveItems.length === 0 ? (
+<tr>
+<td colSpan={6} className="py-6 text-center text-xs text-[#64748b]">No supportive medicines found.</td>
+</tr>
+) : (
+supportiveItems.map((item, index) => (
+<tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
+<td className="py-2">{index + 1}</td>
+<td className="py-2 font-medium text-[#1e293b]">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
+<td className="py-2">{item.administration_route ?? "—"}</td>
+<td className="py-2">{item.frequency ?? item.remarks ?? "—"}</td>
+<td className="py-2 text-right"><StatusBadge>{item.drug_role || "SUPPORTIVE"}</StatusBadge></td>
 </tr>
 ))
 )}
