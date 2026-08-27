@@ -20,13 +20,13 @@ import {
 import { encounterApi } from "../../api/encounter.api";
 import {
   doctorDashboardApi,
-  type DoctorNotificationItem,
 } from "../../api/doctorDashboard.api";
 import { employeeApi } from "../../api/employee.api";
 import API, { getActiveBranchId } from "../../api/axios";
 import { getUser } from "../../utils/token";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -829,70 +829,8 @@ export default function AppointmentPage() {
   };
 
   /* =======================================================
-     HEADER NOTIFICATIONS
+     HEADER NOTIFICATIONS - Using global BellNotificationButton
      ======================================================= */
-
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [notifications, setNotifications] = useState<DoctorNotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const notificationRef = useRef<HTMLDivElement>(null);
-
-  const bellEmployeeId =
-    targetDoctorId ?? getUser()?.employee_id ?? null;
-
-  useEffect(() => {
-    if (!bellEmployeeId) return;
-
-    let cancelled = false;
-
-    const load = () => {
-      doctorDashboardApi
-        .getNotifications(bellEmployeeId)
-        .then((res) => {
-          if (cancelled) return;
-          setNotifications(res.data?.data?.notifications ?? []);
-          setUnreadCount(res.data?.data?.unreadCount ?? 0);
-        })
-        .catch(() => {});
-    };
-
-    load();
-    const intervalId = window.setInterval(load, 10000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [bellEmployeeId]);
-
-  useEffect(() => {
-    if (
-      notificationsOpen &&
-      unreadCount > 0 &&
-      bellEmployeeId
-    ) {
-      setUnreadCount(0);
-      doctorDashboardApi
-        .markNotificationsRead(bellEmployeeId)
-        .catch(() => {});
-    }
-  }, [notificationsOpen, unreadCount, bellEmployeeId]);
-
-  useEffect(() => {
-    const handleClick = (event: MouseEvent) => {
-      if (
-        !notificationRef.current?.contains(
-          event.target as Node,
-        )
-      ) {
-        setNotificationsOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClick);
-    return () =>
-      document.removeEventListener("mousedown", handleClick);
-  }, []);
 
   function timeAgo(iso: string): string {
     const then = new Date(iso).getTime();
@@ -1149,77 +1087,8 @@ export default function AppointmentPage() {
             </div>
           </div>
 
-          {/* ==================== NOTIFICATION BELL ==================== */}
-          <div className="relative" ref={notificationRef}>
-            <button
-              type="button"
-              aria-label="Notifications"
-              onClick={() => setNotificationsOpen((value) => !value)}
-              className="relative w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500"
-            >
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-                <path d="M13.7 21a2 2 0 01-3.4 0" />
-              </svg>
-              {unreadCount > 0 && (
-                <span className="absolute top-0 right-0 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-bold leading-none text-white">
-                  {unreadCount > 9 ? "9+" : unreadCount}
-                </span>
-              )}
-            </button>
-
-            {notificationsOpen && (
-              <div className="absolute right-0 top-12 z-50 w-[300px] rounded-xl border border-gray-200 bg-white p-4 shadow-xl">
-                <h3 className="mb-2 text-sm font-semibold text-gray-800">Notifications</h3>
-                {notifications.length === 0 ? (
-                  <div className="py-5 text-center text-xs text-gray-400">No new notifications</div>
-                ) : (
-                  <div className="max-h-[300px] overflow-y-auto">
-                    {notifications.map((item, index) => {
-                      const patientBio = item.appointment_history?.patient_bio_data;
-                      const patientName = [
-                        patientBio?.patient_first_name,
-                        patientBio?.patient_middle_name,
-                        patientBio?.patient_last_name,
-                      ].filter(Boolean).join(" ") || "A patient";
-                      const isBooking = item.notification_type === "BOOKING";
-
-                      return (
-                        <div
-                          key={item.notification_id}
-                          className={`py-2.5 text-xs text-gray-600 ${
-                            index < notifications.length - 1 ? "border-b border-gray-100" : ""
-                          }`}
-                        >
-                          <p className="leading-4">
-                            {item.status === "UNREAD" && (
-                              <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-blue-500 align-middle" />
-                            )}
-                            {isBooking ? (
-                              <>
-                                <span className="font-semibold text-gray-800">{patientName}</span>{" "}
-                                booked an appointment
-                                {item.appointment_history
-                                  ? ` for ${new Date(item.appointment_history.appointment_date).toLocaleDateString("en-GB")}`
-                                  : ""}
-                                .
-                              </>
-                            ) : (
-                              <>
-                                <span className="font-semibold text-gray-800">{patientName}</span>{" "}
-                                checked in.
-                              </>
-                            )}
-                          </p>
-                          <span className="text-[10px] text-gray-400">{timeAgo(item.created_at)}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          {/* ==================== NOTIFICATION BELL (Global) ==================== */}
+          <BellNotificationButton size="sm" />
 
           {/* ==================== MAIN CARD ==================== */}
           <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col transition-all duration-300 hover:shadow-md">

@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 
 const PatientNotesDocuments: React.FC = () => {
   const [activeTab, setActiveTab] = useState("Notes & Documents");
@@ -109,15 +110,7 @@ const PatientNotesDocuments: React.FC = () => {
           {/* Header Actions */}
           <div className="flex items-center space-x-4">
             {/* Notification */}
-            <button
-              type="button"
-              className="relative text-slate-400 transition-colors hover:text-slate-600"
-              aria-label="Notifications"
-            >
-              <i className="fa-regular fa-bell" />
-
-              <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
-            </button>
+            <BellNotificationButton size="md" />
 
             {/* HMS */}
             <span className="rounded bg-blue-50 px-2 py-1 text-sm font-medium text-blue-600">
