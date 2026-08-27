@@ -224,6 +224,7 @@ export interface GetEmployeesParams {
   page?: number;
   limit?: number;
   date?: string;
+  skipBranchScope?: boolean;
 }
 
 export interface UpdateEmployeePayload {

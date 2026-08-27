@@ -534,6 +534,7 @@ export default function AppointmentPage() {
             roleType: "DOCTOR",
             page: 1,
             limit: 1000,
+            skipBranchScope: true,
           });
           const firstData = firstPage.data?.data;
           const remainingPages = Array.from(
