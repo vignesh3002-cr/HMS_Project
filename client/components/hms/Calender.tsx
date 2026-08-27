@@ -534,6 +534,7 @@ export default function Calendar({
       <div className="cal-card">
         <div className="cal-header">
           <button
+            type="button"
             aria-label={weekMode ? "Previous week" : "Previous month"}
             className="cal-nav-btn"
             onClick={weekMode ? () => goToWeek(-1) : () => goToMonth(-1)}
@@ -573,6 +574,7 @@ export default function Calendar({
             )}
           </div>
           <button
+            type="button"
             aria-label={weekMode ? "Next week" : "Next month"}
             className="cal-nav-btn"
             onClick={weekMode ? () => goToWeek(1) : () => goToMonth(1)}
@@ -602,6 +604,7 @@ export default function Calendar({
 
             return (
               <button
+                type="button"
                 key={i}
                 onClick={(e) => handleClick(date, e.shiftKey, e.ctrlKey || e.metaKey, false)}
                 onDoubleClick={(e) => handleClick(date, e.shiftKey, e.ctrlKey || e.metaKey, true)}
@@ -637,6 +640,7 @@ export default function Calendar({
                 const active = name === activeTheme;
                 return (
                   <button
+                    type="button"
                     key={name}
                     className="cal-theme-pill"
                     data-active={active}
@@ -652,6 +656,7 @@ export default function Calendar({
                 );
               })}
               <button
+                type="button"
                 className="cal-theme-pill"
                 data-active={activeTheme === "custom"}
                 onClick={() => {

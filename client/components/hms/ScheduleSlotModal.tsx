@@ -34,6 +34,7 @@ export interface ScheduleSlotAddPayload {
   // the submit is a doctor_schedule_change rather than a template row.
   changeMode?: ScheduleChangeMode;
   changeId?: string | number | null;
+  bypassPending?: boolean;
 }
 
 export interface ScheduleSlotEditPayload {
@@ -54,6 +55,7 @@ export interface ScheduleSlotEditPayload {
   departmentId?: string;
   changeMode?: ScheduleChangeMode;
   changeId?: string | number | null;
+  bypassPending?: boolean;
 }
 
 const WEEK_DAY_OPTIONS = [
@@ -80,6 +82,7 @@ export interface ScheduleSlotCancelPayload {
   changeId?: string | number | null;
   changeMode?: ScheduleChangeMode;
   info: string;
+  bypassPending?: boolean;
 }
 
 export interface ScheduleSlotModalHandle {
@@ -91,7 +94,18 @@ export interface ScheduleSlotModalHandle {
     date?: string,
     changeMode?: ScheduleChangeMode,
   ) => void;
-  openEditSlot: (payload: Omit<ScheduleSlotEditPayload, "row" | "col">) => void;
+      openEditSlot: (payload: {
+        scheduleId?: string | number | null;
+        day?: string;
+        date?: string;
+        branchId?: string;
+        startTime?: string;
+        endTime?: string;
+        consultationMinutes?: string | number | null;
+        mode?: ScheduleSlotMode;
+        changeMode?: ScheduleChangeMode;
+        changeId?: string | number | null;
+      }) => void;
   openCancelSlot: (
     dayName: string,
     rowIndex: number,
@@ -106,15 +120,15 @@ export interface ScheduleSlotModalHandle {
 
 interface ScheduleSlotModalProps {
   branches?: ScheduleSlotBranchOption[];
-  departments?: { department_id: string; department_name: string }[];
   defaultConsultationMinutes?: number;
-  defaultDepartmentId?: string;
   defaultBranchId?: string;
   hideDate?: boolean;
   onAddSlot: (payload: ScheduleSlotAddPayload) => Promise<boolean> | boolean;
   onUpdateSlot?: (payload: ScheduleSlotEditPayload) => Promise<boolean> | boolean;
   onCancelSlot: (payload: ScheduleSlotCancelPayload) => void;
+  onClose?: () => void;
   isSubmitting?: boolean;
+  showBypassOption?: boolean;
 }
 
 const formatTime12 = (time: string) => {
@@ -128,7 +142,7 @@ const formatTime12 = (time: string) => {
 
 const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalProps>(
   function ScheduleSlotModal(
-    { branches, departments = [], defaultConsultationMinutes = 20, defaultDepartmentId = "", defaultBranchId = "", hideDate = false, onAddSlot, onUpdateSlot, onCancelSlot, isSubmitting = false },
+    { branches, defaultConsultationMinutes = 20, defaultBranchId = "", hideDate = false, onAddSlot, onUpdateSlot, onCancelSlot, onClose, isSubmitting = false, showBypassOption = false },
     ref,
   ) {
     const [addSlotOpen, setAddSlotOpen] = useState(false);
@@ -140,10 +154,8 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
     const [slotBranch, setSlotBranch] = useState("");
     const [slotMode, setSlotMode] = useState<ScheduleSlotMode>("weekly");
     const [slotChangeMode, setSlotChangeMode] = useState<ScheduleChangeMode>("ADD");
-    const [slotDepartment, setSlotDepartment] = useState("");
     const [slotEffectiveDate, setSlotEffectiveDate] = useState(() => toDateInputValue(new Date()));
-    const [slotConsultationMinutes, setSlotConsultationMinutes] = useState("");
-    const [slotTransferReason, setSlotTransferReason] = useState("");
+    const [slotConsultationMinutes, setSlotConsultationMinutes] = useState("20");
     const [editingScheduleId, setEditingScheduleId] = useState<string | number | null>(null);
     const [editingChangeId, setEditingChangeId] = useState<string | number | null>(null);
     const [cancelSlotOpen, setCancelSlotOpen] = useState(false);
@@ -152,6 +164,8 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
     const [cancelScheduleId, setCancelScheduleId] = useState<string | number | null>(null);
     const [cancelChangeId, setCancelChangeId] = useState<string | number | null>(null);
     const [cancelChangeMode, setCancelChangeMode] = useState<ScheduleChangeMode | undefined>(undefined);
+    const [slotBypassPending, setSlotBypassPending] = useState(false);
+    const [cancelBypassPending, setCancelBypassPending] = useState(false);
 
     const branchOptions = branches ?? [];
 
@@ -167,13 +181,12 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
         setSlotBranch(defaultBranchId ?? "");
         setSlotMode(mode);
         setSlotChangeMode(mode === "date" ? changeMode : "ADD");
-        setSlotDepartment(defaultDepartmentId ?? "");
         setSlotEffectiveDate(date || toDateInputValue(new Date()));
-        setSlotConsultationMinutes(String(defaultConsultationMinutes));
-        setSlotTransferReason("");
+        setSlotConsultationMinutes("20");
+        setSlotBypassPending(false);
         setAddSlotOpen(true);
       },
-      openEditSlot: ({ scheduleId, day, date, branchId, startTime, endTime, mode, departmentId, consultationMinutes, changeMode, changeId }) => {
+      openEditSlot: ({ scheduleId, day, date, branchId, startTime, endTime, mode, consultationMinutes, changeMode, changeId }) => {
         setEditingScheduleId(scheduleId ?? null);
         setEditingChangeId(changeId ?? null);
         setAddSlotDay(day);
@@ -184,12 +197,10 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
         setSlotBranch(branchId);
         setSlotMode(mode);
         setSlotChangeMode(mode === "date" ? changeMode ?? "ADD" : "ADD");
-        setSlotDepartment(departmentId ?? "");
         setSlotEffectiveDate(date || toDateInputValue(new Date()));
         setSlotConsultationMinutes(
           consultationMinutes != null ? String(consultationMinutes) : String(defaultConsultationMinutes),
         );
-        setSlotTransferReason("");
         setAddSlotOpen(true);
       },
       openCancelSlot: (dayName, rowIndex, colIndex, text, branch, scheduleId = null, changeId = null, changeMode) => {
@@ -198,11 +209,13 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
         setCancelScheduleId(scheduleId);
         setCancelChangeId(changeId);
         setCancelChangeMode(changeMode);
+        setCancelBypassPending(false);
         setCancelSlotOpen(true);
       },
     }));
 
     const closeAddSlot = () => {
+      onClose?.();
       setAddSlotOpen(false);
     };
 
@@ -211,12 +224,16 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
       const effectiveChangeMode: ScheduleChangeMode | undefined = isDateChange ? slotChangeMode : undefined;
       const isCancelChange = effectiveChangeMode === "CANCEL";
 
-      if (!addSlotDay || !slotDate || !slotBranch) {
+      if (!addSlotDay || !slotDate || (!isCancelChange && !slotBranch)) {
         alert("Please select day, date and branch location.");
         return;
       }
       if (!isCancelChange && (!slotStart || !slotEnd)) {
         alert("Please select start time and end time.");
+        return;
+      }
+      if (!isCancelChange && (!slotConsultationMinutes || Number(slotConsultationMinutes) < 1)) {
+        alert("Please enter consultation minutes.");
         return;
       }
 
@@ -237,6 +254,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
         timeLabel,
         mode: slotMode,
         changeMode: effectiveChangeMode,
+        bypassPending: slotBypassPending || undefined,
       };
 
       if (editingChangeId !== null) {
@@ -246,8 +264,6 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
           changeId: editingChangeId,
           effectiveDate: slotEffectiveDate,
           consultationMinutes: slotConsultationMinutes,
-          transferReason: slotTransferReason.trim(),
-          departmentId: slotDepartment,
         });
         if (ok === false) return;
       } else if (editingScheduleId !== null) {
@@ -257,8 +273,6 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
           changeId: editingChangeId,
           effectiveDate: slotEffectiveDate,
           consultationMinutes: slotConsultationMinutes,
-          transferReason: slotTransferReason.trim(),
-          departmentId: slotDepartment,
         });
         if (ok === false) return;
       } else {
@@ -266,8 +280,6 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
           ...base,
           effectiveDate: slotEffectiveDate,
           consultationMinutes: slotConsultationMinutes,
-          transferReason: slotTransferReason.trim(),
-          departmentId: slotDepartment,
         });
         if (ok === false) return;
       }
@@ -288,6 +300,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
           changeId: cancelChangeId,
           changeMode: cancelChangeMode,
           info: cancelSlotInfo,
+          bypassPending: cancelBypassPending || undefined,
         });
       }
 
@@ -350,7 +363,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
               <div className="flex flex-col gap-3 mb-6">
                 <div>
                   <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                    DAY
+                    DAY *
                   </label>
 
                   <select
@@ -370,7 +383,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
                 {slotMode === "date" && (
                   <div>
                     <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                      DATE
+                      DATE *
                     </label>
 
                     <input
@@ -386,7 +399,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
                   <>
                     <div>
                       <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                        START TIME
+                        START TIME *
                       </label>
 
                       <TimepickerWheel
@@ -400,7 +413,7 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
 
                     <div>
                       <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                        END TIME
+                        END TIME *
                       </label>
 
                       <TimepickerWheel
@@ -414,67 +427,57 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
                   </>
                 )}
 
-                <div>
-                  <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                    BRANCH LOCATION
-                  </label>
-
-                  <select
-                    value={slotBranch}
-                    onChange={(e) => setSlotBranch(e.target.value)}
-                    className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
-                  >
-                    <option value="">Select branch</option>
-                    {branchOptions.map((branch) => (
-                      <option key={branch.branch_id} value={branch.branch_id}>
-                        {branch.branch_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
                 {!(slotMode === "date" && slotChangeMode === "CANCEL") && (
-                  <>
-                    <div>
-                      <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                        DEPARTMENT
-                      </label>
+                  <div>
+                    <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
+                      BRANCH LOCATION *
+                    </label>
 
-                      <select
-                        value={slotDepartment}
-                        onChange={(e) => setSlotDepartment(e.target.value)}
-                        className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
-                      >
-                        <option value="">Select department</option>
-                        {departments.map((d) => (
-                          <option key={d.department_id} value={d.department_id}>
-                            {d.department_name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </>
+                    <select
+                      value={slotBranch}
+                      onChange={(e) => setSlotBranch(e.target.value)}
+                      className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
+                    >
+                      <option value="">Select branch</option>
+                      {branchOptions.map((branch) => (
+                        <option key={branch.branch_id} value={branch.branch_id}>
+                          {branch.branch_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 )}
-
-                {slotMode !== "date" && (
-                  <>
-
-                    <div>
-                      <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                        TRANSFER REASON
-                      </label>
-
-                      <textarea
-                        rows={2}
-                        value={slotTransferReason}
-                        onChange={(e) => setSlotTransferReason(e.target.value)}
-                        placeholder="Why is this slot being changed?"
-                        className="w-full resize-y border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
-                      />
-                    </div>
-                  </>
+                {!(slotMode === "date" && slotChangeMode === "CANCEL") && (
+                  <div>
+                    <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
+                      CONSULTATION MINUTES *
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={slotConsultationMinutes}
+                      onChange={(e) => setSlotConsultationMinutes(e.target.value)}
+                      placeholder="e.g. 20"
+                      disabled={isSubmitting}
+                      className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
+                    />
+                  </div>
                 )}
               </div>
+
+              {showBypassOption && slotMode === "date" && slotChangeMode !== "CANCEL" && (
+                <label className="flex items-center gap-2 mb-4 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={slotBypassPending}
+                    onChange={(e) => setSlotBypassPending(e.target.checked)}
+                    className="h-4 w-4 rounded border-[#dfe4ea] text-[#004a91] focus:ring-[#004a91]/30"
+                  />
+                  <span className="text-[12px] text-[#374151] font-medium">
+                    Override pending transfer
+                  </span>
+                </label>
+              )}
 
               <div className="flex justify-end gap-3">
                 <button
@@ -512,11 +515,25 @@ const ScheduleSlotModal = forwardRef<ScheduleSlotModalHandle, ScheduleSlotModalP
                 {cancelChangeId != null ? "Remove Date Change" : "Cancel Slot"}
               </h3>
 
-              <p className="text-[#5f6672] text-[13px] mb-6">
+              <p className="text-[#5f6672] text-[13px] mb-4">
                 {cancelChangeId != null
                   ? `Remove this date change for ${cancelSlotInfo}?`
                   : `Cancel this slot for ${cancelSlotInfo}?`}
               </p>
+
+              {showBypassOption && cancelChangeId == null && (
+                <label className="flex items-center gap-2 mb-4 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={cancelBypassPending}
+                    onChange={(e) => setCancelBypassPending(e.target.checked)}
+                    className="h-4 w-4 rounded border-[#dfe4ea] text-[#004a91] focus:ring-[#004a91]/30"
+                  />
+                  <span className="text-[12px] text-[#374151] font-medium">
+                    Override pending transfer
+                  </span>
+                </label>
+              )}
 
               <div className="flex justify-end gap-3">
                 <button

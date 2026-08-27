@@ -436,6 +436,7 @@ const AbsenceManagement: React.FC = () => {
         leave_start_date: isoStart,
         leave_end_date: isoEnd,
         leave_reason: leaveReason,
+        leave_type: selectedType,
         requested_by: getUser()?.user_id ?? "",
       };
 

@@ -1,7 +1,15 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { format } from "date-fns";
-import { User, IdCard, Phone, Mail, MapPin, Cake, Droplet, VenusAndMars, Briefcase, X, Loader2, Star, CalendarOff, RotateCw, CheckCircle2 } from "lucide-react";
+import {
+  User, IdCard, Phone, Mail, MapPin, Cake, Droplet,
+  VenusAndMars, Briefcase, X, Loader2, Star, CalendarOff,
+  RotateCw, CheckCircle2, ArrowLeft, Stethoscope,
+  GraduationCap, Hospital, Clock, Calendar,
+  Plus, Sun, Calendar as CalendarIcon,
+  UserCircle, Quote, Ban, Coffee, Send, ClipboardList,
+  CalendarX,
+} from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   AlertDialog,
@@ -20,19 +28,16 @@ import ScheduleSlotModal, {
   type ScheduleSlotEditPayload,
   type ScheduleSlotCancelPayload,
 } from "@/components/hms/ScheduleSlotModal";
-import { employeeApi, type EmployeeDetailResponse, type DoctorScheduleRecord } from "@/api/employee.api";
-import { appointmentApi, type AvailableSlotsResult } from "@/api/appointment.api";
+import AffectedAppointmentsDialog from "@/components/hms/AffectedAppointmentsDialog";
+import { employeeApi, type EmployeeDetailResponse, type DoctorScheduleRecord, type EmployeeRecord } from "@/api/employee.api";
 import { doctorLeaveApi } from "@/api/doctorLeave.api";
-import { departmentApi, type Department } from "@/api/department.api";
-import {
-  doctorScheduleApi,
+import { doctorScheduleApi,
   type ScheduleChangeMode,
   type ScheduleChangeRecord,
 } from "@/api/doctorSchedule.api";
 import {
   doctorTransferApi,
   type TransferAppointmentSummary,
-  type TransferAction,
 } from "@/api/doctorTransfer.api";
 import { getUser } from "@/utils/token";
 import type { DoctorLeaveRecord } from "@/api/doctorLeave.api";
@@ -41,18 +46,13 @@ import {
   formatTimeOfDay,
   type LeaveConflict,
 } from "@/utils/leaveConflicts";
-import { DepartmentPill } from "@/components/hms/DepartmentBadge";
-import { StatusBadge } from "@/components/hms/StatusBadge";
+import { useToast } from "@/hooks/use-toast";
 
 function formatDoctorFullName(e: EmployeeDetailResponse["employee"] | null): string {
   if (!e) return "Doctor";
   return `Dr. ${[e.first_name, e.middle_name, e.last_name].filter(Boolean).join(" ")}`;
 }
 
-// doctor_schedule.start_time/end_time come back as UTC-anchored time values
-// (see toTimeInputValue in Edit Appointment.tsx for the same pattern) -- read
-// with UTC getters so the displayed hour doesn't shift with the browser's
-// local timezone.
 function formatScheduleTime(time: string | null): string {
   if (!time) return "";
   const d = new Date(time);
@@ -83,7 +83,6 @@ function toMinutes(time: string): number {
   return (h || 0) * 60 + (m || 0);
 }
 
-// dd/mm/yy -> yyyy-mm-dd (used to match doctor_schedule_change.change_date).
 function weekDateToISO(dateStr: string): string {
   const [dd, mm, yy] = dateStr.split("/").map(Number);
   const date = new Date(2000 + yy, mm - 1, dd);
@@ -93,20 +92,14 @@ function weekDateToISO(dateStr: string): string {
   return `${y}-${m}-${d}`;
 }
 
-// change_date arrives as an ISO/date string; keep only the yyyy-mm-dd part.
 function normalizeChangeDate(value: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value ?? "");
   if (m) return `${m[1]}-${m[2]}-${m[3]}`;
   return value ?? "";
 }
 
-// Shifts a "yyyy-mm-dd" string by N days using the local
-// calendar (used to expand approved-leave date ranges).
 function addIsoDays(isoDate: string, days: number): string {
-  const [year, month, day] = isoDate
-    .slice(0, 10)
-    .split("-")
-    .map(Number);
+  const [year, month, day] = isoDate.slice(0, 10).split("-").map(Number);
   const shifted = new Date(year, month - 1, day + days);
   const y = shifted.getFullYear();
   const m = String(shifted.getMonth() + 1).padStart(2, "0");
@@ -114,7 +107,6 @@ function addIsoDays(isoDate: string, days: number): string {
   return `${y}-${m}-${d}`;
 }
 
-// Handles both "HH:mm" / "HH:mm:ss" strings and UTC-anchored Date/ISO values.
 function formatChangeTime(time: string | null | undefined): string {
   if (!time) return "";
   if (/^\d{1,2}:\d{2}/.test(time)) {
@@ -128,7 +120,6 @@ function formatChangeTime(time: string | null | undefined): string {
   return formatScheduleTime(time);
 }
 
-// Input-value variant (HH:mm) of formatChangeTime for the edit modal.
 function changeTimeInputValue(time: string | null | undefined): string {
   if (!time) return "";
   if (/^\d{1,2}:\d{2}/.test(time)) {
@@ -148,8 +139,7 @@ const WEEK_DAYS = [
   ["Sunday"],
 ];
 
-// Monday-Sunday dates (dd/mm/yy) for the week containing `reference`.
-const getWeekDates = (reference) => {
+const getWeekDates = (reference: Date) => {
   const day = reference.getDay();
   const mondayOffset = day === 0 ? -6 : 1 - day;
   const monday = new Date(reference);
@@ -165,7 +155,7 @@ const getWeekDates = (reference) => {
   });
 };
 
-const shiftDate = (dateStr, days) => {
+const shiftDate = (dateStr: string, days: number) => {
   const [dd, mm, yy] = dateStr.split("/").map(Number);
   const date = new Date(2000 + yy, mm - 1, dd);
   date.setDate(date.getDate() + days);
@@ -175,60 +165,36 @@ const shiftDate = (dateStr, days) => {
   return `${newDd}/${newMm}/${newYy}`;
 };
 
-const parseDate = (dateStr) => {
-  const [dd, mm, yy] = dateStr.split("/").map(Number);
-  return new Date(2000 + yy, mm - 1, dd);
-};
-
-const isSameDay = (a, b) =>
-  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-
-const dateKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-
-const buildCalendarDays = (year, month) => {
-  const firstDay = new Date(year, month, 1);
-  const startOffset = firstDay.getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const daysInPrevMonth = new Date(year, month, 0).getDate();
-
-  const cells = [];
-
-  for (let i = startOffset - 1; i >= 0; i--) {
-    cells.push({ date: new Date(year, month - 1, daysInPrevMonth - i), inMonth: false });
-  }
-  for (let d = 1; d <= daysInMonth; d++) {
-    cells.push({ date: new Date(year, month, d), inMonth: true });
-  }
-  while (cells.length % 7 !== 0 || cells.length < 42) {
-    const last = cells[cells.length - 1].date;
-    cells.push({ date: new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1), inMonth: false });
-  }
-
-  return cells;
-};
-
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-const getMonthYearLabel = (year, month) => `${MONTH_NAMES[month]} ${year}`;
+interface WeekBlock {
+  key: string;
+  type: "template" | "ADD" | "OVERRIDE" | "CANCEL";
+  time: string;
+  branch: string;
+  branchId: string;
+  scheduleId: string | number | null;
+  changeId?: string | number | null;
+  startTime: string;
+  endTime: string;
+  consultationMinutes?: number | null;
+}
 
 export default function DoctorProfile() {
   const navigate = useNavigate();
   const { id } = useParams();
   const location = useLocation();
-  // Entering via /doctor/day-view/:id opens on the Day tab, /doctor/view/:id
-  // opens on Week -- both routes render this same merged page now, so the
-  // entry URL just decides the initial tab instead of navigating to a
-  // separate page.
+  const { toast } = useToast();
+
+  const showAlert = (message: string, variant: "default" | "destructive" = "default") => {
+    toast({ description: message, ...(variant === "destructive" ? { variant } : {}) });
+  };
+
   const [activeTab, setActiveTab] = useState(() =>
     location.pathname.includes("/doctor/day-view") ? "day" : "week",
   );
-  const [toggledDates, setToggledDates] = useState<Set<string>>(new Set());
   const slotModalRef = useRef<ScheduleSlotModalHandle>(null);
-  const [fromDate, setFromDate] = useState(null);
-  const [toDate, setToDate] = useState(null);
+  const [fromDate, setFromDate] = useState<Date | null>(null);
+  const [toDate, setToDate] = useState<Date | null>(null);
+  const [leaveType, setLeaveType] = useState<"Emergency" | "Vacation" | "Sick Leave">("Emergency");
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const [leaveSuccessOpen, setLeaveSuccessOpen] = useState(false);
   const [submittingLeave, setSubmittingLeave] = useState(false);
@@ -239,70 +205,47 @@ export default function DoctorProfile() {
     queuedCount?: number;
     queueFailed?: boolean;
   } | null>(null);
-  const [leaveConflicts, setLeaveConflicts] = useState<
-    LeaveConflict[]
-  >([]);
-  const [leaveConflictsOpen, setLeaveConflictsOpen] =
-    useState(false);
+  const [leaveConflicts, setLeaveConflicts] = useState<LeaveConflict[]>([]);
+  const [leaveConflictsOpen, setLeaveConflictsOpen] = useState(false);
   const [processingLeave, setProcessingLeave] = useState(false);
   const leaveFormRef = useRef<HTMLFormElement | null>(null);
   const [isFromCalendarOpen, setIsFromCalendarOpen] = useState(false);
   const [isToCalendarOpen, setIsToCalendarOpen] = useState(false);
   const [savingSlot, setSavingSlot] = useState(false);
-  const [departments, setDepartments] = useState<Department[]>([]);
   const [pendingTransfer, setPendingTransfer] = useState<{
     transferId: string;
     appointments: TransferAppointmentSummary[];
     message: string;
   } | null>(null);
-  const [transferAction, setTransferAction] = useState<TransferAction | null>(null);
-  const [replacementDoctorId, setReplacementDoctorId] = useState("");
-  const [isConfirmingTransfer, setIsConfirmingTransfer] = useState(false);
+  const [openDoctors, setOpenDoctors] = useState<EmployeeRecord[]>([]);
   const [weekDates, setWeekDates] = useState(() => getWeekDates(new Date()));
-  const [calendarViewYear, setCalendarViewYear] = useState(() => new Date().getFullYear());
-  const [calendarViewMonth, setCalendarViewMonth] = useState(() => new Date().getMonth());
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<Date | null>(() => {
-    const first = weekDates[0];
+    const first = getWeekDates(new Date())[0];
     const [dd, mm, yy] = first.split("/").map(Number);
     return new Date(2000 + yy, mm - 1, dd);
   });
-
-  // Multi-select dates for calendar (double-click + Ctrl+Click)
   const [selectedDates, setSelectedDates] = useState<Date[]>(() => {
-    // Default to Monday-Sunday of current week
     const week = getWeekDates(new Date());
     return week.map((d) => {
       const [dd, mm, yy] = d.split("/").map(Number);
       return new Date(2000 + yy, mm - 1, dd);
     });
   });
-
-  // Week start for calendar sync
   const [calendarWeekStart, setCalendarWeekStart] = useState<Date>(() => {
-    const first = weekDates[0];
+    const first = getWeekDates(new Date())[0];
     const [dd, mm, yy] = first.split("/").map(Number);
     return new Date(2000 + yy, mm - 1, dd);
   });
-
   const [doctorDetail, setDoctorDetail] = useState<EmployeeDetailResponse | null>(null);
-
-  // Date-specific (non-recurring) schedule changes for the doctor: ADD /
-  // OVERRIDE / CANCEL records loaded for the Week tab.
   const [weekChanges, setWeekChanges] = useState<ScheduleChangeRecord[]>([]);
   const [weekChangesLoading, setWeekChangesLoading] = useState(false);
-
-  // APPROVED leaves for this doctor — week view marks covered
-  // days with a "Doctor Leave" banner.
-  const [approvedLeaves, setApprovedLeaves] = useState<
-    DoctorLeaveRecord[]
-  >([]);
+  const [approvedLeaves, setApprovedLeaves] = useState<DoctorLeaveRecord[]>([]);
 
   const loadApprovedLeaves = useCallback(async () => {
     if (!id) {
       setApprovedLeaves([]);
       return;
     }
-
     try {
       const response = await doctorLeaveApi.getApprovedLeavesForDoctor(id);
       setApprovedLeaves(response.data?.leaves ?? []);
@@ -316,49 +259,28 @@ export default function DoctorProfile() {
     void loadApprovedLeaves();
   }, [loadApprovedLeaves]);
 
-  /* =======================================================
-     APPROVED LEAVES BY DATE
-     ======================================================= */
-
-  // Expands each APPROVED leave into every calendar day it
-  // covers (yyyy-mm-dd keys, matching weekDateToISO output)
-  // so the week grid can flag covered columns directly.
   const leaveByIso = useMemo(() => {
     const map = new Map<string, DoctorLeaveRecord>();
-
     for (const leave of approvedLeaves) {
-      const startIso = String(
-        leave.leave_start_date
-      ).slice(0, 10);
-      const endIso = String(
-        leave.leave_end_date
-      ).slice(0, 10);
-
-      if (!startIso || !endIso) {
-        continue;
-      }
-
+      const startIso = String(leave.leave_start_date).slice(0, 10);
+      const endIso = String(leave.leave_end_date).slice(0, 10);
+      if (!startIso || !endIso) continue;
       let cursor = startIso;
       let guard = 0;
-
-      while (
-        cursor <= endIso &&
-        guard < 732
-      ) {
+      while (cursor <= endIso && guard < 732) {
         map.set(cursor, leave);
         cursor = addIsoDays(cursor, 1);
         guard += 1;
       }
     }
-
     return map;
   }, [approvedLeaves]);
 
   useEffect(() => {
-    departmentApi
-      .getAll()
-      .then((res) => setDepartments(res.data?.data ?? []))
-      .catch((err) => console.error("[Doctor Profile] Failed to load departments:", err));
+    employeeApi
+      .getAll({ roleType: "DOCTOR", limit: 1000 })
+      .then((res) => setOpenDoctors(res.data?.data?.employees ?? []))
+      .catch((err) => console.error("[Doctor Profile] Failed to load doctors:", err));
   }, []);
 
   useEffect(() => {
@@ -374,15 +296,10 @@ export default function DoctorProfile() {
       });
   }, [id]);
 
-  // Real available slots for the selected day (today), fetched from the
-  // appointments API for the doctor being viewed here.
-  const [todaySlots, setTodaySlots] = useState<AvailableSlotsResult | null>(null);
-  const [isSlotsLoading, setIsSlotsLoading] = useState(false);
-
   const doctorEmployee = doctorDetail?.employee ?? null;
   const doctorName = formatDoctorFullName(doctorEmployee);
-  const doctorSpecialization = doctorDetail?.doctorProfile?.specialization || doctorEmployee?.specialization || "â€”";
-  const doctorQualification = doctorDetail?.doctorProfile?.qualification || doctorEmployee?.qualification || "â€”";
+  const doctorSpecialization = doctorDetail?.doctorProfile?.specialization || doctorEmployee?.specialization || "—";
+  const doctorQualification = doctorDetail?.doctorProfile?.qualification || doctorEmployee?.qualification || "—";
   const doctorBranchNames = (doctorDetail?.branches?.length
     ? doctorDetail.branches.map((b) => b.branch_name)
     : doctorEmployee?.branch?.branch_name
@@ -390,57 +307,25 @@ export default function DoctorProfile() {
       : []
   );
   const doctorIsAvailable = doctorEmployee?.emp_status === true || doctorDetail?.user?.user_status === 0;
-  // Only a real photo URL from the backend is used -- no stock/fallback
-  // image, so the avatar block simply doesn't render when the doctor has
-  // no employee_photo_URL on file.
   const doctorPhoto = doctorEmployee?.employee_photo_URL || "";
-  const doctorLicenseNo = doctorDetail?.doctorProfile?.license_no || doctorEmployee?.license_no || "â€”";
-  const doctorPhone = doctorEmployee?.mobile_no || "â€”";
-  const doctorEmail = doctorEmployee?.email || "â€”";
-  const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanent_address || "â€”";
-  const doctorBloodGroup = doctorEmployee?.blood_group || "â€”";
-  const doctorExperience = doctorEmployee?.employee_no_experence != null ? `${doctorEmployee.employee_no_experence}+ yrs` : "â€”";
+  const doctorLicenseNo = doctorDetail?.doctorProfile?.license_no || doctorEmployee?.license_no || "—";
+  const doctorPhone = doctorEmployee?.mobile_no || "—";
+  const doctorEmail = doctorEmployee?.email || "—";
+  const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanent_address || "—";
+  const doctorBloodGroup = doctorEmployee?.blood_group || "—";
+  const doctorExperience = doctorEmployee?.employee_no_experence != null ? `${doctorEmployee.employee_no_experence}+ yrs` : "—";
   const doctorDOB = (doctorEmployee as any)?.dob
     ? format(new Date((doctorEmployee as any).dob), "dd MMM yyyy")
-    : "â€”";
-  const doctorGender = (doctorEmployee as any)?.gender || "â€”";
+    : "—";
+  const doctorGender = (doctorEmployee as any)?.gender || "—";
 
-  useEffect(() => {
-    const branchId = doctorDetail?.branches?.[0]?.branch_id;
-    if (!id || !branchId) return;
-
-    setIsSlotsLoading(true);
-    appointmentApi
-      .getAvailableSlots(id, branchId, format(new Date(), "yyyy-MM-dd"))
-      .then((res) => {
-        setTodaySlots(res.data?.data ?? null);
-      })
-      .catch((err) => {
-        console.error("[Doctor Profile] Failed to load available slots:", err);
-        setTodaySlots(null);
-      })
-      .finally(() => {
-        setIsSlotsLoading(false);
-      });
-  }, [id, doctorDetail]);
-
-  const calendarDays = buildCalendarDays(calendarViewYear, calendarViewMonth);
-
-  // Past-dated notes are frozen in Week view: no add/override/cancel/edit/delete.
   const todayIso = format(new Date(), "yyyy-MM-dd");
-
-  // Real weekly availability, grouped by day_of_week from the doctor's
-  // active doctor_schedule rows (part of the same employeeApi.getOne(id)
-  // response used above) -- no fake/placeholder slots. Since doctor_schedule
-  // is a recurring weekly template (day_of_week, not a specific date), the
-  // same grid applies to every week; only the displayed dates change when
-  // navigating weeks.
   const doctorSchedules: DoctorScheduleRecord[] = doctorDetail?.doctorSchedules ?? [];
 
   const scheduleByDay = useMemo(() => {
     const map: Record<
       string,
-      { time: string; branch: string; branchId: string; startTime: string; endTime: string; scheduleId: string | number }[]
+      { time: string; branch: string; branchId: string; startTime: string; endTime: string; scheduleId: string | number; consultationMinutes: number | null }[]
     > = {};
     WEEK_DAYS.forEach(([day]) => {
       map[day.toUpperCase()] = [];
@@ -455,6 +340,7 @@ export default function DoctorProfile() {
         startTime: toTimeInputValue(s.start_time),
         endTime: toTimeInputValue(s.end_time),
         scheduleId: s.schedule_id,
+        consultationMinutes: s.consultation_minutes ?? null,
       });
     });
     return map;
@@ -477,14 +363,12 @@ export default function DoctorProfile() {
             entry.branchId,
             entry.startTime,
             entry.endTime,
-          ] as [string, string, string, string | number, string, string, string])
+            entry.consultationMinutes,
+          ] as [string, string, string, string | number, string, string, string, number | null])
         : (["+", "empty"] as [string, string]);
     }),
   );
 
-  // Role-based permission: only the doctor themselves or an admin may modify
-  // the doctor's date-specific schedule changes. Everyone else views
-  // read-only (controls are hidden; the backend enforces this too).
   const viewer = getUser();
   const viewerEmployeeId = viewer?.employee_id ?? viewer?.id ?? null;
   const viewerRole = String(viewer?.role_type ?? viewer?.role ?? "").toUpperCase();
@@ -512,22 +396,6 @@ export default function DoctorProfile() {
 
   const branchNameById = (branchId: string): string =>
     doctorDetail?.branches?.find((b) => b.branch_id === branchId)?.branch_name ?? "";
-
-  // Effective per-day grid for the Week tab: the recurring weekly template
-  // merged with the doctor's date-specific changes. Uses the same rules the
-  // backend applies in getEffectiveSchedules - CANCEL wins for the whole
-  // day, OVERRIDE replaces the template, ADD appends extra blocks.
-  type WeekBlock = {
-    key: string;
-    type: "template" | "ADD" | "OVERRIDE" | "CANCEL";
-    time: string;
-    branch: string;
-    branchId: string;
-    scheduleId: string | number | null;
-    changeId?: string | number | null;
-    startTime: string;
-    endTime: string;
-  };
 
   const weekSchedule = useMemo(() => {
     if (activeTab !== "week") return [];
@@ -569,6 +437,7 @@ export default function DoctorProfile() {
         scheduleId: e.scheduleId,
         startTime: e.startTime,
         endTime: e.endTime,
+        consultationMinutes: e.consultationMinutes ?? null,
       }));
 
       let blocks: WeekBlock[] =
@@ -622,6 +491,7 @@ export default function DoctorProfile() {
           entry.endTime,
           entry.changeId ?? null,
           entry.type,
+          entry.consultationMinutes ?? null,
         ] as [
           string,
           string,
@@ -632,11 +502,11 @@ export default function DoctorProfile() {
           string,
           string | number | null,
           string,
+          number | null,
         ];
       }),
     );
   }, [activeTab, weekDates, weekChanges, scheduleByDay, doctorDetail]);
-
 
   const refetchDoctor = () => {
     if (!id) return;
@@ -646,19 +516,6 @@ export default function DoctorProfile() {
       .catch((err) => console.error("[Doctor Profile] Failed to refresh schedule:", err));
   };
 
-  const replacementDoctors = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const a of pendingTransfer?.appointments ?? []) {
-      for (const d of a.eligible_replacement_doctors ?? []) {
-        if (!map.has(d.employee_id)) map.set(d.employee_id, d.name);
-      }
-    }
-    return Array.from(map, ([employee_id, name]) => ({ employee_id, name }));
-  }, [pendingTransfer]);
-
-  // Creates or updates a date-specific (non-recurring) schedule change
-  // (ADD / OVERRIDE / CANCEL) via the doctor_schedule_change table. Used by
-  // the Week tab; the Day tab keeps its existing transfer-based flow.
   const handleDateChange = async ({
     day,
     date,
@@ -668,6 +525,7 @@ export default function DoctorProfile() {
     changeMode,
     changeId,
     transferReason,
+    bypassPending,
   }: {
     day: string;
     date: string;
@@ -677,30 +535,61 @@ export default function DoctorProfile() {
     changeMode?: ScheduleChangeMode;
     changeId?: string | number | null;
     transferReason?: string;
+    bypassPending?: boolean;
   }): Promise<boolean> => {
-    if (!id || !branchId) {
-      showAlert("Please select a branch location.");
-      return false;
-    }
     if (!date) {
-      showAlert("Date is required.");
+      showAlert("Date is required.", "destructive");
       return false;
     }
     if (!changeMode) {
-      showAlert("Please choose a change type (Add / Override / Cancel).");
+      showAlert("Please choose a change type (Add / Override / Cancel).", "destructive");
       return false;
     }
     if (changeMode !== "CANCEL" && (!startTime || !endTime)) {
-      showAlert("Please select start time and end time.");
+      showAlert("Please select start time and end time.", "destructive");
       return false;
     }
 
-    // Client-side pre-check mirroring the backend cross-branch ADD /
-    // OVERRIDE overlap rule - instant feedback only; backend stays authoritative.
+    // A full-day CANCEL does not need a branch pick - fall back to that
+    // weekday's template slot branch, then to the doctor's first branch.
+    let effectiveBranchId = branchId;
+    if (!effectiveBranchId && changeMode === "CANCEL") {
+      const templateSlots = scheduleByDay[(day || "").toUpperCase()] ?? [];
+      effectiveBranchId =
+        templateSlots[0]?.branchId || doctorDetail?.branches?.[0]?.branch_id || "";
+    }
+    if (!id || !effectiveBranchId) {
+      showAlert("Please select a branch location.", "destructive");
+      return false;
+    }
+
     if (changeMode !== "CANCEL" && startTime && endTime) {
       const isoDate = normalizeChangeDate(date);
       const newStart = toMinutes(startTime);
       const newEnd = toMinutes(endTime);
+
+      // An OVERRIDE replaces the whole day, so overlapping anything is
+      // expected. An ADD is an EXTRA slot and must respect both other
+      // date-changes and the recurring template rows for that weekday.
+      if (changeMode === "ADD") {
+        const templateSlots = scheduleByDay[(day || "").toUpperCase()] ?? [];
+        const templateConflict = templateSlots.find(
+          (entry) =>
+            newStart < toMinutes(entry.endTime) && toMinutes(entry.startTime) < newEnd,
+        );
+        if (templateConflict) {
+          const fmt = (mins: number) =>
+            `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+          showAlert(
+            `This extra slot overlaps the recurring ${day} hours ` +
+              `(${fmt(toMinutes(templateConflict.startTime))}-${fmt(toMinutes(templateConflict.endTime))})` +
+              `${templateConflict.branch ? ` at ${templateConflict.branch}` : ""}. ` +
+              `Use Override if you intend to replace that day's schedule.`,
+            "destructive",
+          );
+          return false;
+        }
+      }
 
       const conflict = weekChanges.find((c) => {
         if (c.is_active === false) return false;
@@ -722,6 +611,7 @@ export default function DoctorProfile() {
         showAlert(
           `This ${changeMode} overlaps an existing ${conflict.mode} on this date ` +
             `(${fmt(cStart)}-${fmt(cEnd)})${conflictBranch ? ` at ${conflictBranch}` : ""}. Adjust the times.`,
+          "destructive",
         );
         return false;
       }
@@ -729,28 +619,26 @@ export default function DoctorProfile() {
 
     setSavingSlot(true);
     try {
-      // Date-changes ride the transfer machinery so affected appointments
-      // receive the same Transfer / Reschedule / Cancel popup as slots.
       const res = await doctorTransferApi.initiateTransfer(id, {
         mode: "ADD_BRANCH",
-        new_branch_id: branchId,
+        new_branch_id: effectiveBranchId,
         effective_date: date,
         transfer_reason: transferReason?.trim() || `${changeMode} ${date}`,
         schedule_change: {
           action: changeId != null ? "UPDATE" : "CREATE",
           mode: changeMode!,
-          branch_id: branchId,
+          branch_id: effectiveBranchId,
           change_date: date,
           start_time: changeMode === "CANCEL" ? undefined : startTime,
           end_time: changeMode === "CANCEL" ? undefined : endTime,
           reason: transferReason?.trim(),
           change_id: changeId != null ? Number(changeId) : undefined,
         },
-      });
+      }, bypassPending);
 
       const data = res.data?.data;
       if (!data) {
-        showAlert(res.data?.message || "Failed to save schedule change.");
+        showAlert(res.data?.message || "Failed to save schedule change.", "destructive");
         return false;
       }
 
@@ -760,8 +648,6 @@ export default function DoctorProfile() {
           appointments: data.appointments ?? [],
           message: data.message ?? "",
         });
-        setTransferAction(null);
-        setReplacementDoctorId("");
         return true;
       }
 
@@ -769,7 +655,7 @@ export default function DoctorProfile() {
       showAlert(data.message || `Schedule change saved for ${day}.`);
       return true;
     } catch (err: any) {
-      showAlert(err?.response?.data?.message || err?.message || "Failed to save schedule change.");
+      showAlert(err?.response?.data?.message || err?.message || "Failed to save schedule change.", "destructive");
       return false;
     } finally {
       setSavingSlot(false);
@@ -778,6 +664,11 @@ export default function DoctorProfile() {
 
   const handleAddSlot = async (payload: ScheduleSlotAddPayload) => {
     if (payload.mode === "date" && payload.changeMode) {
+      if (payload.consultationMinutes) {
+        try {
+          await employeeApi.update(id, { consultation_minutes: Number(payload.consultationMinutes) });
+        } catch {}
+      }
       return handleDateChange({
         day: payload.day,
         date: payload.date || payload.effectiveDate || "",
@@ -786,29 +677,24 @@ export default function DoctorProfile() {
         endTime: payload.endTime,
         changeMode: payload.changeMode,
         transferReason: payload.transferReason,
+        bypassPending: payload.bypassPending,
       });
     }
 
     const {
       day,
       branchId,
-      branchName,
       startTime,
       endTime,
-      timeLabel,
-      effectiveDate,
-      consultationMinutes,
-      transferReason,
-      departmentId,
     } = payload;
 
     if (!id || !branchId) {
-      showAlert("Please select a branch location.");
+      showAlert("Please select a branch location.", "destructive");
       return false;
     }
 
     if (!startTime || !endTime) {
-      showAlert("Please select start time and end time.");
+      showAlert("Please select start time and end time.", "destructive");
       return false;
     }
 
@@ -820,6 +706,7 @@ export default function DoctorProfile() {
         shift_name: deriveShiftName(startTime),
         start_time: startTime,
         end_time: endTime,
+        consultation_minutes: payload.consultationMinutes ? Number(payload.consultationMinutes) : undefined,
         effective_from: null,
         effective_to: null,
       });
@@ -827,7 +714,7 @@ export default function DoctorProfile() {
       showAlert(`Schedule slot added for ${day}.`);
       return true;
     } catch (err: any) {
-      showAlert(err?.response?.data?.message || err?.message || "Failed to add schedule slot.");
+      showAlert(err?.response?.data?.message || err?.message || "Failed to add schedule slot.", "destructive");
       return false;
     } finally {
       setSavingSlot(false);
@@ -836,11 +723,16 @@ export default function DoctorProfile() {
 
   const handleUpdateSlot = async (payload: ScheduleSlotEditPayload) => {
     if (!id || !payload.branchId) {
-      showAlert("Please select a branch location.");
+      showAlert("Please select a branch location.", "destructive");
       return false;
     }
 
     if (payload.mode === "date" && payload.changeMode) {
+      if (payload.consultationMinutes) {
+        try {
+          await employeeApi.update(id, { consultation_minutes: Number(payload.consultationMinutes) });
+        } catch {}
+      }
       return handleDateChange({
         day: payload.day,
         date: payload.date || payload.effectiveDate || "",
@@ -850,6 +742,7 @@ export default function DoctorProfile() {
         changeMode: payload.changeMode,
         changeId: payload.changeId,
         transferReason: payload.transferReason,
+        bypassPending: payload.bypassPending,
       });
     }
 
@@ -861,6 +754,7 @@ export default function DoctorProfile() {
         shift_name: deriveShiftName(payload.startTime),
         start_time: payload.startTime,
         end_time: payload.endTime,
+        consultation_minutes: payload.consultationMinutes ? Number(payload.consultationMinutes) : undefined,
         effective_from: null,
         effective_to: null,
       });
@@ -868,7 +762,7 @@ export default function DoctorProfile() {
       showAlert(`Schedule slot updated for ${payload.day}.`);
       return true;
     } catch (err: any) {
-      showAlert(err?.response?.data?.message || err?.message || "Failed to update schedule slot.");
+      showAlert(err?.response?.data?.message || err?.message || "Failed to update schedule slot.", "destructive");
       return false;
     } finally {
       setSavingSlot(false);
@@ -883,13 +777,46 @@ export default function DoctorProfile() {
       if (payload.changeId != null) {
         await doctorScheduleApi.cancelChange(String(payload.changeId));
         await refetchWeekChanges();
+        showAlert("Schedule slot removed.");
       } else if (payload.scheduleId != null) {
-        await employeeApi.removeScheduleSlot(id, payload.scheduleId);
+        const slot = doctorSchedules.find(
+          (s) => String(s.schedule_id) === String(payload.scheduleId),
+        );
+        const slotBranchId = slot?.branch_id;
+        if (!slotBranchId) {
+          showAlert("Unable to resolve the branch for this schedule slot.", "destructive");
+          return;
+        }
+
+        const res = await doctorTransferApi.initiateTransfer(id, {
+          mode: "ADD_BRANCH",
+          close_schedule_ids: [Number(payload.scheduleId)],
+          new_branch_id: slotBranchId,
+          effective_date: todayIso,
+          transfer_reason: "Recurring slot removed from Schedule page",
+        }, payload.bypassPending);
+
+        const data = res.data?.data;
+        if (!data) {
+          showAlert(res.data?.message || "Failed to remove schedule slot.", "destructive");
+          return;
+        }
+
+        if (data.status === "PENDING_CONFIRMATION") {
+          setPendingTransfer({
+            transferId: data.transfer_id,
+            appointments: data.appointments ?? [],
+            message: data.message ?? "",
+          });
+          return;
+        }
+
         await refetchDoctor();
+        await refetchWeekChanges();
+        showAlert(data.message || "Schedule slot removed.");
       }
-      showAlert("Schedule slot removed.");
     } catch (err: any) {
-      showAlert(err?.response?.data?.message || err?.message || "Failed to remove schedule slot.");
+      showAlert(err?.response?.data?.message || err?.message || "Failed to remove schedule slot.", "destructive");
     } finally {
       setSavingSlot(false);
     }
@@ -898,6 +825,7 @@ export default function DoctorProfile() {
   const openBlockCancel = (event: React.MouseEvent, rowIndex: number, colIndex: number) => {
     event.stopPropagation();
     if (!canManageSchedule) return;
+    if (activeTab === "week" && weekDateToISO(weekDates[colIndex]) < todayIso) return;
     const cell = (activeTab === "week" ? weekSchedule : schedule)[rowIndex]?.[colIndex] as any[] | undefined;
     if (!cell) return;
     slotModalRef.current?.openCancelSlot(
@@ -914,29 +842,11 @@ export default function DoctorProfile() {
 
   const showDelete = canManageSchedule && (activeTab !== "week" || weekDates.some((date) => weekDateToISO(date) >= todayIso));
 
-  const confirmPendingTransfer = async (action: TransferAction) => {
-    if (!pendingTransfer || !id) return;
-    if (action === "TRANSFER" && !replacementDoctorId) {
-      showAlert("Please select a replacement doctor.");
-      return;
-    }
-    setIsConfirmingTransfer(true);
-    try {
-      await doctorTransferApi.confirmTransfer(id, {
-        transfer_id: pendingTransfer.transferId,
-        action,
-        replacement_employee_id: action === "TRANSFER" ? replacementDoctorId : undefined,
-      });
-      setPendingTransfer(null);
-      setTransferAction(null);
-      await refetchDoctor();
-      await refetchWeekChanges();
-      showAlert("Transfer action completed.");
-    } catch (err: any) {
-      showAlert(err?.response?.data?.message || err?.message || "Failed to complete transfer action.");
-    } finally {
-      setIsConfirmingTransfer(false);
-    }
+  const handleTransferCompleted = async () => {
+    setPendingTransfer(null);
+    await refetchDoctor();
+    await refetchWeekChanges();
+    showAlert("Transfer action completed.");
   };
 
   const shiftWeek = (dir: number) => {
@@ -950,12 +860,10 @@ export default function DoctorProfile() {
         const ny = String(dt.getFullYear() % 100).padStart(2, "0");
         return `${nd}/${nm}/${ny}`;
       });
-      // sync calendar selection to first day of the new week
       const [dd, mm, yy] = newDates[0].split("/").map(Number);
       const newWeekStart = new Date(2000 + yy, mm - 1, dd);
       setCalendarSelectedDate(newWeekStart);
       setCalendarWeekStart(newWeekStart);
-      // Update selected dates to new week's Mon-Sun (default behavior)
       const newSelectedDates = newDates.map((d) => {
         const [dd2, mm2, yy2] = d.split("/").map(Number);
         return new Date(2000 + yy2, mm2 - 1, dd2);
@@ -965,598 +873,724 @@ export default function DoctorProfile() {
     });
   };
 
-  const showAlert = (message) => {
-    alert(message);
-  };
+  const submitLeave = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
 
-const submitLeave = (e: React.FormEvent<HTMLFormElement>) => {
-  e.preventDefault();
+    const formEl = e.currentTarget;
+    leaveFormRef.current = formEl;
 
-  const formEl = e.currentTarget;
-  leaveFormRef.current = formEl;
-
-  if (!id) {
-    alert("Doctor ID is missing.");
-    return;
-  }
-
-  const form = new FormData(formEl);
-  const reason = String(form.get("reason") || "").trim();
-
-  if (!fromDate || !toDate || !reason) {
-    alert("Please fill in all leave details.");
-    return;
-  }
-
-  if (toDate < fromDate) {
-    alert("The To date cannot be before the From date.");
-    return;
-  }
-
-  setLeaveConfirmOpen(true);
-};
-
-const doApplyLeave = async () => {
-  if (!id) {
-    setLeaveConfirmOpen(false);
-    alert("Doctor ID is missing.");
-    return;
-  }
-
-  if (!fromDate || !toDate) {
-    setLeaveConfirmOpen(false);
-    return;
-  }
-
-  try {
-    setProcessingLeave(true);
-
-    // Check for booked appointments inside the leave range
-    // before actually applying.
-    const conflicts = await findLeaveConflictingAppointments(
-      id,
-      format(fromDate, "yyyy-MM-dd"),
-      format(toDate, "yyyy-MM-dd")
-    );
-
-    setLeaveConfirmOpen(false);
-
-    if (conflicts.length > 0) {
-      setLeaveConflicts(conflicts);
-      setLeaveConflictsOpen(true);
+    if (!id) {
+      showToastMissingDoctor();
       return;
     }
 
-    await applyLeaveNow(false);
-  } catch (error: any) {
-    console.error("Leave conflict check failed:", error);
+    const form = new FormData(formEl);
+    const reason = String(form.get("reason") || "").trim();
 
-    alert(
-      error?.response?.data?.message ||
-        error?.message ||
-        "Failed to check appointments for this leave period."
-    );
-  } finally {
-    setProcessingLeave(false);
-  }
-};
+    if (!fromDate || !toDate || !reason) {
+      showAlert("Please fill in all leave details.", "destructive");
+      return;
+    }
 
-const applyLeaveNow = async (queueConflicts: boolean) => {
-  if (!id) {
-    setLeaveConflictsOpen(false);
-    alert("Doctor ID is missing.");
-    return;
-  }
+    if (toDate < fromDate) {
+      showAlert("The To date cannot be before the From date.", "destructive");
+      return;
+    }
 
-  try {
-    setSubmittingLeave(true);
+    setLeaveConfirmOpen(true);
+  };
 
-    const loggedInUser = getUser();
+  const doApplyLeave = async () => {
+    if (!id) {
+      setLeaveConfirmOpen(false);
+      showToastMissingDoctor();
+      return;
+    }
 
-    if (!loggedInUser?.user_id) {
+    if (!fromDate || !toDate) {
+      setLeaveConfirmOpen(false);
+      return;
+    }
+
+    try {
+      setProcessingLeave(true);
+
+      const conflicts = await findLeaveConflictingAppointments(
+        id,
+        format(fromDate, "yyyy-MM-dd"),
+        format(toDate, "yyyy-MM-dd")
+      );
+
+      setLeaveConfirmOpen(false);
+
+      if (conflicts.length > 0) {
+        setLeaveConflicts(conflicts);
+        setLeaveConflictsOpen(true);
+        return;
+      }
+
+      await applyLeaveNow(false);
+    } catch (error: any) {
+      console.error("Leave conflict check failed:", error);
+      showAlert(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to check appointments for this leave period.",
+        "destructive"
+      );
+    } finally {
+      setProcessingLeave(false);
+    }
+  };
+
+  const applyLeaveNow = async (queueConflicts: boolean) => {
+    if (!id) {
       setLeaveConflictsOpen(false);
-      alert("Logged-in user information is missing. Please log in again.");
+      showToastMissingDoctor();
       return;
     }
 
-    const formEl = leaveFormRef.current;
-    const reason = formEl
-      ? String(new FormData(formEl).get("reason") || "").trim()
-      : "";
+    try {
+      setSubmittingLeave(true);
 
-    const response = await doctorLeaveApi.apply(id, {
-      leave_start_date: format(fromDate, "yyyy-MM-dd"),
-      leave_end_date: format(toDate, "yyyy-MM-dd"),
-      leave_reason: reason,
-      requested_by: loggedInUser.user_id,
-    });
+      const loggedInUser = getUser();
 
-    if (response.data?.success === false) {
-      throw new Error(response.data.message || "Failed to apply leave.");
+      if (!loggedInUser?.user_id) {
+        setLeaveConflictsOpen(false);
+        showAlert("Logged-in user information is missing. Please log in again.", "destructive");
+        return;
+      }
+
+      const formEl = leaveFormRef.current;
+      const reason = formEl
+        ? String(new FormData(formEl).get("reason") || "").trim()
+        : "";
+
+      const response = await doctorLeaveApi.apply(id, {
+        leave_start_date: format(fromDate, "yyyy-MM-dd"),
+        leave_end_date: format(toDate, "yyyy-MM-dd"),
+        leave_reason: reason,
+        leave_type: leaveType,
+        requested_by: loggedInUser.user_id,
+      });
+
+      if (response.data?.success === false) {
+        throw new Error(response.data.message || "Failed to apply leave.");
+      }
+
+      let queuedCount: number | undefined;
+      let queueFailed = false;
+
+      if (queueConflicts && fromDate && toDate) {
+        try {
+          const queueResponse = await doctorLeaveApi.queueReschedule(id, {
+            date_from: format(fromDate, "yyyy-MM-dd"),
+            date_to: format(toDate, "yyyy-MM-dd"),
+            reason: `${leaveType} absence${reason ? ` - ${reason}` : ""}`,
+          });
+          queuedCount = queueResponse.data?.data?.queued;
+        } catch (queueError: any) {
+          console.error("Reschedule queueing failed:", queueError);
+          queueFailed = true;
+        }
+      }
+
+      setLeaveSuccessInfo({
+        from: format(fromDate, "dd/MM/yyyy"),
+        to: format(toDate, "dd/MM/yyyy"),
+        leaveId: response.data?.leave?.leave_id,
+        queuedCount,
+        queueFailed,
+      });
+
+      setLeaveConflictsOpen(false);
+      setLeaveSuccessOpen(true);
+
+      void loadApprovedLeaves();
+
+      formEl?.reset();
+      setFromDate(null);
+      setToDate(null);
+    } catch (error: any) {
+      console.error("Leave application failed:", error);
+      console.error("Backend response:", error?.response?.data);
+
+      setLeaveConfirmOpen(false);
+      setLeaveConflictsOpen(false);
+
+      showAlert(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to apply for leave.",
+        "destructive"
+      );
+    } finally {
+      setSubmittingLeave(false);
     }
-
-    let queuedCount: number | undefined;
-    let queueFailed = false;
-
-    if (queueConflicts && fromDate && toDate) {
-      try {
-        const queueResponse = await doctorLeaveApi.queueReschedule(id, {
-          date_from: format(fromDate, "yyyy-MM-dd"),
-          date_to: format(toDate, "yyyy-MM-dd"),
-          reason,
-        });
-        queuedCount = queueResponse.data?.data?.queued;
-      } catch (queueError: any) {
-        console.error("Reschedule queueing failed:", queueError);
-        queueFailed = true;
-      }
-    }
-
-    setLeaveSuccessInfo({
-      from: format(fromDate, "dd/MM/yyyy"),
-      to: format(toDate, "dd/MM/yyyy"),
-      leaveId: response.data?.leave?.leave_id,
-      queuedCount,
-      queueFailed,
-    });
-
-    setLeaveConflictsOpen(false);
-    setLeaveSuccessOpen(true);
-
-    // Admin-submitted leaves auto-approve, so refresh the
-    // week grid's leave markers right away.
-    void loadApprovedLeaves();
-
-    formEl?.reset();
-    setFromDate(null);
-    setToDate(null);
-  } catch (error: any) {
-    console.error("Leave application failed:", error);
-    console.error("Backend response:", error?.response?.data);
-
-    setLeaveConfirmOpen(false);
-    setLeaveConflictsOpen(false);
-
-    alert(
-      error?.response?.data?.message ||
-        error?.message ||
-        "Failed to apply for leave."
-    );
-  } finally {
-    setSubmittingLeave(false);
-  }
-};
-
-  const previousWeek = () => {
-    setWeekDates((prev) => prev.map((date) => shiftDate(date, -7)));
   };
 
-  const nextWeek = () => {
-    setWeekDates((prev) => prev.map((date) => shiftDate(date, 7)));
+  const showToastMissingDoctor = () => {
+    showAlert("Doctor ID is missing.", "destructive");
   };
 
-  const previousMonth = () => {
-    setCalendarViewMonth((prev) => {
-      if (prev === 0) {
-        setCalendarViewYear((y) => y - 1);
-        return 11;
-      }
-      return prev - 1;
-    });
-  };
+  const aboutItems = [
+    { label: "Medical Licence Number", value: doctorLicenseNo, icon: <IdCard className="h-4 w-4" /> },
+    { label: "Phone Number", value: doctorPhone, icon: <Phone className="h-4 w-4" /> },
+    { label: "Email", value: doctorEmail, icon: <Mail className="h-4 w-4" /> },
+    { label: "Location", value: doctorLocation, icon: <MapPin className="h-4 w-4" /> },
+    { label: "DOB", value: doctorDOB, icon: <Cake className="h-4 w-4" /> },
+    { label: "Blood group", value: doctorBloodGroup, icon: <Droplet className="h-4 w-4" /> },
+    { label: "Gender", value: doctorGender, icon: <VenusAndMars className="h-4 w-4" /> },
+    { label: "Experience", value: doctorExperience, icon: <Briefcase className="h-4 w-4" /> },
+  ];
 
-  const nextMonth = () => {
-    setCalendarViewMonth((prev) => {
-      if (prev === 11) {
-        setCalendarViewYear((y) => y + 1);
-        return 0;
-      }
-      return prev + 1;
-    });
-  };
+  const reviews = [
+    {
+      name: "Sarah Jenkins",
+      time: "1 week ago",
+      image: "https://i.pravatar.cc/100?img=47",
+      rating: 4,
+      text: `"Excellent treatment manner. Wait time was a bit longer than expected, but the quality of care definitely made up for it. Highly recommended."`,
+      tags: ["Cardiology"],
+    },
+    {
+      name: "Robert Wilson",
+      time: "3 days ago",
+      image: "https://i.pravatar.cc/100?img=11",
+      rating: 5,
+      text: `"The staff and Dr are incredible. I've been a patient here for 2 years and the level of clinical precision and personal attention is unmatched in the city."`,
+      tags: ["Long-term Care", "Referral"],
+    },
+  ];
 
   return (
-    <div>
-      <main className="min-h-screen bg-[#f7f9fc] p-6 text-[#172033]">
-        <div className="mx-auto max-w-[1580px] p-4">
-          <div className="space-y-6">
-            <button onClick={() => navigate(-1)} className="inline-flex items-center gap-2 px-3 py-2 border border-[#E5E7EB] bg-white rounded-lg text-sm font-medium text-[#424752] hover:bg-gray-50 mb-2">
-              ← Doctors
-            </button>
-            {/* Profile Header */}
-            <section className="bg-white border border-[#E5E7EB] rounded-[12px] p-6 flex gap-6 transition-shadow duration-200 hover:shadow-md">
-              <div className="w-32 h-32 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden flex-shrink-0">
-                {doctorPhoto ? <img src={doctorPhoto} alt={doctorName} className="w-full h-full object-cover" /> : <User className="w-12 h-12 text-gray-400" />}
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-xl font-bold">{doctorName}</h1>
-                  <span className="text-xs px-3 py-1 rounded-full bg-[#f1f6ff] text-[#004a91] font-semibold">{doctorSpecialization}</span>
-                </div>
-                <p className="text-sm text-[#424752] mt-1">{doctorQualification}</p>
-                <div className="mt-4 text-sm text-[#424752]">Hospital: {doctorBranchNames?.join(", ") || "-"}</div>
-                <div className="flex items-center justify-between mt-4">
-                  <span className="inline-flex items-center gap-2 text-xs font-semibold px-3 py-1 rounded-full bg-[#e9f9ee] text-[#1a9c53]">● Available</span>
-                  <button
-                    onClick={() => { if(!id) return; navigate("/appointments/add", { state: { doctorId: id } }) }}
-                    className="bg-[#004785] text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-[#003a6b]"
-                  >
-                    Book Appointment
-                  </button>
-                </div>
-              </div>
-            </section>
+    <div className=" bg-[#F7F9FB] p-0 font-[Manrope,sans-serif]">
+      <div className="mx-auto max-w-[1300px]">
 
-            {/* About Card */}
-            <section className="bg-white border border-[#edf0f4] rounded-[10px] p-6 transition-shadow duration-200 hover:shadow-md">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-lg font-semibold">About</h2>
-                <button
-                  onClick={() => navigate(`/staff/view/${id}`)}
-                  className="text-sm text-[#135dc5] underline"
-                >
-                  View More
-                </button>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                {[
-                  {label:"Medical Licence Number", value: doctorLicenseNo, icon: <IdCard className="w-4 h-4" />},
-                  {label:"Phone Number", value: doctorPhone, icon: <Phone className="w-4 h-4" />},
-                  {label:"Email", value: doctorEmail, icon: <Mail className="w-4 h-4" />},
-                  {label:"Location", value: doctorLocation, icon: <MapPin className="w-4 h-4" />},
-                  {label:"DOB", value: doctorDOB, icon: <Cake className="w-4 h-4" />},
-                  {label:"Blood group", value: doctorBloodGroup, icon: <Droplet className="w-4 h-4" />},
-                  {label:"Gender", value: doctorGender, icon: <VenusAndMars className="w-4 h-4" />},
-                  {label:"Experience", value: doctorExperience, icon: <Briefcase className="w-4 h-4" />},
-                ].map((item) => (
-                  <div key={item.label} className="flex items-start gap-3">
-                    <div className="w-6 h-6 text-gray-600 flex-shrink-0">{item.icon}</div>
-                    <div>
-                      <strong className="block text-xs font-semibold text-[#222938]">{item.label}</strong>
-                      <span className="text-xs text-[#6d7480]">{item.value ?? "-"}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <hr className="my-6 border-[#edf0f4]" />
-              <div>
-                <h3 className="text-lg font-semibold mb-2">Short Bio</h3>
-                <p className="text-sm text-[#5f6672] leading-6">{doctorDetail?.doctorProfile?.doctor_bio || "No bio available."}</p>
-              </div>
-            </section>
+        {/* Back Button */}
+        <div className="mb-6 flex items-center gap-3">
+          <button
+            onClick={() => navigate(-1)}
+            title="Go back"
+            aria-label="Go back"
+            className="w-9 h-9 flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <span className="text-sm font-semibold text-[#424752]">Back to Doctors</span>
+        </div>
 
-            {/* Tabs */}
-            <div className="h-[39px] flex items-center justify-center gap-[42px] bg-transparent">
-              {["day", "week"].map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setActiveTab(t)}
-                  className={`h-[39px] px-[17px] bg-transparent border-0 text-[12px] cursor-pointer ${activeTab === t ? "text-[#004a91] border-b-[2px] border-[#004a91] font-semibold" : "text-[#4c515a] border-b-[2px] border-transparent"}`}
-                >
-                  {t === "day" ? "Day" : "Week"}
-                </button>
-              ))}
-            </div>
+        {/* Profile Header */}
+        <div className="mb-6 flex flex-col items-start gap-6 rounded-xl border border-[#E5E7EB] bg-white p-7 shadow-sm transition-all duration-300 hover:shadow-md sm:flex-row sm:items-center sm:gap-7">
+          <div className="relative flex h-[112px] w-[112px] shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-[#EDF3FB] shadow-md">
+            {doctorPhoto ? (
+              <img src={doctorPhoto} alt={doctorName} className="h-full w-full rounded-full object-cover" />
+            ) : (
+              <User className="h-12 w-12 text-[#00488D]/40" />
+            )}
+            {doctorIsAvailable && (
+              <span className="absolute bottom-1 right-1 h-[16px] w-[16px] animate-pulse rounded-full border-[3px] border-white bg-[#22C55E]" />
+            )}
           </div>
 
-          {/* Main grid */}
-          <div className="grid lg:grid-cols-[1fr_345px] gap-6 items-start mt-6">
-            <div>
-            <section className="bg-white border border-[#edf0f4] rounded-[10px] p-[31px] max-[500px]:p-5 transition-shadow duration-200 hover:shadow-md">
-            <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-              <h2 className="text-[19px] font-semibold">Availability</h2>
-              <div className="flex items-center gap-4 flex-wrap">
-                {activeTab === "week" && (
-                  <span className="flex items-center gap-4">
-                    <button onClick={() => shiftWeek(-1)} className="text-xs text-[#555e6c] hover:underline">‹ Previous week</button>
-                    <button onClick={() => shiftWeek(1)} className="text-xs text-[#555e6c] hover:underline">Next week ›</button>
-                  </span>
-                )}
-                {canManageSchedule && (
-                  <button
-                    onClick={() =>
-                      slotModalRef.current?.openAddSlot(
-                        "",
-                        null,
-                        null,
-                        activeTab === "week" ? "date" : "weekly",
-                        undefined,
-                        activeTab === "week" ? "ADD" : undefined,
-                      )
-                    }
-                    className="bg-[#004a91] text-white px-3 py-2 rounded-md text-xs font-semibold"
-                  >
-                    + Add slot
-                  </button>
-                )}
-              </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-bold tracking-tight text-[#191C1E]">{doctorName}</h1>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#D6E3FF] px-3 py-1 text-xs font-semibold text-[#00488D]">
+                <Stethoscope className="h-3.5 w-3.5" />
+                {doctorSpecialization}
+              </span>
             </div>
+            <p className="mt-1.5 flex items-center gap-1.5 text-sm font-medium text-[#424752]">
+              <GraduationCap className="h-4 w-4 shrink-0 text-[#00488D]" />
+              {doctorQualification}
+            </p>
+            <div className="mt-1 flex items-center gap-1.5 text-sm text-[#6B7280]">
+              <Hospital className="h-4 w-4 shrink-0 text-[#00488D]" />
+              Hospital: {doctorBranchNames?.join(", ") || "-"}
+            </div>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              {doctorIsAvailable ? (
+                <span className="inline-flex items-center gap-2 rounded-full bg-[#E7F4EE] px-3 py-1 text-xs font-semibold text-[#2E7D5B]">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-[#22C55E]" />
+                  Available
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-2 rounded-full bg-[#FCF1DD] px-3 py-1 text-xs font-semibold text-[#A8720F]">
+                  <span className="h-2 w-2 rounded-full bg-[#F59E0B]" />
+                  Unavailable
+                </span>
+              )}
+              <button
+                onClick={() => { if(!id) return; navigate("/appointments/add", { state: { doctorId: id } }); }}
+                className="inline-flex items-center gap-2 rounded-lg bg-[#004785] px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-[#003A6B] hover:shadow-md active:scale-[0.98]"
+              >
+                Book Appointment
+                <ArrowLeft className="h-4 w-4 rotate-180" />
+              </button>
+            </div>
+          </div>
+        </div>
 
-              {/* SCHEDULE */}
-              <div className="border border-[#b9bfcb] rounded-[7px] overflow-x-auto">
+        {/* About Card */}
+        <div className="mb-6 rounded-xl border border-[#E5E7EB] bg-white p-7 shadow-sm transition-all duration-300 hover:shadow-md">
+          <div className="mb-5 flex items-center justify-between">
+            <h2 className="flex items-center gap-2.5 text-lg font-bold text-[#191C1E]">
+              <UserCircle className="h-5 w-5 text-[#00488D]" />
+              About
+            </h2>
+            <button
+              onClick={() => navigate(`/staff/view/${id}`)}
+              className="flex items-center gap-1.5 text-sm font-semibold text-[#00488D] transition-colors duration-200 hover:text-[#003A6B] hover:underline"
+            >
+              View More
+              <ArrowLeft className="h-3.5 w-3.5 rotate-180" />
+            </button>
+          </div>
 
-                <div className="min-w-[610px]">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            {aboutItems.map((item) => (
+              <div key={item.label} className="group flex items-start gap-3 rounded-lg p-3 transition-colors duration-200 hover:bg-[#F7F9FB]">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#EDF3FB] text-[#00488D] transition-colors duration-200 group-hover:bg-[#D6E3FF]">
+                  {item.icon}
+                </div>
+                <div className="min-w-0">
+                  <strong className="block text-[10px] font-bold uppercase tracking-[0.5px] text-[#8C8D8F]">{item.label}</strong>
+                  <span className="truncate text-sm font-semibold text-[#191C1E]">{item.value ?? "-"}</span>
+                </div>
+              </div>
+            ))}
+          </div>
 
-                  {/* HEADER */}
-                  <div className="grid grid-cols-7 bg-[#f1f3f5] border-b border-[#b9bfcb]">
+          <hr className="my-5 border-t border-[#E5E7EB]" />
+          <div>
+            <h3 className="mb-1.5 flex items-center gap-2 text-base font-semibold text-[#191C1E]">
+              <Quote className="h-3.5 w-3.5 text-[#00488D]" />
+              Short Bio
+            </h3>
+            <p className="text-sm leading-relaxed text-[#424752]">{doctorDetail?.doctorProfile?.doctor_bio || "No bio available."}</p>
+          </div>
+        </div>
 
-                    {WEEK_DAYS.map(([day], dayIdx) => (
-                      <div
-                        key={day}
-                        className={`min-h-[43px] p-[7px_3px] border-r border-[#b9bfcb] text-center text-[#003b80] text-[8px] font-bold ${
-                          activeTab === "day" ? "flex items-center justify-center" : ""
-                        }`}
+        {/* Tabs */}
+        <div className="mb-6 inline-flex rounded-lg border border-[#E5E7EB] bg-white p-1 shadow-sm">
+          {(["day", "week"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setActiveTab(t)}
+              className={`flex items-center gap-1.5 rounded-md px-6 py-1.5 text-xs font-semibold transition-all duration-200 active:scale-[0.98] ${
+                activeTab === t
+                  ? "bg-[#004785] text-white shadow-sm"
+                  : "text-[#424752] hover:bg-[#F2F4F6]"
+              }`}
+            >
+              {t === "day" ? <Sun className="h-3.5 w-3.5" /> : <Calendar className="h-3.5 w-3.5" />}
+              {t.charAt(0).toUpperCase() + t.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        {/* Main Grid */}
+        <div className="space-y-6">
+            {/* Availability */}
+            <div className="rounded-xl border border-[#E5E7EB] bg-white p-7 shadow-sm transition-all duration-300 hover:shadow-md">
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="flex items-center gap-2.5 text-lg font-bold text-[#191C1E]">
+                  <Clock className="h-5 w-5 text-[#00488D]" />
+                  Availability
+                  {activeTab === "week" && weekChangesLoading && (
+                    <Loader2 className="h-4 w-4 animate-spin text-[#00488D]" />
+                  )}
+                </h2>
+                <div className="flex flex-wrap items-center gap-3">
+                  {activeTab === "week" && (
+                    <div className="flex items-center">
+                      <button
+                        onClick={() => shiftWeek(-1)}
+                        title="Previous week"
+                        className="flex h-[27px] w-[25px] items-center justify-center rounded-l-lg border border-[#E5E7EB] bg-white transition-colors duration-150 hover:bg-[#F2F4F6] active:scale-[0.95]"
                       >
-                        {day}
-                        {activeTab === "week" && (
-                          <small className="block mt-[3px] text-[7px]">
-                            {weekDates[dayIdx]}
-                          </small>
-                        )}
-                        {activeTab === "week" && (
-                          <div className="flex items-center justify-center gap-[3px] mt-[3px]">
-                            <button
-                              type="button"
-                              title="Add a shift for this date"
-                              onClick={() =>
-                                slotModalRef.current?.openAddSlot(
-                                  WEEK_DAYS[dayIdx][0],
-                                  null,
-                                  null,
-                                  "date",
-                                  weekDateToISO(weekDates[dayIdx]),
-                                  "ADD",
-                                )
-                              }
-                              className="w-[15px] h-[15px] rounded border border-[#b9bfcb] bg-white text-[#004a91] text-[9px] leading-none cursor-pointer hover:border-[#004a91]"
-                            >
-                              +
-                            </button>
-                            <button
-                              type="button"
-                              title="Override this date's schedule"
-                              onClick={() =>
-                                slotModalRef.current?.openAddSlot(
-                                  WEEK_DAYS[dayIdx][0],
-                                  null,
-                                  null,
-                                  "date",
-                                  weekDateToISO(weekDates[dayIdx]),
-                                  "OVERRIDE",
-                                )
-                              }
-                              className="w-[15px] h-[15px] rounded border border-[#b9bfcb] bg-white text-[#b45309] text-[9px] leading-none cursor-pointer hover:border-[#b45309]"
-                            >
-                              <RotateCw className="w-3 h-3" />
-                            </button>
-                            <button
-                              type="button"
-                              title="Cancel this date"
-                              onClick={() =>
-                                slotModalRef.current?.openAddSlot(
-                                  WEEK_DAYS[dayIdx][0],
-                                  null,
-                                  null,
-                                  "date",
-                                  weekDateToISO(weekDates[dayIdx]),
-                                  "CANCEL",
-                                )
-                              }
-                              className="w-[15px] h-[15px] rounded border border-[#b9bfcb] bg-white text-[#ff453a] text-[9px] leading-none cursor-pointer hover:border-[#ff453a]"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
+                        <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
+                          <path d="M5 1L1 5L5 9" stroke="#424752" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button
+                            title="Pick a week"
+                            className="flex h-[27px] w-[150px] items-center justify-center border-t border-b border-[#E5E7EB] bg-white px-2 text-xs font-medium text-[#191C1E] transition-colors duration-150 hover:bg-[#F2F4F6]"
+                          >
+                            {weekDates[0]} – {weekDates[6]}
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto rounded-xl border-[#E5E7EB] p-0 shadow-lg" align="start">
+                          <CalendarPicker
+                            theme="light"
+                            hideThemePicker
+                            mode="week"
+                            weekStart={calendarWeekStart}
+                            onWeekChange={setCalendarWeekStart}
+                            highlightDates={selectedDates}
+                            onDatesChange={setSelectedDates}
+                            selected={calendarSelectedDate}
+                            onSelect={(date) => {
+                              if (!date) return;
+                              if (date instanceof Date === false) return;
+                              setCalendarSelectedDate(date);
+                              const week = getWeekDates(date);
+                              setWeekDates(week);
+                              const [dd, mm, yy] = week[0].split("/").map(Number);
+                              const newWeekStart = new Date(2000 + yy, mm - 1, dd);
+                              setCalendarWeekStart(newWeekStart);
+                              const newSelectedDates = week.map((d) => {
+                                const [dd2, mm2, yy2] = d.split("/").map(Number);
+                                return new Date(2000 + yy2, mm2 - 1, dd2);
+                              });
+                              setSelectedDates(newSelectedDates);
+                            }}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                      <button
+                        onClick={() => shiftWeek(1)}
+                        title="Next week"
+                        className="flex h-[27px] w-[25px] items-center justify-center rounded-r-lg border border-[#E5E7EB] bg-white transition-colors duration-150 hover:bg-[#F2F4F6] active:scale-[0.95]"
+                      >
+                        <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
+                          <path d="M1 1L5 5L1 9" stroke="#424752" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
+                  {canManageSchedule && (
+                    <button
+                      onClick={() =>
+                        slotModalRef.current?.openAddSlot(
+                          "",
+                          null,
+                          null,
+                          activeTab === "week" ? "date" : "weekly",
+                          undefined,
+                          activeTab === "week" ? "ADD" : undefined,
+                        )
+                      }
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#004785] px-4 py-2 text-xs font-semibold text-white shadow-sm transition-all duration-200 hover:bg-[#003A6B] hover:shadow-md active:scale-[0.98]"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Add Slot
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-xl border border-[#E5E7EB]">
+                <div className="hide-scrollbar overflow-x-auto p-0.5">
+                  <div className="min-w-[860px]">
+                    {/* Header */}
+                    <div className="grid grid-cols-7 border-b border-[#E5E7EB] bg-[#F7F9FB]">
+                      {WEEK_DAYS.map(([day], dayIdx) => (
+                        <div
+                          key={day}
+                          className={`border-r border-[#E5E7EB] p-3 text-center text-xs font-bold text-[#00488D] last:border-r-0 transition-colors duration-200 ${
+                            activeTab === "day" ? "flex items-center justify-center" : ""
+                          }`}
+                        >
+                          <div>
+                            {day}
+                            {activeTab === "week" && (
+                              <span className="mt-0.5 block text-[10px] font-normal normal-case text-[#6B7280]">
+                                {weekDates[dayIdx]}
+                              </span>
+                            )}
                           </div>
-                        )}
-                        {activeTab === "week" &&
-                          leaveByIso.has(
-                            weekDateToISO(weekDates[dayIdx])
-                          ) && (
-                            <div className="mt-[3px] flex justify-center">
+                          {activeTab === "week" && weekDateToISO(weekDates[dayIdx]) >= todayIso && (
+                            <div className="mt-1.5 flex items-center justify-center gap-1">
+                              <button
+                                type="button"
+                                title="Add a shift for this date"
+                                onClick={() =>
+                                  slotModalRef.current?.openAddSlot(
+                                    WEEK_DAYS[dayIdx][0],
+                                    null,
+                                    null,
+                                    "date",
+                                    weekDateToISO(weekDates[dayIdx]),
+                                    "ADD",
+                                  )
+                                }
+                                className="flex h-6 w-6 items-center justify-center rounded-md border border-[#E5E7EB] bg-white text-[#00488D] transition-all duration-200 hover:border-[#004785] hover:bg-[#004785] hover:text-white active:scale-90"
+                              >
+                                <Plus className="h-3 w-3" />
+                              </button>
+                              <button
+                                type="button"
+                                title="Override this date's schedule"
+                                onClick={() =>
+                                  slotModalRef.current?.openAddSlot(
+                                    WEEK_DAYS[dayIdx][0],
+                                    null,
+                                    null,
+                                    "date",
+                                    weekDateToISO(weekDates[dayIdx]),
+                                    "OVERRIDE",
+                                  )
+                                }
+                                className="flex h-6 w-6 items-center justify-center rounded-md border border-[#E5E7EB] bg-white text-[#A8720F] transition-all duration-200 hover:border-[#A8720F] hover:bg-[#A8720F] hover:text-white active:scale-90"
+                              >
+                                <RotateCw className="h-3 w-3" />
+                              </button>
+                              <button
+                                type="button"
+                                title="Cancel this date"
+                                onClick={() =>
+                                  slotModalRef.current?.openAddSlot(
+                                    WEEK_DAYS[dayIdx][0],
+                                    null,
+                                    null,
+                                    "date",
+                                    weekDateToISO(weekDates[dayIdx]),
+                                    "CANCEL",
+                                  )
+                                }
+                                className="flex h-6 w-6 items-center justify-center rounded-md border border-[#E5E7EB] bg-white text-[#B5433E] transition-all duration-200 hover:border-[#B5433E] hover:bg-[#B5433E] hover:text-white active:scale-90"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          )}
+                          {activeTab === "week" && leaveByIso.has(weekDateToISO(weekDates[dayIdx])) && (
+                            <div className="mt-1.5 flex justify-center">
                               <span
                                 title="Approved leave covers this date"
-                                className="rounded bg-[#FDE8E8] px-1 py-0.5 text-[7px] font-bold uppercase tracking-wide text-[#9B1C1C]"
+                                className="rounded bg-[#FBEAE9] px-2 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[#B5433E]"
                               >
-                                Doctor Leave
+                                <CalendarX className="mr-0.5 inline h-2.5 w-2.5" /> Leave
                               </span>
                             </div>
                           )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Rows */}
+                    {(activeTab === "week" ? weekSchedule : schedule).map((row, rowIndex) => (
+                      <div
+                        key={rowIndex}
+                        className={`grid grid-cols-7 min-h-[84px] border-b border-[#E5E7EB] last:border-b-0 ${rowIndex % 2 === 0 ? "bg-white" : "bg-[#FBFCFD]"}`}
+                      >
+                        {row.map((cell, index) => {
+                          const cellArr = cell as any[];
+                          const text = cellArr[0];
+                          const type = cellArr[1];
+                          const branch = cellArr[2];
+                          const scheduleId = cellArr[3];
+                          const branchId = cellArr[4];
+                          const startTime = cellArr[5];
+                          const endTime = cellArr[6];
+                          const changeId = activeTab === "week" ? cellArr[7] ?? null : null;
+                          const changeMode = activeTab === "week" ? cellArr[8] : undefined;
+                          const consultationMinutes = activeTab === "week" ? (cellArr[9] ?? null) : (cellArr[7] ?? null);
+                          const colorType =
+                            type === "template" ? "blue" : type === "ADD" ? "green" : type === "OVERRIDE" ? "orange" : type;
+                          const isColored = ["green", "blue", "orange"].includes(colorType);
+                          const isCancelled = type === "CANCEL";
+                          const weekIso = activeTab === "week" ? weekDateToISO(weekDates[index]) : "";
+
+                          const openBlockEdit = () => {
+                            if (!canManageSchedule) return;
+                            slotModalRef.current?.openEditSlot({
+                              scheduleId: scheduleId ?? null,
+                              changeId: changeId ?? null,
+                              day: WEEK_DAYS[index][0],
+                              date: activeTab === "week" ? weekIso : undefined,
+                              branchId: branchId ?? "",
+                              startTime: startTime ?? "",
+                              endTime: endTime ?? "",
+                              consultationMinutes: consultationMinutes ?? undefined,
+                              mode: activeTab === "week" ? "date" : "weekly",
+                              changeMode: changeMode,
+                            });
+                          };
+
+                          const leaveForCell =
+                            activeTab === "week"
+                              ? leaveByIso.get(weekIso)
+                              : undefined;
+
+                          return (
+                            <div key={index} className="min-h-[84px] border-r border-[#E5E7EB] p-1 last:border-r-0 transition-colors duration-200 hover:bg-[rgba(0,71,133,0.02)]">
+                              {leaveForCell && (
+                                <div
+                                  title={leaveForCell.leave_reason ?? "Approved leave"}
+                                  className="flex h-[64px] flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border-2 border-dashed border-[#F5B7B7] bg-[#FBEAE9] px-2 text-center transition-shadow duration-200 hover:shadow-sm"
+                                >
+                                  <span className="text-[9px] font-bold uppercase tracking-wide text-[#B5433E]">
+                                    <CalendarX className="mr-1 inline h-3 w-3" /> Doctor Leave
+                                  </span>
+                                  {leaveForCell.leave_reason && (
+                                    <span className="line-clamp-2 px-0.5 text-[8px] leading-[10px] text-[#B5433E]/80">
+                                      {leaveForCell.leave_reason}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+
+                              {isCancelled && !leaveForCell && (
+                                <div className="relative flex h-[64px] flex-col justify-start gap-0.5 overflow-hidden rounded-lg border-l-4 border-[#9CA3AF] bg-gradient-to-br from-[#F3F4F6] to-[#E8EAED] p-2.5 text-[#6B7280]">
+                                  {showDelete && (
+                                    <button
+                                      type="button"
+                                      title="Restore this date"
+                                      onClick={(e) => openBlockCancel(e, rowIndex, index)}
+                                      className="absolute right-1 top-1 rounded-full p-0.5 text-[#9AA3B0] transition-all duration-200 hover:bg-[#FBEAE9] hover:text-[#B5433E] active:scale-90"
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+                                  <strong className="pl-0.5 text-[9px] font-bold">
+                                    <Ban className="mr-1 inline h-3 w-3" /> {text}
+                                  </strong>
+                                </div>
+                              )}
+
+                              {type === "off" && !leaveForCell && (
+                                <div className="flex h-[64px] items-center justify-center rounded-lg border-2 border-dashed border-[#E5E7EB] bg-[#FAFBFC] text-[11px] font-semibold text-[#8C8D8F] transition-all duration-200 hover:border-[#B9C6D9] hover:bg-[#F2F4F6]">
+                                  <Coffee className="mr-1.5 inline h-3.5 w-3.5" /> Week Off
+                                </div>
+                              )}
+
+                              {type === "empty" && !leaveForCell && (
+                                canManageSchedule ? (
+                                  <div
+                                    onClick={() =>
+                                      slotModalRef.current?.openAddSlot(
+                                        WEEK_DAYS[index][0],
+                                        rowIndex,
+                                        index,
+                                        activeTab === "week" ? "date" : "weekly",
+                                        activeTab === "week" ? weekIso : undefined,
+                                        activeTab === "week" ? "ADD" : undefined,
+                                      )
+                                    }
+                                    className="flex h-[90px] cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-[#E5E7EB] text-xl text-[#B0B8C4] transition-all duration-200 hover:border-[#004785] hover:bg-[#F7F9FB] hover:text-[#004785] active:scale-[0.97]"
+                                  >
+                                    <Plus className="h-5 w-5" />
+                                  </div>
+                                ) : (
+                                  <div className="flex h-[64px] items-center justify-center rounded-lg border-2 border-dashed border-[#EEF0F3] text-xl text-[#C8CED7]">
+                                    <Plus className="h-5 w-5" />
+                                  </div>
+                                )
+                              )}
+
+                              {isColored && !leaveForCell && (
+                                <div
+                                  onClick={openBlockEdit}
+                                  className={`relative flex h-full min-h-[64px] w-full cursor-pointer flex-col items-start gap-[5px] overflow-hidden rounded-lg border-l-4 ${
+                                    showDelete ? "px-2.5 pb-2 pt-7" : "p-2.5"
+                                  } transition-all duration-200 hover:shadow-sm active:scale-[0.98] ${
+                                    colorType === "green"
+                                      ? "border-l-[#2E7D5B] bg-[#EAF7F0] text-[#2E7D5B] hover:bg-[#DDF0E6]"
+                                      : colorType === "blue"
+                                      ? "border-l-[#00488D] bg-[#EDF3FB] text-[#00488D] hover:bg-[#E1ECF8]"
+                                      : "border-l-[#A8720F] bg-[#FCF3E4] text-[#A8720F] hover:bg-[#FAEBD3]"
+                                  }`}
+                                >
+                                  {showDelete && (
+                                    <button
+                                      type="button"
+                                      title={activeTab === "week" && changeId != null ? "Remove this date change" : "Delete slot"}
+                                      onClick={(e) => openBlockCancel(e, rowIndex, index)}
+                                      className="absolute right-1 top-1 rounded-full p-0.5 text-[#9AA3B0] transition-all duration-200 hover:bg-[#FBEAE9] hover:text-[#B5433E] active:bg-[#B5433E] active:text-white active:shadow-[0_0_0_5px_rgba(220,53,69,0.30)] active:scale-90"
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+                                  <strong className="flex flex-col items-start gap-0.5 pl-0.5 text-[11px] font-bold">
+                                    <span className="flex items-center gap-2">
+                                      <Clock className="h-4 w-4 shrink-0" /> {text}
+                                    </span>
+                                  </strong>
+                                  <small className="flex items-center gap-1 pl-0.5 text-[11px] leading-[10px] mt-1">
+                                    <Hospital className="h-4 w-4 shrink-0" />
+                                    <span className="truncate">{branch || "Central Hospital"}</span>
+                                  </small>
+                                  {activeTab === "week" && changeId != null && (
+                                    <small className="pl-0.5 text-[7px] uppercase tracking-wide text-[#8C8D8F] mt-0.5">
+                                      {colorType === "green" ? "Added" : colorType === "orange" ? "Override" : "Template"}
+                                    </small>
+                                  )}
+                                  
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     ))}
-
                   </div>
-
-                  {/* ROWS */}
-                  {(activeTab === "week" ? weekSchedule : schedule).map((row, rowIndex) => (
-                    <div
-                      key={rowIndex}
-                      className="grid grid-cols-7 min-h-[64px] border-b border-[#b9bfcb] last:border-b-0"
-                    >
-                      {row.map((cell, index) => {
-                        const [text, type, branch, scheduleId, branchId, startTime, endTime, changeId, changeMode] =
-                          cell as any[];
-                        const colorType =
-                          type === "template" ? "blue" : type === "ADD" ? "green" : type === "OVERRIDE" ? "orange" : type;
-                        const isColored = ["green", "blue", "orange"].includes(colorType);
-                        const isCancelled = type === "CANCEL";
-                        const weekIso = activeTab === "week" ? weekDateToISO(weekDates[index]) : "";
-
-                        const openBlockEdit = () => {
-                          if (!canManageSchedule) return;
-                          slotModalRef.current?.openCancelSlot(
-                            WEEK_DAYS[index][0],
-                            rowIndex,
-                            index,
-                            text,
-                            branch,
-                            scheduleId ?? null,
-                          );
-                        };
-
-
-                        const leaveForCell =
-                          activeTab === "week"
-                            ? leaveByIso.get(weekIso)
-                            : undefined;
-
-                        return (
-                          <div key={index} className="p-1 border-r border-[#b9bfcb] min-w-0">
-                            {leaveForCell && (
-                              <div
-                                title={leaveForCell.leave_reason ?? "Approved leave"}
-                                className="h-[54px] rounded-[3px] border border-dashed border-[#F5B7B7] bg-[#FDE8E8] flex flex-col items-center justify-center gap-[2px] text-center px-1 overflow-hidden"
-                              >
-                                <span className="text-[7px] font-bold uppercase tracking-wide text-[#9B1C1C]">
-                                  Doctor Leave
-                                </span>
-                                {leaveForCell.leave_reason && (
-                                  <span className="text-[6px] leading-[8px] text-[#9B1C1C]/80 line-clamp-2 px-0.5">
-                                    {leaveForCell.leave_reason}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-
-                            {isCancelled && !leaveForCell && (
-                              <div className="relative h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] bg-[#f3f4f6] text-[#6b7280] border-[#9ca3af]">
-                                {showDelete && (
-                                  <button
-                                    type="button"
-                                    title="Restore this date"
-                                    onClick={(e) => openBlockCancel(e, rowIndex, index)}
-                                    className="absolute top-[2px] right-[2px] p-[1px] rounded-full text-[#9aa3b0] hover:text-[#ff453a] hover:bg-[#ffebea] transition-colors cursor-pointer"
-                                  >
-                                    <X className="size-3" />
-                                  </button>
-                                )}
-                                <strong className="text-[6px] whitespace-nowrap pl-1">{text}</strong>
-                              </div>
-                            )}
-
-                            {type === "off" && !leaveForCell && (
-                              <div className="h-[54px] border border-dashed border-[#b9bfcb] rounded flex items-center justify-center text-[#657080] text-[8px]">
-                                Week Off
-                              </div>
-                            )}
-
-                            {type === "empty" &&
-                              !leaveForCell &&
-                              (canManageSchedule ? (
-                                <div
-                                  onClick={() =>
-                                    slotModalRef.current?.openAddSlot(
-                                      WEEK_DAYS[index][0],
-                                      rowIndex,
-                                      index,
-                                      activeTab === "week" ? "date" : "weekly",
-                                      activeTab === "week" ? weekIso : undefined,
-                                      activeTab === "week" ? "ADD" : undefined,
-                                    )
-                                  }
-                                  className="h-[54px] border border-dashed border-[#b9bfcb] rounded flex items-center justify-center text-[#7d8794] text-lg cursor-pointer hover:border-[#004a91] hover:text-[#004a91]"
-                                >
-                                  +
-                                </div>
-                              ) : (
-                                <div className="h-[54px] border border-dashed border-[#e5e7eb] rounded flex items-center justify-center text-[#c8ced7] text-lg">
-                                  +
-                                </div>
-                              ))}
-
-                            {isColored && !leaveForCell && (
-                              <div
-                                onClick={openBlockEdit}
-                                className={`relative cursor-pointer h-[54px] rounded-[3px] p-[5px] flex flex-col justify-start gap-1 overflow-hidden border-l-[3px] ${
-                                  colorType === "green"
-                                    ? "bg-[#f0faf6] text-[#087d53] border-[#087d53]"
-                                    : colorType === "blue"
-                                    ? "bg-[#f1f6ff] text-[#1e5fc7] border-[#1e5fc7]"
-                                    : "bg-[#fff7ef] text-[#ed741b] border-[#ed741b]"
-                                }`}
-                              >
-                                {showDelete && (
-                                  <button
-                                    type="button"
-                                    title={activeTab === "week" && changeId != null ? "Remove this date change" : "Delete slot"}
-                                    onClick={(e) => openBlockCancel(e, rowIndex, index)}
-                                    className="absolute top-[2px] right-[2px] p-[1px] rounded-full text-[#9aa3b0] hover:text-[#ff453a] hover:bg-[#ffebea] transition-colors cursor-pointer"
-                                  >
-                                    <X className="size-3" />
-                                  </button>
-                                )}
-
-                                <strong className="text-[6px] whitespace-nowrap pl-1">{text}</strong>
-
-                                <small className="text-[6px] leading-[8px]">
-                                  {branch || "Central Hospital"}
-                                </small>
-
-                                {activeTab === "week" && changeId != null && (
-                                  <small className="text-[5px] leading-[7px] uppercase tracking-wide text-[#9aa3b0]">
-                                    {colorType === "green" ? "Added" : colorType === "orange" ? "Override" : "Template"}
-                                  </small>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-
                 </div>
-
               </div>
+            </div>
 
-            </section>
-
-            {/* LEAVE SUBMISSION */}
-            <section className="bg-white border border-[#edf0f4] rounded-[10px] p-[31px] max-[500px]:p-5 transition-shadow duration-200 hover:shadow-md">
-
-              <div className="flex justify-between items-center mb-6 max-[500px]:flex-col max-[500px]:items-start max-[500px]:gap-3">
-
+            {/* Leave Submission + Reviews rail */}
+            <div className="grid items-start gap-6 lg:grid-cols-[1fr_380px]">
+              {/* Leave Submission */}
+              <div className="rounded-xl border border-[#E5E7EB] bg-white p-7 shadow-sm transition-all duration-300 hover:shadow-md">
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-
-                  <div className="w-10 h-10 rounded-lg bg-[#fff1f0] text-[#ff453a] flex items-center justify-center text-[22px]">
-                    <CalendarOff className="w-5 h-5" />
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#FBEAE9] text-[#B5433E]">
+                    <CalendarOff className="h-5 w-5" />
                   </div>
-
-                  <h2 className="text-[19px]">
-                    Leave Submission
-                  </h2>
-
+                  <h2 className="text-lg font-bold text-[#191C1E]">Leave Submission</h2>
                 </div>
-
-                <span className="text-[#a0a7b1] bg-[#f7f8fa] rounded-full px-[11px] py-[5px] text-[9px] tracking-[0.7px]">
-                  LEAVE MANAGEMENT
+                <span className="flex items-center gap-1.5 rounded-full bg-[#F7F9FB] px-3 py-1.5 text-[10px] font-semibold tracking-[0.7px] text-[#8C8D8F]">
+                  <ClipboardList className="h-3 w-3" /> LEAVE MANAGEMENT
                 </span>
-
               </div>
 
-              <form onSubmit={submitLeave}>
-
+              <form onSubmit={submitLeave} className="w-full">
+                <div className="mb-4">
+                  <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.5px] text-[#6B7280]">
+                    Leave Type
+                  </label>
+                  <div className="flex gap-2">
+                    {(["Emergency", "Vacation", "Sick Leave"] as const).map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setLeaveType(type)}
+                        className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                          leaveType === type
+                            ? "border-[#004785] bg-[#004785] text-white"
+                            : "border-[#E5E7EB] bg-white text-[#424752] hover:bg-[#F2F4F6]"
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1">
-
                   <div>
-                    <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                      FROM
+                    <label className="mb-1.5 flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.5px] text-[#6B7280]">
+                      <CalendarIcon className="h-3 w-3" /> From
                     </label>
-
                     <Popover open={isFromCalendarOpen} onOpenChange={setIsFromCalendarOpen}>
                       <PopoverTrigger asChild>
                         <button
                           type="button"
-                          className="w-full text-left border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
+                          className="w-full rounded-lg border border-[#E5E7EB] bg-white p-3 text-left text-sm font-medium text-[#191C1E] outline-none transition-all duration-200 hover:border-[#B9C6D9] focus:border-[#00488D] focus:ring-2 focus:ring-[#D6E3FF]"
                         >
                           {fromDate ? format(fromDate, "dd/MM/yyyy") : "Select date"}
                         </button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0 border-[#dfe4ea] shadow-lg">
+                      <PopoverContent className="w-auto rounded-xl border-[#E5E7EB] p-0 shadow-lg">
                         <CalendarPicker
                           selected={fromDate}
-                        minDate={new Date()}
+                          minDate={new Date()}
                           hideThemePicker
                           onSelect={(date) => {
+                            if (!(date instanceof Date)) return;
                             setFromDate(date);
                             setIsFromCalendarOpen(false);
                           }}
@@ -1566,24 +1600,25 @@ const applyLeaveNow = async (queueConflicts: boolean) => {
                   </div>
 
                   <div>
-                    <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                      TO
+                    <label className="mb-1.5 flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.5px] text-[#6B7280]">
+                      <CalendarIcon className="h-3 w-3" /> To
                     </label>
-
                     <Popover open={isToCalendarOpen} onOpenChange={setIsToCalendarOpen}>
                       <PopoverTrigger asChild>
                         <button
                           type="button"
-                          className="w-full text-left border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
+                          className="w-full rounded-lg border border-[#E5E7EB] bg-white p-3 text-left text-sm font-medium text-[#191C1E] outline-none transition-all duration-200 hover:border-[#B9C6D9] focus:border-[#00488D] focus:ring-2 focus:ring-[#D6E3FF]"
                         >
                           {toDate ? format(toDate, "dd/MM/yyyy") : "Select date"}
                         </button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0 border-[#dfe4ea] shadow-lg">
+                      <PopoverContent className="w-auto rounded-xl border-[#E5E7EB] p-0 shadow-lg">
                         <CalendarPicker
                           selected={toDate}
+                          minDate={new Date()}
                           hideThemePicker
                           onSelect={(date) => {
+                            if (!(date instanceof Date)) return;
                             setToDate(date);
                             setIsToCalendarOpen(false);
                           }}
@@ -1591,314 +1626,115 @@ const applyLeaveNow = async (queueConflicts: boolean) => {
                       </PopoverContent>
                     </Popover>
                   </div>
-
                 </div>
 
                 <textarea
                   name="reason"
                   placeholder="Reason for leave..."
-                  className="w-full min-h-[66px] mt-3 resize-y border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
+                  className="mt-4 min-h-[70px] w-full resize-y rounded-lg border border-[#E5E7EB] bg-white p-3 text-sm text-[#191C1E] outline-none transition-all duration-200 placeholder:text-[#B0B8C4] hover:border-[#B9C6D9] focus:border-[#00488D] focus:ring-2 focus:ring-[#D6E3FF]"
                 />
 
-                <div className="flex justify-end gap-4 mt-4">
-
+                <div className="mt-5 flex justify-end gap-3">
                   <button
                     type="reset"
                     onClick={() => {
                       setFromDate(null);
                       setToDate(null);
                     }}
-                    className="h-[38px] px-7 rounded-[9px] text-sm font-semibold cursor-pointer bg-white text-[#ff453a] border-2 border-[#ff453a]"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#E5E7EB] bg-white px-6 py-2.5 text-sm font-semibold text-[#424752] transition-all duration-200 hover:bg-[#F2F4F6] active:scale-[0.98]"
                   >
-                    Cancel
+                    <X className="h-4 w-4" /> Cancel
                   </button>
-
                   <button
                     type="submit"
-                    className="h-[38px] px-7 rounded-[9px] text-sm font-semibold cursor-pointer bg-[#004a91] text-white border-2 border-[#004a91]"
+                    disabled={submittingLeave || processingLeave}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#004785] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-[#003A6B] hover:shadow-md active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
                   >
-                    Submit
+                    {submittingLeave || processingLeave ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-4 w-4" /> Submit
+                      </>
+                    )}
                   </button>
-
                 </div>
-
               </form>
+            </div>
 
-            </section>
-
+              {/* Reviews rail */}
+  <div className="overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-sm transition-all duration-300 hover:shadow-md">
+    {reviews.map((review) => (
+      <div key={review.name} className="border-b border-[#F2F4F6] p-4 transition-colors duration-200 last:border-b-0 hover:bg-[#FAFBFC]">
+        <div className="flex items-start gap-3">
+          <img
+            src={review.image}
+            alt={review.name}
+            className="h-9 w-9 rounded-full border border-[#E5E7EB] object-cover flex-shrink-0"
+          />
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-semibold text-[#191C1E] truncate">{review.name}</h3>
+            <span className="text-[10px] text-[#8C8D8F]">
+              <Clock className="mr-0.5 inline h-3 w-3" /> {review.time}
+            </span>
           </div>
-
-          {/* RIGHT COLUMN */}
-          <aside className="min-w-0 max-[900px]:grid max-[900px]:grid-cols-2 max-[900px]:gap-5 max-[700px]:block">
-
-            {/* CALENDAR (Week tab only -- the Day tab's simpler layout never had a month calendar) */}
-            {activeTab === "week" && (
-            <section >
-              <div className="flex justify-center h-full">
-                <CalendarPicker
-                  theme="light"
-                  hideThemePicker
-                  mode="week"
-                  weekStart={calendarWeekStart}
-                  onWeekChange={setCalendarWeekStart}
-                  highlightDates={selectedDates}
-                  onDatesChange={setSelectedDates}
-                  selected={calendarWeekStart}
-                  onSelect={(date) => {
-                    if (!date) return;
-                    if (date instanceof Date === false) return; // Skip if DateRange
-                    setCalendarSelectedDate(date);
-                    // set week to the week containing selected date
-                    const week = getWeekDates(date);
-                    setWeekDates(week);
-                    const [dd, mm, yy] = week[0].split("/").map(Number);
-                    const newWeekStart = new Date(2000 + yy, mm - 1, dd);
-                    setCalendarWeekStart(newWeekStart);
-                    // Update selected dates to new week's Mon-Sun
-                    const newSelectedDates = week.map((d) => {
-                      const [dd2, mm2, yy2] = d.split("/").map(Number);
-                      return new Date(2000 + yy2, mm2 - 1, dd2);
-                    });
-                    setSelectedDates(newSelectedDates);
-                  }}
-                />
-              </div>
-            </section>
-            )}
-
-            {/* REVIEWS */}
-            <section className="bg-white border border-[#edf0f4] rounded-lg overflow-hidden transition-shadow duration-200 hover:shadow-md">
-            { [
-                {
-                  name: "Sarah Jenkins",
-                  time: "1 week ago",
-                  image: "https://i.pravatar.cc/100?img=47",
-                  rating: 4,
-                  text: `"Excellent treatment manner. Wait time was a bit longer than expected, but the quality of care definitely made up for it. Highly recommended."`,
-                  tags: ["Cardiology"],
-                },
-                {
-                  name: "Robert Wilson",
-                  time: "3 days ago",
-                  image: "https://i.pravatar.cc/100?img=11",
-                  rating: 5,
-                  text: `"The staff and Dr are incredible. I've been a patient here for 2 years and the level of clinical precision and personal attention is unmatched in the city."`,
-                  tags: ["Long-term Care", "Referral"],
-                },
-              ].map((review) => (
-
-                <article
-                  key={review.name}
-                  className="p-6 border-b border-gray-200"
-                >
-
-                  <div className="flex items-start gap-[11px]">
-
-                    <img
-                      src={review.image}
-                      alt={review.name}
-                      className="w-[47px] h-[47px] rounded-full object-cover bg-gray-200"
-                    />
-
-                    <div>
-                      <h3 className="text-sm mb-[3px]">
-                        {review.name}
-                      </h3>
-
-                      <span className="text-[#4e5663] text-[10px]">
-                        {review.time}
-                      </span>
-                    </div>
-
-                    <div className="ml-auto text-[#f5a623] text-[13px] tracking-wider flex items-center gap-0.5">
-                      {[...Array(5)].map((_, i) => (
-                        <Star
-                          key={i}
-                          className={`w-4 h-4 ${i < review.rating ? "fill-current" : "text-[#e5e7eb]"}`}
-                        />
-                      ))}
-                    </div>
-
-                  </div>
-
-                  <hr className="border-0 border-t border-gray-200 my-4" />
-
-                  <p className="text-[#4c5360] text-[13px] leading-[22px]">
-                    {review.text}
-                  </p>
-
-                  <div className="flex flex-wrap gap-[7px] mt-3">
-
-                    {review.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="bg-[#eef8ff] text-[#0d9bd3] rounded-full px-2 py-[3px] text-[9px]"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-
-                  </div>
-
-                </article>
-
-              ))}
-
-              <button
-                onClick={() => showAlert("All reviews opened.")}
-                className="w-full h-9 border-0 bg-[#e9ebef] text-[#004a91] text-[11px] cursor-pointer"
-              >
-                Read All Reviews
-              </button>
-
-            </section>
-
-          </aside>
-
+          <div className="flex items-center gap-0.5 text-xs tracking-wider text-[#F5A623] flex-shrink-0">
+            {[...Array(5)].map((_, i) => (
+              <Star
+                key={i}
+                className={`h-3.5 w-3.5 ${i < review.rating ? "fill-current" : "text-[#E5E7EB]"}`}
+              />
+            ))}
+          </div>
+        </div>
+        <hr className="my-2.5 border-t border-[#F2F4F6]" />
+        <p className="text-xs leading-relaxed text-[#424752] line-clamp-3">{review.text}</p>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {review.tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-full bg-[#D6E3FF] px-2 py-0.5 text-[9px] font-semibold text-[#00488D] transition-colors duration-200 hover:bg-[#00488D] hover:text-white"
+            >
+              {tag}
+            </span>
+          ))}
         </div>
       </div>
-      </main>
-
-      {pendingTransfer && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-[10px] p-6 w-[440px] max-h-[90vh] overflow-y-auto shadow-lg">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-[16px] font-semibold text-[#172033]">
-                Affected Appointments
-              </h3>
-
-              <button
-                onClick={() => setPendingTransfer(null)}
-                title="Close (the slot change is not applied)"
-                className="p-1 rounded-full text-[#9aa3b0] hover:text-[#374151] hover:bg-[#f1f3f5] transition-colors cursor-pointer"
-              >
-                <X className="size-4" />
-              </button>
+    ))}
+    <button
+      onClick={() => showAlert("All reviews opened.")}
+      className="flex w-full items-center justify-center gap-2 border-t border-[#F2F4F6] bg-[#F7F9FB] py-3 text-sm font-semibold text-[#00488D] transition-colors duration-200 hover:bg-[#004785] hover:text-white active:scale-[0.99]"
+    >
+      Read All Reviews <ArrowLeft className="h-4 w-4 rotate-180" />
+    </button>
+  </div>
             </div>
-
-            <p className="text-[#5f6672] text-[13px] mb-2">{pendingTransfer.message}</p>
-
-            <p className="text-[#5f6672] text-[13px] mb-3">
-              {pendingTransfer.appointments.length} future appointment(s) need handling before the slot change is applied.
-            </p>
-
-            <div className="border border-[#dfe4ea] rounded-[7px] max-h-[180px] overflow-y-auto divide-y divide-[#eef1f4] mb-4">
-              {pendingTransfer.appointments.map((a) => (
-                <div key={a.appointment_id} className="px-3 py-2">
-                  <div className="text-xs font-semibold text-[#172033]">
-                    {a.patient_name || a.patient_id}
-                  </div>
-                  <div className="text-[11px] text-[#5f6672]">
-                    {a.appointment_date} Â· {a.appointment_time} Â·{" "}
-                    {a.branch_id
-                      ? doctorDetail?.branches?.find((b) => b.branch_id === a.branch_id)?.branch_name ?? a.branch_id
-                      : "â€”"}
-                  </div>
-                </div>
-              ))}
-              {pendingTransfer.appointments.length === 0 && (
-                <div className="px-3 py-3 text-xs text-[#5f6672]">No affected appointments.</div>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2 mb-4">
-              <button
-                onClick={() => {
-                  setTransferAction("TRANSFER");
-                  setReplacementDoctorId(replacementDoctors[0]?.employee_id ?? "");
-                }}
-                className={`text-left px-3 py-2 rounded-[7px] border text-xs font-semibold cursor-pointer transition-colors ${
-                  transferAction === "TRANSFER"
-                    ? "border-[#004a91] bg-[#eef4ff] text-[#004a91]"
-                    : "border-[#dfe4ea] bg-white text-[#374151] hover:border-[#b8cce8]"
-                }`}
-              >
-                Transfer to replacement doctor
-              </button>
-
-              <button
-                onClick={() => setTransferAction("RESCHEDULE")}
-                className={`text-left px-3 py-2 rounded-[7px] border text-xs font-semibold cursor-pointer transition-colors ${
-                  transferAction === "RESCHEDULE"
-                    ? "border-[#b45309] bg-[#fff7ed] text-[#b45309]"
-                    : "border-[#dfe4ea] bg-white text-[#374151] hover:border-[#f2c9a0]"
-                }`}
-              >
-                Reschedule queue
-              </button>
-
-              <button
-                onClick={() => setTransferAction("CANCEL")}
-                className={`text-left px-3 py-2 rounded-[7px] border text-xs font-semibold cursor-pointer transition-colors ${
-                  transferAction === "CANCEL"
-                    ? "border-[#ff453a] bg-[#fff1f0] text-[#ff453a]"
-                    : "border-[#dfe4ea] bg-white text-[#374151] hover:border-[#ffc9c5]"
-                }`}
-              >
-                Cancel appointments
-              </button>
-            </div>
-
-            {transferAction === "TRANSFER" && (
-              <div className="mb-4">
-                <label className="block text-[#99a1ac] text-[9px] font-bold mb-[5px]">
-                  REPLACEMENT DOCTOR
-                </label>
-
-                <select
-                  value={replacementDoctorId}
-                  onChange={(e) => setReplacementDoctorId(e.target.value)}
-                  className="w-full border border-[#dfe4ea] rounded-[7px] outline-none p-[10px_12px] text-xs text-[#374151] focus:border-[#004a91]"
-                >
-                  <option value="">Select replacement doctor</option>
-                  {replacementDoctors.map((d) => (
-                    <option key={d.employee_id} value={d.employee_id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-
-                {replacementDoctors.length === 0 && (
-                  <p className="text-[11px] text-[#c2410c] mt-1">
-                    No eligible replacement doctors were found for these appointments.
-                  </p>
-                )}
-              </div>
-            )}
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setPendingTransfer(null)}
-                disabled={isConfirmingTransfer}
-                className="h-9 px-4 rounded-[7px] text-[13px] font-semibold cursor-pointer bg-white text-[#555e6c] border border-[#dfe4ea] disabled:opacity-70 disabled:cursor-not-allowed"
-              >
-                Back
-              </button>
-
-              <button
-                onClick={() => transferAction && confirmPendingTransfer(transferAction)}
-                disabled={!transferAction || isConfirmingTransfer}
-                className={`h-9 px-4 rounded-[7px] text-[13px] font-semibold cursor-pointer inline-flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed ${
-                  transferAction === "CANCEL" ? "bg-[#ff453a] text-white border-0" : "bg-[#004a91] text-white border-0"
-                }`}
-              >
-                {isConfirmingTransfer ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin" />
-                    Processing...
-                  </>
-                ) : transferAction === "TRANSFER" ? (
-                  "Transfer appointments"
-                ) : transferAction === "RESCHEDULE" ? (
-                  "Add to reschedule queue"
-                ) : (
-                  "Confirm cancel"
-                )}
-              </button>
-            </div>
-          </div>
         </div>
-      )}
+      </div>
+
+      {/* Pending Transfer / Affected Appointments Dialog */}
+      <AffectedAppointmentsDialog
+        open={pendingTransfer !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingTransfer(null);
+        }}
+        employeeId={id ?? ""}
+        branches={doctorDetail?.branches ?? []}
+        doctors={openDoctors}
+        transfers={
+          pendingTransfer
+            ? [{ transfer_id: pendingTransfer.transferId, message: pendingTransfer.message }]
+            : []
+        }
+        appointments={pendingTransfer?.appointments ?? []}
+        title="Affected Appointments"
+        onCompleted={() => {
+          void handleTransferCompleted();
+        }}
+      />
 
       {/* LEAVE CONFIRM DIALOG */}
       <AlertDialog
@@ -1950,7 +1786,7 @@ const applyLeaveNow = async (queueConflicts: boolean) => {
       <AlertDialog open={leaveSuccessOpen} onOpenChange={setLeaveSuccessOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-green-600">
+            <AlertDialogTitle className="flex items-center gap-2 text-[#2E7D5B]">
               <CheckCircle2 className="size-5" />
               Leave applied successfully
             </AlertDialogTitle>
@@ -2000,24 +1836,24 @@ const applyLeaveNow = async (queueConflicts: boolean) => {
             </AlertDialogDescription>
           </AlertDialogHeader>
 
-          <div className="max-h-[220px] overflow-y-auto rounded-md border border-slate-200">
+          <div className="max-h-[220px] overflow-y-auto rounded-lg border border-[#E5E7EB]">
             {leaveConflicts.map((conflict) => (
               <div
                 key={conflict.appointment_id}
-                className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-[12px] last:border-b-0"
+                className="flex items-center justify-between gap-3 border-b border-[#F2F4F6] px-3 py-2 text-[12px] last:border-b-0"
               >
                 <div className="min-w-0">
-                  <p className="truncate font-semibold text-slate-800">
+                  <p className="truncate font-semibold text-[#191C1E]">
                     {conflict.patientName}
                   </p>
-                  <p className="text-slate-500">
+                  <p className="text-[#6B7280]">
                     {format(new Date(conflict.appointment_date), "dd/MM/yyyy")}
                     {formatTimeOfDay(conflict.appointment_time)
                       ? ` · ${formatTimeOfDay(conflict.appointment_time)}`
                       : ""}
                   </p>
                 </div>
-                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                <span className="shrink-0 rounded-full bg-[#F2F4F6] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#424752]">
                   {conflict.status}
                 </span>
               </div>
@@ -2030,7 +1866,7 @@ const applyLeaveNow = async (queueConflicts: boolean) => {
             </AlertDialogCancel>
             <AlertDialogAction
               disabled={submittingLeave}
-              className="border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              className="border border-[#E5E7EB] bg-white text-[#424752] hover:bg-[#F2F4F6]"
               onClick={(e) => {
                 e.preventDefault();
                 applyLeaveNow(false);
@@ -2072,15 +1908,13 @@ const applyLeaveNow = async (queueConflicts: boolean) => {
       <ScheduleSlotModal
         ref={slotModalRef}
         branches={doctorDetail?.branches?.filter((b) => b.status === 1) ?? []}
-        departments={departments}
         defaultConsultationMinutes={doctorDetail?.doctorProfile?.consultation_minutes ?? 20}
-        defaultDepartmentId={doctorEmployee?.department_id ?? ""}
         onAddSlot={handleAddSlot}
         onUpdateSlot={handleUpdateSlot}
         onCancelSlot={handleCancelSlot}
         isSubmitting={savingSlot}
+        showBypassOption={viewerIsAdmin}
       />
     </div>
   );
 }
-

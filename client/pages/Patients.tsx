@@ -27,6 +27,7 @@ import { patientApi, type PatientRecord } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
+import { getDepartmentColors } from "@/components/hms/DepartmentBadge";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
 
@@ -92,6 +93,7 @@ const NON_ASSIGNING_APPOINTMENT_STATUSES = new Set(["CANCELLED", "NO_SHOW", "COM
 interface AssignedDoctor {
   name: string;
   id: string;
+  department: string | null;
 }
 
 function getDoctorInitials(name: string): string {
@@ -152,6 +154,7 @@ function buildAssignedDoctorMap(appointments: AppointmentRecord[]): Record<strin
     result[patientId] = {
       id: doctor.employee_id,
       name: `Dr. ${[doctor.first_name, doctor.middle_name, doctor.last_name].filter(Boolean).join(" ")}`,
+      department: record.department_master?.department_name ?? record.department ?? null,
     };
   }
   return result;
@@ -163,6 +166,7 @@ function buildAssignedDoctorMap(appointments: AppointmentRecord[]): Record<strin
 // existing endpoint yet, so that stays a clear placeholder rather than a guess.
 function mapToListPatient(p: PatientRecord, assignedDoctors: Record<string, AssignedDoctor>) {
   const assigned = assignedDoctors[p.patient_id];
+  const { bg: deptBg, text: deptColor } = getDepartmentColors(assigned?.department);
   return {
     id: p.patient_id,
     name: getPatientFullName(p),
@@ -172,11 +176,13 @@ function mapToListPatient(p: PatientRecord, assignedDoctors: Record<string, Assi
     diagnose: "Not recorded",
     diagnoseBg: "#F3F4F6",
     diagnoseColor: "#6B7280",
+    patientAvatarColor: assigned ? deptColor : "#00488D",
+    patientAvatarBg: assigned ? deptBg : "#D6E3FF",
     doctor: assigned?.name ?? "Unassigned",
     doctorId: assigned?.id ?? "—",
     doctorAvatar: assigned ? getDoctorInitials(assigned.name) : "?",
-    doctorColor: assigned ? "#4F46E5" : "#6B7280",
-    doctorBg: assigned ? "#E0E7FF" : "#F3F4F6",
+    doctorColor: assigned ? deptColor : "#6B7280",
+    doctorBg: assigned ? deptBg : "#F3F4F6",
     status: getPatientStatus(p),
   };
 }
@@ -685,7 +691,7 @@ export default function PatientsManagement() {
                 columns={[
                   { key: "name", label: "Name", render: (r: any) => (
                     <div className="flex items-center gap-2">
-                      <Avatar text={String(r.name)[0]} color="#00488D" bg="#D6E3FF" />
+                      <Avatar text={String(r.name)[0]} color={String(r.patientAvatarColor ?? "#00488D")} bg={String(r.patientAvatarBg ?? "#D6E3FF")} />
                       <div><div className="hms-name-text">{String(r.name)}</div><div className="hms-id-text">{String(r.id)}</div></div>
                     </div>
                   )},

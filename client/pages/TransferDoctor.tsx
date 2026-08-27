@@ -4,27 +4,16 @@ import {
   ArrowLeft,
   Loader2,
   RefreshCw,
-  CheckCircle2,
   AlertTriangle,
   X,
-  UserRound,
   Plus,
   ChevronRight,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
-import { buttonVariants } from "@/components/ui/button";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import TimepickerWheel from "@/components/ui/timepicker-wheel";
-import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { StatusBadge } from "@/components/hms/StatusBadge";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import AffectedAppointmentsDialog from "@/components/hms/AffectedAppointmentsDialog";
 import {
   employeeApi,
   EmployeeDetailResponse,
@@ -36,10 +25,7 @@ import {
   doctorTransferApi,
   InitiateTransferPayload,
   InitiateTransferResult,
-  TransferAppointmentSummary,
   TransferMode,
-  ConfirmTransferPayload,
-  ConfirmTransferResult,
 } from "@/api/doctorTransfer.api";
 import { getUser } from "@/utils/token";
 
@@ -54,8 +40,6 @@ const DAYS_OF_WEEK: { value: string; label: string }[] = [
   { value: "SATURDAY", label: "Saturday" },
   { value: "SUNDAY", label: "Sunday" },
 ];
-
-const NOTIFY_CHANNELS = ["SMS", "EMAIL", "WHATSAPP"];
 
 interface ScheduleEntry {
   id: string;
@@ -120,26 +104,11 @@ export default function TransferDoctor() {
   const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
   const [recentTransfers, setRecentTransfers] = useState<BranchTransfer[]>([]);
 
-  // Step 2 modal — which recent transfer is being viewed
+  // Step 2 modal ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â which recent transfer is being viewed
   const [viewingTransferId, setViewingTransferId] = useState<string | null>(null);
 
-  // Confirm-action state (step 2)
-  const [replacementEmployeeId, setReplacementEmployeeId] = useState("");
-  const [replacementBranchId, setReplacementBranchId] = useState("");
-  const [notifyChannels, setNotifyChannels] = useState<string[]>([]);
-  const [cancelConfirm, setCancelConfirm] = useState(false);
-  const [priority, setPriority] = useState("NORMAL");
-  const [rescheduleReason, setRescheduleReason] = useState("");
-  const [confirming, setConfirming] = useState(false);
-  const [confirmResult, setConfirmResult] = useState<ConfirmTransferResult | null>(null);
-
-  const [replacementOpen, setReplacementOpen] = useState(false);
-  const [rescheduleOpen, setRescheduleOpen] = useState(false);
-  const [cancelOpen, setCancelOpen] = useState(false);
-  const [confirmDone, setConfirmDone] = useState(false);
-
   // Set after a transfer completes so the admin deliberately acknowledges
-  // before starting another one — prevents the accidental rapid-fire
+  // before starting another one ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â prevents the accidental rapid-fire
   // transfer chains that left behind duplicate/closed mapping rows.
   const [justCompleted, setJustCompleted] = useState(false);
 
@@ -162,7 +131,7 @@ export default function TransferDoctor() {
   // Any of the doctor's OTHER currently-active schedule rows (from the
   // freshly fetched employee payload) that overlap a newly requested slot
   // in day/time. Rows being replaced (the From branch in TRANSFER mode)
-  // are excluded — everything else is untouchable and a conflict there
+  // are excluded ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â everything else is untouchable and a conflict there
   // must block the transfer before anything is sent to the backend.
   const findOverlappingExistingSlots = (rows: ScheduleEntry[]) => {
     const existing = employee?.doctorSchedules?.filter((s) => s.is_active !== false) ?? [];
@@ -178,7 +147,7 @@ export default function TransferDoctor() {
         const end = timeToMinutes(s.end_time);
         if (newStart < end && start < newEnd) {
           overlaps.push(
-            `${s.day_of_week} ${s.start_time}–${s.end_time} at ${branchLabelOf(s.branch_id)}`,
+            `${s.day_of_week} ${s.start_time}ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“${s.end_time} at ${branchLabelOf(s.branch_id)}`,
           );
         }
       }
@@ -249,7 +218,7 @@ export default function TransferDoctor() {
   }, [employee]);
 
   // Doctor's currently assigned branches (from user_branch_mapping, active
-  // status 1 only) — for the From Branch dropdown. Transfer requires a real
+  // status 1 only) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â for the From Branch dropdown. Transfer requires a real
   // source branch: "None" is not an option (that's the separate Add Branch
   // operation), so the list has no empty-value entry.
   const fromBranchOptions = useMemo(
@@ -264,7 +233,7 @@ export default function TransferDoctor() {
   );
 
   // Branch ids the doctor is currently assigned to (active mappings). Both
-  // TRANSFER and ADD_BRANCH on this page target NEW assignments only — the
+  // TRANSFER and ADD_BRANCH on this page target NEW assignments only ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the
   // doctor must never be "moved to" a branch they already hold, otherwise
   // the operation silently closes the source while doing nothing useful at
   // the destination. Adding extra slots at an existing branch belongs to
@@ -279,7 +248,7 @@ export default function TransferDoctor() {
     [employee],
   );
 
-  // All branches the doctor is NOT currently assigned to — for To Branch
+  // All branches the doctor is NOT currently assigned to ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â for To Branch
   // dropdown.
   const toBranchOptions = useMemo(
     () =>
@@ -293,7 +262,7 @@ export default function TransferDoctor() {
     [branches, fromBranchId, activeBranchIds],
   );
 
-  // In TRANSFER mode the doctor leaves ONLY the From branch — every other
+  // In TRANSFER mode the doctor leaves ONLY the From branch ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â every other
   // active assignment stays. Show the admin exactly what is kept so a
   // "transfer" is never mistaken for "move the doctor everywhere".
   const keptBranches = useMemo(
@@ -305,7 +274,7 @@ export default function TransferDoctor() {
   );
 
   const branchLabelOf = (branchId: string | undefined | null) => {
-    if (!branchId) return "—";
+    if (!branchId) return "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â";
     const b = branches.find((x) => x.branch_id === branchId);
     if (!b) return branchId;
     return b.branch_name ? b.branch_name : b.branch_id;
@@ -366,7 +335,7 @@ export default function TransferDoctor() {
 
   const handleInitiate = async () => {
     if (!id) return;
-    // A transfer must always name the branch the doctor is leaving — the
+    // A transfer must always name the branch the doctor is leaving ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the
     // From dropdown has no "None" option here. Adding a branch without
     // leaving one is the separate Add Branch operation (opMode).
     if (opMode === "TRANSFER" && !fromBranchId) {
@@ -422,13 +391,13 @@ export default function TransferDoctor() {
 
     // Client-side conflict check: the new working hours must not overlap
     // any schedule the doctor KEEPS (every branch except the From branch
-    // in TRANSFER mode). The backend enforces the same rule — this just
+    // in TRANSFER mode). The backend enforces the same rule ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â this just
     // fails fast with a friendly message.
     const overlaps = findOverlappingExistingSlots(schedules);
     if (overlaps.length > 0) {
       toast({
         title: "Working hours conflict with an existing slot",
-        description: `${overlaps.join(", ")} — nothing was changed. Edit or cancel the conflicting slot first, or choose different hours.`,
+        description: `${overlaps.join(", ")} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â nothing was changed. Edit or cancel the conflicting slot first, or choose different hours.`,
         variant: "destructive",
       });
       return;
@@ -465,7 +434,7 @@ export default function TransferDoctor() {
       setRecentTransfers((prev) => [newTransfer, ...prev]);
       // Reset form for next transfer (reset both From and To)
       resetForm();
-      // Refetch so the From branch list and schedules are fresh — the
+      // Refetch so the From branch list and schedules are fresh ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the
       // branch just left must disappear from the dropdown immediately.
       await refreshEmployee();
       setJustCompleted(true);
@@ -475,8 +444,8 @@ export default function TransferDoctor() {
         title: allCompleted ? (opMode === "TRANSFER" ? "Transfer completed" : "Branch added") : "Transfer request created",
         description:
           opMode === "TRANSFER"
-            ? `Transfer initiated for ${branchLabelOf(fromBranchId)} → ${branchLabelOf(toBranchId)}.`
-            : `Doctor assigned to ${branchLabelOf(toBranchId)} — existing branches kept.`,
+            ? `Transfer initiated for ${branchLabelOf(fromBranchId)} ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ${branchLabelOf(toBranchId)}.`
+            : `Doctor assigned to ${branchLabelOf(toBranchId)} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â existing branches kept.`,
       });
     } catch (err: any) {
       toast({
@@ -495,150 +464,26 @@ export default function TransferDoctor() {
     [recentTransfers, viewingTransferId],
   );
 
-  const replacementOptions = useMemo(() => {
-    const dept = employee?.employee.department_id;
-    return openDoctors
-      .filter(
-        (d) =>
-          d.employee_id !== id &&
-          d.emp_status !== false &&
-          (dept ? d.department_id === dept : true),
-      )
-      .map((d) => ({
-        label: `Dr. ${[d.first_name, d.middle_name, d.last_name].filter(Boolean).join(" ")}`,
-        value: d.employee_id,
-      }));
-  }, [openDoctors, employee, id]);
-
-  const combinedAppointments = useMemo(
-    () => viewingTransfer?.result.appointments ?? [],
-    [viewingTransfer],
-  );
-
-  const branchAppointmentCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const a of viewingTransfer?.result.appointments ?? []) {
-      if (!a.branch_id) continue;
-      counts.set(a.branch_id, (counts.get(a.branch_id) ?? 0) + 1);
-    }
-    return counts;
-  }, [viewingTransfer]);
-
-  const defaultReplacementBranchId = useMemo(() => {
-    let best: string | null = null;
-    let bestCount = 0;
-    for (const [bid, count] of branchAppointmentCounts) {
-      if (count > bestCount) {
-        best = bid;
-        bestCount = count;
-      }
-    }
-    return best ?? viewingTransfer?.fromBranchId ?? employee?.branches?.[0]?.branch_id ?? "";
-  }, [branchAppointmentCounts, viewingTransfer, employee]);
-
-  const branchEligibility = useMemo(() => {
-    const acc: Record<
-      string,
-      {
-        total: number;
-        doctors: Map<string, { employee_id: string; name: string; covered: number }>;
-      }
-    > = {};
-    for (const a of viewingTransfer?.result.appointments ?? []) {
-      const bid = a.branch_id ?? "";
-      if (!bid) continue;
-      const entry = (acc[bid] ??= { total: 0, doctors: new Map() });
-      entry.total += 1;
-      for (const doc of a.eligible_replacement_doctors ?? []) {
-        const existing = entry.doctors.get(doc.employee_id);
-        if (existing) existing.covered += 1;
-        else
-          entry.doctors.set(doc.employee_id, {
-            employee_id: doc.employee_id,
-            name: doc.name,
-            covered: 1,
-          });
-      }
-    }
-    return acc;
-  }, [viewingTransfer]);
-
-  const replacementBranchOptions = useMemo(
-    () => [
-      { label: "Appointment's own branch (auto)", value: "" },
-      ...branches.map((b) => ({
-        label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
-        value: b.branch_id,
-        highlight: b.branch_id === defaultReplacementBranchId,
-        badge: branchAppointmentCounts.has(b.branch_id)
-          ? `${branchAppointmentCounts.get(b.branch_id)} affected appointment(s)`
-          : b.branch_id === defaultReplacementBranchId
-            ? "Branch the doctor left"
-            : undefined,
-      })),
-    ],
-    [branches, defaultReplacementBranchId, branchAppointmentCounts],
-  );
-
-  const branchFilteredDoctorOptions = useMemo(() => {
-    const elig = branchEligibility[replacementBranchId];
-    if (!elig) return null;
-    return Array.from(elig.doctors.values())
-      .filter((d) => d.employee_id !== id)
-      .sort((x, y) => y.covered - x.covered)
-      .map((d) => ({
-        label: `Dr. ${d.name}`,
-        value: d.employee_id,
-        badge: `covers ${d.covered} of ${elig.total} affected appointment(s)`,
-      }));
-  }, [branchEligibility, replacementBranchId, id]);
-
-  const replacementDoctorOptions = branchFilteredDoctorOptions ?? replacementOptions;
-
-  const transferSummaryMessage = viewingTransfer?.result.message ?? "";
-
-  const doConfirm = async (payload: Omit<ConfirmTransferPayload, "transfer_id">) => {
-    if (!id || !viewingTransfer) return;
-    if (viewingTransfer.result.status !== "PENDING_CONFIRMATION") {
-      toast({
-        title: "Nothing to process",
-        description: "This transfer has already been completed.",
-      });
-      return;
-    }
-    setConfirming(true);
-    try {
-      const res = await doctorTransferApi.confirmTransfer(id, {
-        ...payload,
-        transfer_id: viewingTransfer.result.transfer_id,
-      });
-      setConfirmResult(res.data.data);
-      setConfirmDone(true);
-      // Mark the transfer as completed in the recent transfers list
-      setRecentTransfers((prev) =>
-        prev.map((t) =>
-          t.transferId === viewingTransfer.result.transfer_id
-            ? { ...t, result: { ...t.result, status: "COMPLETED" } }
-            : t,
-        ),
-      );
-      // The branch assignment changed — refresh so From/To options reflect
-      // the doctor's real, current state.
-      await refreshEmployee();
-      setJustCompleted(true);
-      toast({
-        title: "Transfer action completed",
-        description: `Processed ${res.data.data.summary.total} appointment(s).`,
-      });
-    } catch (err: any) {
-      toast({
-        title: "Failed to process transfer action",
-        description: err?.response?.data?.message || err?.message || "Something went wrong",
-        variant: "destructive",
-      });
-    } finally {
-      setConfirming(false);
-    }
+  const handleAffectedCompleted = async (summary: {
+    total: number;
+    successful: number;
+    queued: number;
+    cancelled: number;
+  }) => {
+    if (!viewingTransfer) return;
+    setRecentTransfers((prev) =>
+      prev.map((t) =>
+        t.transferId === viewingTransfer.result.transfer_id
+          ? { ...t, result: { ...t.result, status: "COMPLETED" } }
+          : t,
+      ),
+    );
+    await refreshEmployee();
+    setJustCompleted(true);
+    toast({
+      title: "Transfer action completed",
+      description: `Processed ${summary.total} appointment(s).`,
+    });
   };
 
   if (loading) {
@@ -661,42 +506,8 @@ export default function TransferDoctor() {
     );
   }
 
-  const doneFooter = (onOk: () => void) => (
-    <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-      <button
-        type="button"
-        onClick={() => navigate("/dashboard")}
-        className={cn(buttonVariants({ variant: "outline" }), "gap-2")}
-      >
-        Home
-      </button>
-      <button
-        type="button"
-        onClick={onOk}
-        className={cn(buttonVariants({ variant: "default" }), "gap-2")}
-      >
-        OK
-      </button>
-    </div>
-  );
-
-  const doneStats = (rows: { label: string; value: number }[]) => (
-    <div className="grid w-full grid-cols-3 gap-2">
-      {rows.map((r) => (
-        <div key={r.label} className="bg-[#F8FAFC] rounded-lg p-2.5">
-          <div className="text-lg font-black text-[#191C1E]">{String(r.value)}</div>
-          <div className="text-[10px] font-semibold text-[#64748B] uppercase tracking-wide">
-            {r.label}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-
   const closeViewingModal = () => {
     setViewingTransferId(null);
-    setConfirmResult(null);
-    setConfirmDone(false);
   };
 
   return (
@@ -738,19 +549,19 @@ export default function TransferDoctor() {
               Dr. {doctorSummary.name}
             </div>
             <div className="text-xs text-[#64748B] mt-0.5">
-              {doctorSummary.designation} · {doctorSummary.specialization}
+              {doctorSummary.designation} Ãƒâ€šÃ‚Â· {doctorSummary.specialization}
             </div>
           </div>
           <StatusBadge status={doctorSummary.active ? "active" : "inactive"} />
         </div>
       )}
 
-      {/* ── STEP 1: New Transfer ── */}
+      {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ STEP 1: New Transfer ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
       <div className="bg-white rounded-xl border border-[#E5E7EB] p-5 space-y-5">
         {justCompleted && (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
             <p className="text-xs text-[#00488D] leading-relaxed">
-              Transfer completed — the doctor's assignment was updated and the form was reset.
+              Transfer completed ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the doctor's assignment was updated and the form was reset.
               Review the doctor's current branches above before starting another transfer.
             </p>
             <button
@@ -764,7 +575,7 @@ export default function TransferDoctor() {
         )}
         <h2 className="font-bold text-sm text-[#191C1E]">1. New Transfer</h2>
 
-        {/* Operation type — Transfer vs Add Branch are distinct operations */}
+        {/* Operation type ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Transfer vs Add Branch are distinct operations */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             type="button"
@@ -782,7 +593,7 @@ export default function TransferDoctor() {
           >
             <div className="text-sm font-bold text-[#191C1E]">Transfer Branch</div>
             <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
-              Doctor leaves the From branch — that assignment is deactivated. From and To branches are both required.
+              Doctor leaves the From branch ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â that assignment is deactivated. From and To branches are both required.
             </p>
           </button>
           <button
@@ -821,7 +632,7 @@ export default function TransferDoctor() {
                 emptyMessage="No branches assigned to this doctor"
               />
               <p className="text-[11px] text-[#94A3B8] mt-1">
-                Required — the branch the doctor is leaving.
+                Required ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the branch the doctor is leaving.
               </p>
               {keptBranches.length > 0 && (
                 <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2 leading-relaxed">
@@ -910,11 +721,11 @@ export default function TransferDoctor() {
           </div>
           {!toBranchId ? (
             <p className="text-[13px] text-gray-400">
-              Select a To Branch first — working hours are tied to the destination branch.
+              Select a To Branch first ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â working hours are tied to the destination branch.
             </p>
           ) : schedules.length === 0 ? (
             <p className="text-[13px] text-gray-400">
-              No working hours for this branch yet — add at least one slot.
+              No working hours for this branch yet ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â add at least one slot.
             </p>
           ) : (
             <div className="space-y-2.5">
@@ -985,7 +796,7 @@ export default function TransferDoctor() {
         </div>
       </div>
 
-      {/* ── Recent Transfers ── */}
+      {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Recent Transfers ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
       {recentTransfers.length > 0 && (
         <div className="bg-white rounded-xl border border-[#E5E7EB] overflow-hidden">
           <div className="px-4 py-3 border-b border-[#EEF1F4] text-xs font-bold text-gray-600 uppercase tracking-wide">
@@ -1014,8 +825,6 @@ export default function TransferDoctor() {
                 />
                 <button
                   onClick={() => {
-                    setConfirmResult(null);
-                    setConfirmDone(false);
                     setViewingTransferId(t.transferId);
                   }}
                   className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#00488D] bg-[#D6E3FF] hover:bg-[#C3D6FF] transition-colors"
@@ -1027,459 +836,31 @@ export default function TransferDoctor() {
           </div>
         </div>
       )}
-
-      {/* ── STEP 2 modal: affected appointments + action ── */}
-      <Dialog open={viewingTransfer !== null} onOpenChange={(open) => { if (!open) closeViewingModal(); }}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Transfer Details</DialogTitle>
-            <DialogDescription className="text-xs">
-              {viewingTransfer?.fromBranchId
-                ? branchLabelOf(viewingTransfer.fromBranchId)
-                : "New assignment"}
-              {" → "}
-              {branchLabelOf(viewingTransfer?.toBranchId)}
-              {" · effective "}
-              {viewingTransfer?.effectiveDate}
-            </DialogDescription>
-          </DialogHeader>
-
-          {confirmResult ? (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 mb-4">
-                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                <h2 className="font-bold text-[#191C1E]">Transfer processed</h2>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <SummaryStat label="Total affected" value={confirmResult.summary.total} />
-                <SummaryStat label="Transferred" value={confirmResult.summary.successful} />
-                <SummaryStat label="Queued" value={confirmResult.summary.queued} />
-                <SummaryStat label="Conflicts" value={confirmResult.summary.conflicts} />
-                <SummaryStat label="Cancelled" value={confirmResult.summary.cancelled} />
-              </div>
-              {confirmResult.conflicts.length > 0 && (
-                <div>
-                  <h3 className="text-xs font-bold text-[#7B3200] uppercase tracking-wide mb-2">
-                    Conflicts needing review
-                  </h3>
-                  <ul className="text-xs text-[#64748B] space-y-1 list-disc list-inside">
-                    {confirmResult.conflicts.map((c) => (
-                      <li key={c.appointment_id}>
-                        {c.appointment_id} — {c.reason}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              <button
-                onClick={closeViewingModal}
-                className="px-4 py-2 rounded-lg bg-[#00488D] text-white text-xs font-semibold hover:bg-[#003A70]"
-              >
-                Done
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-5">
-              <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-                <h2 className="font-bold text-sm text-[#191C1E]">
-                  {combinedAppointments.length} future appointment(s) affected
-                </h2>
-                <span className="text-[10px] font-semibold text-[#00488D] bg-[#D6E3FF] px-2 py-1 rounded-full whitespace-nowrap">
-                  {branchLabelOf(viewingTransfer?.toBranchId)} · {viewingTransfer?.result.affected_appointment_count ?? 0} affected
-                </span>
-              </div>
-              <p className="text-xs text-[#64748B]">{transferSummaryMessage}</p>
-
-              {combinedAppointments.length > 0 && (
-                <div className="border border-[#E5E7EB] rounded-xl overflow-hidden">
-                  <div className="px-4 py-3 border-b border-[#EEF1F4] text-xs font-bold text-gray-600 uppercase tracking-wide">
-                    Appointments affected
-                  </div>
-                  <div className="max-h-64 overflow-y-auto divide-y divide-[#F1F5F9]">
-                    {combinedAppointments.map((a) => (
-                      <div key={a.appointment_id} className="flex items-center gap-3 px-4 py-3">
-                        <div className="w-8 h-8 rounded-full bg-[#E6E8EA] flex items-center justify-center">
-                          <UserRound className="w-4 h-4 text-[#475569]" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-[#191C1E] truncate">
-                            {a.patient_name || a.patient_id}
-                          </div>
-                          <div className="text-xs text-[#64748B]">
-                            {a.appointment_date} · {a.appointment_time} · Branch {branchLabelOf(a.branch_id)}
-                          </div>
-                        </div>
-                        {a.eligible_replacement_doctors && a.eligible_replacement_doctors.length > 0 && (
-                          <span className="text-[10px] font-semibold text-[#00488D] bg-[#D6E3FF] px-2 py-1 rounded-full whitespace-nowrap">
-                            {a.eligible_replacement_doctors.length} replacement available
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {combinedAppointments.length === 0 ? (
-                <div className="flex items-center justify-between gap-3 bg-white rounded-xl border border-[#E5E7EB] p-4">
-                  <div>
-                    <p className="text-xs font-semibold text-[#191C1E]">
-                      No future appointments were affected
-                    </p>
-                    <p className="text-xs text-[#64748B] mt-0.5">
-                      The doctor was assigned to the selected branch immediately — nothing to transfer, reschedule or cancel.
-                    </p>
-                  </div>
-                  <button
-                    onClick={closeViewingModal}
-                    className="px-4 py-2 rounded-lg bg-[#00488D] text-white text-xs font-semibold hover:bg-[#003A70] shrink-0"
-                  >
-                    Done
-                  </button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <ActionCard
-                    title="Transfer to replacement"
-                    description="Reassign every appointment to another doctor of the same department with a slot for the same day."
-                    tone="blue"
-                    onClick={() => {
-                      setConfirmDone(false);
-                      setReplacementEmployeeId("");
-                      setReplacementBranchId(defaultReplacementBranchId);
-                      setReplacementOpen(true);
-                    }}
-                  />
-                  <ActionCard
-                    title="Reschedule required"
-                    description="Flag appointments as Reschedule Required — they'll be reassigned later via the Edit Appointment form."
-                    tone="amber"
-                    onClick={() => {
-                      setConfirmDone(false);
-                      setRescheduleOpen(true);
-                    }}
-                  />
-                  <ActionCard
-                    title="Cancel appointments"
-                    description="Bulk-cancel the affected appointments and optionally notify patients."
-                    tone="red"
-                    onClick={() => {
-                      setConfirmDone(false);
-                      setCancelOpen(true);
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Replacement doctor dialog */}
-      <ConfirmationDialog
-        open={replacementOpen}
-        type={confirmDone ? "success" : "info"}
-        title={confirmDone ? "Transfer appointments processed" : "Transfer to a replacement doctor"}
-        description={
-          confirmDone
-            ? "The affected appointments have been reassigned where possible. Full details are shown on the page behind this window."
-            : "Pick a doctor from the same department. Each appointment is only reassigned where the replacement has a matching slot for the same day."
+      {/* Ã¢â€â‚¬Ã¢â€â‚¬ STEP 2 modal: affected appointments + action Ã¢â€â‚¬Ã¢â€â‚¬ */}
+      <AffectedAppointmentsDialog
+        open={viewingTransfer !== null}
+        onOpenChange={(open) => {
+          if (!open) closeViewingModal();
+        }}
+        employeeId={id ?? ""}
+        branches={branches}
+        doctors={openDoctors}
+        transfers={
+          viewingTransfer
+            ? [
+                {
+                  transfer_id: viewingTransfer.result.transfer_id,
+                  message: viewingTransfer.result.message,
+                },
+              ]
+            : []
         }
-        confirmText="Transfer appointments"
-        loading={confirming}
-        hideCancelButton={confirmDone}
-        showCloseButton={!confirmDone}
-        footer={confirmDone ? doneFooter(() => {
-          setConfirmDone(false);
-          setReplacementOpen(false);
-        }) : undefined}
-        onConfirm={() => {
-          if (branchFilteredDoctorOptions && branchFilteredDoctorOptions.length === 0) {
-            toast({
-              title: "No doctor available",
-              description: `No doctor from the same department works at ${branchLabelOf(replacementBranchId)} on the affected date(s).`,
-              variant: "destructive",
-            });
-            return;
-          }
-          if (!replacementEmployeeId) {
-            toast({ title: "Choose a replacement doctor", variant: "destructive" });
-            return;
-          }
-          doConfirm({
-            action: "TRANSFER",
-            // The source branch travels with the confirm so the backend can
-            // close that branch's mapping/schedules on the pending path too.
-            old_branch_id: viewingTransfer.fromBranchId || undefined,
-            replacement_employee_id: replacementEmployeeId,
-            replacement_branch_id: replacementBranchId || undefined,
-          });
+        appointments={viewingTransfer?.result.appointments ?? []}
+        title="Transfer Details"
+        onCompleted={(summary) => {
+          void handleAffectedCompleted(summary);
         }}
-        onCancel={() => {
-          setConfirmDone(false);
-          setReplacementOpen(false);
-        }}
-      >
-        {confirmDone ? (
-          <div className="w-full">
-            {doneStats([
-              { label: "Total", value: confirmResult?.summary.total ?? 0 },
-              { label: "Transferred", value: confirmResult?.summary.successful ?? 0 },
-              { label: "Conflicts", value: confirmResult?.summary.conflicts ?? 0 },
-            ])}
-          </div>
-        ) : (
-        <div className="w-full space-y-3 text-left">
-          <div>
-            <label className={labelCls}>Replace at branch</label>
-            <FormDropdown
-              name="replacement_branch"
-              className={
-                replacementBranchId === defaultReplacementBranchId && defaultReplacementBranchId
-                  ? "w-full bg-blue-50 border border-blue-500 rounded-xl px-3 py-2 text-sm text-[#00488D] focus:outline-none focus:ring-2 focus:ring-[#00488D]/30"
-                  : inputCls
-              }
-              options={replacementBranchOptions}
-              value={replacementBranchId}
-              onValueChange={(v) => {
-                setReplacementBranchId(v);
-                if (v && branchEligibility[v]) {
-                  const allowed = new Set(
-                    Array.from(branchEligibility[v].doctors.values())
-                      .filter((d) => d.employee_id !== id)
-                      .map((d) => d.employee_id),
-                  );
-                  if (!allowed.has(replacementEmployeeId)) setReplacementEmployeeId("");
-                }
-              }}
-              placeholder="Select branch"
-            />
-            {replacementBranchId === defaultReplacementBranchId && defaultReplacementBranchId && (
-              <p className="text-[11px] text-blue-600 mt-1">
-                Defaults to the branch the doctor left — changeable.
-              </p>
-            )}
-          </div>
-          <div>
-            <label className={labelCls}>Replacement doctor</label>
-            <FormDropdown
-              name="replacement"
-              className={inputCls}
-              options={replacementDoctorOptions}
-              value={replacementEmployeeId}
-              onValueChange={setReplacementEmployeeId}
-              placeholder={
-                branchFilteredDoctorOptions?.length === 0
-                  ? "No doctors available"
-                  : "Select doctor"
-              }
-              emptyMessage="No doctors available"
-            />
-            {branchFilteredDoctorOptions ? (
-              branchFilteredDoctorOptions.length === 0 ? (
-                <p className="text-[11px] text-[#94A3B8] mt-1">
-                  No doctor from the same department works at {branchLabelOf(replacementBranchId)} on the affected date(s).
-                </p>
-              ) : (
-                <p className="text-[11px] text-[#94A3B8] mt-1">
-                  Showing {branchFilteredDoctorOptions.length} doctor(s) working at{" "}
-                  {branchLabelOf(replacementBranchId)} on the affected date(s) — only these are listed.
-                </p>
-              )
-            ) : (
-              <p className="text-[11px] text-[#94A3B8] mt-1">
-                No affected appointments to filter by — showing all {replacementOptions.length} doctor(s) in the department.
-              </p>
-            )}
-          </div>
-        </div>
-        )}
-      </ConfirmationDialog>
-
-      {/* Reschedule dialog */}
-      <ConfirmationDialog
-        open={rescheduleOpen}
-        type={confirmDone ? "success" : "warning"}
-        title={confirmDone ? "Reschedule queue updated" : "Flag appointments as Reschedule Required"}
-        description={
-          confirmDone
-            ? "The affected appointments have been queued for reassignment. Full details are shown on the page behind this window."
-            : "The affected appointments will be unlinked from the doctor and queued for reassignment. You will pick a doctor later in the Edit Appointment form."
-        }
-        confirmText="Queue for reschedule"
-        loading={confirming}
-        hideCancelButton={confirmDone}
-        showCloseButton={!confirmDone}
-        footer={confirmDone ? doneFooter(() => {
-          setConfirmDone(false);
-          setRescheduleOpen(false);
-        }) : undefined}
-        onConfirm={() => {
-          doConfirm({
-            action: "RESCHEDULE",
-            priority,
-            reason: rescheduleReason.trim() || details.transferReason || "",
-          });
-        }}
-        onCancel={() => {
-          setConfirmDone(false);
-          setRescheduleOpen(false);
-        }}
-      >
-        {confirmDone ? (
-          <div className="w-full">
-            {doneStats([
-              { label: "Total", value: confirmResult?.summary.total ?? 0 },
-              { label: "Queued", value: confirmResult?.summary.queued ?? 0 },
-              { label: "Conflicts", value: confirmResult?.summary.conflicts ?? 0 },
-            ])}
-          </div>
-        ) : (
-        <div className="w-full space-y-3 text-left">
-          <div>
-            <label className={labelCls}>Priority</label>
-            <FormDropdown
-              name="priority"
-              className={inputCls}
-              options={[
-                { label: "Normal", value: "NORMAL" },
-                { label: "High", value: "HIGH" },
-                { label: "Urgent", value: "URGENT" },
-              ]}
-              value={priority}
-              onValueChange={setPriority}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>Reason (optional)</label>
-            <textarea
-              rows={2}
-              className={inputCls}
-              value={rescheduleReason}
-              onChange={(e) => setRescheduleReason(e.target.value)}
-            />
-          </div>
-        </div>
-        )}
-      </ConfirmationDialog>
-
-      {/* Cancel dialog */}
-      <ConfirmationDialog
-        open={cancelOpen}
-        type={confirmDone ? "success" : "danger"}
-        title={confirmDone ? "Appointments cancelled" : "Cancel all affected appointments?"}
-        description={
-          confirmDone
-            ? "The affected appointments have been cancelled. Full details are shown on the page behind this window."
-            : "This will mark every affected future appointment as cancelled. Patients can be notified via the channels below."
-        }
-        confirmText="Cancel appointments"
-        loading={confirming}
-        hideCancelButton={confirmDone}
-        showCloseButton={!confirmDone}
-        footer={confirmDone ? doneFooter(() => {
-          setConfirmDone(false);
-          setCancelOpen(false);
-        }) : undefined}
-        onConfirm={() => {
-          if (!cancelConfirm) {
-            toast({ title: "Please confirm to proceed", variant: "destructive" });
-            return;
-          }
-          doConfirm({
-            action: "CANCEL",
-            confirm: true,
-            notify_channels: notifyChannels,
-          });
-        }}
-        onCancel={() => {
-          setConfirmDone(false);
-          setCancelOpen(false);
-        }}
-      >
-        {confirmDone ? (
-          <div className="w-full">
-            {doneStats([
-              { label: "Total", value: confirmResult?.summary.total ?? 0 },
-              { label: "Cancelled", value: confirmResult?.summary.cancelled ?? 0 },
-              { label: "Conflicts", value: confirmResult?.summary.conflicts ?? 0 },
-            ])}
-          </div>
-        ) : (
-        <div className="w-full space-y-3 text-left">
-          <label className="flex items-center gap-2 text-sm font-medium text-[#191C1E]">
-            <input
-              type="checkbox"
-              checked={cancelConfirm}
-              onChange={(e) => setCancelConfirm(e.target.checked)}
-              className="accent-[#00488D]"
-            />
-            I understand this is permanent
-          </label>
-          <div>
-            <label className={labelCls}>Notify patients via (optional)</label>
-            <div className="flex flex-wrap gap-2">
-              {NOTIFY_CHANNELS.map((ch) => (
-                <button
-                  key={ch}
-                  type="button"
-                  onClick={() =>
-                    setNotifyChannels((p) =>
-                      p.includes(ch) ? p.filter((x) => x !== ch) : [...p, ch],
-                    )
-                  }
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                    notifyChannels.includes(ch)
-                      ? "bg-[#00488D] text-white border-[#00488D]"
-                      : "bg-white text-[#475569] border-[#E5E7EB]"
-                  }`}
-                >
-                  {ch}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        )}
-      </ConfirmationDialog>
+      />
     </div>
-  );
-}
-
-function SummaryStat({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div className="bg-[#F8FAFC] rounded-lg p-3">
-      <div className="text-xl font-black text-[#191C1E]">{String(value)}</div>
-      <div className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wide">
-        {label}
-      </div>
-    </div>
-  );
-}
-
-function ActionCard({
-  title,
-  description,
-  tone,
-  onClick,
-}: {
-  title: string;
-  description: string;
-  tone: "blue" | "amber" | "red";
-  onClick: () => void;
-}) {
-  const toneClasses = {
-    blue: "border-blue-200 hover:border-blue-400 bg-blue-50",
-    amber: "border-amber-200 hover:border-amber-400 bg-amber-50",
-    red: "border-red-200 hover:border-red-400 bg-red-50",
-  };
-  return (
-    <button
-      onClick={onClick}
-      className={`text-left rounded-xl border p-4 transition-colors ${toneClasses[tone]}`}
-    >
-      <div className="font-bold text-sm mb-1 text-[#191C1E]">{title}</div>
-      <p className="text-xs text-[#64748B] leading-relaxed">{description}</p>
-    </button>
   );
 }

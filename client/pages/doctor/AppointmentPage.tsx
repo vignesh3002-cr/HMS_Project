@@ -237,7 +237,6 @@ const STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: "COMPLETED", label: "Checked Out" },
   { value: "CANCELLED", label: "Cancelled" },
   { value: "NO_SHOW", label: "No Show" },
-  { value: "NOT_CHECKED_IN", label: "Not Checked In" },
   { value: "RESCHEDULED", label: "Reschedule" },
 ];
 
@@ -626,7 +625,7 @@ function SortIcon({ direction }: { direction?: "asc" | "desc" | null }) {
 }
 
 // Statuses that allow the Check In transition (mirrors the dashboard).
-const CHECKIN_STATUSES = ["SCHEDULED", "RESCHEDULED", "NOT_CHECKED_IN"];
+const CHECKIN_STATUSES = ["SCHEDULED", "RESCHEDULED"];
 // Statuses that can proceed to the consultation screen.
 const PROCEED_STATUSES = ["CHECKED_IN", "IN_CONSULTATION"];
 // Statuses that can no longer be cancelled.
@@ -637,7 +636,6 @@ const NON_EDITABLE_STATUSES = [
   "COMPLETED",
   "CANCELLED",
   "NO_SHOW",
-  "NOT_CHECKED_IN",
 ];
 
 interface PatientActionProps {
