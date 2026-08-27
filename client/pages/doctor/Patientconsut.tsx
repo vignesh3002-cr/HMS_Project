@@ -4158,10 +4158,12 @@ type Drug = {
   unit: string;
   volume: string;
   planItemId?: string;
+  medicineId?: string;
 };
 
 type ChemotherapyPlanItem = {
   chemotherapy_plan_item_id: string;
+  medicine_id: string;
   drug_role: string | null;
   protocol_dose: number | null;
   protocol_dose_unit: string | null;
@@ -4519,6 +4521,7 @@ const ChemotherapyOrder: React.FC<{
             item.medicine_master?.unit ||
             "",
           volume: "",
+          medicineId: item.medicine_id,
         });
 
         setDrugs(
@@ -4571,6 +4574,9 @@ const ChemotherapyOrder: React.FC<{
 
         planIdRef.current = plan.chemotherapy_plan_id;
 
+        const planItems = plan.chemotherapy_plan_items ?? [];
+        planItemsRef.current = planItems;
+
         if (!userTouched.current.startDate) {
           setStartDate(formatDateDMY(plan.treatment_start_date));
         }
@@ -4597,8 +4603,6 @@ const ChemotherapyOrder: React.FC<{
           setProtocolName(
             plan.protocol_name || plan.regimen_name || ""
           );
-          const planItems = plan.chemotherapy_plan_items ?? [];
-          planItemsRef.current = planItems;
           const toPlanDrug = (
             item: ChemotherapyPlanItem,
             index: number
@@ -4622,6 +4626,7 @@ const ChemotherapyOrder: React.FC<{
               item.dilution_volume != null
                 ? `${item.dilution_volume}`
                 : "",
+            medicineId: item.medicine_id,
           });
 
           setDrugs(
@@ -4744,22 +4749,73 @@ const ChemotherapyOrder: React.FC<{
 
   const resolvePlanItemId = (
     kind: "drug" | "premedication",
-    name: string
+    name: string,
+    medicineId?: string
   ) => {
-    const role = kind === "drug" ? "PRIMARY" : "PRE-MEDICATION";
+    const role = kind === "drug" ? "PRIMARY" : "PREMEDICATION";
     const normalizedName = name.trim().toLowerCase();
 
-    const matched = planItemsRef.current.find(
+    // 1. Exact medicine_id match within same role
+    if (medicineId) {
+      const byId = planItemsRef.current.find(
+        (item) =>
+          item.medicine_id === medicineId &&
+          item.drug_role?.toUpperCase() === role
+      );
+      if (byId) return byId.chemotherapy_plan_item_id;
+
+      // 2. Exact medicine_id match across any role
+      const byIdAnyRole = planItemsRef.current.find(
+        (item) => item.medicine_id === medicineId
+      );
+      if (byIdAnyRole) return byIdAnyRole.chemotherapy_plan_item_id;
+    }
+
+    // 3. Name match within same role
+    const candidates = planItemsRef.current.filter(
       (item) =>
-        (!item.drug_role || item.drug_role.toUpperCase() === role) &&
-        (
-          item.medicine_master?.medicine_name ||
-          item.medicine_master?.generic_name ||
-          ""
-        )
-          .trim()
-          .toLowerCase() === normalizedName
+        !item.drug_role || item.drug_role.toUpperCase() === role
     );
+
+    let matched =
+      candidates.find(
+        (item) =>
+          (
+            item.medicine_master?.medicine_name ||
+            item.medicine_master?.generic_name ||
+            ""
+          )
+            .trim()
+            .toLowerCase() === normalizedName
+      );
+
+    // 4. Name match across any role
+    if (!matched) {
+      matched = planItemsRef.current.find(
+        (item) =>
+          (
+            item.medicine_master?.medicine_name ||
+            item.medicine_master?.generic_name ||
+            ""
+          )
+            .trim()
+            .toLowerCase() === normalizedName
+      );
+    }
+
+    // 5. Partial name match
+    if (!matched && normalizedName) {
+      matched = planItemsRef.current.find(
+        (item) => {
+          const item_name = (
+            item.medicine_master?.medicine_name ||
+            item.medicine_master?.generic_name ||
+            ""
+          ).trim().toLowerCase();
+          return item_name.includes(normalizedName) || normalizedName.includes(item_name);
+        }
+      );
+    }
 
     return matched?.chemotherapy_plan_item_id ?? "";
   };
@@ -4783,11 +4839,50 @@ const ChemotherapyOrder: React.FC<{
       if (planIdRef.current) {
         planItemId =
           editDraft.planItemId ||
-          resolvePlanItemId(editingRow.kind, editDraft.name);
+          resolvePlanItemId(editingRow.kind, editDraft.name, editDraft.medicineId);
+
+        if (!planItemId && editDraft.medicineId) {
+          try {
+            const createRes = await API.post(
+              `/chemotherapy/plans/${planIdRef.current}/items`,
+              {
+                medicine_id: editDraft.medicineId,
+                drug_role: editingRow.kind === "drug" ? "PRIMARY" : "PREMEDICATION",
+                drug_sequence: planItemsRef.current.length + 1,
+                dosage: trimmedDose === "" ? null : Number(trimmedDose),
+                dosage_unit: editDraft.unit.trim() || null,
+              }
+            );
+            const planData = createRes.data?.data;
+            const newItems: ChemotherapyPlanItem[] = planData?.chemotherapy_plan_items ?? [];
+            const created = newItems.find(
+              (i) => i.medicine_id === editDraft.medicineId
+            );
+            if (created) {
+              planItemId = created.chemotherapy_plan_item_id;
+              editDraft.planItemId = planItemId;
+              planItemsRef.current = newItems;
+            }
+          } catch (createErr: any) {
+            console.error("Failed to create plan item:", createErr);
+          }
+        }
 
         if (!planItemId) {
+          console.error("resolvePlanItemId failed:", {
+            kind: editingRow.kind,
+            name: editDraft.name,
+            medicineId: editDraft.medicineId,
+            planItemCount: planItemsRef.current.length,
+            planItems: planItemsRef.current.map((i) => ({
+              id: i.chemotherapy_plan_item_id,
+              medicineId: i.medicine_id,
+              name: i.medicine_master?.medicine_name,
+              role: i.drug_role,
+            })),
+          });
           throw new Error(
-            "Could not match this medication to the patient's chemotherapy plan."
+            "Could not match this medication to the patient's chemotherapy plan. The plan may not have been saved yet — complete the Treatment Plan step first."
           );
         }
 
@@ -5188,32 +5283,12 @@ const ChemotherapyOrder: React.FC<{
                           key={drug.id}
                           className="bg-blue-50/40 transition-colors"
                         >
-                          <td className="px-3 py-3 pl-6 pr-3">
-                            <input
-                              type="text"
-                              value={editDraft.name}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "name",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[160px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 pl-6 pr-3 text-base font-medium text-gray-900">
+                            {editDraft.name}
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.form}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "form",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[120px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-gray-500">
+                            {editDraft.form}
                           </td>
 
                           <td className="px-3 py-3">
@@ -5230,18 +5305,8 @@ const ChemotherapyOrder: React.FC<{
                             />
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.unit}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "unit",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-blue-500">
+                            {editDraft.unit}
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
@@ -5402,32 +5467,12 @@ const ChemotherapyOrder: React.FC<{
                           key={drug.id}
                           className="bg-blue-50/40 transition-colors"
                         >
-                          <td className="px-3 py-3 pl-6 pr-3">
-                            <input
-                              type="text"
-                              value={editDraft.name}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "name",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[160px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 pl-6 pr-3 text-base font-medium text-gray-900">
+                            {editDraft.name}
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.form}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "form",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[120px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-gray-500">
+                            {editDraft.form}
                           </td>
 
                           <td className="px-3 py-3">
@@ -5444,18 +5489,8 @@ const ChemotherapyOrder: React.FC<{
                             />
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.unit}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "unit",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-blue-500">
+                            {editDraft.unit}
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
