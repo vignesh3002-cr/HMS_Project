@@ -22,6 +22,10 @@ import {
   type PatientRecord,
 } from "../../api/patient.api";
 import {
+
+
+
+  
   encounterApi,
   type EncounterRecord,
 } from "../../api/encounter.api";
@@ -4850,7 +4854,7 @@ const ChemotherapyOrder: React.FC<{
         );
         setPremedicationDrugs(
           items
-            .filter((item) => item.drug_role === "PREMEDICATION")
+            .filter((item) => item.drug_role?.toUpperCase() === "PREMEDICATION")
             .map(toDrug)
         );
         setSupportiveDrugs(
@@ -4953,7 +4957,9 @@ const ChemotherapyOrder: React.FC<{
           );
           setPremedicationDrugs(
             planItems
-              .filter((item) => item.drug_role === "PREMEDICATION")
+              .filter((item) => item.drug_role?.toUpperCase() === "PREMEDICATION")
+
+
               .map(toPlanDrug)
           );
           setSupportiveDrugs(
@@ -5065,12 +5071,12 @@ const ChemotherapyOrder: React.FC<{
     kind: "drug" | "premedication",
     name: string
   ) => {
-    const role = kind === "drug" ? "PRIMARY" : "PREMEDICATION";
+    const role = kind === "drug" ? "PRIMARY" : "PRE-MEDICATION";
     const normalizedName = name.trim().toLowerCase();
 
     const matched = planItemsRef.current.find(
       (item) =>
-        (!item.drug_role || item.drug_role === role) &&
+        (!item.drug_role || item.drug_role.toUpperCase() === role) &&
         (
           item.medicine_master?.medicine_name ||
           item.medicine_master?.generic_name ||
