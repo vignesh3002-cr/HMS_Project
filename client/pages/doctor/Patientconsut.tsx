@@ -4960,6 +4960,7 @@ const ChemotherapyOrder: React.FC<{
               .filter((item) => item.drug_role?.toUpperCase() === "PREMEDICATION")
 
 
+
               .map(toPlanDrug)
           );
           setSupportiveDrugs(
