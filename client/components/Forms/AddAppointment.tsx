@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import CalendarPicker from "@/components/hms/Calender";
+import { PatientConflictWarningDialog, type PatientConflictAppointment } from "@/components/hms/PatientConflictWarningDialog";
 import { branchApi, Branch } from "@/api/branch.api";
 
 interface DoctorAssignedBranch {
@@ -138,7 +139,13 @@ function timeStringToMinutes(time: string): number {
     const date = new Date(time);
     return date.getUTCHours() * 60 + date.getUTCMinutes();
   }
-  const [hours, minutes] = time.split(":").map(Number);
+  // Handle formatted times like "09:00 AM"
+  const cleaned = time.replace(/[ ]?(AM|PM)/i, "").trim();
+  const [hoursPart, minutesPart] = cleaned.split(":");
+  let hours = Number(hoursPart);
+  const minutes = Number(minutesPart);
+  if (time.toUpperCase().includes("PM") && hours < 12) hours += 12;
+  if (time.toUpperCase().includes("AM") && hours === 12) hours = 0;
   return hours * 60 + minutes;
 }
 
@@ -350,6 +357,11 @@ export default function AddAppointment() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [bookingResult, setBookingResult] = useState<AppointmentResponse | null>(null);
+  const [showConflictWarning, setShowConflictWarning] = useState(false);
+  const [conflictSeverity, setConflictSeverity] = useState<"warning" | "high" | "critical">("warning");
+  const [conflictAppointments, setConflictAppointments] = useState<PatientConflictAppointment[]>([]);
+  const [conflictMessages, setConflictMessages] = useState<{ type: string; message: string }[]>([]);
+  const [checkingConflicts, setCheckingConflicts] = useState(false);
 
   // Edit mode: store original appointment slot to prevent it from being cleared
   const originalSlotRef = useRef<{
@@ -397,6 +409,30 @@ export default function AddAppointment() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [doctors, setDoctors] = useState<EmployeeRecord[]>([]);
+
+  // Edit mode: load doctor's schedules, assigned branches, and changes
+  // without overwriting the existing date/time.
+  // applyDoctorSelection would findNearestAvailableDate and reset timeSlot,
+  // so we fetch those three pieces directly.
+  useEffect(() => {
+    if (!isEditMode || !formData.doctorId) return;
+
+    let cancelled = false;
+
+    employeeApi.getOne(formData.doctorId).then((res) => {
+      if (cancelled) return;
+      setDoctorSchedules(res.data?.data?.doctorSchedules || []);
+      setDoctorAssignedBranches(activeBranches(res.data?.data?.branches || []));
+    }).catch(() => {});
+
+    loadDoctorChanges(formData.doctorId).then(() => {
+      // No-op – loadDoctorChanges already sets state
+    }).catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditMode, formData.doctorId]);
 
   // Available time slots
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
@@ -548,7 +584,6 @@ export default function AddAppointment() {
     setDoctorUnavailable(false);
     setDoctorOnLeave(false);
     setLeaveReason(null);
-    setFormData((prev) => ({ ...prev, timeSlot: "" }));
 
     let cancelled = false;
 
@@ -766,7 +801,7 @@ export default function AddAppointment() {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     const required: RequiredField<keyof AppointmentFormData>[] = [
@@ -788,6 +823,102 @@ export default function AddAppointment() {
 
     if (!validateRequiredFields(required, formData, toast)) return;
 
+    if (isEditMode) {
+      setShowConfirm(true);
+      return;
+    }
+
+    // Check for patient conflicts on this date
+    try {
+      setCheckingConflicts(true);
+      const res = await appointmentApi.getAll({
+        patientId: formData.patientId,
+        date: formData.selectDate,
+        limit: 100,
+      });
+
+      const appointments = res.data?.data?.appointments || [];
+      const activeAppointments = appointments.filter((a) => {
+        const status = (a.status || "").toUpperCase();
+        return !["CANCELLED", "NO_SHOW", "COMPLETED"].includes(status);
+      });
+
+      if (activeAppointments.length === 0) {
+        setShowConfirm(true);
+        return;
+      }
+
+      const newTimeMinutes = timeStringToMinutes(formData.timeSlot);
+      const newDoctorId = formData.doctorId;
+
+      const conflictMessages: { type: string; message: string }[] = [];
+      const conflictAppointments: PatientConflictAppointment[] = [];
+
+      let severity: "warning" | "high" | "critical" = "warning";
+
+      activeAppointments.forEach((appt) => {
+        const apptTimeMinutes = timeStringToMinutes(appt.appointment_time || "");
+        const sameDoctor = appt.employee_id === newDoctorId;
+        const timeDiff = Math.abs(apptTimeMinutes - newTimeMinutes);
+        const isOverlap = timeDiff <= 20; // 20 min buffer
+
+        const mapped: PatientConflictAppointment = {
+          appointmentId: appt.appointment_id,
+          doctorName: appt.doctor_name || `${appt.employees?.first_name || ""} ${appt.employees?.last_name || ""}`.trim(),
+          time: formatSlotLabel(appt.appointment_time || ""),
+          branchName: appt.branch?.branch_name || "Unknown",
+          department: appt.department_master?.department_name || appt.department || undefined,
+          status: appt.status || "",
+        };
+        conflictAppointments.push(mapped);
+
+        if (isOverlap && sameDoctor) {
+          conflictMessages.push({
+            type: "critical",
+            message: `Direct conflict with existing appointment at ${mapped.time} with Dr. ${mapped.doctorName}`,
+          });
+          severity = "critical";
+        } else if (sameDoctor) {
+          conflictMessages.push({
+            type: "high",
+            message: `Patient already has appointment with Dr. ${mapped.doctorName} on this day at ${mapped.time}`,
+          });
+          if (severity !== "critical") severity = "high";
+        } else {
+          conflictMessages.push({
+            type: "warning",
+            message: `Patient has another appointment on this day at ${mapped.time} with Dr. ${mapped.doctorName}`,
+          });
+        }
+      });
+
+      // Deduplicate messages by type
+      const uniqueMessages = Array.from(
+        new Map(conflictMessages.map((m) => [m.message, m])).values()
+      );
+
+      setConflictSeverity(severity);
+      setConflictAppointments(conflictAppointments.sort((a, b) => {
+        const aMin = timeStringToMinutes(a.time);
+        const bMin = timeStringToMinutes(b.time);
+        return aMin - bMin;
+      }));
+      setConflictMessages(uniqueMessages);
+      setShowConflictWarning(true);
+    } catch (err) {
+      console.error("Conflict check failed:", err);
+      setShowConfirm(true);
+    } finally {
+      setCheckingConflicts(false);
+    }
+  };
+
+  const handleConflictReview = () => {
+    setShowConflictWarning(false);
+  };
+
+  const handleConflictProceed = () => {
+    setShowConflictWarning(false);
     setShowConfirm(true);
   };
 
@@ -1549,6 +1680,17 @@ const isDirty = Boolean(
         confirmText="Yes"
         cancelText="No"
         loading={submitting}
+      />
+
+      <PatientConflictWarningDialog
+        open={showConflictWarning}
+        severity={conflictSeverity}
+        conflicts={conflictMessages}
+        existingAppointments={conflictAppointments}
+        totalAppointments={conflictAppointments.length}
+        onReview={handleConflictReview}
+        onProceed={handleConflictProceed}
+        loading={checkingConflicts}
       />
 
       <ConfirmationDialog

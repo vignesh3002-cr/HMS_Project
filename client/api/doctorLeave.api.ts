@@ -18,6 +18,7 @@ export interface ApplyDoctorLeavePayload {
 leave_start_date: string;
 leave_end_date: string;
 leave_reason: string;
+leave_type?: string;
 replacement_employee_id?: string;
 requested_by: string;
 }
@@ -73,6 +74,7 @@ rejected_at: string | null;
 remarks: string | null;
 
 branch_id: string;
+leave_type?: string | null;
 }
 
 export interface DoctorLeaveListData {

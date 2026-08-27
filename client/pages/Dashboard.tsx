@@ -22,6 +22,7 @@ import { DepartmentPill, DepartmentAvatarText } from "@/components/hms/Departmen
 import { DoctorBranchDisplay } from "@/components/hms/DoctorBranchDisplay";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
+import { getUser } from "@/utils/token";
 
 const navItems = [
   {
@@ -216,6 +217,7 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
     date: formatDateOnly(doc.appointment_date),
     time: formatTimeOnly(doc.appointment_time),
     status: formatAppointmentStatus(doc.status ?? ""),
+    appointmentDateISO: doc.appointment_date,
   };
 }
 
@@ -815,7 +817,6 @@ export default function Dashboard() {
   const [cancelTarget, setCancelTarget] = useState<Record<string, unknown> | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [isCancelling, setIsCancelling] = useState(false);
-  const [vitalsOpen, setVitalsOpen] = useState(false);
 
   const handleCancelAppointment = (target: Record<string, unknown>) => {
     setCancelReason("");
@@ -833,7 +834,7 @@ export default function Dashboard() {
     const targetId = cancelTarget.id as string;
     setIsCancelling(true);
     try {
-      const res = await appointmentApi.cancel(targetId, cancelReason.trim());
+      const res = await appointmentApi.cancel(targetId, cancelReason.trim(), getUser()?.employee_id ?? "");
       const cancelled = res.data?.data;
       setRealAppointments((prev) =>
         (prev ?? []).map((appt, index) =>
@@ -1118,13 +1119,13 @@ export default function Dashboard() {
                   { key: "actions", label: "Action", sortable: false, render: (r: any) => (
                     <AppointmentActionMenu
                       status={r.status}
+                      appointmentDateISO={r.appointmentDateISO}
                       onView={() => navigate(`/appointments/view/${r.id}`)}
                       onEdit={() => handleEdit(r.id)}
                       onCancel={() => handleCancelAppointment(r)}
                       onCheckIn={() => handleCheckIn(r)}
                       onCheckOut={() => handleCheckOut(r)}
-                      vitalsOpen={vitalsOpen}
-                      onVitalsOpenChange={setVitalsOpen}
+                      onVitalsSaved={fetchAppointments}
                       appointmentId={r.id}
                       patientId={r.patientId}
                     />

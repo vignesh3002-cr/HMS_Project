@@ -465,6 +465,14 @@ export default function PatientRegistrationForm({
           email: formData.patient_email || undefined,
           marital_status: formData.patient_marital_status || undefined,
           nationality: formData.patient_nationality || undefined,
+          patient_type:
+            formData.patient_type === OTHER_PATIENT_TYPE_VALUE
+              ? formData.patient_type_other.trim() || undefined
+              : formData.patient_type || undefined,
+          patient_state: formData.patient_state || undefined,
+          patient_district: formData.patient_district || undefined,
+          patient_area: formData.patient_area || undefined,
+          patient_pincode: formData.patient_pincode ? Number(formData.patient_pincode) : undefined,
           current_address: formData.patient_current_address || undefined,
           emergency_name: formData.patient_emergency_name || undefined,
           emergency_relation: formData.patient_emergency_relation || undefined,

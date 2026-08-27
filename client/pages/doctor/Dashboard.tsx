@@ -7,11 +7,11 @@ import {
   type DashboardAppointment,
   type DashboardDoctorResponse,
   type DashboardSchedule,
-  type DoctorNotificationItem,
 } from "../../api/doctorDashboard.api";
 import { activeBranches } from "../../lib/utils";
 import { encounterApi } from "../../api/encounter.api";
 import { useToast } from "@/hooks/use-toast";
+import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 
 type AppointmentStatus = "Check Out" | "Check In" | "Cancelled";
 
@@ -234,7 +234,6 @@ export default function DoctorDashboard() {
 
   const [periodOpen, setPeriodOpen] = useState(false);
   const [hospitalOpen, setHospitalOpen] = useState(false);
-  const [notificationOpen, setNotificationOpen] = useState(false);
   const [period, setPeriod] = useState("Last 7 Days");
   const [hospital, setHospital] = useState("");
   const [doctor, setDoctor] = useState<DashboardDoctorResponse["data"] | null>(null);
@@ -246,8 +245,6 @@ export default function DoctorDashboard() {
   const [totalAppointments, setTotalAppointments] = useState(0);
   const [cancelledAppointments, setCancelledAppointments] = useState(0);
   const [totalPatientsToday, setTotalPatientsToday] = useState(0);
-  const [notifications, setNotifications] = useState<DoctorNotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
   const [doctorEmployeeId, setDoctorEmployeeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [branchLoading, setBranchLoading] = useState(false);
@@ -297,7 +294,6 @@ export default function DoctorDashboard() {
 
   const periodRef = useRef<HTMLDivElement>(null);
   const hospitalRef = useRef<HTMLDivElement>(null);
-  const notificationRef = useRef<HTMLDivElement>(null);
 
   // Load dashboard data - uses selectedBranchId for branch-specific data
   const loadDashboard = useCallback(async (showLoader = false, isBranchSwitch = false) => {
@@ -311,8 +307,6 @@ export default function DoctorDashboard() {
         setTotalAppointments(0);
         setCancelledAppointments(0);
         setTotalPatientsToday(0);
-        setNotifications([]);
-        setUnreadCount(0);
       }
       setDashboardError("");
 
@@ -351,7 +345,6 @@ export default function DoctorDashboard() {
         appointmentsResponse,
         cancelledResponse,
         checkedInResponse,
-        notificationsResponse,
       ] = await Promise.all([
         doctorDashboardApi.getAppointments({
           employeeId,
@@ -372,16 +365,11 @@ export default function DoctorDashboard() {
           employeeId,
           branchId: branchId || undefined,
         }),
-        doctorDashboardApi.getNotifications(employeeId),
       ]);
 
       setTotalAppointments(appointmentsResponse.data.data.total);
       setCancelledAppointments(cancelledResponse.data.data.total);
       setTotalPatientsToday(checkedInResponse.data.data.totalPatients);
-
-      // Show ALL change notifications — no status filtering here.
-      setNotifications(notificationsResponse.data.data.notifications);
-      setUnreadCount(notificationsResponse.data.data.unreadCount);
 
       const mappedAppointments = appointmentsResponse.data.data.appointments
         .map(
@@ -471,20 +459,6 @@ export default function DoctorDashboard() {
     };
   }, [loadDashboard]);
 
-  // Opening the notification panel clears unread state (server + badge).
-  useEffect(() => {
-    if (
-      notificationOpen &&
-      unreadCount > 0 &&
-      doctorEmployeeId
-    ) {
-      setUnreadCount(0);
-      doctorDashboardApi
-        .markNotificationsRead(doctorEmployeeId)
-        .catch(() => {});
-    }
-  }, [notificationOpen, unreadCount, doctorEmployeeId]);
-
   useEffect(() => {
     const handleClick = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -496,17 +470,12 @@ export default function DoctorDashboard() {
       if (!hospitalRef.current?.contains(target)) {
         setHospitalOpen(false);
       }
-
-      if (!notificationRef.current?.contains(target)) {
-        setNotificationOpen(false);
-      }
     };
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setPeriodOpen(false);
         setHospitalOpen(false);
-        setNotificationOpen(false);
       }
     };
 
@@ -605,190 +574,8 @@ export default function DoctorDashboard() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 max-[700px]:hidden">
-            <div className="relative" ref={notificationRef}>
-              <button
-                type="button"
-                aria-label="Notifications"
-                onClick={() =>
-                  setNotificationOpen((value) => !value)
-                }
-                className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]"
-              >
-                <Icon name="bell" className="h-5 w-5" />
-
-                {unreadCount > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#003ec7] px-1 text-[10px] font-bold leading-none text-white">
-                    {unreadCount > 9 ? "9+" : unreadCount}
-                  </span>
-                )}
-              </button>
-
-              {notificationOpen && (
-                <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-                  <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-                    <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">
-                      Notifications
-                    </h1>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNotifications((prev) =>
-                            prev.map((n) => ({ ...n, status: "READ" }))
-                          );
-                        }}
-                        className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
-                      >
-                        Mark all as read
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setNotifications([])}
-                        disabled={notifications.length === 0}
-                        className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Clear all
-                      </button>
-                    </div>
-                  </header>
-
-                  <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-                    {notifications.length === 0 ? (
-                      <p className="py-6 text-center text-xs text-[#434656]">
-                        No new notifications
-                      </p>
-                    ) : (
-                      notifications.map(
-                        (item, index) => {
-                          const patient =
-                            item.appointment_history?.patient_bio_data;
-                          const patientName =
-                            [
-                              patient?.patient_first_name,
-                              patient?.patient_middle_name,
-                              patient?.patient_last_name,
-                            ]
-                              .filter(Boolean)
-                              .join(" ") || "A patient";
-
-                          const isBooking =
-                            item.notification_type === "BOOKING";
-                          const appointment =
-                            item.appointment_history;
-                          const isUnread = item.status === "UNREAD";
-
-                          return (
-                            <article
-                              key={item.notification_id}
-                              className="relative flex gap-3 rounded-lg px-2 py-3 transition-colors"
-                            >
-                              {isUnread && (
-                                <span className="absolute left-0 top-5 h-2 w-2 rounded-full bg-[#003ec7]" />
-                              )}
-
-                              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f0eaff]">
-                                <svg
-                                  viewBox="0 0 24 24"
-                                  className="h-5 w-5 text-[#7046c9]"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.8"
-                                >
-                                  <rect x="3" y="5" width="18" height="16" rx="2" />
-                                  <path d="M16 3v4M8 3v4M3 10h18" strokeLinecap="round" />
-                                  <path d="M8 14h3M8 17h5" strokeLinecap="round" />
-                                </svg>
-                              </div>
-
-                              <div className="min-w-0 flex-1">
-                                <div className="mb-1 flex items-start justify-between gap-3">
-                                  <h3 className="truncate text-xs font-semibold tracking-[0.02em] text-[#131b2e]">
-                                    {isBooking ? (
-                                      <>
-                                        <span className="font-semibold text-[#131b2e]">
-                                          {patientName}
-                                        </span>{" "}
-                                        booked an appointment
-                                        {appointment
-                                          ? ` for ${formatDate(
-                                              appointment.appointment_date
-                                            )} at ${formatTime(
-                                              appointment.appointment_time
-                                            )}`
-                                          : ""}
-                                        .
-                                      </>
-                                    ) : (
-                                      <>
-                                        <span className="font-semibold text-[#131b2e]">
-                                          {patientName}
-                                        </span>{" "}
-                                        checked in.
-                                      </>
-                                    )}
-                                  </h3>
-
-                                  <div className="flex shrink-0 items-center gap-2">
-                                    <span
-                                      className={[
-                                        "text-[11px] font-medium leading-[14px]",
-                                        isUnread
-                                          ? "text-[#003ec7]"
-                                          : "text-[#434656]",
-                                      ].join(" ")}
-                                    >
-                                      {timeAgo(item.created_at)}
-                                    </span>
-
-                                    {isUnread && (
-                                      <span
-                                        aria-label="Unread indicator"
-                                        className="h-2 w-2 rounded-full bg-[#003ec7]"
-                                      />
-                                    )}
-
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setNotifications((prev) =>
-                                          prev.filter(
-                                            (n) => n.notification_id !== item.notification_id
-                                          )
-                                        )
-                                      }
-                                      aria-label="Delete notification"
-                                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
-                                    >
-                                      <svg
-                                        viewBox="0 0 24 24"
-                                        className="h-3.5 w-3.5 fill-none stroke-current"
-                                        strokeWidth="2"
-                                      >
-                                        <path
-                                          d="M6 6l12 12M18 6L6 18"
-                                          strokeLinecap="round"
-                                        />
-                                      </svg>
-                                    </button>
-                                  </div>
-                                </div>
-
-                                <p className="text-[13px] font-normal leading-[18px] text-[#434656]">
-                                  {isBooking
-                                    ? `${patientName} was booked for an appointment.`
-                                    : `${patientName} checked in.`}
-                                </p>
-                              </div>
-                            </article>
-                          );
-                        }
-                      )
-                    )}
-                  </main>
-                </div>
-              )}
-            </div>
+<div className="flex items-center gap-4 max-[700px]:hidden">
+            <BellNotificationButton size="md" />
 
             <div className="h-8 w-px bg-[#c3c6d6]" />
 

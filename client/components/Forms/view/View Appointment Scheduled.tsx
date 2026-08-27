@@ -18,6 +18,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { employeeApi } from "@/api/employee.api";
 
 // Mirrors APPOINTMENT_STATUS in appointment.constants.ts exactly -- keep
 // these keys in sync with the backend enum (previously had "BOOKED" where
@@ -161,7 +162,7 @@ const AppointmentDetails: React.FC = () => {
               </h1>
 
               <p className="text-sm font-medium text-slate-500">
-                Ref ID: #{appointment.appointment_id} • Created {formatCreatedAt(appointment.created_at)}
+                APT_ID: {appointment.appointment_id} • Created {formatCreatedAt(appointment.created_at)}
               </p>
             </div>
           </div>

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 
 type TreatmentType =
   | "Chemotherapy"
@@ -87,26 +88,6 @@ const TreatmentPlan: React.FC = () => {
         d="M19 12H5M12 19l-7-7 7-7"
         strokeLinecap="round"
         strokeLinejoin="round"
-      />
-    </svg>
-  );
-
-  const BellIcon = () => (
-    <svg
-      className="h-5 w-5"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path
-        d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M10 21h4"
-        strokeLinecap="round"
       />
     </svg>
   );
@@ -386,15 +367,7 @@ const TreatmentPlan: React.FC = () => {
           {/* Right */}
           <div className="flex items-center space-x-6">
 
-            <button
-              type="button"
-              className="relative text-slate-400 transition-colors hover:text-slate-600"
-              aria-label="Notifications"
-            >
-              <BellIcon />
-
-              <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500" />
-            </button>
+            <BellNotificationButton size="md" />
 
             <div className="flex items-center space-x-3 border-l border-slate-200 pl-6">
 

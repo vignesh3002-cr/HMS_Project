@@ -152,10 +152,11 @@ export interface ProcessRescheduleActionPayload {
 }
 
 export const doctorTransferApi = {
-  initiateTransfer: (employeeId: string, data: InitiateTransferPayload) =>
+  initiateTransfer: (employeeId: string, data: InitiateTransferPayload, bypassPending?: boolean) =>
     API.post<{ success: boolean; message: string; data: InitiateTransferResult }>(
       `/doctors/${employeeId}/transfer`,
-      data
+      data,
+      { headers: bypassPending ? { "X-Bypass-Pending-Transfer": "true" } : undefined }
     ),
 
   confirmTransfer: (employeeId: string, data: ConfirmTransferPayload) =>

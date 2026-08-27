@@ -7,6 +7,9 @@
 @tailwind utilities;
 
 @layer utilities {
+   .back-button {
+    @apply text-lg font-bold text-[#0F172A] leading-tight;
+  }
   .hms-heading {
     @apply text-[#191C1E] font-extrabold text-2xl leading-8 tracking-[-0.6px];
   }
@@ -18,7 +21,7 @@
     @apply text-[#424752] text-xs font-medium leading-4;
   }
   .hms-table-header {
-    @apply text-[12px] font-bold text-[#424752] tracking-[0.9px] capitalize;
+    @apply text-[12px] font-bold text-[#01091a] tracking-[0.9px] capitalize;
   }
   .hms-avatar-text {
   @apply text-[10px] font-semibold;
