@@ -81,4 +81,9 @@ export const labOrderItemApi = {
 
   getAll: () =>
     API.get<{ success: boolean; data: LabOrderItemRecord[] }>("/lab-order-item"),
+
+  getById: (id: string) =>
+    API.get<{ success: boolean; data: LabOrderItemRecord }>(
+      `/lab-order-item/${encodeURIComponent(id)}`
+    ),
 };

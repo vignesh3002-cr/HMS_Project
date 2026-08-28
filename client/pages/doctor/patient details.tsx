@@ -6,6 +6,22 @@ import {
   patientApi,
   type PatientRecord,
 } from "../../api/patient.api";
+import {
+  encounterApi,
+  type EncounterRecord,
+} from "../../api/encounter.api";
+import {
+  labOrderItemApi,
+  type LabOrderItemRecord,
+} from "../../api/labOrder.api";
+import {
+  ALL_BRANCHES_VALUE,
+  BranchFilterProvider,
+  NO_BRANCH_VALUE,
+  useBranchFilter,
+} from "../../context/BranchFilterContext";
+import { computeBsa } from "../../utils/vitals";
+import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 
 interface ConsultationState {
   patientId?: string;
@@ -128,6 +144,8 @@ const MedicationPortal: React.FC<{
   patientId?: string;
   plan?: SummaryPlan | null;
   allergies?: PatientAllergyRecord[];
+  selectedCycle?: number;
+  cycleMedicationsMap?: Record<string, any[]>;
 }> = ({
   onBackToProfile,
   patientName = "",
@@ -137,15 +155,19 @@ const MedicationPortal: React.FC<{
   patientId = "",
   plan = null,
   allergies = [],
+  selectedCycle,
+  cycleMedicationsMap,
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>("Medications");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showDischargeDashboard, setShowDischargeDashboard] = useState(false);
-  const [notifOpen, setNotifOpen] = useState(false);
 
   /* Recent medication details for THIS selected patient, sourced from
-     the fetched chemotherapy plan (GET /chemotherapy/plans?patient_id=). */
-  const medPlanItems = plan?.chemotherapy_plan_items ?? [];
+      the fetched chemotherapy plan (GET /chemotherapy/plans?patient_id=). */
+  const cycleId = plan?.chemotherapy_cycle?.find(c => c.cycle_number === selectedCycle)?.chemotherapy_cycle_id;
+  const medPlanItems = cycleId && cycleMedicationsMap?.[cycleId]?.length
+    ? cycleMedicationsMap[cycleId]
+    : plan?.chemotherapy_plan_items ?? [];
   const medPremedications = medPlanItems.filter(
     (item) => (item.drug_role ?? "").toUpperCase() === "PREMEDICATION",
   );
@@ -237,31 +259,7 @@ const MedicationPortal: React.FC<{
            
           </div>
           <div className="flex items-center gap-5">
-            <div className="relative">
-              <button
-                type="button"
-                aria-label="Notifications"
-                onClick={() => setNotifOpen((v) => !v)}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]"
-              >
-                <i className="fa-regular fa-bell text-xl" />
-                <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-[#003ec7]" />
-              </button>
-              {notifOpen && (
-                <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-                  <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-                    <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]">Mark all as read</button>
-                      <button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40">Clear all</button>
-                    </div>
-                  </header>
-                  <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-                    <p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
-                  </main>
-                </div>
-              )}
-            </div>
+            <BellNotificationButton size="md" />
             <div className="flex items-center gap-2 border-l border-slate-200 pl-5">
               <span className="font-bold text-[#0052cc]">HMS</span>
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-700 text-white">
@@ -392,7 +390,7 @@ const MedicationPortal: React.FC<{
             {activeTab === "Medications" ? (
               <>
                 {/* Summary cards */}
-                <div className="grid grid-cols-1 gap-4 pt-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="grid gap-4 pt-4 sm:grid-cols-2 xl:grid-cols-4">
                   {[
                     ["TOTAL MEDS", String(medPlanItems.length), "fa-solid fa-pills", "bg-blue-50 text-[#0052cc]"],
                     ["PREMEDS", String(medPremedications.length), "fa-solid fa-syringe", "bg-purple-50 text-purple-600"],
@@ -906,37 +904,17 @@ const loadLatestPlanPreview = async (
 const loadLatestChemoPlan = async (
   patientId: string
 ): Promise<SummaryPlan | null> => {
-  const fetchPlans = async (branchId?: string) => {
-    const response = await API.get<{
-      success: boolean;
-      data: SummaryPlan[];
-    }>("/chemotherapy/plans", {
-      params: {
-        patient_id: patientId,
-        page: 1,
-        limit: 1,
-        ...(branchId ? { branchId } : {}),
-      },
-    });
-    return response.data?.data ?? [];
-  };
-
-  const branchId = getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
-
-  let plans: SummaryPlan[] = [];
-  try {
-    plans = await fetchPlans(branchId);
-  } catch {
-    plans = [];
-  }
-  if (plans.length === 0) {
-    try {
-      plans = await fetchPlans();
-    } catch {
-      plans = [];
-    }
-  }
-  return plans[0] ?? null;
+  /* Mapping-scoped endpoint (GET /plans/latest-for-patient): access is
+     resolved from the caller's ACTIVE user_branch_mapping on the
+     backend (like /encounters/latest), so this works with or without
+     a branch selection and never 403s multi-branch staff. */
+  const response = await API.get<{
+    success: boolean;
+    data: SummaryPlan | null;
+  }>("/chemotherapy/plans/latest-for-patient", {
+    params: { patient_id: patientId },
+  });
+  return response.data?.data ?? null;
 };
 
 interface ChemoVitalsEntry extends ChemotherapyVitalsRecord {
@@ -1065,15 +1043,302 @@ function useDischargeMedicines(protocolId: string) {
   return { rows, loading, error };
 }
 
+/* ============================================================
+   LATEST PATIENT VITALS HOOK
+   The freshest recorded vitals across BOTH sources for a
+   patient, fetched once and shared by every portal that shows
+   vitals (Order Summary header strip, Discharge portal):
+   - latest OPD encounter via GET /encounters/latest
+     (newest-first, branch-independent on the backend)
+   - newest chemotherapy-cycle vitals row (recorded BSA source;
+     missing BSA is derived from height & weight via utils/vitals)
+   Merged per-field: encounter value first, chemo fallback.
+   ============================================================ */
+
+interface LatestPatientVitalsValues {
+  height: number | null;
+  weight: number | null;
+  bpSystolic: number | null;
+  bpDiastolic: number | null;
+  pulse: number | null;
+  temp: number | null;
+  spo2: number | null;
+  bmi: number | null;
+  bsa: number | null;
+}
+
+interface UseLatestPatientVitalsResult {
+  latestEncounter: EncounterRecord | null;
+  latestChemoVitals: ChemoVitalsEntry | null;
+  loading: boolean;
+  adverseEventCount: number;
+  vitals: LatestPatientVitalsValues;
+  /** [label, display] pairs; "" means no recorded value. */
+  vitalEntries: [string, string][];
+  lastCheckedLabel: string;
+  /** True when a fetch was blocked by branch-scope (403) - the UI
+     should nudge the user to pick a branch in the header selector. */
+  scopeHint: boolean;
+}
+
+const formatLastChecked = (values: (string | null | undefined)[]) => {
+  const timestamps = values
+    .filter((value): value is string => !!value)
+    .map((value) => new Date(value).getTime())
+    .filter((time) => !Number.isNaN(time));
+  if (timestamps.length === 0) return "";
+  const d = new Date(Math.max(...timestamps));
+  let hours = d.getHours();
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  const meridiem = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12;
+  return `Last checked: ${String(hours).padStart(2, "0")}:${minutes} ${meridiem}`;
+};
+
+function useLatestPatientVitals(
+  patientId?: string,
+  /** Changes when the user picks a different branch - triggers refetch
+      so scoped calls use the fresh x-branch-id header. */
+  scopeKey?: string
+): UseLatestPatientVitalsResult {
+  const [latestEncounter, setLatestEncounter] =
+    useState<EncounterRecord | null>(null);
+  const [encounterRows, setEncounterRows] =
+    useState<EncounterRecord[]>([]);
+  const [latestChemoVitals, setLatestChemoVitals] =
+    useState<ChemoVitalsEntry | null>(null);
+  const [adverseEventCount, setAdverseEventCount] = useState(0);
+  const [scopeHint, setScopeHint] = useState(false);
+  const [loading, setLoading] = useState(!!patientId);
+
+  useEffect(() => {
+    if (!patientId) {
+      setLatestEncounter(null);
+      setEncounterRows([]);
+      setLatestChemoVitals(null);
+      setAdverseEventCount(0);
+      setScopeHint(false);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+
+    /* Flag scope-style rejections so the UI can nudge the user to
+       pick a branch ("Please select a branch first." / "No branch
+       has been assigned to your account."). */
+    const noteScopeError = (message?: string) => {
+      if (/select a branch|branch has been assigned/i.test(message ?? "")) {
+        if (!cancelled) setScopeHint(true);
+      }
+    };
+
+    /* Latest OPD/encounter vitals via GET /encounters/latest
+       (newest-first, branch-independent - access resolves from the
+       caller's ACTIVE branch mappings server-side). Falls through to
+       the branch-scoped encounter list when it fails OR comes back
+       empty, so single-branch auto-scoping / a valid selection still
+       shows vitals. */
+    const loadEncounterVitals = async () => {
+      let rows: EncounterRecord[] = [];
+      let latest: EncounterRecord | null = null;
+      try {
+        const response = await encounterApi.getLatest(patientId, 20);
+        const encs = response.data?.data?.encounters ?? [];
+        rows = [...encs].sort(
+          (a, b) =>
+            new Date(b.created_at).getTime() -
+            new Date(a.created_at).getTime()
+        );
+        latest = rows[0] ?? null;
+      } catch (error: any) {
+        const message = error?.response?.data?.message;
+        console.error(
+          "Failed to load latest encounter vitals:",
+          message ?? error
+        );
+        noteScopeError(message);
+      }
+      if (!latest || rows.length === 0) {
+        try {
+          const response = await encounterApi.getAll({
+            patientId,
+            limit: 20,
+          });
+          if (cancelled) return;
+          rows = [...(response.data?.data?.encounters ?? [])].sort(
+            (a, b) =>
+              new Date(b.created_at).getTime() -
+              new Date(a.created_at).getTime()
+          );
+          latest = rows[0] ?? null;
+        } catch (error: any) {
+          const message = error?.response?.data?.message;
+          console.error(
+            "Encounter vitals fallback failed:",
+            message ?? error
+          );
+          noteScopeError(message);
+        }
+      }
+      if (!cancelled) {
+        setLatestEncounter(latest);
+        setEncounterRows(rows);
+      }
+    };
+    loadEncounterVitals();
+
+    /* Newest chemotherapy-cycle vitals + adverse-event count
+       (single chain fetch, same as the Discharge portal used). */
+    loadLatestChemoPlan(patientId)
+      .then(async (loaded) => {
+        const sortedCycles = [...(loaded?.chemotherapy_cycle ?? [])].sort(
+          (a, b) =>
+            (b.actual_date ?? b.planned_date ?? "").localeCompare(
+              a.actual_date ?? a.planned_date ?? ""
+            ) || b.cycle_number - a.cycle_number
+        );
+        const newestWithId = sortedCycles.find(
+          (cycle) => cycle.chemotherapy_cycle_id
+        );
+        if (!newestWithId?.chemotherapy_cycle_id) return;
+        try {
+          const detail = await loadCycleDetail(
+            newestWithId.chemotherapy_cycle_id as string
+          );
+          if (cancelled || !detail) return;
+          const vitalsRows = (detail.chemotherapy_vitals ?? []).slice();
+          vitalsRows.sort((a, b) =>
+            (b.recorded_at ?? "").localeCompare(a.recorded_at ?? "")
+          );
+          setLatestChemoVitals(vitalsRows[0] ?? null);
+          setAdverseEventCount(
+            (detail.chemotherapy_adverse_event ?? []).length
+          );
+        } catch (error: any) {
+          const message = error?.response?.data?.message;
+          console.error(
+            "Failed to load chemo cycle vitals:",
+            message ?? error
+          );
+          noteScopeError(message);
+          /* Vitals stay empty - panels show placeholders. */
+        }
+      })
+      .catch((error: any) => {
+        const message = error?.response?.data?.message;
+        console.error(
+          "Failed to load chemotherapy plan for vitals:",
+          message ?? error
+        );
+        noteScopeError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId, scopeKey]);
+
+  const num = (value?: string | number | null) => {
+    if (value === null || value === undefined || value === "") return null;
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+  const encNum = (value: number | string | null | undefined) =>
+    num(value ?? null);
+
+  const firstNonNull = <T,>(rows: T[], getter: (r: T) => any) => {
+    for (const r of rows) {
+      const v = getter(r);
+      if (v !== null && v !== undefined && v !== "") return v;
+    }
+    return null;
+  };
+  const firstEncounterValue = (getter: (e: EncounterRecord) => any) => {
+    return firstNonNull(encounterRows, getter);
+  };
+
+  const heightValue =
+    encNum(firstEncounterValue(e => e.height)) ?? num(latestChemoVitals?.height);
+  const weightValue =
+    encNum(firstEncounterValue(e => e.weight)) ?? num(latestChemoVitals?.weight);
+
+  const vitals: LatestPatientVitalsValues = {
+    height: heightValue,
+    weight: weightValue,
+    bpSystolic:
+      encNum(firstEncounterValue(e => e.systolic_bp)) ??
+      num(latestChemoVitals?.blood_pressure_systolic),
+    bpDiastolic:
+      encNum(firstEncounterValue(e => e.diastolic_bp)) ??
+      num(latestChemoVitals?.blood_pressure_diastolic),
+    pulse: encNum(firstEncounterValue(e => e.pulse)) ?? num(latestChemoVitals?.pulse_rate),
+    temp:
+      encNum(firstEncounterValue(e => e.temperature)) ??
+      num(latestChemoVitals?.body_temperature),
+    spo2: encNum(firstEncounterValue(e => e.spo2)) ?? num(latestChemoVitals?.spo2),
+    bmi: encNum(firstEncounterValue(e => e.BMI)) ?? num(latestChemoVitals?.bmi),
+    /* Recorded chemo value wins; otherwise derive from height & weight
+        (Mosteller - see utils/vitals.ts). */
+    bsa:
+      num(latestChemoVitals?.body_surface_area) ??
+      computeBsa(heightValue, weightValue),
+  };
+
+  const vitalEntries: [string, string][] = [
+    ["HEIGHT", vitals.height != null ? `${vitals.height} cm` : ""],
+    [
+      "BP",
+      vitals.bpSystolic != null && vitals.bpDiastolic != null
+        ? `${vitals.bpSystolic}/${vitals.bpDiastolic}`
+        : "",
+    ],
+    ["WEIGHT", vitals.weight != null ? `${vitals.weight} kg` : ""],
+    ["PULSE", vitals.pulse != null ? `${vitals.pulse} bpm` : ""],
+    ["BSA", vitals.bsa != null ? `${vitals.bsa} m²` : ""],
+    ["TEMP", vitals.temp != null ? `${vitals.temp} °C` : ""],
+    ["BMI", vitals.bmi != null ? `${vitals.bmi}` : ""],
+    ["SPO2", vitals.spo2 != null ? `${vitals.spo2}%` : ""],
+  ];
+
+  const lastCheckedLabel = formatLastChecked([
+    latestEncounter?.checkin_time,
+    latestEncounter?.created_at,
+    latestChemoVitals?.recorded_at,
+  ]);
+
+  return {
+    latestEncounter,
+    latestChemoVitals,
+    loading,
+    adverseEventCount,
+    vitals,
+    vitalEntries,
+    lastCheckedLabel,
+    scopeHint,
+  };
+}
+
 function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [activeTab, setActiveTab] = useState("Order Summary");
   const [selectedDay, setSelectedDay] = useState("Day 1");
   const [selectedCycle, setSelectedCycle] = useState(1);
   const [showMedicationPortal, setShowMedicationPortal] = useState(false);
   const [showDischargePortal, setShowDischargePortal] = useState(false);
-  const [notifOpen, setNotifOpen] = useState(false);
+
   const [savedPlan, setSavedPlan] = useState<SummaryPlan | null>(null);
   const [planNotice, setPlanNotice] = useState("");
+  const [regimenProtocol, setRegimenProtocol] = useState<any | null>(null);
+  const [regimenLoading, setRegimenLoading] = useState(false);
+  const [regimenError, setRegimenError] = useState("");
+  const [currentPlan, setCurrentPlan] = useState<any | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState("");
+  const [cycleMedications, setCycleMedications] = useState<any[]>([]);
+  const [cycleMedicationsMap, setCycleMedicationsMap] = useState<Record<string, any[]>>({});
   const [nextAppointment, setNextAppointment] = useState<{
     date: string;
     detail: string;
@@ -1084,8 +1349,87 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 
   const location = useLocation();
   const consultationState = location.state as ConsultationState | null;
+  const { selectedBranchId } = useBranchFilter();
+
+  /* Latest vitals (encounter + chemo merged) for the header strip.
+     Re-runs when the branch selection changes so scoped fallbacks and
+     the chemo chain pick up the new x-branch-id header. */
+  const { vitalEntries, scopeHint } = useLatestPatientVitals(
+    consultationState?.patientId,
+    selectedBranchId
+  );
+  const summaryHeaderVitals = (label: string) =>
+    vitalEntries.find(([key]) => key === label)?.[1] || "—";
 
   const [patient, setPatient] = useState<PatientRecord | null>(null);
+
+  const [labItems, setLabItems] = useState<LabOrderItemRecord[]>([]);
+  const [labItemsLoading, setLabItemsLoading] = useState(false);
+  const [labItemsError, setLabItemsError] = useState("");
+
+  useEffect(() => {
+    const pid = consultationState?.patientId;
+    if (!pid) return;
+    let cancelled = false;
+    setLabItemsLoading(true);
+    setLabItemsError("");
+
+    const storedItemIds: string[] = (() => {
+      try {
+        return JSON.parse(localStorage.getItem(`hms_lab_item_ids_${pid}`) || "[]");
+      } catch {
+        return [];
+      }
+    })();
+
+    if (storedItemIds.length > 0) {
+      Promise.all(
+        storedItemIds.map((id) =>
+          labOrderItemApi.getById(id).then((r) => r.data.data).catch(() => null)
+        )
+      )
+        .then((results) => {
+          if (cancelled) return;
+          const items = results.filter(Boolean) as LabOrderItemRecord[];
+          if (items.length > 0) {
+            setLabItems(items);
+            return;
+          }
+          fetchAllAndFilter();
+        })
+        .catch(() => { fetchAllAndFilter(); })
+        .finally(() => { if (!cancelled) setLabItemsLoading(false); });
+    } else {
+      fetchAllAndFilter();
+    }
+
+    function fetchAllAndFilter() {
+      labOrderItemApi
+        .getAll()
+        .then((response) => {
+          if (cancelled) return;
+          const allItems = response.data.data ?? [];
+          const forPatient = allItems.filter(
+            (item) => item.lab_order?.patient_history?.patient_id === pid
+          );
+          setLabItems(forPatient);
+        })
+        .catch((error: any) => {
+          if (!cancelled) {
+            setLabItemsError(
+              error?.response?.data?.message ||
+                error?.message ||
+                "Failed to load lab investigations."
+            );
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setLabItemsLoading(false);
+        });
+    }
+
+    return () => { cancelled = true; };
+  }, [consultationState?.patientId]);
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
@@ -1115,46 +1459,24 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
        The branch filter is tried first; when it comes back empty
        (plan was saved under another branch) retry without it.
        Runs for every tab so Medications gets the same data. */
+    /* Latest plan for THIS selected patient via the mapping-scoped
+       endpoint (GET /plans/latest-for-patient) - works with or without
+       a branch selection. Runs for every tab so Medications gets the
+       same data. */
     const loadSavedPlan = async () => {
-      const fetchPlans = async (branchId?: string) => {
-        const response = await API.get<{
-          success: boolean;
-          data: SummaryPlan[];
-        }>("/chemotherapy/plans", {
-          params: {
-            patient_id: patientId,
-            page: 1,
-            limit: 1,
-            ...(branchId ? { branchId } : {}),
-          },
-        });
-        return response.data?.data ?? [];
-      };
-
-      const branchId =
-        getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
-
-      let plans: SummaryPlan[] = [];
+      let loaded: SummaryPlan | null = null;
       try {
-        plans = await fetchPlans(branchId);
+        loaded = await loadLatestChemoPlan(patientId);
       } catch {
-        plans = [];
-      }
-
-      if (plans.length === 0) {
-        try {
-          plans = await fetchPlans();
-        } catch {
-          plans = [];
-        }
+        loaded = null;
       }
 
       if (cancelled) return;
-      setSavedPlan(plans[0] ?? null);
+      setSavedPlan(loaded);
       setPlanNotice(
-        plans.length === 0
-          ? "No chemotherapy plan found for this patient yet. Complete the Treatment Plan step to populate the Order Summary."
-          : ""
+        loaded
+          ? ""
+          : "No chemotherapy plan found for this patient yet. Complete the Treatment Plan step to populate the Order Summary."
       );
     };
 
@@ -1162,7 +1484,111 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [consultationState?.patientId, activeTab]);
+  }, [consultationState?.patientId, activeTab, selectedBranchId]);
+
+  // Pre-fetch doctor-described medications for all cycles
+  useEffect(() => {
+    if (!savedPlan?.chemotherapy_cycle?.length) {
+      setCycleMedicationsMap({});
+      return;
+    }
+    let cancelled = false;
+    const fetchAllCycles = async () => {
+      const map: Record<string, any[]> = {};
+      const cycles = savedPlan.chemotherapy_cycle.filter(c => c?.chemotherapy_cycle_id);
+      await Promise.all(
+        cycles.map(async (cycle) => {
+          try {
+            const response = await API.get<{ success: boolean; data: any }>(
+              `/chemotherapy/cycles/${encodeURIComponent(cycle.chemotherapy_cycle_id)}`
+            );
+            if (cancelled) return;
+            const items = response.data?.data?.chemotherapy_plan_items ?? response.data?.data?.items ?? response.data?.data?.chemotherapy_plan?.chemotherapy_plan_items ?? [];
+            map[cycle.chemotherapy_cycle_id] = items;
+          } catch {
+            map[cycle.chemotherapy_cycle_id] = [];
+          }
+        })
+      );
+      if (!cancelled) setCycleMedicationsMap(map);
+    };
+    fetchAllCycles();
+    return () => { cancelled = true; };
+  }, [savedPlan?.chemotherapy_plan_id, selectedBranchId]);
+
+  useEffect(() => {
+    const protocolId = savedPlan?.source_protocol_id;
+    if (!protocolId) {
+      setRegimenProtocol(null);
+      setRegimenError("");
+      return;
+    }
+    let cancelled = false;
+    const loadRegimenProtocol = async () => {
+      setRegimenLoading(true);
+      setRegimenError("");
+      try {
+        const response = await API.get<{ success: boolean; data: any }>(
+          `/chemotherapy/regimen-protocols/${encodeURIComponent(protocolId)}`
+        );
+        if (cancelled) return;
+        setRegimenProtocol(response.data?.data ?? null);
+      } catch (err: any) {
+        if (cancelled) return;
+        setRegimenError(err?.response?.data?.message ?? "Failed to load regimen protocol");
+        setRegimenProtocol(null);
+      } finally {
+        if (!cancelled) setRegimenLoading(false);
+      }
+    };
+    loadRegimenProtocol();
+    return () => {
+      cancelled = true;
+    };
+  }, [savedPlan?.source_protocol_id]);
+
+  useEffect(() => {
+    const planId = savedPlan?.chemotherapy_plan_id;
+    if (!planId) {
+      setCurrentPlan(null);
+      setPlanError("");
+      return;
+    }
+    let cancelled = false;
+    const loadPlanDetails = async () => {
+      setPlanLoading(true);
+      setPlanError("");
+      try {
+        const response = await API.get<{ success: boolean; data: any }>(
+          `/chemotherapy/plans/${encodeURIComponent(planId)}`
+        );
+        if (cancelled) return;
+        setCurrentPlan(response.data?.data ?? null);
+      } catch (err: any) {
+        if (cancelled) return;
+        setPlanError(err?.response?.data?.message ?? "Failed to load plan details");
+        setCurrentPlan(null);
+      } finally {
+        if (!cancelled) setPlanLoading(false);
+      }
+    };
+    loadPlanDetails();
+    return () => {
+      cancelled = true;
+    };
+  }, [savedPlan?.chemotherapy_plan_id]);
+
+  useEffect(() => {
+    const cycle = savedPlan?.chemotherapy_cycle?.find(
+      (c) => c.cycle_number === Number(selectedCycle)
+    );
+    if (!cycle?.chemotherapy_cycle_id) {
+      setCycleMedications([]);
+      return;
+    }
+    const items = cycleMedicationsMap?.[cycle.chemotherapy_cycle_id] ?? [];
+    setCycleMedications(items);
+  }, [selectedCycle, savedPlan?.chemotherapy_cycle, cycleMedicationsMap]);
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
@@ -1174,28 +1600,11 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
        upcoming cycle planned_date -> recorded next_cycle_date ->
        next cycle derived from start date + cycle interval. */
     const loadNextAppointment = async () => {
+      /* Mapping-scoped endpoint (GET /plans/latest-for-patient) - one
+         clean call, works with or without a branch selection. */
       try {
-        const response = await API.get<{
-          success: boolean;
-          data: {
-            planned_cycles?: number | null;
-            completed_cycles?: number | null;
-            cycle_interval_days?: number | null;
-            treatment_start_date?: string | null;
-            expected_end_date?: string | null;
-            chemotherapy_cycle?: {
-              cycle_number: number;
-              planned_date?: string | null;
-              next_cycle_date?: string | null;
-              cycle_status?: string | null;
-            }[] | null;
-          }[];
-        }>("/chemotherapy/plans", {
-          params: { patient_id: patientId, page: 1, limit: 1 },
-        });
+        const plan = await loadLatestChemoPlan(patientId);
         if (cancelled) return;
-
-        const plan = response.data?.data?.[0];
         const cycles = plan?.chemotherapy_cycle ?? [];
         const startOfToday = new Date();
         startOfToday.setHours(0, 0, 0, 0);
@@ -1291,8 +1700,11 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
         }
 
         setNextAppointment(null);
-      } catch (error) {
-        console.error("Failed to load next appointment:", error);
+      } catch (error: any) {
+        console.error(
+          "Failed to load next appointment:",
+          error?.response?.data?.message ?? error
+        );
         if (!cancelled) setNextAppointment(null);
       }
     };
@@ -1301,7 +1713,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [consultationState?.patientId]);
+  }, [consultationState?.patientId, selectedBranchId]);
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
@@ -1381,23 +1793,6 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const orderTherapy = savedPlan?.regimen_name || recentTherapy;
   const orderIntent = savedPlan?.treatment_intent || recentIntent;
 
-  /* Plan items split by drug_role and the SELECTED DAY: PREMEDICATION
-     drugs render in the Premedications table, PRIMARY drugs render in
-     Chemo Orders - both only for the day picked in the Select Day
-     control (items without an explicit day belong to Day 1). */
-  const selectedDayNumber =
-    Number(selectedDay.replace("Day ", "")) || 1;
-  const premedicationItems = (savedPlan?.chemotherapy_plan_items ?? []).filter(
-    (item) =>
-      (item.drug_role ?? "").toUpperCase() === "PREMEDICATION" &&
-      (item.cycle_day ?? item.administration_day ?? 1) === selectedDayNumber,
-  );
-  const primaryChemoItems = (savedPlan?.chemotherapy_plan_items ?? []).filter(
-    (item) =>
-      (item.drug_role ?? "").toUpperCase() === "PRIMARY" &&
-      (item.cycle_day ?? item.administration_day ?? 1) === selectedDayNumber,
-  );
-
   const planCycles = (savedPlan?.chemotherapy_cycle ?? []).filter(
     (cycle) => typeof cycle.cycle_number === "number"
   );
@@ -1408,8 +1803,6 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
         )
       : null;
 
-  /* When no chemo cycle has been recorded yet for this plan, derive the
-     current cycle/day from the treatment window (start date + interval). */
   const derivedCycleInfo = (() => {
     if (!savedPlan?.treatment_start_date || !savedPlan?.cycle_interval_days) {
       return null;
@@ -1432,6 +1825,69 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     latestPlanCycle?.cycle_number ?? derivedCycleInfo?.cycle ?? null;
   const displayCycleDay =
     latestPlanCycle?.cycle_day ?? derivedCycleInfo?.day ?? null;
+
+  /* Plan items split by drug_role and the SELECTED DAY: PREMEDICATION
+     drugs render in the Premedications table, PRIMARY drugs render in
+     Chemo Orders - both only for the day picked in the Select Day
+     control (items without an explicit day belong to Day 1). */
+  const selectedDayNumber =
+    Number(selectedDay.replace("Day ", "")) || 1;
+  const currentCycleNumber =
+    Number(selectedCycle) || displayCycleNumber || 1;
+
+  // Use regimen protocol items if available, otherwise fall back to saved plan items
+  const protocolItemsRaw = regimenProtocol?.chemotherapy_regimen_protocol_items ?? [];
+  const mapProtocolItem = (item: any) => ({
+    chemotherapy_plan_item_id: item.id || item.protocol_item_id,
+    drug_role: item.drug_role,
+    medicine_master: item.medicine_master,
+    protocol_dose: item.patient_dose ? Number(item.patient_dose) : null,
+    protocol_dose_unit: item.patient_dose_unit,
+    administration_route: item.administration_detail ?? item.administration_route ?? '',
+    frequency: item.frequency ?? item.remarks ?? '',
+    remarks: item.remarks ?? '',
+    cycle_day: item.cycle_day,
+    administration_day: item.administration_day,
+    dilution_volume: '',
+  });
+  const protocolItems = protocolItemsRaw.map(mapProtocolItem);
+  const planItems = currentPlan?.chemotherapy_plan_items ?? [];
+  const savedItems = savedPlan?.chemotherapy_plan_items ?? [];
+  const sourceItems = cycleMedications.length > 0 ? cycleMedications : (protocolItems.length > 0 ? protocolItems : (planItems.length > 0 ? planItems : savedItems));
+
+  const matchesCycleAndDay = (item: any) => {
+    const itemAdminDay = item.administration_day ?? item.cycle_day ?? 1;
+    // When using per-cycle medications from /chemotherapy/cycles/:id, items are already scoped to the cycle
+    // so only filter by day. Otherwise filter by both cycle_day and day.
+    if (cycleMedications.length > 0) {
+      return itemAdminDay === selectedDayNumber;
+    }
+    const itemCycleDay = item.cycle_day ?? item.administration_day ?? 1;
+    // If cycle number maps to day within cycle, use cycle number as day filter
+    // This makes cycle 3 show items with cycle_day =3
+    return itemCycleDay === currentCycleNumber && itemAdminDay === selectedDayNumber;
+  };
+
+  const premedicationItems = sourceItems.filter(
+    (item) =>
+      (item.drug_role ?? "").toUpperCase() === "PREMEDICATION" &&
+      matchesCycleAndDay(item),
+  );
+  const primaryChemoItems = sourceItems.filter(
+    (item) =>
+      (item.drug_role ?? "").toUpperCase() === "PRIMARY" &&
+      matchesCycleAndDay(item),
+  );
+  const supportiveItems = sourceItems.filter(
+    (item) => {
+      const role = (item.drug_role ?? "").toUpperCase();
+      return (
+        role !== "PREMEDICATION" &&
+        role !== "PRIMARY" &&
+        matchesCycleAndDay(item)
+      );
+    },
+  );
 
   /* Treatment timeline: one node per CYCLE, Cycle 1 through the final
      planned cycle of the selected protocol. Day counting / interval
@@ -1555,7 +2011,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   ]);
 
   const renderOrderEntryGrid = (entries: [string, string][]) => (
-    <div className="grid grid-cols-1 gap-x-8 gap-y-3 px-6 py-5 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-x-8 gap-y-3 px-6 py-5 grid-cols-[auto_auto_auto]">
       {entries.map(([label, value]) => (
         <div key={label}>
           <div className="text-[10px] font-semibold uppercase tracking-wide text-[#64748b] mb-0.5">
@@ -1584,6 +2040,8 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
         patientId={consultationState?.patientId || ""}
         plan={savedPlan}
         allergies={patientAllergies}
+        selectedCycle={selectedCycle}
+        cycleMedicationsMap={cycleMedicationsMap}
       />
     );
   }
@@ -1620,31 +2078,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 
 </div>
 <div className="flex items-center space-x-6">
-<div className="relative">
-<button
-type="button"
-aria-label="Notifications"
-onClick={() => setNotifOpen((v) => !v)}
-className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]"
->
-<i className="fa-regular fa-bell text-xl"></i>
-<span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-[#003ec7]"></span>
-</button>
-{notifOpen && (
-<div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-<header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-<h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
-<div className="flex shrink-0 items-center gap-3">
-<button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]">Mark all as read</button>
-<button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40">Clear all</button>
-</div>
-</header>
-<main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-<p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
-</main>
-</div>
-)}
-</div>
+<BellNotificationButton size="md" />
 <div className="flex items-center space-x-3 cursor-pointer pl-6 border-l border-[#e2e8f0]">
 <span className="text-sm font-bold text-[#1d4ed8]">HMS</span>
 <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white">
@@ -1677,41 +2111,41 @@ className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text
 <div className="space-y-4">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">HEIGHT</div>
-<div className="font-bold text-sm">—</div>
+<div className="font-bold text-sm">{summaryHeaderVitals("HEIGHT")}</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BP</div>
-<div className="font-bold text-sm">—</div>
+<div className="font-bold text-sm">{summaryHeaderVitals("BP")}</div>
 </div>
 </div>
 <div className="space-y-4">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">WEIGHT</div>
-<div className="font-bold text-sm">—</div>
+<div className="font-bold text-sm">{summaryHeaderVitals("WEIGHT")}</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">PULSE</div>
-<div className="font-bold text-sm">—</div>
+<div className="font-bold text-sm">{summaryHeaderVitals("PULSE")}</div>
 </div>
 </div>
 <div className="space-y-4">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BSA</div>
-<div className="font-bold text-sm">—</div>
+<div className="font-bold text-sm">{summaryHeaderVitals("BSA")}</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">TEMP</div>
-<div className="font-bold text-sm">—</div>
+<div className="font-bold text-sm">{summaryHeaderVitals("TEMP")}</div>
 </div>
 </div>
 <div className="space-y-4">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BMI</div>
-<div className="font-bold text-sm">—</div>
+<div className="font-bold text-sm">{summaryHeaderVitals("BMI")}</div>
 </div>
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">SPO2</div>
-<div className="font-bold text-sm">—</div>
+<div className="font-bold text-sm">{summaryHeaderVitals("SPO2")}</div>
 </div>
 </div>
 </div>
@@ -1746,6 +2180,14 @@ className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text
 <a className="text-[#1d4ed8] font-semibold hover:underline" href="#">View Full Alerts (2)</a>
 </div>
 {/* END: Alerts Banner */}
+{/* BEGIN: Branch scope hint */}
+{scopeHint && (
+<div className="mb-6 flex items-center rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+<i className="fa-solid fa-triangle-exclamation mr-2"></i> Multiple branches assigned — select your branch to load plan, discharge &amp; appointment details:
+<InlineBranchPicker />
+</div>
+)}
+{/* END: Branch scope hint */}
 {/* BEGIN: Tabs */}
 <div className="border-b border-[#e2e8f0] mb-6">
 <nav className="flex space-x-8">
@@ -1914,21 +2356,21 @@ className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text
 <div className="col-span-3 space-y-6">
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-5">
 <h4 className="text-sm font-bold text-[#1e293b] mb-4">Cycle &amp; Schedule</h4>
-<div className="grid grid-cols-3 gap-4 mb-5">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">CYCLE</div>
-<div className="font-bold text-sm">{displayCycleNumber ? `${displayCycleNumber}${savedPlan?.planned_cycles ? ` / ${savedPlan.planned_cycles}` : ""}` : "—"}</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">DAY</div>
-<div className="font-bold text-sm">{displayCycleDay ?? "—"}</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">TOTAL DAYS</div>
-<div className="font-bold text-sm">{totalTreatmentDays ?? "—"}</div>
-</div>
-</div>
-<div className="grid grid-cols-3 gap-4">
+        <div className="grid gap-4 mb-5 grid-cols-[auto_auto_auto]">
+          <div>
+            <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">CYCLE</div>
+            <div className="font-bold text-sm">{displayCycleNumber ? `${displayCycleNumber}${savedPlan?.planned_cycles ? ` / ${savedPlan.planned_cycles}` : ""}` : "—"}</div>
+          </div>
+          <div>
+            <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">DAY</div>
+            <div className="font-bold text-sm">{displayCycleDay ?? "—"}</div>
+          </div>
+          <div>
+            <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">TOTAL DAYS</div>
+            <div className="font-bold text-sm">{totalTreatmentDays ?? "—"}</div>
+          </div>
+        </div>
+        <div className="grid gap-4 grid-cols-[auto_auto_auto]">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">START DATE</div>
 <div className="font-bold text-sm">{fmtOrderDate(savedPlan?.treatment_start_date) || "—"}<br/></div>
@@ -1945,7 +2387,7 @@ className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text
 </div>
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-5">
 <h4 className="text-sm font-bold text-[#1e293b] mb-4">Clinical Info</h4>
-<div className="grid grid-cols-2 gap-4 mb-5">
+<div className="grid gap-4 mb-5 grid-cols-[auto_auto]">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">TYPE</div>
 <div className="font-bold text-sm">{recentCancerType || "—"}</div>
@@ -1962,70 +2404,111 @@ className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text
 </div>
 </div>
 {/* Middle Column */}
-<div className="col-span-4 space-y-6">
+<div className="col-span-9 space-y-6">
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-5">
 <div className="flex items-center mb-4">
 <h4 className="text-sm font-bold text-[#1e293b] mr-3">Lab Validation</h4>
-<span className="px-2 py-0.5 bg-slate-50 text-[#64748b] text-[10px] font-bold uppercase rounded border border-slate-200">—</span>
+<span className="px-2 py-0.5 bg-slate-50 text-[#64748b] text-[10px] font-bold uppercase rounded border border-slate-200">{labItemsLoading ? "Loading…" : `${labItems.length} Test(s)`}</span>
 </div>
-<table className="w-full text-left text-sm mb-4">
-<thead>
-<tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
-<th className="pb-2 font-semibold">PARAMETER</th>
-<th className="pb-2 font-semibold">RESULT</th>
-<th className="pb-2 font-semibold">RANGE</th>
-<th className="pb-2 font-semibold">STATUS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td colSpan={4} className="py-6 text-center text-xs text-[#64748b]">No lab validation records found.</td>
-</tr>
-</tbody>
-</table>
+{labItemsError && (
+  <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">{labItemsError}</div>
+)}
+{labItemsLoading ? (
+  <div className="py-6 text-center text-xs text-[#64748b]">
+    <i className="fa-solid fa-circle-notch fa-spin mr-1" />Loading lab investigations…
+  </div>
+) : labItems.length === 0 ? (
+  <table className="w-full text-left text-sm mb-4">
+    <thead>
+      <tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
+        <th className="pb-2 font-semibold">PARAMETER</th>
+        <th className="pb-2 font-semibold">RESULT</th>
+        <th className="pb-2 font-semibold">RANGE</th>
+        <th className="pb-2 font-semibold">STATUS</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td colSpan={4} className="py-6 text-center text-xs text-[#64748b]">No lab validation records found.</td>
+      </tr>
+    </tbody>
+  </table>
+) : (
+  <table className="w-full text-left text-sm mb-4">
+    <thead>
+      <tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
+        <th className="pb-2 font-semibold">TEST NAME</th>
+        <th className="pb-2 font-semibold">TEST CODE</th>
+        <th className="pb-2 font-semibold">UNIT</th>
+        <th className="pb-2 font-semibold">REFERENCE RANGE</th>
+        <th className="pb-2 font-semibold">STATUS</th>
+      </tr>
+    </thead>
+    <tbody>
+      {labItems.map((item) => (
+        <tr key={item.lab_order_item_id} className="border-b border-slate-50">
+          <td className="py-2 font-bold text-sm">{item.lab_test_master?.test_name ?? "—"}</td>
+          <td className="py-2 text-sm">{item.lab_test_master?.test_code ?? "—"}</td>
+          <td className="py-2 text-sm">{item.lab_test_master?.unit ?? "—"}</td>
+          <td className="py-2 text-sm">{item.lab_test_master?.reference_range ?? "—"}</td>
+          <td className="py-2">
+            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+              item.item_status === "Completed"
+                ? "bg-emerald-100 text-emerald-700"
+                : item.item_status === "Ordered"
+                ? "bg-blue-100 text-blue-700"
+                : "bg-slate-100 text-slate-600"
+            }`}>
+              {item.item_status ?? "Ordered"}
+            </span>
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+)}
 <div className="border-t border-slate-100 pt-3 flex justify-between items-center text-sm">
 <span className="text-[#64748b]">Chemo Clearance :</span>
 <span className="font-bold text-[#64748b] uppercase">—</span>
 </div>
 </div>
-<div className="bg-blue-50/50 rounded-[16px] shadow-sm border border-blue-100 p-5 relative overflow-hidden">
-<div className="flex items-center justify-between mb-5">
-<div className="flex items-center text-[#1d4ed8]">
-<i className="fa-solid fa-flask text-lg mr-2"></i>
-<h4 className="text-sm font-bold uppercase">PROTOCOL: {orderTherapy || "—"}</h4>
+</div>
+</div>
+<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden mt-6">
+<div className="px-5 py-4 border-b border-[#e2e8f0] flex items-center justify-between text-[#1d4ed8]">
+<div className="flex items-center">
+<i className="fa-solid fa-flask mr-2"></i>
+<h4 className="text-sm font-bold">PROTOCOL: {orderTherapy || "—"}</h4>
 </div>
 <a className="text-xs text-[#1d4ed8] font-medium hover:underline flex items-center" href="#">View Protocol <i className="fa-solid fa-chevron-right text-[10px] ml-1"></i></a>
 </div>
-<div className="grid grid-cols-4 gap-4">
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">DOSE</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">PATIENT DOSE</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">ROUTE</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">DILUENT</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">VOLUME</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">INF. TIME</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
+<div className="p-5">
+<table className="w-full text-left text-sm">
+<thead>
+<tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
+<th className="pb-2 font-semibold">DOSE</th>
+<th className="pb-2 font-semibold">PATIENT DOSE</th>
+<th className="pb-2 font-semibold">ROUTE</th>
+<th className="pb-2 font-semibold">DILUENT</th>
+<th className="pb-2 font-semibold">VOLUME</th>
+<th className="pb-2 font-semibold">INF. TIME</th>
+</tr>
+</thead>
+<tbody>
+<tr className="border-b border-slate-50">
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+</tr>
+</tbody>
+</table>
 </div>
 </div>
-</div>
-{/* Right Column */}
-<div className="col-span-5 space-y-6">
+{/* BEGIN: Medication Orders Row */}
+<div className="mt-6 space-y-6">
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden">
 <div className="px-5 py-4 border-b border-[#e2e8f0] flex items-center text-purple-600">
 <i className="fa-solid fa-pills mr-2"></i>
@@ -2051,12 +2534,12 @@ className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text
 ) : (
 premedicationItems.map((item, index) => (
 <tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
-<td className="py-2">{index + 1}</td>
+<td className="py-2 whitespace-nowrap">{index + 1}</td>
 <td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
 <td className="py-2 whitespace-nowrap">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
 <td className="py-2 whitespace-nowrap">{item.administration_route ?? "—"}</td>
 <td className="py-2 whitespace-nowrap">{item.frequency ?? item.remarks ?? "—"}</td>
-<td className="py-2 text-right"><StatusBadge>{item.drug_role || "PREMEDICATION"}</StatusBadge></td>
+<td className="py-2 whitespace-nowrap text-right"><StatusBadge>{item.drug_role || "PREMEDICATION"}</StatusBadge></td>
 </tr>
 ))
 )}
@@ -2089,12 +2572,50 @@ premedicationItems.map((item, index) => (
 ) : (
 primaryChemoItems.map((item, index) => (
 <tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
-<td className="py-2">{index + 1}</td>
-<td className="py-2 font-medium text-[#1e293b]">{item.medicine_master?.medicine_name ?? "—"}</td>
-<td className="py-2">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
-<td className="py-2">{item.administration_route ?? "—"}</td>
-<td className="py-2">{item.dilution_volume ?? "—"}</td>
-<td className="py-2 text-right"><StatusBadge>{item.drug_role || "ORDERED"}</StatusBadge></td>
+<td className="py-2 whitespace-nowrap">{index + 1}</td>
+<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.administration_route ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.dilution_volume ?? "—"}</td>
+<td className="py-2 whitespace-nowrap text-right"><StatusBadge>{item.drug_role || "ORDERED"}</StatusBadge></td>
+</tr>
+))
+)}
+</tbody>
+</table>
+</div>
+</div>
+<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden">
+<div className="px-5 py-4 border-b border-[#e2e8f0] flex items-center text-emerald-600">
+<i className="fa-solid fa-heart-pulse mr-2"></i>
+<h4 className="text-sm font-bold">Supportive Medicines</h4>
+</div>
+<div className="p-5">
+<table className="w-full text-left text-sm">
+<thead>
+<tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
+<th className="pb-2 font-semibold w-8">#</th>
+<th className="pb-2 font-semibold">DRUG</th>
+<th className="pb-2 font-semibold">DOSE</th>
+<th className="pb-2 font-semibold">ROUTE</th>
+<th className="pb-2 font-semibold">TIMING</th>
+<th className="pb-2 font-semibold text-right">STATUS</th>
+</tr>
+</thead>
+<tbody>
+{supportiveItems.length === 0 ? (
+<tr>
+<td colSpan={6} className="py-6 text-center text-xs text-[#64748b]">No supportive medicines found.</td>
+</tr>
+) : (
+supportiveItems.map((item, index) => (
+<tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
+<td className="py-2 whitespace-nowrap">{index + 1}</td>
+<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.administration_route ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.frequency ?? item.remarks ?? "—"}</td>
+<td className="py-2 whitespace-nowrap text-right"><StatusBadge>{item.drug_role || "SUPPORTIVE"}</StatusBadge></td>
 </tr>
 ))
 )}
@@ -2149,7 +2670,7 @@ orderDischargeMeds.map((item, index) => (
 </div>
 </div>
 </div>
-</div>
+{/* END: Medication Orders Row */}
 {/* END: Bottom Grid */}
 {/* BEGIN: Instructions Card */}
 <div className="mt-6 bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-6 flex justify-between items-start">
@@ -2222,7 +2743,7 @@ const HistoryDashboard: React.FC<{
   const [cycleDetails, setCycleDetails] = useState<ChemoCycleDetail[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
-  const [notifOpen, setNotifOpen] = useState(false);
+
 
   /* Real treatment history for THIS selected patient:
      latest chemo plan (GET /chemotherapy/plans?patient_id=) plus
@@ -2477,7 +2998,7 @@ const HistoryDashboard: React.FC<{
       )}
 
       {/* TIMELINE + RIGHT COLUMN */}
-      <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6 bg-slate-50/50">
+      <div className="p-6 grid lg:grid-cols-3 gap-6 bg-slate-50/50">
         {/* LEFT */}
         <div className="lg:col-span-2">
           <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
@@ -2981,33 +3502,7 @@ const HistoryDashboard: React.FC<{
           
 
           <div className="flex items-center gap-6">
-            <div className="relative">
-              <button
-                type="button"
-                aria-label="Notifications"
-                onClick={() => setNotifOpen((v) => !v)}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]"
-              >
-                <i className="fa-regular fa-bell text-lg" />
-              </button>
-
-              <div className="absolute -top-1 -right-1 w-2 h-2 bg-[#003ec7] rounded-full border border-white" />
-
-              {notifOpen && (
-                <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-                  <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-                    <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]">Mark all as read</button>
-                      <button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40">Clear all</button>
-                    </div>
-                  </header>
-                  <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-                    <p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
-                  </main>
-                </div>
-              )}
-            </div>
+            <BellNotificationButton size="md" />
 
             <span className="text-blue-600 font-semibold text-sm">
               HMS
@@ -3075,25 +3570,36 @@ function DischargeDetailsPortal({
   const [planPreviewError, setPlanPreviewError] = useState("");
   const [patient, setPatient] = useState<PatientRecord | null>(null);
   const [dischargePlan, setDischargePlan] = useState<SummaryPlan | null>(null);
-  const [notifOpen, setNotifOpen] = useState(false);
-  const [latestVitals, setLatestVitals] = useState<ChemoVitalsEntry | null>(
-    null
-  );
-  const [reactionCount, setReactionCount] = useState(0);
+
+
+  /* Latest vitals (encounter + chemo merged, one shared fetch set)
+     - also supplies the drug-reaction count for this portal.
+     Re-runs when the branch selection changes so scoped fallbacks and
+     the chemo chain pick up the new x-branch-id header. */
+  const { selectedBranchId } = useBranchFilter();
+  const {
+    latestEncounter,
+    latestChemoVitals,
+    adverseEventCount: reactionCount,
+    vitals: mergedVitals,
+    vitalEntries,
+    lastCheckedLabel,
+    scopeHint,
+  } = useLatestPatientVitals(patientId, selectedBranchId);
+  const [dischargeAllergies, setDischargeAllergies] = useState<
+    PatientAllergyRecord[]
+  >([]);
 
   // Recent details for THIS selected patient via
   // /chemotherapy/plans/preview?staging_detail_id=<latest staging detail>.
-  // Also loads the live patient record (api/patient.api), the saved
-  // chemotherapy plan and the most recent cycle's recorded vitals +
-  // adverse events so every panel shows REAL data.
+  // Also loads the live patient record (api/patient.api) and the saved
+  // chemotherapy plan; vitals + adverse events come from the hook above.
   useEffect(() => {
     if (!patientId) {
       setPlanPreview(null);
       setStagingDetail(null);
       setPatient(null);
       setDischargePlan(null);
-      setLatestVitals(null);
-      setReactionCount(0);
       setPlanPreviewLoading(false);
       setPlanPreviewError(
         "No patient selected. Open this page from a patient consultation to load recent details."
@@ -3114,37 +3620,10 @@ function DischargeDetailsPortal({
         /* Header falls back to staging/patient bio when unavailable. */
       });
 
-    /* Saved plan + latest cycle vitals/adverse events. */
+    /* Saved plan (intent, cycle stats, treatment status). */
     loadLatestChemoPlan(patientId)
-      .then(async (loaded) => {
-        if (cancelled) return;
-        setDischargePlan(loaded);
-        const sortedCycles = [...(loaded?.chemotherapy_cycle ?? [])].sort(
-          (a, b) =>
-            (b.actual_date ?? b.planned_date ?? "").localeCompare(
-              a.actual_date ?? a.planned_date ?? ""
-            ) || b.cycle_number - a.cycle_number
-        );
-        const newestWithId = sortedCycles.find(
-          (cycle) => cycle.chemotherapy_cycle_id
-        );
-        if (!newestWithId?.chemotherapy_cycle_id) return;
-        try {
-          const detail = await loadCycleDetail(
-            newestWithId.chemotherapy_cycle_id as string
-          );
-          if (cancelled || !detail) return;
-          const vitalsRows = (detail.chemotherapy_vitals ?? []).slice();
-          vitalsRows.sort((a, b) =>
-            (b.recorded_at ?? "").localeCompare(a.recorded_at ?? "")
-          );
-          setLatestVitals(vitalsRows[0] ?? null);
-          setReactionCount(
-            (detail.chemotherapy_adverse_event ?? []).length
-          );
-        } catch {
-          /* Vitals stay empty - panels show placeholders. */
-        }
+      .then((loaded) => {
+        if (!cancelled) setDischargePlan(loaded);
       })
       .catch(() => {
         /* Plan-dependent panels fall back to their empty states. */
@@ -3163,7 +3642,32 @@ function DischargeDetailsPortal({
     return () => {
       cancelled = true;
     };
+  }, [patientId, selectedBranchId]);
+
+  useEffect(() => {
+    if (!patientId) {
+      setDischargeAllergies([]);
+      return;
+    }
+    let cancelled = false;
+    API.get<{ success: boolean; data: PatientAllergyRecord[] }>(
+      `/clinical-details/patients/${patientId}/allergies`
+    )
+      .then((response) => {
+        if (!cancelled) setDischargeAllergies(response.data?.data ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setDischargeAllergies([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [patientId]);
+
+  const dischargeAllergyNames = dischargeAllergies
+    .map((item) => item.allergy_master?.substance_name)
+    .filter(Boolean)
+    .join(", ");
 
   const orderSummaryDiagnosis = planPreview
     ? [planPreview.cancer_type, planPreview.cancer_subtype]
@@ -3338,7 +3842,7 @@ function DischargeDetailsPortal({
     : [];
 
   const renderEntryGrid = (entries: [string, string][]) => (
-    <div className="grid grid-cols-1 gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
       {entries.map(([label, value]) => (
         <div key={label} className="rounded-lg border border-slate-100 bg-slate-50/60 p-4">
           <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
@@ -3396,26 +3900,11 @@ function DischargeDetailsPortal({
       .filter(Boolean)
       .join(" • ") || "";
 
-  const num = (value?: string | number | null) => {
-    if (value === null || value === undefined || value === "") return null;
-    const parsed = Number(value);
-    return Number.isNaN(parsed) ? null : parsed;
-  };
-
-  const bpSystolic = num(latestVitals?.blood_pressure_systolic);
-  const bpDiastolic = num(latestVitals?.blood_pressure_diastolic);
-  const headerVitalEntries: [string, string][] = [
-    ["HEIGHT", latestVitals?.height != null ? `${latestVitals.height} cm` : ""],
-    ["BP", bpSystolic != null && bpDiastolic != null ? `${bpSystolic}/${bpDiastolic}` : ""],
-    ["WEIGHT", latestVitals?.weight != null ? `${latestVitals.weight} kg` : ""],
-    ["PULSE", latestVitals?.pulse_rate != null ? `${latestVitals.pulse_rate} bpm` : ""],
-    ["BSA", latestVitals?.body_surface_area != null ? `${latestVitals.body_surface_area} m²` : ""],
-    ["TEMP", latestVitals?.body_temperature != null ? `${latestVitals.body_temperature} °C` : ""],
-    ["BMI", latestVitals?.bmi != null ? `${latestVitals.bmi}` : ""],
-    ["SPO2", latestVitals?.spo2 != null ? `${latestVitals.spo2}%` : ""],
-  ];
+  /* Vital display values come from useLatestPatientVitals above
+     (encounter first, chemo-cycle fallback per field; BSA falls back
+     to a Mosteller derivation from height & weight). */
   const headerVitals = (label: string) =>
-    headerVitalEntries.find(([key]) => key === label)?.[1] || "—";
+    vitalEntries.find(([key]) => key === label)?.[1] || "—";
 
   const intentTherapy =
     dischargePlan?.regimen_name ||
@@ -3455,49 +3944,37 @@ function DischargeDetailsPortal({
     duration: item.duration || "—",
   }));
 
-  /* Final vital signs from the most recent cycle's recorded vitals. */
+  /* Final vital signs - freshest recorded values (encounter first,
+     chemo-cycle fallback per field). */
   const vitals = [
     {
       label: "BP",
       value:
-        bpSystolic != null && bpDiastolic != null
-          ? `${bpSystolic}/${bpDiastolic}`
+        mergedVitals.bpSystolic != null && mergedVitals.bpDiastolic != null
+          ? `${mergedVitals.bpSystolic}/${mergedVitals.bpDiastolic}`
           : "—",
-      status: latestVitals?.vital_stage || "Not recorded",
+      status:
+        latestEncounter?.systolic_bp != null ||
+        latestEncounter?.diastolic_bp != null
+          ? "Recorded"
+          : latestChemoVitals?.vital_stage || "Not recorded",
     },
     {
       label: "Pulse",
-      value:
-        latestVitals?.pulse_rate != null
-          ? `${latestVitals.pulse_rate} bpm`
-          : "—",
+      value: mergedVitals.pulse != null ? `${mergedVitals.pulse} bpm` : "—",
       status: "Recorded",
     },
     {
       label: "Temp",
-      value:
-        latestVitals?.body_temperature != null
-          ? `${latestVitals.body_temperature} °C`
-          : "—",
+      value: mergedVitals.temp != null ? `${mergedVitals.temp} °C` : "—",
       status: "Recorded",
     },
     {
       label: "SpO2",
-      value: latestVitals?.spo2 != null ? `${latestVitals.spo2}%` : "—",
-      status: latestVitals?.oxygen_support ? "On Support" : "Room Air",
+      value: mergedVitals.spo2 != null ? `${mergedVitals.spo2}%` : "—",
+      status: latestChemoVitals?.oxygen_support ? "On Support" : "Room Air",
     },
   ];
-
-  const lastCheckedLabel = (() => {
-    if (!latestVitals?.recorded_at) return "";
-    const d = new Date(latestVitals.recorded_at);
-    if (Number.isNaN(d.getTime())) return "";
-    let hours = d.getHours();
-    const minutes = String(d.getMinutes()).padStart(2, "0");
-    const meridiem = hours >= 12 ? "PM" : "AM";
-    hours = hours % 12 || 12;
-    return `Last checked: ${String(hours).padStart(2, "0")}:${minutes} ${meridiem}`;
-  })();
 
   /* Cycle stats computed from the saved plan + its cycles. */
   const allDischargeCycles = dischargePlan?.chemotherapy_cycle ?? [];
@@ -3555,31 +4032,7 @@ function DischargeDetailsPortal({
 
 </div>
 <div className="flex items-center space-x-6">
-<div className="relative">
-<button
-type="button"
-aria-label="Notifications"
-onClick={() => setNotifOpen((v) => !v)}
-className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]"
->
-<i className="fa-regular fa-bell text-xl"></i>
-<span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-[#003ec7]"></span>
-</button>
-{notifOpen && (
-<div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-<header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-<h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
-<div className="flex shrink-0 items-center gap-3">
-<button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]">Mark all as read</button>
-<button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40">Clear all</button>
-</div>
-</header>
-<main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-<p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
-</main>
-</div>
-)}
-</div>
+<BellNotificationButton size="md" />
 <div className="flex items-center space-x-3 cursor-pointer pl-6 border-l border-[#e2e8f0]">
 <span className="text-sm font-bold text-[#1d4ed8]">HMS</span>
 <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white">
@@ -3668,6 +4121,20 @@ className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text
 </div>
 </div>
 {/* END: Patient Header Card */}
+{/* BEGIN: Alerts Banner */}
+<div className="flex items-center justify-between text-sm mb-8 border-b border-[#e2e8f0] pb-4">
+<div className="flex items-center space-x-8">
+<div className="flex items-center">
+<i className="fa-solid fa-triangle-exclamation text-[#ef4444] mr-2"></i>
+<span className="text-[#ef4444] font-semibold">Allergy:</span> <span className="ml-1 text-[#1e293b]">{dischargeAllergyNames || "—"}</span>
+</div>
+<div className="flex items-center">
+<i className="fa-solid fa-clock-rotate-left text-[#f59e0b] mr-2"></i>
+<span className="text-[#f59e0b] font-semibold">Previous Cycle:</span> <span className="ml-1 text-[#1e293b]">{dischargePlan?.completed_cycles ? `Cycle ${dischargePlan.completed_cycles} completed` : "—"}</span>
+</div>
+</div>
+</div>
+{/* END: Alerts Banner */}
 {/* BEGIN: Tabs */}
 <div className="border-b border-[#e2e8f0] mb-6">
 <nav className="flex space-x-8">
@@ -3682,6 +4149,14 @@ return (
 </nav>
 </div>
 {/* END: Tabs */}
+{/* BEGIN: Branch scope hint */}
+{scopeHint && (
+<div className="mb-6 flex items-center rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+<i className="fa-solid fa-triangle-exclamation mr-2"></i> Multiple branches assigned — select your branch to load plan, discharge &amp; appointment details:
+<InlineBranchPicker />
+</div>
+)}
+{/* END: Branch scope hint */}
 
 
           
@@ -3741,7 +4216,7 @@ return (
             )}
           </div>
           ) : (
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+          <div className="grid gap-6 xl:grid-cols-3">
             {/* ===================================================
                 LEFT COLUMN
             ==================================================== */}
@@ -3843,7 +4318,7 @@ return (
                       Treatment Cycle Stats
                     </h4>
 
-                    <div className="grid grid-cols-2 gap-y-4">
+                    <div className="grid gap-y-4 sm:grid-cols-2">
                       {/* Planned */}
                       <div>
                         <p className="mb-1 text-xs text-gray-500">
@@ -4008,7 +4483,7 @@ return (
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
                   {vitals.map((vital) => (
                     <div
                       key={vital.label}
@@ -4090,7 +4565,7 @@ const PatientNotesDocuments: React.FC<{
   const [labTab, setLabTab] = useState("Chemistry");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [notifOpen, setNotifOpen] = useState(false);
+
   const [notesPlan, setNotesPlan] = useState<SummaryPlan | null>(null);
   const [notesAllergies, setNotesAllergies] = useState<PatientAllergyRecord[]>(
     []
@@ -4220,7 +4695,7 @@ const PatientNotesDocuments: React.FC<{
           {/* =================================================
               SUMMARY CARDS
           ================================================== */}
-          <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div className="mb-8 grid gap-4 md:grid-cols-4">
 
             {/* Total Notes */}
             <div className="flex items-center rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -4341,7 +4816,7 @@ const PatientNotesDocuments: React.FC<{
               </button>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-3">
               {documents.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-400 md:col-span-3">
                   No documents uploaded for this patient yet. Use the upload
@@ -4679,33 +5154,7 @@ const PatientNotesDocuments: React.FC<{
           {/* Header Actions */}
           <div className="flex items-center space-x-4">
             {/* Notification */}
-            <div className="relative">
-              <button
-                type="button"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656]"
-                aria-label="Notifications"
-                onClick={() => setNotifOpen((v) => !v)}
-              >
-                <i className="fa-regular fa-bell" />
-
-                <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-[#003ec7] ring-2 ring-white" />
-              </button>
-
-              {notifOpen && (
-                <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-                  <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-                    <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]">Mark all as read</button>
-                      <button type="button" className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40">Clear all</button>
-                    </div>
-                  </header>
-                  <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-                    <p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
-                  </main>
-                </div>
-              )}
-            </div>
+            <BellNotificationButton size="md" />
 
             {/* HMS */}
             <span className="rounded bg-blue-50 px-2 py-1 text-sm font-medium text-blue-600">
@@ -4776,9 +5225,44 @@ const PatientNotesDocuments: React.FC<{
   );
 };
 
+/* Compact branch dropdown for the full-screen portals. They render
+   OUTSIDE AppLayout, so the header BranchSelector isn't available and
+   multi-branch users would otherwise 403 on every scoped call with no
+   way to pick a branch on-page. Uses the real selectBranch, so the
+   localStorage key and the axios x-branch-id header stay in sync with
+   the rest of the app. */
+function InlineBranchPicker() {
+  const { branches, loading, selectedBranchId, selectBranch } =
+    useBranchFilter();
+  const hasSelection =
+    !!selectedBranchId &&
+    selectedBranchId !== ALL_BRANCHES_VALUE &&
+    selectedBranchId !== NO_BRANCH_VALUE;
+  return (
+    <select
+      value={hasSelection ? selectedBranchId : ""}
+      disabled={loading}
+      onChange={(event) => selectBranch(event.target.value)}
+      className="ml-2 rounded-md border border-amber-300 bg-white px-2 py-1 text-xs font-semibold text-[#1e293b] focus:outline-none"
+    >
+      {!hasSelection && <option value="">Select branch…</option>}
+      {branches.map((branch) => (
+        <option key={branch.id} value={branch.id}>
+          {branch.name}
+          {branch.area && branch.area !== "N/A" ? ` – ${branch.area}` : ""}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 const PatientDetails: React.FC = () => {
   const navigate = useNavigate();
-  return <HMSPatientPortal onBack={() => navigate(-1)} />;
+  return (
+    <BranchFilterProvider>
+      <HMSPatientPortal onBack={() => navigate(-1)} />
+    </BranchFilterProvider>
+  );
 };
 
 export default PatientDetails;

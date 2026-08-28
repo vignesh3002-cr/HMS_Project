@@ -153,6 +153,21 @@ export const encounterApi = {
       `/encounters/by-appointment/${appointmentId}`,
     ),
 
+  /**
+   * Newest-first encounters for a patient (GET /encounters/latest).
+   * Branch-independent on the backend - access is resolved from the
+   * caller's active branch mappings, so this works for multi-branch
+   * staff even when no branch is selected.
+   */
+  getLatest: (patientId: string, limit?: number) =>
+    API.get<{
+      success: boolean;
+      message: string;
+      data: { encounters: EncounterRecord[] };
+    }>("/encounters/latest", {
+      params: { patientId, ...(limit ? { limit } : {}) },
+    }),
+
   update: (encounterNo: string, data: Partial<EncounterRecord>) =>
     API.put<{ success: boolean; message: string; data: EncounterRecord }>(
       `/encounters/${encounterNo}`,

@@ -74,6 +74,7 @@ export interface DashboardAppointment {
     patient_middle_name?: string | null;
     patient_last_name?: string | null;
     patient_primary_mobile?: string | null;
+    patient_photo_url?: string | null;
   } | null;
   employees?: {
     employee_id?: string;

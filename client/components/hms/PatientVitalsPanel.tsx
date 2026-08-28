@@ -206,12 +206,11 @@ export default function PatientVitalsPanel({ patientId }: { patientId?: string }
     let cancelled = false;
     setLoading(true);
     encounterApi
-      .getAll({ patientId, limit: 100 })
+      .getLatest(patientId, 10)
       .then((res) => {
         if (cancelled) return;
-        const rows = [...(res.data?.data?.encounters ?? [])].sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
+        // /encounters/latest already returns newest-first records.
+        const rows = res.data?.data?.encounters ?? [];
         setEncounters(rows);
         setSelectedKey(rows[0]?.encounter_no ?? "");
       })

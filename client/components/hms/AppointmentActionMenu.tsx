@@ -11,10 +11,12 @@ interface AppointmentActionMenuProps {
   onCancel: () => void;
   onCheckIn: () => void;
   onCheckOut: () => void;
-  vitalsOpen: boolean;
-  onVitalsOpenChange: (open: boolean) => void;
+  /** Fired after the vitals popover saved successfully so parents can refresh. */
+  onVitalsSaved?: () => void;
   appointmentId?: string;
   patientId?: string;
+  /** ISO date string of the appointment, e.g. "2025-08-27". Used to hide Check In on non-today dates. */
+  appointmentDateISO?: string;
 }
 
 export function AppointmentActionMenu({
@@ -24,12 +26,15 @@ export function AppointmentActionMenu({
   onCancel,
   onCheckIn,
   onCheckOut,
-  vitalsOpen,
-  onVitalsOpenChange,
+  onVitalsSaved,
   appointmentId,
   patientId,
+  appointmentDateISO,
 }: AppointmentActionMenuProps) {
   const { can } = usePermission();
+  // Per-row open state: every menu owns its own popover instance, so opening
+  // Vitals on one appointment can never bleed into another row's overlay.
+  const [vitalsOpen, setVitalsOpen] = useState(false);
 
   if (!can("appointment.read") && !can("appointment.update") && !can("appointment.cancel")) {
     return null;
@@ -37,7 +42,26 @@ export function AppointmentActionMenu({
 
   const normalizedStatus = status.toLowerCase().replace(/_/g, " ").trim();
   const isCancelled = normalizedStatus === "cancelled";
+  const isCompleted = normalizedStatus === "completed";
   const isScheduled = normalizedStatus === "scheduled";
+  
+  // Check if appointment date is today (local)
+  const isAppointmentToday = (() => {
+    if (!appointmentDateISO) return true; // fallback to previous behavior if no date provided
+    try {
+      const apptDate = new Date(appointmentDateISO);
+      const today = new Date();
+      return (
+        apptDate.getFullYear() === today.getFullYear() &&
+        apptDate.getMonth() === today.getMonth() &&
+        apptDate.getDate() === today.getDate()
+      );
+    } catch {
+      return true;
+    }
+  })();
+
+  const canCheckIn = (isScheduled || normalizedStatus === "rescheduled") && isAppointmentToday && !isCompleted;
   const isCheckIn =
     normalizedStatus === "checked in" ||
     normalizedStatus === "check in" ||
@@ -69,7 +93,7 @@ export function AppointmentActionMenu({
               View Appointment
             </DropdownMenuItem>
           )}
-          {can("appointment.update") && !isCancelled && (
+          {can("appointment.update") && !isCancelled && !isCompleted && (
             <DropdownMenuItem
               onSelect={() => onEdit()}
               className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-[#374151] focus:bg-[#F2F4F6]"
@@ -77,7 +101,7 @@ export function AppointmentActionMenu({
               Edit Appointment
             </DropdownMenuItem>
           )}
-          {can("appointment.update") && isScheduled && (
+          {can("appointment.update") && canCheckIn && (
             <DropdownMenuItem
               onSelect={() => onCheckIn()}
               className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-green-600 focus:bg-green-50"
@@ -85,7 +109,7 @@ export function AppointmentActionMenu({
               Check In
             </DropdownMenuItem>
           )}
-          {can("appointment.update") && isCheckIn && (
+          {can("appointment.update") && isCheckIn && !isCompleted && (
             <DropdownMenuItem
               onSelect={() => onCheckOut()}
               className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-blue-600 focus:bg-blue-50"
@@ -93,15 +117,15 @@ export function AppointmentActionMenu({
               Check Out
             </DropdownMenuItem>
           )}
-          {can("appointment.read") && isInConsultation && (
+          {can("appointment.read") && isInConsultation && !isCompleted && (
             <DropdownMenuItem
-              onSelect={() => onVitalsOpenChange(true)}
+              onSelect={() => setVitalsOpen(true)}
               className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-purple-600 focus:bg-purple-50"
             >
               Vitals
             </DropdownMenuItem>
           )}
-          {can("appointment.cancel") && !isCancelled && (
+          {can("appointment.cancel") && !isCancelled && !isCompleted && (
             <DropdownMenuItem
               onSelect={() => onCancel()}
               className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-red-600 focus:bg-red-50"
@@ -114,9 +138,10 @@ export function AppointmentActionMenu({
 
       <VitalsSignsPopover
         open={vitalsOpen}
-        onOpenChange={onVitalsOpenChange}
+        onOpenChange={setVitalsOpen}
         appointmentId={appointmentId}
         patientId={patientId}
+        onSaved={onVitalsSaved}
       />
     </>
   );

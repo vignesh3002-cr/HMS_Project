@@ -11,6 +11,7 @@ import {
   Loader2,
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
+import { getDepartmentColors } from "@/components/hms/DepartmentBadge";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import CalendarPicker from "@/components/hms/Calender";
@@ -42,6 +43,7 @@ interface Appointment {
   patientId: string;
   patientInitial: string;
   avatarColor: string;
+  avatarBg: string;
   branch: string;
   
   doctor: string;
@@ -51,6 +53,7 @@ interface Appointment {
   time: string;
   sortDate: number;
   status: string;
+  appointmentDateISO?: string;
 }
 
 
@@ -70,14 +73,6 @@ const STATUS_LABELS: Record<string, string> = {
   RESCHEDULE_REQUIRED: "Reschedule Required",
   TRANSFER_REVIEW_REQUIRED: "Transfer Review Required",
 };
-
-const APPOINTMENT_AVATAR_COLORS = [
-  "bg-blue-100 text-blue-600",
-  "bg-green-100 text-green-600",
-  "bg-amber-100 text-amber-600",
-  "bg-purple-100 text-purple-600",
-  "bg-rose-100 text-rose-600",
-];
 
 function getInitials(name: string): string {
   const words = name.replace(/^Dr\.?\s*/i, "").trim().split(/\s+/).filter(Boolean);
@@ -131,6 +126,8 @@ function formatAppointmentTimeConditional(record: Appointment): string {
 function mapAppointmentRecord(record: AppointmentRecord, index: number): Appointment {
   const patientName = formatPatientName(record.patient_bio_data);
   const doctorName = formatDoctorName(record.employees);
+  const deptName = record.department_master?.department_name ?? record.department ?? null;
+  const { bg: deptBg, text: deptColor } = getDepartmentColors(deptName);
 
   const dateMs = new Date(record.appointment_date).getTime();
   const timeMs = new Date(record.appointment_time).getTime();
@@ -145,7 +142,8 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
     patient: patientName,
     patientId: record.patient_id,
     patientInitial: getInitials(patientName),
-    avatarColor: APPOINTMENT_AVATAR_COLORS[index % APPOINTMENT_AVATAR_COLORS.length],
+    avatarColor: deptColor,
+    avatarBg: deptBg,
     branch: record.branch?.branch_name ?? "—",
     doctor: doctorName,
     doctorId: record.employee_id ?? "—",
@@ -154,6 +152,7 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
     time: formatAppointmentTime(record.appointment_time),
     sortDate,
     status: STATUS_LABELS[record.status ?? ""] ?? (record.status || "Unknown"),
+    appointmentDateISO: record.appointment_date,
   };
 }
 
@@ -205,14 +204,10 @@ const AppointmentSchedule: React.FC = () => {
 
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
   const [cancelReason, setCancelReason] = useState("");
-  const currentUser = getUser();
-  const [cancelledBy, setCancelledBy] = useState(currentUser?.employee_id || "");
   const [isCancelling, setIsCancelling] = useState(false);
-  const [vitalsOpen, setVitalsOpen] = useState(false);
 
   const handleCancelAppointment = (target: Appointment) => {
     setCancelReason("");
-    setCancelledBy(currentUser?.employee_id || "");
     setCancelTarget(target);
   };
 
@@ -224,14 +219,13 @@ const AppointmentSchedule: React.FC = () => {
       return;
     }
 
-    if (!cancelledBy.trim()) {
-      toast({ title: "Cancelled by (Employee ID) is required", variant: "destructive" });
-      return;
-    }
-
     setIsCancelling(true);
     try {
-      const res = await appointmentApi.cancel(cancelTarget.id, cancelReason.trim(), cancelledBy.trim());
+      const res = await appointmentApi.cancel(
+        cancelTarget.id,
+        cancelReason.trim(),
+        getUser()?.employee_id ?? "",
+      );
       const cancelled = res.data?.data;
       setAppointments((prev) =>
         prev.map((appt) =>
@@ -248,7 +242,6 @@ const AppointmentSchedule: React.FC = () => {
       });
       setCancelTarget(null);
       setCancelReason("");
-      setCancelledBy(currentUser?.employee_id || "");
     } catch (err: any) {
       console.error("[Appointments Page] Cancel error:", err);
       toast({
@@ -676,14 +669,14 @@ const AppointmentSchedule: React.FC = () => {
                   )},
                   { key: "patient", label: "Patient", className: "!whitespace-normal", render: (r: Appointment) => (
                     <div className="flex items-center gap-2">
-                      <div className={`w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0 ${r.avatarColor}`}>{r.patientInitial}</div>
+                      <div className="w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0" style={{ backgroundColor: r.avatarBg, color: r.avatarColor }}>{r.patientInitial}</div>
                       <div><div className="hms-name-text capitalize">{r.patient}</div><div className="hms-id-text">{r.patientId}</div></div>
                     </div>
                   )},
                   { key: "branch", label: "Branch", className: "!whitespace-normal", render: (r: Appointment) => <span className="hms-content-text text-[#191C1E]">{r.branch}</span> },
                   { key: "doctor", label: "Doctor", className: "!whitespace-normal", render: (r: Appointment) => (
                     <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center hms-avatar-text shrink-0">{r.doctorInitial}</div>
+                      <div className="w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0" style={{ backgroundColor: r.avatarBg, color: r.avatarColor }}>{r.doctorInitial}</div>
                       <div><div className="hms-name-text capitalize">{r.doctor}</div><div className="hms-id-text">{r.doctorId}</div></div>
                     </div>
                   )},
@@ -696,13 +689,13 @@ const AppointmentSchedule: React.FC = () => {
                   { key: "actions", label: "Action", sortable: false, className: "w-px !whitespace-normal !pl-3", headerClassName: "w-px !pl-3", render: (r: Appointment) => (
                     <AppointmentActionMenu
                       status={r.status}
+                      appointmentDateISO={r.appointmentDateISO}
                       onView={() => navigate(`/appointments/view/${r.id}`)}
                       onEdit={() => navigate(`/appointments/edit/${r.id}`)}
                       onCancel={() => handleCancelAppointment(r)}
                       onCheckIn={() => handleCheckIn(r)}
                       onCheckOut={() => handleCheckOut(r)}
-                      vitalsOpen={vitalsOpen}
-                      onVitalsOpenChange={setVitalsOpen}
+                      onVitalsSaved={fetchAppointments}
                       appointmentId={r.id}
                       patientId={r.patientId}
                     />
@@ -752,16 +745,6 @@ const AppointmentSchedule: React.FC = () => {
             rows={3}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
           />
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Cancelled By (Employee ID) *</label>
-            <input
-              type="text"
-              value={cancelledBy}
-              onChange={(e) => setCancelledBy(e.target.value)}
-              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-              placeholder="Enter your Employee ID"
-            />
-          </div>
         </div>
       </ConfirmationDialog>
     </div>

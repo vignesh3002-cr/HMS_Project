@@ -20,6 +20,8 @@ import {
 import { AppLayout } from "@/components/layout/AppLayout";
 import DoctorLayout from "@/components/layout/DoctorLayout";
 import { PermissionProvider } from "@/context/PermissionContext";
+import { NotificationProvider } from "@/context/NotificationContext";
+import { getToken, getUser } from "@/utils/token";
 
 // ============================================================
 // FORMS
@@ -100,7 +102,6 @@ import {
   useLocation,
 } from "react-router-dom";
 
-import { getToken, getUser } from "./utils/token";
 import { LoadingScreen } from "./components/skeletons/LoadingScreen";
 
 // ============================================================
@@ -453,8 +454,9 @@ const App = () => (
       <BrowserRouter>
 
         <PermissionProvider>
+          <NotificationProvider employeeId={getUser()?.employee_id ?? null}>
 
-          <RememberMeCheck />
+            <RememberMeCheck />
 
           <Routes>
 
@@ -620,7 +622,8 @@ const App = () => (
 
           </Routes>
 
-        </PermissionProvider>
+        </NotificationProvider>
+      </PermissionProvider>
 
       </BrowserRouter>
 

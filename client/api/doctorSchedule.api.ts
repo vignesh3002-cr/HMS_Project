@@ -47,14 +47,14 @@ export const doctorScheduleApi = {
       data,
     ),
 
-  updateChange: (changeId: string, data: UpdateScheduleChangePayload) =>
-    API.put<{ success?: boolean; message?: string; data?: ScheduleChangeRecord }>(
+updateChange: (changeId: string, data: UpdateScheduleChangePayload) =>
+    API.patch<{ success?: boolean; message?: string; data?: ScheduleChangeRecord }>(
       `/doctor-schedule/change/${changeId}`,
       data,
     ),
 
   cancelChange: (changeId: string) =>
-    API.post<{ success?: boolean; message?: string; data?: ScheduleChangeRecord }>(
+    API.patch<{ success?: boolean; message?: string; data?: ScheduleChangeRecord }>(
       `/doctor-schedule/change/${changeId}/cancel`,
     ),
 };

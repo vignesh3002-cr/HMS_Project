@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
 import { CalendarDays, CheckCircle2, Loader2 } from "lucide-react";
 import API from "@/api/axios";
+import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import {
   doctorLeaveApi,
   type ApplyDoctorLeavePayload,
@@ -436,6 +437,7 @@ const AbsenceManagement: React.FC = () => {
         leave_start_date: isoStart,
         leave_end_date: isoEnd,
         leave_reason: leaveReason,
+        leave_type: selectedType,
         requested_by: getUser()?.user_id ?? "",
       };
 
@@ -646,24 +648,7 @@ const AbsenceManagement: React.FC = () => {
 
             <div className="flex items-center gap-4">
 
-              <button
-                type="button"
-                aria-label="Notifications"
-                onClick={() =>
-                  showToast(
-                    "No new notifications."
-                  )
-                }
-                className="flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-[#f5f6f8]"
-              >
-
-                <img
-                  src="https://www.figma.com/api/mcp/asset/8a71a457-9707-42bc-90f5-6f1380855c99.svg"
-                  alt=""
-                  className="h-5 w-4"
-                />
-
-              </button>
+              <BellNotificationButton size="md" />
 
 
               <div className="h-8 w-px bg-[#c3c6d6]" />

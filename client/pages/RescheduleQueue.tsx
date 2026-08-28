@@ -17,6 +17,7 @@ import {
   doctorTransferApi,
   RescheduleQueueEntry,
 } from "@/api/doctorTransfer.api";
+import { doctorLeaveApi, DoctorLeaveRecord, LeaveStatus } from "@/api/doctorLeave.api";
 import { branchApi, Branch } from "@/api/branch.api";
 import { employeeApi, EmployeeRecord, DoctorScheduleRecord } from "@/api/employee.api";
 import { buttonVariants } from "@/components/ui/button";
@@ -162,6 +163,26 @@ export default function RescheduleQueue() {
   const [processing, setProcessing] = useState(false);
   const [autoCancelling, setAutoCancelling] = useState(false);
 
+  // View mode toggle
+  const [viewMode, setViewMode] = useState<"transfer" | "leave">("transfer");
+
+  // Leave queue state
+  const [leaveEntries, setLeaveEntries] = useState<DoctorLeaveRecord[]>([]);
+  const [leaveTotal, setLeaveTotal] = useState(0);
+  const [leaveTotalPages, setLeaveTotalPages] = useState(1);
+  const [leavePage, setLeavePage] = useState(1);
+  const [leaveStatusFilter, setLeaveStatusFilter] = useState<LeaveStatus | "">("");
+  const [leaveBranchFilter, setLeaveBranchFilter] = useState("");
+  const [approveDialogOpen, setApproveDialogOpen] = useState(false);
+  const [approveTarget, setApproveTarget] = useState<DoctorLeaveRecord | null>(null);
+  const [approveRemarks, setApproveRemarks] = useState("");
+  const [declineDialogOpen, setDeclineDialogOpen] = useState(false);
+  const [declineTarget, setDeclineTarget] = useState<DoctorLeaveRecord | null>(null);
+  const [declineRemarks, setDeclineRemarks] = useState("");
+  const [leaveConflicts, setLeaveConflicts] = useState<any[]>([]);
+  const [leaveConflictDialogOpen, setLeaveConflictDialogOpen] = useState(false);
+  const [pendingApprove, setPendingApprove] = useState<DoctorLeaveRecord | null>(null);
+
   useEffect(() => {
     const user = getUser();
     const role = (user?.role_type || user?.role || "").toUpperCase();
@@ -262,9 +283,37 @@ export default function RescheduleQueue() {
     }
   }, [statusFilter, branchFilter, page, toast]);
 
+  const fetchLeaves = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await doctorLeaveApi.getAll({
+        status: leaveStatusFilter || undefined,
+        page: leavePage,
+        limit: PAGE_SIZE,
+      });
+      setLeaveEntries(res.data.leaves || []);
+      setLeaveTotal(res.data.total ?? 0);
+      setLeaveTotalPages(res.data.totalPages ?? 1);
+    } catch (err: any) {
+      toast({
+        title: "Failed to load leave requests",
+        description: err?.response?.data?.message || err?.message || "Something went wrong",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [leaveStatusFilter, leavePage, toast]);
+
   useEffect(() => {
     if (roleOk) fetchQueue();
   }, [roleOk, fetchQueue]);
+
+  useEffect(() => {
+    if (roleOk && viewMode === "leave") {
+      fetchLeaves();
+    }
+  }, [roleOk, viewMode, fetchLeaves]);
 
   // Auto-cancel queue entries whose appointment date has already passed
   // (the original date for PENDING, the assigned date for ASSIGNED) -- a
@@ -414,6 +463,11 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
       return name.includes(q) || mobile.includes(q) || pid.includes(q);
     });
   }, [entries, search]);
+
+  const filteredLeaves = useMemo(() => {
+    if (!leaveBranchFilter) return leaveEntries;
+    return leaveEntries.filter((l) => l.branch_id === leaveBranchFilter);
+  }, [leaveEntries, leaveBranchFilter]);
 
   // Compute doctor appointment counts from queue entries (frontend-only load balancing)
   const doctorQueueCounts = useMemo(() => {
@@ -626,6 +680,100 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
     }
   };
 
+  const handleApproveLeave = async (queueForReschedule = false) => {
+    if (!approveTarget) return;
+    const user = getUser();
+    const approvedBy = user?.user_id || user?.employee_id || "";
+    if (!approvedBy) {
+      toast({ title: "Unable to determine approver", variant: "destructive" });
+      return;
+    }
+    setProcessing(true);
+    try {
+      await doctorLeaveApi.approve(approveTarget.leave_id, {
+        approved_by: approvedBy,
+        remarks: approveRemarks.trim() || undefined,
+      });
+      if (queueForReschedule) {
+        const priority = (approveTarget.leave_type === "Emergency") ? "HIGH" : "NORMAL";
+        await doctorLeaveApi.queueReschedule(approveTarget.employee_id, {
+          date_from: approveTarget.leave_start_date,
+          date_to: approveTarget.leave_end_date,
+          reason: `Leave approved: ${approveTarget.leave_reason}`,
+          priority,
+        });
+      }
+      toast({ title: "Leave approved", description: queueForReschedule ? "Appointments queued for reschedule" : "Leave approved" });
+      setApproveDialogOpen(false);
+      setApproveTarget(null);
+      setApproveRemarks("");
+      setLeaveConflictDialogOpen(false);
+      setPendingApprove(null);
+      fetchLeaves();
+    } catch (err: any) {
+      toast({
+        title: "Failed to approve leave",
+        description: err?.response?.data?.message || err?.message || "Something went wrong",
+        variant: "destructive",
+      });
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleDeclineLeave = async () => {
+    if (!declineTarget || !declineRemarks.trim()) {
+      toast({ title: "Remarks are required to decline", variant: "destructive" });
+      return;
+    }
+    const user = getUser();
+    const rejectedBy = user?.user_id || user?.employee_id || "";
+    if (!rejectedBy) {
+      toast({ title: "Unable to determine rejector", variant: "destructive" });
+      return;
+    }
+    setProcessing(true);
+    try {
+      await doctorLeaveApi.reject(declineTarget.leave_id, {
+        rejected_by: rejectedBy,
+        remarks: declineRemarks.trim(),
+      });
+      toast({ title: "Leave declined", description: "Leave request has been rejected" });
+      setDeclineDialogOpen(false);
+      setDeclineTarget(null);
+      setDeclineRemarks("");
+      fetchLeaves();
+    } catch (err: any) {
+      toast({
+        title: "Failed to decline leave",
+        description: err?.response?.data?.message || err?.message || "Something went wrong",
+        variant: "destructive",
+      });
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const openApproveLeave = async (leave: DoctorLeaveRecord) => {
+    setApproveTarget(leave);
+    setApproveRemarks(leave.remarks || "");
+    setApproveDialogOpen(true);
+    // Check conflicts
+    try {
+      const conflicts = await doctorLeaveApi.getConflicts(leave.employee_id, {
+        date_from: leave.leave_start_date,
+        date_to: leave.leave_end_date,
+      });
+      if (conflicts.data?.data?.length > 0) {
+        setLeaveConflicts(conflicts.data.data);
+        setLeaveConflictDialogOpen(true);
+        setPendingApprove(leave);
+      }
+    } catch (err) {
+      console.error("[RescheduleQueue] Conflict check failed", err);
+    }
+  };
+
   const assignDoneFooter = (
     <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
       <button
@@ -685,176 +833,351 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
 
       {/* Filters */}
       <div className="bg-white rounded-xl border border-[#E5E7EB] p-4 mb-4 flex flex-wrap items-end gap-3">
-        <div className="w-44">
-          <label className={labelCls}>Status</label>
+        <div className="w-50">
+          <label className={labelCls}>View</label>
           <FormDropdown
-            name="queue_status"
+            name="view_mode"
             className={inputCls}
-            options={STATUS_FILTERS}
-            value={statusFilter}
+            options={[
+              { label: "Appointment Transfer", value: "transfer" },
+              { label: "Leave Request", value: "leave" },
+            ]}
+            value={viewMode}
             onValueChange={(v) => {
-              setStatusFilter(v);
+              setViewMode(v as "transfer" | "leave");
               setPage(1);
+              setLeavePage(1);
             }}
-            placeholder="All status"
+            placeholder="Select view"
           />
         </div>
-        <div className="w-56">
-          <label className={labelCls}>Branch</label>
-          <FormDropdown
-            name="queue_branch"
-            className={inputCls}
-            options={branches.map((b) => ({
-              label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
-              value: b.branch_id,
-            }))}
-            value={branchFilter}
-            onValueChange={(v) => {
-              setBranchFilter(v);
-              setPage(1);
-            }}
-            placeholder="All branches"
-          />
-        </div>
-        <div className="flex-1 min-w-[200px]">
-          <label className={labelCls}>Search patient</label>
-          <input
-            type="text"
-            className={inputCls}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Name, mobile or patient ID"
-          />
-        </div>
+        {viewMode === "transfer" && (
+          <>
+            <div className="w-44">
+              <label className={labelCls}>Status</label>
+              <FormDropdown
+                name="queue_status"
+                className={inputCls}
+                options={STATUS_FILTERS}
+                value={statusFilter}
+                onValueChange={(v) => {
+                  setStatusFilter(v);
+                  setPage(1);
+                }}
+                placeholder="All status"
+              />
+            </div>
+            <div className="w-56">
+              <label className={labelCls}>Branch</label>
+              <FormDropdown
+                name="queue_branch"
+                className={inputCls}
+                options={branches.map((b) => ({
+                  label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                  value: b.branch_id,
+                }))}
+                value={branchFilter}
+                onValueChange={(v) => {
+                  setBranchFilter(v);
+                  setPage(1);
+                }}
+                placeholder="All branches"
+              />
+            </div>
+            <div className="flex-1 min-w-[200px]">
+              <label className={labelCls}>Search patient</label>
+              <input
+                type="text"
+                className={inputCls}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Name, mobile or patient ID"
+              />
+            </div>
+          </>
+        )}
+        {viewMode === "leave" && (
+          <>
+            <div className="w-44">
+              <label className={labelCls}>Status</label>
+              <FormDropdown
+                name="leave_status"
+                className={inputCls}
+                options={[
+                  { label: "All status", value: "" },
+                  { label: "Pending", value: "PENDING" },
+                  { label: "Approved", value: "APPROVED" },
+                  { label: "Rejected", value: "REJECTED" },
+                ]}
+                value={leaveStatusFilter}
+                onValueChange={(v) => {
+                  setLeaveStatusFilter(v as any);
+                  setLeavePage(1);
+                }}
+                placeholder="All status"
+              />
+            </div>
+            <div className="w-56">
+              <label className={labelCls}>Branch</label>
+              <FormDropdown
+                name="leave_branch"
+                className={inputCls}
+                options={branches.map((b) => ({
+                  label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+                  value: b.branch_id,
+                }))}
+                value={leaveBranchFilter}
+                onValueChange={(v) => {
+                  setLeaveBranchFilter(v);
+                  setLeavePage(1);
+                }}
+                placeholder="All branches"
+              />
+            </div>
+          </>
+        )}
       </div>
 
-      <div className="bg-white rounded-xl border border-[#E5E7EB] overflow-hidden">
-        <div className="px-4 py-3 border-b border-[#EEF1F4] flex items-center justify-between">
-          <span className="text-xs font-bold text-gray-600 uppercase tracking-wide">
-            Queue ({total} total)
-          </span>
-          {autoCancelling && (
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-red-600">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Auto-cancelling expired appointments…
+      {viewMode === "transfer" && (
+        <div className="bg-white rounded-xl border border-[#E5E7EB] overflow-hidden">
+          <div className="px-4 py-3 border-b border-[#EEF1F4] flex items-center justify-between">
+            <span className="text-xs font-bold text-gray-600 uppercase tracking-wide">
+              Queue ({total} total)
             </span>
+            {autoCancelling && (
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-red-600">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Auto-cancelling expired appointments…
+              </span>
+            )}
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="h-6 w-6 animate-spin text-[#00488D]" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="py-16 text-center">
+              <CalendarClock className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+              <p className="text-sm text-[#64748B]">No queue entries match the current filters.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-[#F1F5F9]">
+              {filtered.map((entry) => {
+                const patient = entry.patient_bio_data;
+                const name = [patient?.patient_first_name, patient?.patient_last_name]
+                  .filter(Boolean)
+                  .join(" ");
+                return (
+                  <div key={entry.queue_id} className="flex items-center gap-3 px-4 py-3">
+                    <div className="w-8 h-8 rounded-full bg-[#E6E8EA] flex items-center justify-center shrink-0">
+                      <UserRound className="w-4 h-4 text-[#475569]" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-[#191C1E] truncate">
+                          {name || entry.patient_id}
+                        </span>
+                        <span className="text-[11px] text-[#94A3B8] font-mono">{entry.patient_id}</span>
+                      </div>
+                      <div className="text-xs text-[#64748B] mt-0.5">
+                        {formatDate(entry.old_appointment_date)} · {formatTime(entry.old_appointment_time)}
+                        {entry.branch?.branch_name ? ` · ${entry.branch.branch_name}` : ` · ${entry.branch_id}`}
+                      </div>
+                      {entry.transfer_id && (
+                        <div className="text-[11px] text-[#94A3B8] mt-0.5">Transfer {entry.transfer_id}</div>
+                      )}
+                      {entry.status === "ASSIGNED" && (
+                        <div className="text-[11px] text-[#00488D] mt-0.5">
+                          Assigned: {doctorNameById(entry.assigned_employee_id)} ·{" "}
+                          {formatDate(entry.assigned_date)} {formatTime(entry.assigned_time)}
+                        </div>
+                      )}
+                    </div>
+                    <div className="hidden sm:flex flex-col items-end gap-1">
+                      <StatusBadge tone={PRIORITY_TONE[entry.priority] || "slate"} status={entry.priority.toLowerCase()} />
+                    </div>
+                    <StatusBadge tone={QUEUE_TONE[entry.status] || "slate"} status={entry.status.toLowerCase()} />
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {entry.status === "PENDING" && (
+                        <button
+                          onClick={() => openAssign(entry)}
+                          className="px-2 py-1 rounded bg-[#00488D] text-white text-[10px] font-semibold hover:bg-[#003A70]"
+                        >
+                          Assign slot
+                        </button>
+                      )}
+                      {entry.status === "ASSIGNED" && (
+                        <button
+                          onClick={() => {
+                            setConfirmReason("");
+                            setConfirmTarget(entry);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-semibold hover:bg-green-700"
+                        >
+                          Confirm
+                        </button>
+                      )}
+                      {(entry.status === "PENDING" || entry.status === "ASSIGNED") && (
+                        <button
+                          onClick={() => {
+                            setCancelReason("");
+                            setCancelTarget(entry);
+                          }}
+                          className="px-3 py-1.5 rounded-lg border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      {entry.status === "CONFIRMED" && (
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-600">
+                          <CheckCircle2 className="w-4 h-4" /> Rescheduled
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-[#EEF1F4]">
+              <span className="text-xs text-[#64748B]">
+                Page {page} of {totalPages}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-[#475569] disabled:opacity-40 hover:bg-[#F2F4F6]"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-[#475569] disabled:opacity-40 hover:bg-[#F2F4F6]"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
           )}
         </div>
+      )}
 
-        {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-[#00488D]" />
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="py-16 text-center">
-            <CalendarClock className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-            <p className="text-sm text-[#64748B]">No queue entries match the current filters.</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-[#F1F5F9]">
-            {filtered.map((entry) => {
-              const patient = entry.patient_bio_data;
-              const name = [patient?.patient_first_name, patient?.patient_last_name]
-                .filter(Boolean)
-                .join(" ");
-              return (
-                <div key={entry.queue_id} className="flex items-center gap-3 px-4 py-3">
-                  <div className="w-8 h-8 rounded-full bg-[#E6E8EA] flex items-center justify-center shrink-0">
-                    <UserRound className="w-4 h-4 text-[#475569]" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-[#191C1E] truncate">
-                        {name || entry.patient_id}
-                      </span>
-                      <span className="text-[11px] text-[#94A3B8] font-mono">{entry.patient_id}</span>
-                    </div>
-                    <div className="text-xs text-[#64748B] mt-0.5">
-                      {formatDate(entry.old_appointment_date)} · {formatTime(entry.old_appointment_time)}
-                      {entry.branch?.branch_name ? ` · ${entry.branch.branch_name}` : ` · ${entry.branch_id}`}
-                    </div>
-                    {entry.transfer_id && (
-                      <div className="text-[11px] text-[#94A3B8] mt-0.5">Transfer {entry.transfer_id}</div>
-                    )}
-                    {entry.status === "ASSIGNED" && (
-                      <div className="text-[11px] text-[#00488D] mt-0.5">
-                        Assigned: {doctorNameById(entry.assigned_employee_id)} ·{" "}
-                        {formatDate(entry.assigned_date)} {formatTime(entry.assigned_time)}
-                      </div>
-                    )}
-                  </div>
-                  <div className="hidden sm:flex flex-col items-end gap-1">
-                    <StatusBadge tone={PRIORITY_TONE[entry.priority] || "slate"} status={entry.priority.toLowerCase()} />
-                  </div>
-                  <StatusBadge tone={QUEUE_TONE[entry.status] || "slate"} status={entry.status.toLowerCase()} />
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {entry.status === "PENDING" && (
-                      <button
-                        onClick={() => openAssign(entry)}
-                        className="px-2 py-1 rounded bg-[#00488D] text-white text-[10px] font-semibold hover:bg-[#003A70]"
-                      >
-                        Assign slot
-                      </button>
-                    )}
-                    {entry.status === "ASSIGNED" && (
-                      <button
-                        onClick={() => {
-                          setConfirmReason("");
-                          setConfirmTarget(entry);
-                        }}
-                        className="px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-semibold hover:bg-green-700"
-                      >
-                        Confirm
-                      </button>
-                    )}
-                    {(entry.status === "PENDING" || entry.status === "ASSIGNED") && (
-                      <button
-                        onClick={() => {
-                          setCancelReason("");
-                          setCancelTarget(entry);
-                        }}
-                        className="px-3 py-1.5 rounded-lg border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50"
-                      >
-                        Cancel
-                      </button>
-                    )}
-                    {entry.status === "CONFIRMED" && (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-600">
-                        <CheckCircle2 className="w-4 h-4" /> Rescheduled
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-[#EEF1F4]">
-            <span className="text-xs text-[#64748B]">
-              Page {page} of {totalPages}
+      {viewMode === "leave" && (
+        <div className="bg-white rounded-xl border border-[#E5E7EB] overflow-hidden">
+          <div className="px-4 py-3 border-b border-[#EEF1F4] flex items-center justify-between">
+            <span className="text-xs font-bold text-gray-600 uppercase tracking-wide">
+              Leave Requests ({leaveTotal} total)
             </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
-                className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-[#475569] disabled:opacity-40 hover:bg-[#F2F4F6]"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
-                className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-[#475569] disabled:opacity-40 hover:bg-[#F2F4F6]"
-              >
-                Next
-              </button>
-            </div>
           </div>
-        )}
-      </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="h-6 w-6 animate-spin text-[#00488D]" />
+            </div>
+          ) : filteredLeaves.length === 0 ? (
+            <div className="py-16 text-center">
+              <CalendarClock className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+              <p className="text-sm text-[#64748B]">No leave requests match the current filters.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-[#F1F5F9]">
+              {filteredLeaves.map((leave) => {
+                const doctorName = doctorNameById(leave.employee_id);
+                const priorityTone = leave.leave_type === "Emergency" ? "red" : "slate";
+                const priorityLabel = leave.leave_type?.toLowerCase() || "normal";
+                const branchLabel = branchLabelOf(leave.branch_id);
+                const isPending = leave.status === "PENDING";
+                return (
+                  <div key={leave.leave_id} className="flex items-center gap-3 px-4 py-3">
+                    <div className="w-8 h-8 rounded-full bg-[#E6E8EA] flex items-center justify-center shrink-0">
+                      <UserRound className="w-4 h-4 text-[#475569]" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-[#191C1E] truncate">
+                          {doctorName || leave.employee_id}
+                        </span>
+                        <span className="text-[11px] text-[#94A3B8] font-mono">{leave.leave_id}</span>
+                      </div>
+                      <div className="text-xs text-[#64748B] mt-0.5">
+                        {formatDate(leave.leave_start_date)} - {formatDate(leave.leave_end_date)} · {branchLabel}
+                      </div>
+                      <div className="text-[11px] text-[#94A3B8] mt-0.5 truncate">Reason: {leave.leave_reason}</div>
+                    </div>
+                    <div className="hidden sm:flex flex-col items-end gap-1">
+                      <StatusBadge tone={priorityTone as any} status={priorityLabel} />
+                    </div>
+                    <StatusBadge tone={QUEUE_TONE[leave.status] || "slate"} status={leave.status.toLowerCase()} />
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {isPending && (
+                        <>
+                          <button
+                            onClick={() => openApproveLeave(leave)}
+                            className="px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-semibold hover:bg-green-700"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => {
+                              setDeclineTarget(leave);
+                              setDeclineRemarks("");
+                              setDeclineDialogOpen(true);
+                            }}
+                            className="px-3 py-1.5 rounded-lg border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50"
+                          >
+                            Decline
+                          </button>
+                        </>
+                      )}
+                      {leave.status === "APPROVED" && (
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-600">
+                          <CheckCircle2 className="w-4 h-4" /> Approved
+                        </span>
+                      )}
+                      {leave.status === "REJECTED" && (
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-600">
+                          Declined
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Pagination */}
+          {leaveTotalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-[#EEF1F4]">
+              <span className="text-xs text-[#64748B]">
+                Page {leavePage} of {leaveTotalPages}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setLeavePage((p) => Math.max(1, p - 1))}
+                  disabled={leavePage <= 1}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-[#475569] disabled:opacity-40 hover:bg-[#F2F4F6]"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setLeavePage((p) => Math.min(leaveTotalPages, p + 1))}
+                  disabled={leavePage >= leaveTotalPages}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-[#475569] disabled:opacity-40 hover:bg-[#F2F4F6]"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Assign slot dialog */}
       <ConfirmationDialog
@@ -1090,6 +1413,123 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
             value={cancelReason}
             onChange={(e) => setCancelReason(e.target.value)}
           />
+        </div>
+      </ConfirmationDialog>
+
+      {/* Approve Leave Dialog */}
+      <ConfirmationDialog
+        open={approveDialogOpen}
+        type="info"
+        title="Approve leave request"
+        description={
+          approveTarget
+            ? `Approve leave for ${doctorNameById(approveTarget.employee_id)} from ${formatDate(approveTarget.leave_start_date)} to ${formatDate(approveTarget.leave_end_date)}?`
+            : ""
+        }
+        confirmText="Approve"
+        loading={processing}
+        onConfirm={() => handleApproveLeave(false)}
+        onCancel={() => {
+          setApproveDialogOpen(false);
+          setApproveTarget(null);
+          setApproveRemarks("");
+        }}
+      >
+        <div className="w-full text-left space-y-3">
+          <div>
+            <label className={labelCls}>Remarks (optional)</label>
+            <textarea
+              rows={2}
+              className={inputCls}
+              value={approveRemarks}
+              onChange={(e) => setApproveRemarks(e.target.value)}
+              placeholder="Add remarks..."
+            />
+          </div>
+        </div>
+      </ConfirmationDialog>
+
+      {/* Decline Leave Dialog */}
+      <ConfirmationDialog
+        open={declineDialogOpen}
+        type="danger"
+        title="Decline leave request"
+        description={
+          declineTarget
+            ? `Decline leave request for ${doctorNameById(declineTarget.employee_id)}? Remarks are required.`
+            : ""
+        }
+        confirmText="Decline"
+        loading={processing}
+        onConfirm={handleDeclineLeave}
+        onCancel={() => {
+          setDeclineDialogOpen(false);
+          setDeclineTarget(null);
+          setDeclineRemarks("");
+        }}
+      >
+        <div className="w-full text-left space-y-3">
+          <div>
+            <label className={labelCls}>Remarks *</label>
+            <textarea
+              rows={2}
+              className={inputCls}
+              value={declineRemarks}
+              onChange={(e) => setDeclineRemarks(e.target.value)}
+              placeholder="Reason for decline..."
+            />
+          </div>
+        </div>
+      </ConfirmationDialog>
+
+      {/* Leave Conflict Dialog */}
+      <ConfirmationDialog
+        open={leaveConflictDialogOpen}
+        type="warning"
+        title="Conflicting appointments found"
+        description={
+          pendingApprove
+            ? `There are ${leaveConflicts.length} appointments conflicting with the leave period. You can approve anyway or approve and queue them for reschedule.`
+            : ""
+        }
+        confirmText="Approve & Queue"
+        loading={processing}
+        onConfirm={() => {
+          if (pendingApprove) {
+            handleApproveLeave(true);
+          }
+        }}
+        onCancel={() => {
+          setLeaveConflictDialogOpen(false);
+          setPendingApprove(null);
+        }}
+      >
+        <div className="w-full text-left space-y-3">
+          <div className="max-h-[200px] overflow-y-auto rounded-lg border border-[#E5E7EB]">
+            {leaveConflicts.map((c: any) => (
+              <div key={c.appointment_id} className="px-3 py-2 border-b last:border-b-0 text-xs">
+                <div className="font-medium">
+                  {c.patient_first_name} {c.patient_last_name}
+                </div>
+                <div className="text-[#64748B]">
+                  {c.appointment_date} {c.appointment_time} · {c.status}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs"
+              onClick={() => {
+                if (pendingApprove) {
+                  handleApproveLeave(false);
+                }
+              }}
+            >
+              Approve Anyway
+            </button>
+          </div>
         </div>
       </ConfirmationDialog>
     </div>

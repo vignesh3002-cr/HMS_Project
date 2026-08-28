@@ -12,15 +12,19 @@ import API, { getActiveBranchId } from "../../api/axios";
 import { employeeApi } from "../../api/employee.api";
 import { appointmentApi } from "../../api/appointment.api";
 import { getUser } from "../../utils/token";
+import { computeBmi, computeBsa } from "../../utils/vitals";
 import {
   doctorDashboardApi,
-  type DoctorNotificationItem,
 } from "../../api/doctorDashboard.api";
 import {
   patientApi,
   type PatientRecord,
 } from "../../api/patient.api";
 import {
+
+
+
+  
   encounterApi,
   type EncounterRecord,
 } from "../../api/encounter.api";
@@ -41,6 +45,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "../../components/ui/popover";
+import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import { MultiSelectDropdown } from "../../components/ui/multi-select-dropdown";
 
 const formatPickedDate = (date: Date) => {
@@ -145,6 +150,10 @@ interface MeasurementValues {
   weight: string;
   bsa: string;
   bmi: string;
+  bp: string;
+  pulse: string;
+  temp: string;
+  spo2: string;
 }
 
 const vitalNum = (
@@ -156,29 +165,53 @@ const vitalNum = (
 };
 
 const buildMeasurements = (
-  encounter: EncounterRecord | null | undefined
+  encounter: EncounterRecord | null | undefined,
+  recentEncounters: EncounterRecord[] = []
 ): MeasurementValues => {
-  const height = vitalNum(encounter?.height);
-  const weight = vitalNum(encounter?.weight);
+  const getField = (field: keyof EncounterRecord) => {
+    // Prefer active encounter
+    const activeVal = (encounter as any)?.[field];
+    if (activeVal != null && activeVal !== "") return vitalNum(activeVal);
+    // Fallback to recent encounters per-field
+    for (const enc of recentEncounters) {
+      const v = (enc as any)?.[field];
+      if (v != null && v !== "") {
+        const n = vitalNum(v);
+        if (n !== null) return n;
+      }
+    }
+    return null;
+  };
 
-  const bsa =
-    height !== null && weight !== null && height > 0 && weight > 0
-      ? Math.sqrt((height * weight) / 3600).toFixed(2)
-      : "";
+  const height = getField("height");
+  const weight = getField("weight");
+  const systolic = getField("systolic_bp");
+  const diastolic = getField("diastolic_bp");
+  const pulse = getField("pulse");
+  const temp = getField("temperature");
+  const spo2 = getField("spo2");
+  const bmiStored = getField("BMI");
 
-  const storedBmi = vitalNum(encounter?.BMI);
+  const bsaValue = computeBsa(height, weight);
   const bmi =
-    storedBmi !== null
-      ? String(storedBmi)
-      : height !== null && weight !== null && height > 0
-        ? (weight / Math.pow(height / 100, 2)).toFixed(1)
-        : "";
+    bmiStored !== null
+      ? String(bmiStored)
+      : String(computeBmi(height, weight) ?? "");
+
+  const bp =
+    systolic !== null && diastolic !== null
+      ? `${systolic}/${diastolic}`
+      : "";
 
   return {
     height: height !== null ? `${height} cm` : "",
     weight: weight !== null ? `${weight} kg` : "",
-    bsa: bsa ? `${bsa} m²` : "",
+    bsa: bsaValue !== null ? `${bsaValue} m²` : "",
     bmi,
+    bp,
+    pulse: pulse !== null ? `${pulse} bpm` : "",
+    temp: temp !== null ? `${temp} °C` : "",
+    spo2: spo2 !== null ? `${spo2}%` : "",
   };
 };
 
@@ -391,6 +424,36 @@ const Consultation: React.FC = () => {
   const [activeStep, setActiveStep] = useState("CONSULTATION");
   const [proceeding, setProceeding] = useState(false);
 
+  const STEP_ORDER = [
+    "CONSULTATION",
+    "LAB REPORT REVIEW",
+    "DIAGNOSIS",
+    "TREATMENT PLAN",
+    "CHEMOTHERAPY ORDER",
+    "DISCHARGE MEDICATION",
+    "FOLLOW UP",
+    "SUMMARY",
+  ];
+
+  const DIRECT_ACCESS_STEPS = [
+    "DISCHARGE MEDICATION",
+    "CHEMOTHERAPY ORDER",
+    "FOLLOW UP",
+    "DIAGNOSIS",
+  ];
+
+  const [completedSteps, setCompletedSteps] = useState<Set<string>>(
+    () => new Set(["CONSULTATION", "LAB REPORT REVIEW"])
+  );
+
+  const markStepCompleted = (stepName: string) => {
+    setCompletedSteps((prev) => {
+      const next = new Set(prev);
+      next.add(stepName);
+      return next;
+    });
+  };
+
   const [orderedTestIds, setOrderedTestIds] = useState<Set<string>>(
     new Set()
   );
@@ -408,6 +471,7 @@ const Consultation: React.FC = () => {
 
   const [encounter, setEncounter] = useState<EncounterRecord | null>(null);
   const [encounterError, setEncounterError] = useState("");
+  const [recentEncounters, setRecentEncounters] = useState<EncounterRecord[]>([]);
 
   const formatDateDMY = (value?: string | null) => {
     if (!value) return "";
@@ -470,7 +534,10 @@ const Consultation: React.FC = () => {
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
-    if (!patientId) return;
+    if (!patientId) {
+      setRecentEncounters([]);
+      return;
+    }
     let cancelled = false;
     setEncounterError("");
     findActiveEncounter(
@@ -498,6 +565,34 @@ const Consultation: React.FC = () => {
           setEncounterError(message);
         }
       });
+
+    // Load recent encounters for per-field vitals fallback
+    const loadRecent = async () => {
+      try {
+        const response = await encounterApi.getLatest(patientId, 10);
+        const rows = [...(response.data?.data?.encounters ?? [])].sort(
+          (a, b) =>
+            new Date(b.created_at ?? 0).getTime() -
+            new Date(a.created_at ?? 0).getTime()
+        );
+        if (!cancelled) setRecentEncounters(rows);
+      } catch (e) {
+        // Fallback to scoped list
+        try {
+          const response = await encounterApi.getAll({ patientId, limit: 10 });
+          const rows = [...(response.data?.data?.encounters ?? [])].sort(
+            (a, b) =>
+              new Date(b.created_at).getTime() -
+              new Date(a.created_at).getTime()
+          );
+          if (!cancelled) setRecentEncounters(rows);
+        } catch {
+          if (!cancelled) setRecentEncounters([]);
+        }
+      }
+    };
+    loadRecent();
+
     return () => {
       cancelled = true;
     };
@@ -607,7 +702,7 @@ const Consultation: React.FC = () => {
      LATEST VITALS (from the active encounter record)
   ============================================================ */
 
-  const measurements = useMemo(() => buildMeasurements(encounter), [encounter]);
+  const measurements = useMemo(() => buildMeasurements(encounter, recentEncounters), [encounter, recentEncounters]);
 
   /* ============================================================
      TOAST
@@ -621,104 +716,9 @@ const Consultation: React.FC = () => {
     }, 2200);
   };
 
-  /* ============================================================
-     NOTIFICATIONS
-  ============================================================ */
-
-  const [notificationOpen, setNotificationOpen] = useState(false);
-  const [notifItems, setNotifItems] = useState<DoctorNotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [doctorEmployeeId, setDoctorEmployeeId] = useState<string | null>(null);
-  const notificationRef = useRef<HTMLDivElement>(null);
-
-  const notifTimeAgo = (iso: string): string => {
-    const then = new Date(iso).getTime();
-    if (Number.isNaN(then)) return "";
-    const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
-    if (seconds < 60) return "Just now";
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  };
-
-  const notifFormatDate = (value: string) => {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleDateString("en-US", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  };
-
-  const notifFormatTime = (value: string) => {
-    if (!value) return "";
-    const timeMatch = value.match(
-      /(?:T|\s)?(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?/
-    );
-    if (timeMatch) {
-      let hour = Number(timeMatch[1]);
-      const minute = timeMatch[2];
-      const suffix = hour >= 12 ? "PM" : "AM";
-      hour = hour % 12 || 12;
-      return `${String(hour).padStart(2, "0")}:${minute} ${suffix}`;
-    }
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  useEffect(() => {
-    const user = getUser();
-    const empId = user?.employee_id;
-    if (!empId) return;
-    setDoctorEmployeeId(empId);
-    let cancelled = false;
-    doctorDashboardApi
-      .getNotifications(empId)
-      .then((res) => {
-        if (cancelled) return;
-        setNotifItems(res.data.data.notifications);
-        setUnreadCount(res.data.data.unreadCount);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (notificationOpen && unreadCount > 0 && doctorEmployeeId) {
-      setUnreadCount(0);
-      doctorDashboardApi
-        .markNotificationsRead(doctorEmployeeId)
-        .catch(() => {});
-    }
-  }, [notificationOpen, unreadCount, doctorEmployeeId]);
-
-  useEffect(() => {
-    const handleClick = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (notificationRef.current && !notificationRef.current.contains(target)) {
-        setNotificationOpen(false);
-      }
-    };
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setNotificationOpen(false);
-    };
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, []);
+/* ============================================================
+     NOTIFICATIONS - Using global BellNotificationButton
+   ============================================================ */
 
   /* ============================================================
      LOAD DRAFT
@@ -874,6 +874,7 @@ const Consultation: React.FC = () => {
 
       showToast("Consultation saved");
 
+      markStepCompleted("CONSULTATION");
       selectStep("LAB REPORT REVIEW");
     } catch (error: any) {
       console.error("Failed to save consultation details:", error);
@@ -892,6 +893,20 @@ const Consultation: React.FC = () => {
   ============================================================ */
 
   const selectStep = (name: string) => {
+    const currentIndex = STEP_ORDER.indexOf(activeStep);
+    const targetIndex = STEP_ORDER.indexOf(name);
+
+    if (targetIndex > currentIndex && !DIRECT_ACCESS_STEPS.includes(name)) {
+      for (let i = currentIndex; i < targetIndex; i++) {
+        if (!completedSteps.has(STEP_ORDER[i])) {
+          showToast(
+            "Please select or enter the important field in the previous form."
+          );
+          return;
+        }
+      }
+    }
+
     setActiveStep(name);
 
     if (name === "LAB REPORT REVIEW") {
@@ -900,7 +915,7 @@ const Consultation: React.FC = () => {
     }
 
     setShowLabReview(false);
-    showToast(name);
+    if (name !== activeStep) showToast(name);
   };
 
   /* ============================================================
@@ -1151,6 +1166,42 @@ const Consultation: React.FC = () => {
                   </div>
                 </div>
 
+                <div className="flex flex-col">
+                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    BP
+                  </div>
+                  <div className="text-sm font-bold leading-5 text-slate-800">
+                    {measurements.bp}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    PULSE
+                  </div>
+                  <div className="text-sm font-bold leading-5 text-slate-800">
+                    {measurements.pulse}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    TEMP
+                  </div>
+                  <div className="text-sm font-bold leading-5 text-slate-800">
+                    {measurements.temp}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    SPO2
+                  </div>
+                  <div className="text-sm font-bold leading-5 text-slate-800">
+                    {measurements.spo2}
+                  </div>
+                </div>
+
               </div>
 
               {/* PROFILE */}
@@ -1218,201 +1269,9 @@ const Consultation: React.FC = () => {
 
               <div className="flex items-center gap-6">
 
-                {/* NOTIFICATION */}
+                {/* NOTIFICATION (Global) */}
 
-                <div className="relative" ref={notificationRef}>
-                  <button
-                    type="button"
-                    aria-label="Notifications"
-                    onClick={() => setNotificationOpen((v) => !v)}
-                    className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none"
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="h-5 w-5"
-                    >
-                      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
-                      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-                    </svg>
-
-                    {unreadCount > 0 && (
-                      <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#003ec7] px-1 text-[10px] font-bold leading-none text-white">
-                        {unreadCount > 9 ? "9+" : unreadCount}
-                      </span>
-                    )}
-                  </button>
-
-                  {notificationOpen && (
-                    <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-                      <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-                        <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">
-                          Notifications
-                        </h1>
-                        <div className="flex shrink-0 items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setNotifItems((prev) =>
-                                prev.map((n) => ({ ...n, status: "READ" }))
-                              )
-                            }
-                            className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
-                          >
-                            Mark all as read
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setNotifItems([])}
-                            disabled={notifItems.length === 0}
-                            className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            Clear all
-                          </button>
-                        </div>
-                      </header>
-
-                      <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-                        {notifItems.length === 0 ? (
-                          <p className="py-6 text-center text-xs text-[#434656]">
-                            No new notifications
-                          </p>
-                        ) : (
-                          notifItems.map((item, index) => {
-                            const patient =
-                              item.appointment_history?.patient_bio_data;
-                            const patientName = [
-                              patient?.patient_first_name,
-                              patient?.patient_middle_name,
-                              patient?.patient_last_name,
-                            ]
-                              .filter(Boolean)
-                              .join(" ") || "A patient";
-
-                            const isBooking =
-                              item.notification_type === "BOOKING";
-                            const appointment =
-                              item.appointment_history;
-                            const isUnread = item.status === "UNREAD";
-
-                            return (
-                              <article
-                                key={item.notification_id}
-                                className="relative flex gap-3 rounded-lg px-2 py-3 transition-colors"
-                              >
-                                {isUnread && (
-                                  <span className="absolute left-0 top-5 h-2 w-2 rounded-full bg-[#003ec7]" />
-                                )}
-
-                                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f0eaff]">
-                                  <svg
-                                    viewBox="0 0 24 24"
-                                    className="h-5 w-5 text-[#7046c9]"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="1.8"
-                                  >
-                                    <rect
-                                      x="3"
-                                      y="5"
-                                      width="18"
-                                      height="16"
-                                      rx="2"
-                                    />
-                                    <path
-                                      d="M16 3v4M8 3v4M3 10h18"
-                                      strokeLinecap="round"
-                                    />
-                                    <path
-                                      d="M8 14h3M8 17h5"
-                                      strokeLinecap="round"
-                                    />
-                                  </svg>
-                                </div>
-
-                                <div className="min-w-0 flex-1">
-                                  <div className="mb-1 flex items-start justify-between gap-3">
-                                    <h3 className="truncate text-xs font-semibold tracking-[0.02em] text-[#131b2e]">
-                                      {isBooking ? (
-                                        <>
-                                          <span className="font-semibold text-[#131b2e]">
-                                            {patientName}
-                                          </span>{" "}
-                                          booked an appointment
-                                          {appointment
-                                            ? ` for ${notifFormatDate(appointment.appointment_date)} at ${notifFormatTime(appointment.appointment_time)}`
-                                            : ""}
-                                          .
-                                        </>
-                                      ) : (
-                                        <>
-                                          <span className="font-semibold text-[#131b2e]">
-                                            {patientName}
-                                          </span>{" "}
-                                          checked in.
-                                        </>
-                                      )}
-                                    </h3>
-
-                                    <div className="flex shrink-0 items-center gap-2">
-                                      <span
-                                        className={[
-                                          "text-[11px] font-medium leading-[14px]",
-                                          isUnread
-                                            ? "text-[#003ec7]"
-                                            : "text-[#434656]",
-                                        ].join(" ")}
-                                      >
-                                        {notifTimeAgo(item.created_at)}
-                                      </span>
-
-                                      {isUnread && (
-                                        <span
-                                          aria-label="Unread indicator"
-                                          className="h-2 w-2 rounded-full bg-[#003ec7]"
-                                        />
-                                      )}
-
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setNotifItems((prev) =>
-                                            prev.filter(
-                                              (n) =>
-                                                n.notification_id !==
-                                                item.notification_id
-                                            )
-                                          )
-                                        }
-                                        aria-label="Delete notification"
-                                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
-                                      >
-                                        <svg
-                                          viewBox="0 0 24 24"
-                                          className="h-3.5 w-3.5 fill-none stroke-current"
-                                          strokeWidth="2"
-                                        >
-                                          <path
-                                            d="M6 6l12 12M18 6L6 18"
-                                            strokeLinecap="round"
-                                          />
-                                        </svg>
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                              </article>
-                            );
-                          })
-                        )}
-                      </main>
-                    </div>
-                  )}
-                </div>
+                <BellNotificationButton size="md" />
 
                 {/* USER */}
 
@@ -1510,13 +1369,13 @@ const Consultation: React.FC = () => {
                     encounterNo={encounter?.encounter_no}
                     pendingTests={pendingLabTests}
                     onOrdered={handleTestsOrdered}
-                    onNext={() => selectStep("DIAGNOSIS")}
+                    onNext={() => { markStepCompleted("LAB REPORT REVIEW"); selectStep("DIAGNOSIS"); }}
                   />
                 ) : activeStep === "DIAGNOSIS" ? (
                   <Diagnosis
                     embedded
                     patientId={patientDisplayId}
-                    onNext={() => selectStep("TREATMENT PLAN")}
+                    onNext={() => { markStepCompleted("DIAGNOSIS"); selectStep("TREATMENT PLAN"); }}
                   />
                 ) : activeStep === "TREATMENT PLAN" ? (
                   <TreatmentPlan
@@ -1525,13 +1384,13 @@ const Consultation: React.FC = () => {
                     measurements={measurements}
                     appointmentId={consultationState?.appointmentId}
                     encounterNo={encounter?.encounter_no}
-                    onNext={() => selectStep("CHEMOTHERAPY ORDER")}
+                    onNext={() => { markStepCompleted("TREATMENT PLAN"); selectStep("CHEMOTHERAPY ORDER"); }}
                   />
                 ) : activeStep === "CHEMOTHERAPY ORDER" ? (
                   <ChemotherapyOrder
                     embedded
                     patientId={patientDisplayId}
-                    onNext={() => selectStep("DISCHARGE MEDICATION")}
+                    onNext={() => { markStepCompleted("CHEMOTHERAPY ORDER"); selectStep("DISCHARGE MEDICATION"); }}
                   />
                 ) : activeStep === "DISCHARGE MEDICATION" ? (
                   <DischargeMedication
@@ -1541,14 +1400,14 @@ const Consultation: React.FC = () => {
                     branchId={consultationState?.branchId}
                     encounterNo={encounter?.encounter_no}
                     measurements={measurements}
-                    onNext={() => selectStep("FOLLOW UP")}
+                    onNext={() => { markStepCompleted("DISCHARGE MEDICATION"); selectStep("FOLLOW UP"); }}
                   />
                 ) : activeStep === "FOLLOW UP" ? (
                   <FollowUp
                     embedded
                     patientId={patientDisplayId}
                     measurements={measurements}
-                    onNext={() => selectStep("SUMMARY")}
+                    onNext={() => { markStepCompleted("FOLLOW UP"); selectStep("SUMMARY"); }}
                   />
 ) : activeStep === "SUMMARY" ? (
                   <Summary
@@ -2266,7 +2125,7 @@ const LabReview: React.FC<{
           throw new Error("Failed to create the lab order.");
         }
 
-        await Promise.all(
+        const createdItems = await Promise.all(
           pendingTests.map((test) =>
             labOrderItemApi.create({
               lab_order_id: labOrderId,
@@ -2275,6 +2134,19 @@ const LabReview: React.FC<{
             })
           )
         );
+
+        try {
+          const itemIds = createdItems
+            .map((r) => r.data.data?.lab_order_item_id)
+            .filter(Boolean);
+          if (itemIds.length > 0) {
+            const existing: string[] = JSON.parse(
+              localStorage.getItem(`hms_lab_item_ids_${patientId}`) || "[]"
+            );
+            const merged = [...new Set([...existing, ...itemIds])];
+            localStorage.setItem(`hms_lab_item_ids_${patientId}`, JSON.stringify(merged));
+          }
+        } catch { /* ignore */ }
 
         onOrdered?.(pendingTests.map((test) => test.lab_test_id));
       } catch (error: any) {
@@ -2814,6 +2686,33 @@ const Diagnosis: React.FC<{
 
   const [cancerTypes, setCancerTypes] = useState<CancerTypeItem[]>([]);
   const [subtypes, setSubtypes] = useState<CancerSubtypeItem[]>([]);
+
+  /* Sync the diagnosis selection (cancer_type_id + subtype_id) to
+     localStorage so downstream steps (Treatment Plan) can read the
+     IDs to query regimen protocols from the backend. */
+  useEffect(() => {
+    if (!formData.type || !formData.subType) return;
+
+    const matchedType = cancerTypes.find(
+      (item) => item.cancer_type === formData.type
+    );
+    const matchedSubtype = subtypes.find(
+      (item) => item.subtype_name === formData.subType
+    );
+
+    if (matchedType && matchedSubtype) {
+      localStorage.setItem(
+        "hms_diagnosis_selection",
+        JSON.stringify({
+          cancer_type_id: matchedType.cancer_type_id,
+          subtype_id: matchedSubtype.subtype_id,
+          cancer_type: matchedType.cancer_type,
+          subtype_name: matchedSubtype.subtype_name,
+        })
+      );
+    }
+  }, [formData.type, formData.subType, cancerTypes, subtypes]);
+
   const [stageLabels, setStageLabels] = useState<string[]>([]);
   const [tnmStages, setTnmStages] = useState<string[]>([]);
   const [tOptions, setTOptions] = useState<string[]>([]);
@@ -2824,7 +2723,6 @@ const Diagnosis: React.FC<{
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
   const [diagnosisError, setDiagnosisError] = useState("");
   const [savingDiagnosis, setSavingDiagnosis] = useState(false);
-  const [notificationOpen, setNotificationOpen] = useState(false);
 
   const diagnosisRequestRef = useRef(0);
   const stagingRequestRef = useRef(0);
@@ -3123,103 +3021,25 @@ const Diagnosis: React.FC<{
       return;
     }
 
-    if (!formData.type || !formData.subType) {
+    const hasAnyData =
+      formData.type ||
+      formData.subType ||
+      formData.cancerStage ||
+      formData.tStage ||
+      formData.nStage ||
+      formData.mStage ||
+      formData.icdCode.trim() ||
+      formData.notes.trim();
+
+    if (!hasAnyData) {
       setDiagnosisError(
-        "Please select a cancer type and sub type before continuing."
+        "Please select or enter the important field in the previous form."
       );
       return;
     }
 
-    if (!formData.cancerStage) {
-      setDiagnosisError("Please select a cancer stage before continuing.");
-      return;
-    }
-
-    const cancerType = cancerTypes.find(
-      (item) => item.cancer_type === formData.type
-    );
-    const subtype = subtypes.find(
-      (item) => item.subtype_name === formData.subType
-    );
-
-    if (!cancerType || !subtype) {
-      setDiagnosisError(
-        "Selected cancer type or sub type is invalid. Please re-select."
-      );
-      return;
-    }
-
-    const tStage: string | null = formData.tStage || null;
-    const nStage: string | null = formData.nStage || null;
-    const mStage: string | null = formData.mStage || null;
-
-    const normalizedIcd = formData.icdCode.trim().toUpperCase();
-    let catalog = diagnosisCatalogRef.current;
-
-    if (catalog.length === 0) {
-      try {
-        catalog = await loadDiagnosisCatalog();
-        diagnosisCatalogRef.current = catalog;
-      } catch (error) {
-        console.error("Failed to load diagnosis catalog:", error);
-      }
-    }
-
-    const matched = catalog.find(
-      (entry) => (entry.icd_code ?? "").toUpperCase() === normalizedIcd
-    );
-    const diagnosisId = matched?.diagnosis_id ?? catalog[0]?.diagnosis_id ?? "";
-
-    if (!diagnosisId) {
-      setDiagnosisError(
-        "Could not resolve a diagnosis entry for this patient. Please try again."
-      );
-      return;
-    }
-
-    setSavingDiagnosis(true);
     setDiagnosisError("");
-
-    try {
-      const response = await API.post<{
-        success: boolean;
-        data: {
-          staging_detail_id: string;
-          data?: { diagnosis_id?: string };
-        };
-      }>("/oncology/staging-details", {
-        patient_id: resolvedPatientId,
-        diagnosis_id: diagnosisId,
-        cancer_type_id: cancerType.cancer_type_id,
-        cancer_subtype_id: subtype.subtype_id,
-        clinical_stage: formData.cancerStage,
-        t_stage: tStage,
-        n_stage: nStage,
-        m_stage: mStage,
-        metastasis_sites: mStage?.trim().toUpperCase().startsWith("M1") && metastasisSites.length > 0 ? metastasisSites : null,
-      });
-
-      const created = response.data?.data;
-      localStorage.setItem(
-        "hms_diagnosis_selection",
-        JSON.stringify({
-          cancer_type_id: cancerType.cancer_type_id,
-          subtype_id: subtype.subtype_id,
-          staging_detail_id: created?.staging_detail_id ?? "",
-          diagnosis_id: created?.data?.diagnosis_id ?? diagnosisId,
-        })
-      );
-
-      onNext?.();
-    } catch (error: any) {
-      console.error("Failed to save staging details:", error);
-      setDiagnosisError(
-        error?.response?.data?.message ||
-          "Failed to save staging details. Please try again."
-      );
-    } finally {
-      setSavingDiagnosis(false);
-    }
+    onNext?.();
   };
 
   const handleBack = () => {
@@ -3375,7 +3195,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
             </div>
           </div>
 
-          {/* Grade */}
+          {/* Grade 
           <div>
             <label
               htmlFor="grade"
@@ -3409,7 +3229,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                 <ChevronDownIcon />
               </div>
             </div>
-          </div>
+          </div>*/}
 
           {/* T Stage */}
           <div>
@@ -3631,45 +3451,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
 
           {/* Notification + User */}
           <div className="flex items-center gap-4 sm:gap-6">
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() =>
-                  setNotificationOpen((previous) => !previous)
-                }
-                aria-label="Notifications"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8a8fa3] transition-colors hover:bg-[#eef1f9] hover:text-[#434656] focus:outline-none"
-              >
-                <NotificationIcon />
-
-                <span className="absolute right-0 top-0 block h-2 w-2 rounded-full bg-[#003ec7] ring-2 ring-white" />
-              </button>
-
-              {notificationOpen && (
-                <div className="absolute right-0 top-14 z-50 w-[360px] overflow-hidden rounded-xl border border-[#e5e7ef] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.15)]">
-                  <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-                    <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">Notifications</h1>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <button
-                        type="button"
-                        className="text-xs font-semibold tracking-[0.02em] text-[#003ec7] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#003ec7]"
-                      >
-                        Mark all as read
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs font-semibold tracking-[0.02em] text-[#93000a] transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#93000a] disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Clear all
-                      </button>
-                    </div>
-                  </header>
-                  <main className="flex max-h-[420px] w-full flex-col gap-6 overflow-y-auto bg-[#f8fafc] p-4">
-                    <p className="py-6 text-center text-xs text-[#434656]">No new notifications</p>
-                  </main>
-                </div>
-              )}
-            </div>
+            <BellNotificationButton size="md" />
 
             <div className="flex items-center gap-3">
               <span className="hidden text-sm font-semibold text-gray-700 sm:block">
@@ -3998,6 +3780,14 @@ const DischargeMedication: React.FC<{
 
   const handleNext = async () => {
     if (savingMeds) return;
+
+    const hasMedications = medications.some((item) => item.drugName.trim());
+    if (!hasMedications) {
+      setMedsError(
+        "Please select or enter the important field in the previous form."
+      );
+      return;
+    }
 
     try {
       setSavingMeds(true);
@@ -4484,10 +4274,12 @@ type Drug = {
   unit: string;
   volume: string;
   planItemId?: string;
+  medicineId?: string;
 };
 
 type ChemotherapyPlanItem = {
   chemotherapy_plan_item_id: string;
+  medicine_id: string;
   drug_role: string | null;
   protocol_dose: number | null;
   protocol_dose_unit: string | null;
@@ -4576,6 +4368,7 @@ const ChemotherapyOrder: React.FC<{
   const [premedicationDrugs, setPremedicationDrugs] = useState<Drug[]>(
     []
   );
+  const [supportiveDrugs, setSupportiveDrugs] = useState<Drug[]>([]);
 
   const [currentCycleNumber, setCurrentCycleNumber] = useState<number | null>(null);
 
@@ -4633,6 +4426,7 @@ const ChemotherapyOrder: React.FC<{
     startDate: false,
     drugs: false,
     premedication: false,
+    supportive: false,
   });
 
   const protocolRef = useRef<RegimenProtocolDetail | null>(null);
@@ -4732,6 +4526,7 @@ const ChemotherapyOrder: React.FC<{
         startDate?: string;
         drugs?: Drug[];
         premedicationDrugs?: Drug[];
+        supportiveDrugs?: Drug[];
       };
 
       if (data.cycleDay) {
@@ -4756,6 +4551,14 @@ const ChemotherapyOrder: React.FC<{
         setPremedicationDrugs(data.premedicationDrugs);
         userTouched.current.premedication = true;
       }
+
+      if (
+        Array.isArray(data.supportiveDrugs) &&
+        data.supportiveDrugs.length > 0
+      ) {
+        setSupportiveDrugs(data.supportiveDrugs);
+        userTouched.current.supportive = true;
+      }
     } catch (error) {
       console.error("Failed to restore chemotherapy order draft:", error);
     }
@@ -4772,6 +4575,9 @@ const ChemotherapyOrder: React.FC<{
         premedicationDrugs: userTouched.current.premedication
           ? premedicationDrugs
           : [],
+        supportiveDrugs: userTouched.current.supportive
+          ? supportiveDrugs
+          : [],
       })
     );
   }, [
@@ -4779,6 +4585,7 @@ const ChemotherapyOrder: React.FC<{
     startDate,
     drugs,
     premedicationDrugs,
+    supportiveDrugs,
     orderDraftKey,
     resolvedPatientId,
   ]);
@@ -4786,6 +4593,7 @@ const ChemotherapyOrder: React.FC<{
   const tabs = [
     "Chemotherapy Orders",
     "Premedication",
+    "Supportive",
     "Hydration",
     "Admin Instructions",
   ];
@@ -4800,49 +4608,17 @@ const ChemotherapyOrder: React.FC<{
       return;
     }
 
-    if (!planIdRef.current) {
+    const hasAnyData = cycleDay.trim() || startDate.trim();
+
+    if (!hasAnyData) {
       setPlanError(
-        "No chemotherapy plan found for this patient. Complete the Treatment Plan step first."
+        "Please select or enter the important field in the previous form."
       );
       return;
     }
 
-    const cycleMatch = cycleDay.match(/Cycle\s+(\d+)/i);
-    const cycleNumber = cycleMatch ? Number(cycleMatch[1]) : 1;
-
-    const isoMatch = startDate.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
-    const dmyMatch = startDate.trim().match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
-    const plannedDate = isoMatch
-      ? `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`
-      : dmyMatch
-        ? `${dmyMatch[3]}-${dmyMatch[2].padStart(2, "0")}-${dmyMatch[1].padStart(2, "0")}`
-        : "";
-
-    if (!plannedDate) {
-      setPlanError("Please pick a valid start date before saving.");
-      return;
-    }
-
-    try {
-      setSavingOrder(true);
-      setPlanError("");
-
-      await API.post(`/chemotherapy/plans/${planIdRef.current}/cycles`, {
-        cycle_number: cycleNumber,
-        planned_date: plannedDate,
-      });
-
-      onNext?.();
-    } catch (error: any) {
-      console.error("Failed to save chemotherapy order:", error);
-      setPlanError(
-        error?.response?.data?.message ||
-          error?.message ||
-          "Failed to save the chemotherapy order. Please try again."
-      );
-    } finally {
-      setSavingOrder(false);
-    }
+    setPlanError("");
+    onNext?.();
   };
 
   const formatDateDMY = (value?: string | null) => {
@@ -4912,6 +4688,7 @@ const ChemotherapyOrder: React.FC<{
             item.medicine_master?.unit ||
             "",
           volume: "",
+          medicineId: item.medicine_id,
         });
 
         const filteredItems = items.filter((item) => {
@@ -4926,7 +4703,12 @@ const ChemotherapyOrder: React.FC<{
         );
         setPremedicationDrugs(
           filteredItems
-            .filter((item) => item.drug_role === "PREMEDICATION")
+            .filter((item) => item.drug_role?.toUpperCase() === "PREMEDICATION")
+            .map(toDrug)
+        );
+        setSupportiveDrugs(
+          filteredItems
+            .filter((item) => item.drug_role?.toUpperCase() === "SUPPORTIVE")
             .map(toDrug)
         );
         protocolRef.current = protocol;
@@ -4964,6 +4746,9 @@ const ChemotherapyOrder: React.FC<{
 
         planIdRef.current = plan.chemotherapy_plan_id;
 
+        const planItems = plan.chemotherapy_plan_items ?? [];
+        planItemsRef.current = planItems;
+
         if (!userTouched.current.startDate) {
           setStartDate(formatDateDMY(plan.treatment_start_date));
         }
@@ -4990,8 +4775,6 @@ const ChemotherapyOrder: React.FC<{
           setProtocolName(
             plan.protocol_name || plan.regimen_name || ""
           );
-          const planItems = plan.chemotherapy_plan_items ?? [];
-          planItemsRef.current = planItems;
           const toPlanDrug = (
             item: ChemotherapyPlanItem,
             index: number
@@ -5015,6 +4798,7 @@ const ChemotherapyOrder: React.FC<{
               item.dilution_volume != null
                 ? `${item.dilution_volume}`
                 : "",
+            medicineId: item.medicine_id,
           });
 
           setDrugs(
@@ -5024,7 +4808,15 @@ const ChemotherapyOrder: React.FC<{
           );
           setPremedicationDrugs(
             planItems
-              .filter((item) => item.drug_role === "PREMEDICATION")
+              .filter((item) => item.drug_role?.toUpperCase() === "PREMEDICATION")
+
+
+
+              .map(toPlanDrug)
+          );
+          setSupportiveDrugs(
+            planItems
+              .filter((item) => item.drug_role === "SUPPORTIVE")
               .map(toPlanDrug)
           );
 
@@ -5051,6 +4843,11 @@ const ChemotherapyOrder: React.FC<{
     return () => {
       cancelled = true;
     };
+  }, [resolvedPatientId]);
+
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    setSupportiveDrugs([]);
   }, [resolvedPatientId]);
 
   const handleAddDrug = () => {
@@ -5124,22 +4921,73 @@ const ChemotherapyOrder: React.FC<{
 
   const resolvePlanItemId = (
     kind: "drug" | "premedication",
-    name: string
+    name: string,
+    medicineId?: string
   ) => {
     const role = kind === "drug" ? "PRIMARY" : "PREMEDICATION";
     const normalizedName = name.trim().toLowerCase();
 
-    const matched = planItemsRef.current.find(
+    // 1. Exact medicine_id match within same role
+    if (medicineId) {
+      const byId = planItemsRef.current.find(
+        (item) =>
+          item.medicine_id === medicineId &&
+          item.drug_role?.toUpperCase() === role
+      );
+      if (byId) return byId.chemotherapy_plan_item_id;
+
+      // 2. Exact medicine_id match across any role
+      const byIdAnyRole = planItemsRef.current.find(
+        (item) => item.medicine_id === medicineId
+      );
+      if (byIdAnyRole) return byIdAnyRole.chemotherapy_plan_item_id;
+    }
+
+    // 3. Name match within same role
+    const candidates = planItemsRef.current.filter(
       (item) =>
-        (!item.drug_role || item.drug_role === role) &&
-        (
-          item.medicine_master?.medicine_name ||
-          item.medicine_master?.generic_name ||
-          ""
-        )
-          .trim()
-          .toLowerCase() === normalizedName
+        !item.drug_role || item.drug_role.toUpperCase() === role
     );
+
+    let matched =
+      candidates.find(
+        (item) =>
+          (
+            item.medicine_master?.medicine_name ||
+            item.medicine_master?.generic_name ||
+            ""
+          )
+            .trim()
+            .toLowerCase() === normalizedName
+      );
+
+    // 4. Name match across any role
+    if (!matched) {
+      matched = planItemsRef.current.find(
+        (item) =>
+          (
+            item.medicine_master?.medicine_name ||
+            item.medicine_master?.generic_name ||
+            ""
+          )
+            .trim()
+            .toLowerCase() === normalizedName
+      );
+    }
+
+    // 5. Partial name match
+    if (!matched && normalizedName) {
+      matched = planItemsRef.current.find(
+        (item) => {
+          const item_name = (
+            item.medicine_master?.medicine_name ||
+            item.medicine_master?.generic_name ||
+            ""
+          ).trim().toLowerCase();
+          return item_name.includes(normalizedName) || normalizedName.includes(item_name);
+        }
+      );
+    }
 
     return matched?.chemotherapy_plan_item_id ?? "";
   };
@@ -5163,11 +5011,50 @@ const ChemotherapyOrder: React.FC<{
       if (planIdRef.current) {
         planItemId =
           editDraft.planItemId ||
-          resolvePlanItemId(editingRow.kind, editDraft.name);
+          resolvePlanItemId(editingRow.kind, editDraft.name, editDraft.medicineId);
+
+        if (!planItemId && editDraft.medicineId) {
+          try {
+            const createRes = await API.post(
+              `/chemotherapy/plans/${planIdRef.current}/items`,
+              {
+                medicine_id: editDraft.medicineId,
+                drug_role: editingRow.kind === "drug" ? "PRIMARY" : "PREMEDICATION",
+                drug_sequence: planItemsRef.current.length + 1,
+                dosage: trimmedDose === "" ? null : Number(trimmedDose),
+                dosage_unit: editDraft.unit.trim() || null,
+              }
+            );
+            const planData = createRes.data?.data;
+            const newItems: ChemotherapyPlanItem[] = planData?.chemotherapy_plan_items ?? [];
+            const created = newItems.find(
+              (i) => i.medicine_id === editDraft.medicineId
+            );
+            if (created) {
+              planItemId = created.chemotherapy_plan_item_id;
+              editDraft.planItemId = planItemId;
+              planItemsRef.current = newItems;
+            }
+          } catch (createErr: any) {
+            console.error("Failed to create plan item:", createErr);
+          }
+        }
 
         if (!planItemId) {
+          console.error("resolvePlanItemId failed:", {
+            kind: editingRow.kind,
+            name: editDraft.name,
+            medicineId: editDraft.medicineId,
+            planItemCount: planItemsRef.current.length,
+            planItems: planItemsRef.current.map((i) => ({
+              id: i.chemotherapy_plan_item_id,
+              medicineId: i.medicine_id,
+              name: i.medicine_master?.medicine_name,
+              role: i.drug_role,
+            })),
+          });
           throw new Error(
-            "Could not match this medication to the patient's chemotherapy plan."
+            "Could not match this medication to the patient's chemotherapy plan. The plan may not have been saved yet — complete the Treatment Plan step first."
           );
         }
 
@@ -5353,7 +5240,7 @@ const ChemotherapyOrder: React.FC<{
   );
 
   const content = (
-    <div className="w-full max-w-6xl space-y-8">
+    <div className="w-full space-y-8">
       {/* ================= ORDER CONTAINER ================= */}
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
         {/* ================= FORM HEADER ================= */}
@@ -5568,32 +5455,12 @@ const ChemotherapyOrder: React.FC<{
                           key={drug.id}
                           className="bg-blue-50/40 transition-colors"
                         >
-                          <td className="px-3 py-3 pl-6 pr-3">
-                            <input
-                              type="text"
-                              value={editDraft.name}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "name",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[160px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 pl-6 pr-3 text-base font-medium text-gray-900">
+                            {editDraft.name}
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.form}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "form",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[120px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-gray-500">
+                            {editDraft.form}
                           </td>
 
                           <td className="px-3 py-3">
@@ -5610,18 +5477,8 @@ const ChemotherapyOrder: React.FC<{
                             />
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.unit}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "unit",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-blue-500">
+                            {editDraft.unit}
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
@@ -5782,32 +5639,12 @@ const ChemotherapyOrder: React.FC<{
                           key={drug.id}
                           className="bg-blue-50/40 transition-colors"
                         >
-                          <td className="px-3 py-3 pl-6 pr-3">
-                            <input
-                              type="text"
-                              value={editDraft.name}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "name",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[160px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 pl-6 pr-3 text-base font-medium text-gray-900">
+                            {editDraft.name}
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.form}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "form",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[120px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-gray-500">
+                            {editDraft.form}
                           </td>
 
                           <td className="px-3 py-3">
@@ -5824,18 +5661,8 @@ const ChemotherapyOrder: React.FC<{
                             />
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.unit}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "unit",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-blue-500">
+                            {editDraft.unit}
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
@@ -5916,6 +5743,92 @@ const ChemotherapyOrder: React.FC<{
               </table>
             </div>
           </div>
+        ) : activeTab === "Supportive" ? (
+          <div className="p-8">
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="py-4 pl-6 pr-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Drug Name
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Form
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Dose
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Unit
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-gray-200 bg-white">
+                  {planLoading && (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className="px-6 py-8 text-center text-sm text-gray-500"
+                      >
+                        Loading supportive drugs
+                      </td>
+                    </tr>
+                  )}
+
+                  {!planLoading &&
+                    !planError &&
+                    supportiveDrugs.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          className="px-6 py-8 text-center text-sm text-gray-500"
+                        >
+                          No supportive drugs found for this protocol.
+                        </td>
+                      </tr>
+                    )}
+
+                  {planError && (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className="px-6 py-8 text-center text-sm text-red-500"
+                      >
+                        {planError}
+                      </td>
+                    </tr>
+                  )}
+
+                  {supportiveDrugs.map((drug) => (
+                    <tr
+                      key={drug.id}
+                      className="transition-colors hover:bg-gray-50"
+                    >
+                      <td className="whitespace-nowrap py-5 pl-6 pr-3 text-base font-medium text-gray-900">
+                        {drug.name}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-500">
+                        {drug.form}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-base text-gray-900">
+                        {drug.dose}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
+                        {drug.unit}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : (
           /* Other Tabs */
           <div className="flex min-h-[300px] items-center justify-center p-8">
@@ -5984,7 +5897,7 @@ const ChemotherapyOrder: React.FC<{
 
       {/* ================= MAIN ================= */}
       <main className="flex min-h-[calc(100vh-73px)] flex-grow justify-center p-8">
-        <div className="w-full max-w-6xl space-y-8">
+        <div className="w-full space-y-8">
           {/* ================= STEPPER ================= */}
           <nav
             aria-label="Progress"
@@ -6162,88 +6075,17 @@ const FollowUp: React.FC<{
       return;
     }
 
-    const trimmedDate = nextVisitDate.trim();
-    const isoMatch = trimmedDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    const dmyMatch = trimmedDate.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
-    const followupDate = isoMatch
-      ? `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`
-      : dmyMatch
-        ? `${dmyMatch[3]}-${dmyMatch[2].padStart(2, "0")}-${dmyMatch[1].padStart(2, "0")}`
-        : "";
+    const hasAnyData = nextVisitDate.trim() || nextCycle || plan || notes.trim();
 
-    if (!followupDate) {
+    if (!hasAnyData) {
       setFollowUpError(
-        "Please pick a valid Next Visit Date before submitting."
+        "Please select or enter the important field in the previous form."
       );
       return;
     }
 
-    try {
-      setSubmittingFollowUp(true);
-      setFollowUpError("");
-
-      const branchId =
-        getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
-      const plansResponse = await API.get<{
-        success: boolean;
-        data: ChemotherapyPlan[];
-      }>("/chemotherapy/plans", {
-        params: { patient_id: resolvedPatientId, branchId },
-      });
-      const planId =
-        plansResponse.data.data?.[0]?.chemotherapy_plan_id ?? "";
-
-      if (!planId) {
-        setFollowUpError(
-          "No chemotherapy plan found for this patient. Complete the earlier steps first."
-        );
-        return;
-      }
-
-      const cyclesResponse = await API.get<{
-        success: boolean;
-        data: {
-          chemotherapy_cycle_id: string;
-          cycle_number: number;
-        }[];
-      }>(`/chemotherapy/plans/${planId}/cycles`);
-      const cycles = cyclesResponse.data.data ?? [];
-      const latestCycle = cycles[cycles.length - 1];
-
-      if (!latestCycle?.chemotherapy_cycle_id) {
-        setFollowUpError(
-          "No chemotherapy cycle found. Complete the Chemotherapy Order step first."
-        );
-        return;
-      }
-
-      const payload: Record<string, string> = {
-        followup_date: followupDate,
-      };
-
-      const noteParts = [plan ? `Plan: ${plan}` : "", notes.trim()].filter(
-        Boolean
-      );
-      if (noteParts.length > 0) {
-        payload.followup_notes = noteParts.join("\n");
-      }
-
-      await API.post(
-        `/chemotherapy/cycles/${latestCycle.chemotherapy_cycle_id}/followup`,
-        payload
-      );
-
-      onNext?.();
-    } catch (error: any) {
-      console.error("Failed to submit follow-up:", error);
-      setFollowUpError(
-        error?.response?.data?.message ||
-          error?.message ||
-          "Failed to submit the follow-up. Please try again."
-      );
-    } finally {
-      setSubmittingFollowUp(false);
-    }
+    setFollowUpError("");
+    onNext?.();
   };
 
   const handleViewProfile = () => {
@@ -7033,9 +6875,9 @@ const TreatmentPlan: React.FC<{
         }
       }
 
-      if (!cancerTypeId || !subtypeId) {
+      if (!cancerTypeId) {
         setProtocolsError(
-          "Cancer type and sub type not found. Complete the Diagnosis step first."
+          "Cancer type not found. Complete the Diagnosis step first."
         );
         return;
       }
@@ -7097,47 +6939,22 @@ const TreatmentPlan: React.FC<{
       return;
     }
 
-    if (!treatmentIntent) {
+    const hasAnyData =
+      treatmentIntent ||
+      treatmentTypes.length > 0 ||
+      plannedStartDate ||
+      protocol ||
+      lineOfTherapy ||
+      remarks.trim();
+
+    if (!hasAnyData) {
       setSaveError(
-        "Please select a treatment intent before continuing."
+        "Please select or enter the important field in the previous form."
       );
       return;
     }
 
-    /* Chemo-only requirements - these inputs are hidden when
-       Chemotherapy is not part of the selected treatment types. */
-    let treatmentStartDate = "";
-
-    if (isChemotherapySelected) {
-      if (!plannedStartDate) {
-        setSaveError(
-          "Please set a planned start date before continuing."
-        );
-        return;
-      }
-
-      if (!protocol) {
-        setSaveError("Please select a protocol before continuing.");
-        return;
-      }
-
-      const dateMatch = plannedStartDate
-        .trim()
-        .match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-      treatmentStartDate = dateMatch
-        ? `${dateMatch[3]}-${dateMatch[2].padStart(2, "0")}-${dateMatch[1].padStart(2, "0")}`
-        : plannedStartDate.trim();
-
-      if (!/^\d{4}-\d{2}-\d{2}/.test(treatmentStartDate)) {
-        setSaveError(
-          "Planned start date is not a valid date (use DD-MM-YYYY or YYYY-MM-DD)."
-        );
-        return;
-      }
-    }
-
-    setSaving(true);
-    setSaveError("");
+setSaveError("");
 
     try {
       /* A chemotherapy plan is only created when Chemotherapy is
@@ -7230,7 +7047,7 @@ const TreatmentPlan: React.FC<{
         encounter_no: encounterNo || null,
         protocol_id: protocol,
         treatment_intent: treatmentIntent,
-        treatment_start_date: treatmentStartDate,
+        treatment_start_date: plannedStartDate,
         remarks: remarks || null,
         confirm_suggested_therapy: true,
       });
@@ -7255,7 +7072,7 @@ const TreatmentPlan: React.FC<{
     window.history.back();
   };
 
-  const handleViewProfile = () => {
+const handleViewProfile = () => {
     console.log("View Full Profile clicked");
   };
 
@@ -8169,11 +7986,13 @@ const Summary: React.FC<{
   patientId?: string;
   appointmentId?: string;
   encounterNo?: string;
+  measurements?: MeasurementValues;
 }> = ({
   embedded = false,
   patientId,
   appointmentId,
   encounterNo,
+  measurements = { height: "", weight: "", bsa: "", bmi: "", bp: "", pulse: "", temp: "", spo2: "" },
 }) => {
   const location = useLocation();
   const statePatientId = (

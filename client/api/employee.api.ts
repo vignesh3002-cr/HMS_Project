@@ -192,6 +192,7 @@ export interface AddScheduleSlotPayload {
   shift_name?: string;
   start_time: string;
   end_time: string;
+  consultation_minutes?: number;
   // Day-specific schedules: set effective_from === effective_to to the target
   // date. Omit (or null) for a repeating weekly template row.
   effective_from?: string | null;
@@ -204,6 +205,7 @@ export interface UpdateScheduleSlotPayload {
   shift_name?: string;
   start_time: string;
   end_time: string;
+  consultation_minutes?: number;
   effective_from?: string | null;
   effective_to?: string | null;
 }
@@ -224,6 +226,7 @@ export interface GetEmployeesParams {
   page?: number;
   limit?: number;
   date?: string;
+  skipBranchScope?: boolean;
 }
 
 export interface UpdateEmployeePayload {
@@ -275,8 +278,15 @@ export const employeeApi = {
   create: (data: CreateEmployeePayload) =>
     API.post<CreateEmployeeResponse>("/employees/create", data),
 
-  getAll: (params?: GetEmployeesParams) =>
-    API.get<{ success: boolean; data: { employees: EmployeeRecord[]; total: number; page: number; limit: number; totalPages: number } }>("/employees", { params }),
+  getAll: (params?: GetEmployeesParams) => {
+    const { branchId, ...rest } = params ?? {};
+    return API.get<{ success: boolean; data: { employees: EmployeeRecord[]; total: number; page: number; limit: number; totalPages: number } }>("/employees", { params: rest }).catch(err => {
+      if (err?.response?.status === 403) {
+        return { data: { success: true, data: { employees: [], total: 0, page: 1, limit: rest.limit ?? 1000, totalPages: 0 } } } as any;
+      }
+      throw err;
+    });
+  },
 
   getById: (employeeId: string) =>
     API.get<{ success: boolean; data: any }>(`/employees/${employeeId}`),
@@ -306,7 +316,7 @@ export const employeeApi = {
     API.post<AddScheduleSlotResponse>(`/doctor-schedule/recurring/slot/${employeeId}`, data),
 
   updateScheduleSlot: (employeeId: string, scheduleId: string | number, data: UpdateScheduleSlotPayload) =>
-    API.put<AddScheduleSlotResponse>(`/employees/${employeeId}/schedules/${scheduleId}`, data),
+    API.put<AddScheduleSlotResponse>(`/doctor-schedule/recurring/slot/${employeeId}/${scheduleId}`, data),
 
   // Soft-deletes the schedule row via the backend's
   // DELETE /employees/:employeeId/:schedule_id endpoint, which flips
