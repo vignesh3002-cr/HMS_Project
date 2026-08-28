@@ -13,7 +13,6 @@ import { usePermission } from "@/context/PermissionContext";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import {
   LayoutDashboard,
   Users,
@@ -405,11 +404,6 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
 
             {/* RIGHT */}
             <div className="flex items-center gap-4">
-              {/* NOTIFICATION */}
-              <BellNotificationButton size="md" />
-
-              <div className="w-px h-6 bg-[rgba(194,198,212,0.30)]" />
-
               {/* PROFILE DROPDOWN */}
               <UserProfileDropdown
                 userName={userData.username || "HMS"}

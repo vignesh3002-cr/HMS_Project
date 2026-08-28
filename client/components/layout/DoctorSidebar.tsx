@@ -11,7 +11,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { remove } from "../../utils/token";
-import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
+
 
 interface DoctorSidebarProps {
   activeItem?: string;
@@ -74,7 +74,6 @@ const DoctorSidebar: React.FC<DoctorSidebarProps> = ({
               Doctor Dashboard
             </p>
           </div>
-          <BellNotificationButton size="sm" />
         </div>
       </div>
 
