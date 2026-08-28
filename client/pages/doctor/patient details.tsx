@@ -2384,7 +2384,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </div>
 </div>
 {/* Middle Column */}
-<div className="col-span-4 space-y-6">
+<div className="col-span-9 space-y-6">
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-5">
 <div className="flex items-center mb-4">
 <h4 className="text-sm font-bold text-[#1e293b] mr-3">Lab Validation</h4>
@@ -2452,9 +2452,6 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 <span className="font-bold text-[#64748b] uppercase">—</span>
 </div>
 </div>
-</div>
-{/* Right Column */}
-<div className="col-span-5 space-y-6">
 </div>
 </div>
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden mt-6">
