@@ -612,20 +612,18 @@ export function NotificationProvider({ children, employeeId }: NotificationProvi
 
     try {
       const feedBranchIds = await resolveFeedBranchIds();
-      const [employees, patients, appointments, doctorNotifs] = await Promise.all([
-        fetchAcrossBranches(
-          feedBranchIds,
-          (branchId) => employeeApi.getAll({ limit: 1000, ...(branchId ? { branchId } : {}) }),
-          (res) => (res.data?.data?.employees ?? []) as any[]
-        ).catch(() => null),
-        fetchAcrossBranches(
-          feedBranchIds,
-          (branchId) => patientApi.getAll({ limit: 1000, ...(branchId ? { branchId } : {}) }),
-          (res) => (res.data?.data?.patients ?? []) as any[]
-        ).catch(() => null),
+      const [employeesRes, patientsRes] = await Promise.all([
+        employeeApi.getAll({ limit: 1000 }).catch(() => null),
+        patientApi.getAll({ limit: 1000 }).catch(() => null),
+      ]);
+      const employees = employeesRes ? (employeesRes.data?.data?.employees ?? []) as any[] : null;
+      const patients = patientsRes ? (patientsRes.data?.data?.patients ?? []) as any[] : null;
+      const [appointments, doctorNotifs] = await Promise.all([
         fetchAppointments(feedBranchIds),
         fetchDoctorNotifications(),
       ]);
+      const [employeesFinal, patientsFinal, appointmentsFinal, doctorNotifsFinal] = [employees, patients, appointments, doctorNotifs];
+      const [employeesFinal2, patientsFinal2, appointmentsFinal2, doctorNotifsFinal2] = [employees, patients, appointments, doctorNotifs];
 
       const appointmentsFetched = appointments !== null;
       const safeAppointments = appointments ?? [];

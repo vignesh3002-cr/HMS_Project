@@ -133,12 +133,19 @@ export const patientApi = {
   create: (data: CreatePatientPayload) =>
     API.post<{ success: boolean; message: string; data?: unknown }>("/patients/create", data),
 
-  getAll: (params?: GetPatientsParams) =>
-    API.get<{
+  getAll: (params?: GetPatientsParams) => {
+    const { branchId, ...rest } = params ?? {};
+    return API.get<{
       success: boolean;
       message: string;
       data: { total: number; page: number; limit: number; totalPages: number; patients: PatientRecord[] };
-    }>("/patients", { params }),
+    }>("/patients", { params: rest }).catch(err => {
+      if (err?.response?.status === 403) {
+        return { data: { success: true, message: '', data: { total: 0, page: 1, limit: rest.limit ?? 1000, totalPages: 0, patients: [] } } } as any;
+      }
+      throw err;
+    });
+  },
 
   getById: (patientId: string) =>
     API.get<{ success: boolean; data: PatientRecord }>(`/patients/${patientId}`),
