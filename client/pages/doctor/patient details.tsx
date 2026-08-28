@@ -383,7 +383,7 @@ const MedicationPortal: React.FC<{
             {activeTab === "Medications" ? (
               <>
                 {/* Summary cards */}
-                <div className="grid grid-cols-1 gap-4 pt-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="grid gap-4 pt-4 sm:grid-cols-2 xl:grid-cols-4">
                   {[
                     ["TOTAL MEDS", String(medPlanItems.length), "fa-solid fa-pills", "bg-blue-50 text-[#0052cc]"],
                     ["PREMEDS", String(medPremedications.length), "fa-solid fa-syringe", "bg-purple-50 text-purple-600"],
@@ -1993,7 +1993,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   ]);
 
   const renderOrderEntryGrid = (entries: [string, string][]) => (
-    <div className="grid grid-cols-1 gap-x-8 gap-y-3 px-6 py-5 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-x-8 gap-y-3 px-6 py-5 grid-cols-[auto_auto_auto]">
       {entries.map(([label, value]) => (
         <div key={label}>
           <div className="text-[10px] font-semibold uppercase tracking-wide text-[#64748b] mb-0.5">
@@ -2336,21 +2336,21 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 <div className="col-span-3 space-y-6">
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-5">
 <h4 className="text-sm font-bold text-[#1e293b] mb-4">Cycle &amp; Schedule</h4>
-<div className="grid grid-cols-3 gap-4 mb-5">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">CYCLE</div>
-<div className="font-bold text-sm">{displayCycleNumber ? `${displayCycleNumber}${savedPlan?.planned_cycles ? ` / ${savedPlan.planned_cycles}` : ""}` : "—"}</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">DAY</div>
-<div className="font-bold text-sm">{displayCycleDay ?? "—"}</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">TOTAL DAYS</div>
-<div className="font-bold text-sm">{totalTreatmentDays ?? "—"}</div>
-</div>
-</div>
-<div className="grid grid-cols-3 gap-4">
+        <div className="grid gap-4 mb-5 grid-cols-[auto_auto_auto]">
+          <div>
+            <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">CYCLE</div>
+            <div className="font-bold text-sm">{displayCycleNumber ? `${displayCycleNumber}${savedPlan?.planned_cycles ? ` / ${savedPlan.planned_cycles}` : ""}` : "—"}</div>
+          </div>
+          <div>
+            <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">DAY</div>
+            <div className="font-bold text-sm">{displayCycleDay ?? "—"}</div>
+          </div>
+          <div>
+            <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">TOTAL DAYS</div>
+            <div className="font-bold text-sm">{totalTreatmentDays ?? "—"}</div>
+          </div>
+        </div>
+        <div className="grid gap-4 grid-cols-[auto_auto_auto]">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">START DATE</div>
 <div className="font-bold text-sm">{fmtOrderDate(savedPlan?.treatment_start_date) || "—"}<br/></div>
@@ -2367,7 +2367,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </div>
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-5">
 <h4 className="text-sm font-bold text-[#1e293b] mb-4">Clinical Info</h4>
-<div className="grid grid-cols-2 gap-4 mb-5">
+<div className="grid gap-4 mb-5 grid-cols-[auto_auto]">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">TYPE</div>
 <div className="font-bold text-sm">{recentCancerType || "—"}</div>
@@ -2452,44 +2452,46 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 <span className="font-bold text-[#64748b] uppercase">—</span>
 </div>
 </div>
-<div className="bg-blue-50/50 rounded-[16px] shadow-sm border border-blue-100 p-5 relative overflow-hidden">
-<div className="flex items-center justify-between mb-5">
-<div className="flex items-center text-[#1d4ed8]">
-<i className="fa-solid fa-flask text-lg mr-2"></i>
-<h4 className="text-sm font-bold uppercase">PROTOCOL: {orderTherapy || "—"}</h4>
-</div>
-<a className="text-xs text-[#1d4ed8] font-medium hover:underline flex items-center" href="#">View Protocol <i className="fa-solid fa-chevron-right text-[10px] ml-1"></i></a>
-</div>
-<div className="grid grid-cols-4 gap-4">
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">DOSE</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">PATIENT DOSE</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">ROUTE</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">DILUENT</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">VOLUME</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">INF. TIME</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-</div>
-</div>
 </div>
 {/* Right Column */}
 <div className="col-span-5 space-y-6">
+</div>
+</div>
+<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden mt-6">
+<div className="px-5 py-4 border-b border-[#e2e8f0] flex items-center justify-between text-[#1d4ed8]">
+<div className="flex items-center">
+<i className="fa-solid fa-flask mr-2"></i>
+<h4 className="text-sm font-bold">PROTOCOL: {orderTherapy || "—"}</h4>
+</div>
+<a className="text-xs text-[#1d4ed8] font-medium hover:underline flex items-center" href="#">View Protocol <i className="fa-solid fa-chevron-right text-[10px] ml-1"></i></a>
+</div>
+<div className="p-5">
+<table className="w-full text-left text-sm">
+<thead>
+<tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
+<th className="pb-2 font-semibold">DOSE</th>
+<th className="pb-2 font-semibold">PATIENT DOSE</th>
+<th className="pb-2 font-semibold">ROUTE</th>
+<th className="pb-2 font-semibold">DILUENT</th>
+<th className="pb-2 font-semibold">VOLUME</th>
+<th className="pb-2 font-semibold">INF. TIME</th>
+</tr>
+</thead>
+<tbody>
+<tr className="border-b border-slate-50">
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+{/* BEGIN: Medication Orders Row */}
+<div className="mt-6 space-y-6">
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden">
 <div className="px-5 py-4 border-b border-[#e2e8f0] flex items-center text-purple-600">
 <i className="fa-solid fa-pills mr-2"></i>
@@ -2515,12 +2517,12 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 ) : (
 premedicationItems.map((item, index) => (
 <tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
-<td className="py-2">{index + 1}</td>
-<td className="py-2 font-medium text-[#1e293b]">{item.medicine_master?.medicine_name ?? "—"}</td>
-<td className="py-2">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
-<td className="py-2">{item.administration_route ?? "—"}</td>
-<td className="py-2">{item.frequency ?? item.remarks ?? "—"}</td>
-<td className="py-2 text-right"><StatusBadge>{item.drug_role || "PREMEDICATION"}</StatusBadge></td>
+<td className="py-2 whitespace-nowrap">{index + 1}</td>
+<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.administration_route ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.frequency ?? item.remarks ?? "—"}</td>
+<td className="py-2 whitespace-nowrap text-right"><StatusBadge>{item.drug_role || "PREMEDICATION"}</StatusBadge></td>
 </tr>
 ))
 )}
@@ -2528,10 +2530,6 @@ premedicationItems.map((item, index) => (
 </table>
 </div>
 </div>
-</div>
-</div>
-{/* BEGIN: Medication Orders Row */}
-<div className="grid grid-cols-1 gap-6 mt-6 lg:grid-cols-3">
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden">
 <div className="px-5 py-4 border-b border-[#e2e8f0] flex items-center text-[#1d4ed8]">
 <i className="fa-solid fa-prescription-bottle-medical mr-2"></i>
@@ -2557,12 +2555,12 @@ premedicationItems.map((item, index) => (
 ) : (
 primaryChemoItems.map((item, index) => (
 <tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
-<td className="py-2">{index + 1}</td>
-<td className="py-2 font-medium text-[#1e293b]">{item.medicine_master?.medicine_name ?? "—"}</td>
-<td className="py-2">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
-<td className="py-2">{item.administration_route ?? "—"}</td>
-<td className="py-2">{item.dilution_volume ?? "—"}</td>
-<td className="py-2 text-right"><StatusBadge>{item.drug_role || "ORDERED"}</StatusBadge></td>
+<td className="py-2 whitespace-nowrap">{index + 1}</td>
+<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.administration_route ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.dilution_volume ?? "—"}</td>
+<td className="py-2 whitespace-nowrap text-right"><StatusBadge>{item.drug_role || "ORDERED"}</StatusBadge></td>
 </tr>
 ))
 )}
@@ -2595,12 +2593,12 @@ primaryChemoItems.map((item, index) => (
 ) : (
 supportiveItems.map((item, index) => (
 <tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
-<td className="py-2">{index + 1}</td>
-<td className="py-2 font-medium text-[#1e293b]">{item.medicine_master?.medicine_name ?? "—"}</td>
-<td className="py-2">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
-<td className="py-2">{item.administration_route ?? "—"}</td>
-<td className="py-2">{item.frequency ?? item.remarks ?? "—"}</td>
-<td className="py-2 text-right"><StatusBadge>{item.drug_role || "SUPPORTIVE"}</StatusBadge></td>
+<td className="py-2 whitespace-nowrap">{index + 1}</td>
+<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.administration_route ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.frequency ?? item.remarks ?? "—"}</td>
+<td className="py-2 whitespace-nowrap text-right"><StatusBadge>{item.drug_role || "SUPPORTIVE"}</StatusBadge></td>
 </tr>
 ))
 )}
@@ -2983,7 +2981,7 @@ const HistoryDashboard: React.FC<{
       )}
 
       {/* TIMELINE + RIGHT COLUMN */}
-      <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6 bg-slate-50/50">
+      <div className="p-6 grid lg:grid-cols-3 gap-6 bg-slate-50/50">
         {/* LEFT */}
         <div className="lg:col-span-2">
           <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
@@ -3827,7 +3825,7 @@ function DischargeDetailsPortal({
     : [];
 
   const renderEntryGrid = (entries: [string, string][]) => (
-    <div className="grid grid-cols-1 gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
       {entries.map(([label, value]) => (
         <div key={label} className="rounded-lg border border-slate-100 bg-slate-50/60 p-4">
           <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
@@ -4201,7 +4199,7 @@ return (
             )}
           </div>
           ) : (
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+          <div className="grid gap-6 xl:grid-cols-3">
             {/* ===================================================
                 LEFT COLUMN
             ==================================================== */}
@@ -4303,7 +4301,7 @@ return (
                       Treatment Cycle Stats
                     </h4>
 
-                    <div className="grid grid-cols-2 gap-y-4">
+                    <div className="grid gap-y-4 sm:grid-cols-2">
                       {/* Planned */}
                       <div>
                         <p className="mb-1 text-xs text-gray-500">
@@ -4468,7 +4466,7 @@ return (
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
                   {vitals.map((vital) => (
                     <div
                       key={vital.label}
@@ -4680,7 +4678,7 @@ const PatientNotesDocuments: React.FC<{
           {/* =================================================
               SUMMARY CARDS
           ================================================== */}
-          <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div className="mb-8 grid gap-4 md:grid-cols-4">
 
             {/* Total Notes */}
             <div className="flex items-center rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -4801,7 +4799,7 @@ const PatientNotesDocuments: React.FC<{
               </button>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-3">
               {documents.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-400 md:col-span-3">
                   No documents uploaded for this patient yet. Use the upload
