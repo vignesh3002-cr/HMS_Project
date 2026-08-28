@@ -383,7 +383,7 @@ export default function DoctorDashboard() {
               .filter(Boolean)
               .join(" ") || "Unknown Patient",
             image:
-              "https://www.figma.com/api/mcp/asset/0174143d-d6a1-4d40-96d6-22a8b499a788.png",
+              item.patient_bio_data?.patient_photo_url || "",
             dateTime: `${formatDate(item.appointment_date)} - ${formatTime(
               item.appointment_time
             )}`,
@@ -810,11 +810,25 @@ export default function DoctorDashboard() {
                       <td className="h-[50px] overflow-hidden border-b border-slate-100 px-5 py-2 text-xs text-slate-600">
                         <div className="flex items-center gap-3">
                           <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-slate-100">
-                            <img
-                              src={appointment.image}
-                              alt={appointment.patient}
-                              className="h-full w-full object-cover"
-                            />
+                            {appointment.image ? (
+                              <img
+                                src={appointment.image}
+                                alt={appointment.patient}
+                                className="h-full w-full object-cover"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = "none";
+                                }}
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-xs font-bold text-slate-500">
+                                {appointment.patient
+                                  .split(" ")
+                                  .map((w) => w[0])
+                                  .slice(0, 2)
+                                  .join("")
+                                  .toUpperCase()}
+                              </div>
+                            )}
                           </div>
 
                           <span className="overflow-hidden text-ellipsis whitespace-nowrap font-['Manrope',sans-serif] text-xs font-bold text-slate-800">

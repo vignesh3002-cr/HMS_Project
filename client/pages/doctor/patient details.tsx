@@ -2416,6 +2416,10 @@ premedicationItems.map((item, index) => (
 </table>
 </div>
 </div>
+</div>
+</div>
+{/* BEGIN: Medication Orders Row */}
+<div className="grid grid-cols-1 gap-6 mt-6 lg:grid-cols-3">
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden">
 <div className="px-5 py-4 border-b border-[#e2e8f0] flex items-center text-[#1d4ed8]">
 <i className="fa-solid fa-prescription-bottle-medical mr-2"></i>
@@ -2539,7 +2543,7 @@ orderDischargeMeds.map((item, index) => (
 </div>
 </div>
 </div>
-</div>
+{/* END: Medication Orders Row */}
 {/* END: Bottom Grid */}
 {/* BEGIN: Instructions Card */}
 <div className="mt-6 bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-6 flex justify-between items-start">
