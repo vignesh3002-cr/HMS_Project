@@ -144,6 +144,8 @@ const MedicationPortal: React.FC<{
   patientId?: string;
   plan?: SummaryPlan | null;
   allergies?: PatientAllergyRecord[];
+  selectedCycle?: number;
+  cycleMedicationsMap?: Record<string, any[]>;
 }> = ({
   onBackToProfile,
   patientName = "",
@@ -153,14 +155,19 @@ const MedicationPortal: React.FC<{
   patientId = "",
   plan = null,
   allergies = [],
+  selectedCycle,
+  cycleMedicationsMap,
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>("Medications");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showDischargeDashboard, setShowDischargeDashboard] = useState(false);
 
   /* Recent medication details for THIS selected patient, sourced from
-     the fetched chemotherapy plan (GET /chemotherapy/plans?patient_id=). */
-  const medPlanItems = plan?.chemotherapy_plan_items ?? [];
+      the fetched chemotherapy plan (GET /chemotherapy/plans?patient_id=). */
+  const cycleId = plan?.chemotherapy_cycle?.find(c => c.cycle_number === selectedCycle)?.chemotherapy_cycle_id;
+  const medPlanItems = cycleId && cycleMedicationsMap?.[cycleId]?.length
+    ? cycleMedicationsMap[cycleId]
+    : plan?.chemotherapy_plan_items ?? [];
   const medPremedications = medPlanItems.filter(
     (item) => (item.drug_role ?? "").toUpperCase() === "PREMEDICATION",
   );
@@ -1331,6 +1338,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState("");
   const [cycleMedications, setCycleMedications] = useState<any[]>([]);
+  const [cycleMedicationsMap, setCycleMedicationsMap] = useState<Record<string, any[]>>({});
   const [nextAppointment, setNextAppointment] = useState<{
     date: string;
     detail: string;
@@ -1478,6 +1486,36 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     };
   }, [consultationState?.patientId, activeTab, selectedBranchId]);
 
+  // Pre-fetch doctor-described medications for all cycles
+  useEffect(() => {
+    if (!savedPlan?.chemotherapy_cycle?.length) {
+      setCycleMedicationsMap({});
+      return;
+    }
+    let cancelled = false;
+    const fetchAllCycles = async () => {
+      const map: Record<string, any[]> = {};
+      const cycles = savedPlan.chemotherapy_cycle.filter(c => c?.chemotherapy_cycle_id);
+      await Promise.all(
+        cycles.map(async (cycle) => {
+          try {
+            const response = await API.get<{ success: boolean; data: any }>(
+              `/chemotherapy/cycles/${encodeURIComponent(cycle.chemotherapy_cycle_id)}`
+            );
+            if (cancelled) return;
+            const items = response.data?.data?.chemotherapy_plan_items ?? response.data?.data?.items ?? response.data?.data?.chemotherapy_plan?.chemotherapy_plan_items ?? [];
+            map[cycle.chemotherapy_cycle_id] = items;
+          } catch {
+            map[cycle.chemotherapy_cycle_id] = [];
+          }
+        })
+      );
+      if (!cancelled) setCycleMedicationsMap(map);
+    };
+    fetchAllCycles();
+    return () => { cancelled = true; };
+  }, [savedPlan?.chemotherapy_plan_id, selectedBranchId]);
+
   useEffect(() => {
     const protocolId = savedPlan?.source_protocol_id;
     if (!protocolId) {
@@ -1548,29 +1586,9 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
       setCycleMedications([]);
       return;
     }
-    let cancelled = false;
-    const loadCycleMeds = async () => {
-      try {
-        const response = await API.get<{ success: boolean; data: any }>(
-          `/chemotherapy/cycles/${encodeURIComponent(cycle.chemotherapy_cycle_id)}`
-        );
-        if (cancelled) return;
-        console.log('Cycle meds response for', cycle.chemotherapy_cycle_id, response.data);
-        const items = response.data?.data?.chemotherapy_plan_items ?? response.data?.data?.items ?? response.data?.data?.chemotherapy_plan?.chemotherapy_plan_items ?? [];
-        if (items.length > 0) {
-          setCycleMedications(items);
-        } else {
-          // Fallback to plan items if cycle endpoint returns no items
-          setCycleMedications([]);
-        }
-      } catch (err) {
-        console.error('Failed to load cycle meds', err);
-        if (!cancelled) setCycleMedications([]);
-      }
-    };
-    loadCycleMeds();
-    return () => { cancelled = true; };
-  }, [selectedCycle, savedPlan?.chemotherapy_cycle]);
+    const items = cycleMedicationsMap?.[cycle.chemotherapy_cycle_id] ?? [];
+    setCycleMedications(items);
+  }, [selectedCycle, savedPlan?.chemotherapy_cycle, cycleMedicationsMap]);
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
@@ -2022,6 +2040,8 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
         patientId={consultationState?.patientId || ""}
         plan={savedPlan}
         allergies={patientAllergies}
+        selectedCycle={selectedCycle}
+        cycleMedicationsMap={cycleMedicationsMap}
       />
     );
   }

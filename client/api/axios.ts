@@ -39,7 +39,10 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
-  const branchId = getActiveBranchId();
+  let branchId = getActiveBranchId();
+  if (config.params?.branchId) {
+    branchId = config.params.branchId;
+  }
   if (branchId && !config.skipBranchScope) {
     config.headers["x-branch-id"] = branchId;
   }
