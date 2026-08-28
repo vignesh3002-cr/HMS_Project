@@ -2123,7 +2123,7 @@ const LabReview: React.FC<{
           throw new Error("Failed to create the lab order.");
         }
 
-        await Promise.all(
+        const createdItems = await Promise.all(
           pendingTests.map((test) =>
             labOrderItemApi.create({
               lab_order_id: labOrderId,
@@ -2132,6 +2132,19 @@ const LabReview: React.FC<{
             })
           )
         );
+
+        try {
+          const itemIds = createdItems
+            .map((r) => r.data.data?.lab_order_item_id)
+            .filter(Boolean);
+          if (itemIds.length > 0) {
+            const existing: string[] = JSON.parse(
+              localStorage.getItem(`hms_lab_item_ids_${patientId}`) || "[]"
+            );
+            const merged = [...new Set([...existing, ...itemIds])];
+            localStorage.setItem(`hms_lab_item_ids_${patientId}`, JSON.stringify(merged));
+          }
+        } catch { /* ignore */ }
 
         onOrdered?.(pendingTests.map((test) => test.lab_test_id));
       } catch (error: any) {

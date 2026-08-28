@@ -11,6 +11,10 @@ import {
   type EncounterRecord,
 } from "../../api/encounter.api";
 import {
+  labOrderItemApi,
+  type LabOrderItemRecord,
+} from "../../api/labOrder.api";
+import {
   ALL_BRANCHES_VALUE,
   BranchFilterProvider,
   NO_BRANCH_VALUE,
@@ -1351,6 +1355,74 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 
   const [patient, setPatient] = useState<PatientRecord | null>(null);
 
+  const [labItems, setLabItems] = useState<LabOrderItemRecord[]>([]);
+  const [labItemsLoading, setLabItemsLoading] = useState(false);
+  const [labItemsError, setLabItemsError] = useState("");
+
+  useEffect(() => {
+    const pid = consultationState?.patientId;
+    if (!pid) return;
+    let cancelled = false;
+    setLabItemsLoading(true);
+    setLabItemsError("");
+
+    const storedItemIds: string[] = (() => {
+      try {
+        return JSON.parse(localStorage.getItem(`hms_lab_item_ids_${pid}`) || "[]");
+      } catch {
+        return [];
+      }
+    })();
+
+    if (storedItemIds.length > 0) {
+      Promise.all(
+        storedItemIds.map((id) =>
+          labOrderItemApi.getById(id).then((r) => r.data.data).catch(() => null)
+        )
+      )
+        .then((results) => {
+          if (cancelled) return;
+          const items = results.filter(Boolean) as LabOrderItemRecord[];
+          if (items.length > 0) {
+            setLabItems(items);
+            return;
+          }
+          fetchAllAndFilter();
+        })
+        .catch(() => { fetchAllAndFilter(); })
+        .finally(() => { if (!cancelled) setLabItemsLoading(false); });
+    } else {
+      fetchAllAndFilter();
+    }
+
+    function fetchAllAndFilter() {
+      labOrderItemApi
+        .getAll()
+        .then((response) => {
+          if (cancelled) return;
+          const allItems = response.data.data ?? [];
+          const forPatient = allItems.filter(
+            (item) => item.lab_order?.patient_history?.patient_id === pid
+          );
+          setLabItems(forPatient);
+        })
+        .catch((error: any) => {
+          if (!cancelled) {
+            setLabItemsError(
+              error?.response?.data?.message ||
+                error?.message ||
+                "Failed to load lab investigations."
+            );
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setLabItemsLoading(false);
+        });
+    }
+
+    return () => { cancelled = true; };
+  }, [consultationState?.patientId]);
+
   useEffect(() => {
     const patientId = consultationState?.patientId;
     if (!patientId) return;
@@ -1703,6 +1775,39 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const orderTherapy = savedPlan?.regimen_name || recentTherapy;
   const orderIntent = savedPlan?.treatment_intent || recentIntent;
 
+  const planCycles = (savedPlan?.chemotherapy_cycle ?? []).filter(
+    (cycle) => typeof cycle.cycle_number === "number"
+  );
+  const latestPlanCycle =
+    planCycles.length > 0
+      ? planCycles.reduce((a, b) =>
+          (b.cycle_number as number) >= (a.cycle_number as number) ? b : a
+        )
+      : null;
+
+  const derivedCycleInfo = (() => {
+    if (!savedPlan?.treatment_start_date || !savedPlan?.cycle_interval_days) {
+      return null;
+    }
+    const start = new Date(savedPlan.treatment_start_date);
+    if (Number.isNaN(start.getTime())) return null;
+    const daysElapsed = Math.floor(
+      (Date.now() - start.getTime()) / 86400000,
+    );
+    const interval = savedPlan.cycle_interval_days;
+    if (interval <= 0) return null;
+    if (daysElapsed < 0) return { cycle: 1, day: 1 };
+    const cycle = Math.floor(daysElapsed / interval) + 1;
+    const planned = savedPlan.planned_cycles || 0;
+    if (planned > 0 && cycle > planned) return null;
+    return { cycle, day: (daysElapsed % interval) + 1 };
+  })();
+
+  const displayCycleNumber =
+    latestPlanCycle?.cycle_number ?? derivedCycleInfo?.cycle ?? null;
+  const displayCycleDay =
+    latestPlanCycle?.cycle_day ?? derivedCycleInfo?.day ?? null;
+
   /* Plan items split by drug_role and the SELECTED DAY: PREMEDICATION
      drugs render in the Premedications table, PRIMARY drugs render in
      Chemo Orders - both only for the day picked in the Select Day
@@ -1765,41 +1870,6 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
       );
     },
   );
-
-  const planCycles = (savedPlan?.chemotherapy_cycle ?? []).filter(
-    (cycle) => typeof cycle.cycle_number === "number"
-  );
-  const latestPlanCycle =
-    planCycles.length > 0
-      ? planCycles.reduce((a, b) =>
-          (b.cycle_number as number) >= (a.cycle_number as number) ? b : a
-        )
-      : null;
-
-  /* When no chemo cycle has been recorded yet for this plan, derive the
-     current cycle/day from the treatment window (start date + interval). */
-  const derivedCycleInfo = (() => {
-    if (!savedPlan?.treatment_start_date || !savedPlan?.cycle_interval_days) {
-      return null;
-    }
-    const start = new Date(savedPlan.treatment_start_date);
-    if (Number.isNaN(start.getTime())) return null;
-    const daysElapsed = Math.floor(
-      (Date.now() - start.getTime()) / 86400000,
-    );
-    const interval = savedPlan.cycle_interval_days;
-    if (interval <= 0) return null;
-    if (daysElapsed < 0) return { cycle: 1, day: 1 };
-    const cycle = Math.floor(daysElapsed / interval) + 1;
-    const planned = savedPlan.planned_cycles || 0;
-    if (planned > 0 && cycle > planned) return null;
-    return { cycle, day: (daysElapsed % interval) + 1 };
-  })();
-
-  const displayCycleNumber =
-    latestPlanCycle?.cycle_number ?? derivedCycleInfo?.cycle ?? null;
-  const displayCycleDay =
-    latestPlanCycle?.cycle_day ?? derivedCycleInfo?.day ?? null;
 
   /* Treatment timeline: one node per CYCLE, Cycle 1 through the final
      planned cycle of the selected protocol. Day counting / interval
@@ -2318,23 +2388,65 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-5">
 <div className="flex items-center mb-4">
 <h4 className="text-sm font-bold text-[#1e293b] mr-3">Lab Validation</h4>
-<span className="px-2 py-0.5 bg-slate-50 text-[#64748b] text-[10px] font-bold uppercase rounded border border-slate-200">—</span>
+<span className="px-2 py-0.5 bg-slate-50 text-[#64748b] text-[10px] font-bold uppercase rounded border border-slate-200">{labItemsLoading ? "Loading…" : `${labItems.length} Test(s)`}</span>
 </div>
-<table className="w-full text-left text-sm mb-4">
-<thead>
-<tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
-<th className="pb-2 font-semibold">PARAMETER</th>
-<th className="pb-2 font-semibold">RESULT</th>
-<th className="pb-2 font-semibold">RANGE</th>
-<th className="pb-2 font-semibold">STATUS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td colSpan={4} className="py-6 text-center text-xs text-[#64748b]">No lab validation records found.</td>
-</tr>
-</tbody>
-</table>
+{labItemsError && (
+  <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">{labItemsError}</div>
+)}
+{labItemsLoading ? (
+  <div className="py-6 text-center text-xs text-[#64748b]">
+    <i className="fa-solid fa-circle-notch fa-spin mr-1" />Loading lab investigations…
+  </div>
+) : labItems.length === 0 ? (
+  <table className="w-full text-left text-sm mb-4">
+    <thead>
+      <tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
+        <th className="pb-2 font-semibold">PARAMETER</th>
+        <th className="pb-2 font-semibold">RESULT</th>
+        <th className="pb-2 font-semibold">RANGE</th>
+        <th className="pb-2 font-semibold">STATUS</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td colSpan={4} className="py-6 text-center text-xs text-[#64748b]">No lab validation records found.</td>
+      </tr>
+    </tbody>
+  </table>
+) : (
+  <table className="w-full text-left text-sm mb-4">
+    <thead>
+      <tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
+        <th className="pb-2 font-semibold">TEST NAME</th>
+        <th className="pb-2 font-semibold">TEST CODE</th>
+        <th className="pb-2 font-semibold">UNIT</th>
+        <th className="pb-2 font-semibold">REFERENCE RANGE</th>
+        <th className="pb-2 font-semibold">STATUS</th>
+      </tr>
+    </thead>
+    <tbody>
+      {labItems.map((item) => (
+        <tr key={item.lab_order_item_id} className="border-b border-slate-50">
+          <td className="py-2 font-bold text-sm">{item.lab_test_master?.test_name ?? "—"}</td>
+          <td className="py-2 text-sm">{item.lab_test_master?.test_code ?? "—"}</td>
+          <td className="py-2 text-sm">{item.lab_test_master?.unit ?? "—"}</td>
+          <td className="py-2 text-sm">{item.lab_test_master?.reference_range ?? "—"}</td>
+          <td className="py-2">
+            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+              item.item_status === "Completed"
+                ? "bg-emerald-100 text-emerald-700"
+                : item.item_status === "Ordered"
+                ? "bg-blue-100 text-blue-700"
+                : "bg-slate-100 text-slate-600"
+            }`}>
+              {item.item_status ?? "Ordered"}
+            </span>
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+)}
 <div className="border-t border-slate-100 pt-3 flex justify-between items-center text-sm">
 <span className="text-[#64748b]">Chemo Clearance :</span>
 <span className="font-bold text-[#64748b] uppercase">—</span>
