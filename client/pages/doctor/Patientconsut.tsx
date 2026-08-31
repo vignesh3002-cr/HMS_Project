@@ -4335,6 +4335,7 @@ type RegimenProtocolDetail = {
     frequency: string | null;
     timing_relative_to_primary: string | null;
     remarks: string | null;
+    administration_detail: string | null;
     medicine_master: {
       medicine_name: string;
       generic_name: string | null;
@@ -4380,6 +4381,23 @@ const ChemotherapyOrder: React.FC<{
   const planIdRef = useRef<string>("");
   const planItemsRef = useRef<ChemotherapyPlanItem[]>([]);
   const [savingOrder, setSavingOrder] = useState(false);
+
+  /* Administration instructions derived from the selected regimen
+     protocol items (route, infusion, frequency, timing, remarks,
+     administration detail). */
+  type AdminInstruction = {
+    id: number;
+    medicineName: string;
+    route: string;
+    infusion: string;
+    frequency: string;
+    timing: string;
+    remarks: string;
+    administrationDetail: string;
+  };
+  const [adminInstructions, setAdminInstructions] = useState<
+    AdminInstruction[]
+  >([]);
 
   /* Edit-in-place state (medication rows) */
   const [editingRow, setEditingRow] = useState<{
@@ -4654,6 +4672,28 @@ const ChemotherapyOrder: React.FC<{
             .map(toDrug)
         );
         protocolRef.current = protocol;
+        setAdminInstructions(
+          items.map((item, index) => ({
+            id: index,
+            medicineName:
+              item.medicine_master?.medicine_name ||
+              item.medicine_master?.generic_name ||
+              "",
+            route: item.administration_route || "",
+            infusion: [
+              item.infusion_type,
+              item.infusion_duration_minutes != null
+                ? `${item.infusion_duration_minutes} min`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" · "),
+            frequency: item.frequency || "",
+            timing: item.timing_relative_to_primary || "",
+            remarks: item.remarks || "",
+            administrationDetail: item.administration_detail || "",
+          }))
+        );
         applyNextCycle(protocol, latestCycleRef.current, savedStartDate);
       } catch (error) {
         console.error("Failed to load regimen protocol:", error);
@@ -5764,6 +5804,121 @@ const ChemotherapyOrder: React.FC<{
 
                       <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
                         {drug.unit}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : activeTab === "Admin Instructions" ? (
+          <div className="p-8">
+            <p className="mb-4 text-sm text-gray-500">
+              Administration instructions for the selected protocol:
+            </p>
+
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="py-4 pl-6 pr-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Drug Name
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Route
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Infusion
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Frequency
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Timing
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Admin Detail
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Remarks
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-gray-200 bg-white">
+                  {planLoading && (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="px-6 py-8 text-center text-sm text-gray-500"
+                      >
+                        Loading administration instructions
+                      </td>
+                    </tr>
+                  )}
+
+                  {!planLoading &&
+                    !planError &&
+                    adminInstructions.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={7}
+                          className="px-6 py-8 text-center text-sm text-gray-500"
+                        >
+                          No administration instructions found for this
+                          protocol.
+                        </td>
+                      </tr>
+                    )}
+
+                  {planError && (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="px-6 py-8 text-center text-sm text-red-500"
+                      >
+                        {planError}
+                      </td>
+                    </tr>
+                  )}
+
+                  {adminInstructions.map((instruction) => (
+                    <tr
+                      key={instruction.id}
+                      className="align-top transition-colors hover:bg-gray-50"
+                    >
+                      <td className="whitespace-nowrap py-5 pl-6 pr-3 text-sm font-medium text-gray-900">
+                        {instruction.medicineName || "—"}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                        {instruction.route || "—"}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                        {instruction.infusion || "—"}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                        {instruction.frequency || "—"}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                        {instruction.timing || "—"}
+                      </td>
+
+                      <td className="px-3 py-5 text-sm text-gray-700">
+                        {instruction.administrationDetail || "—"}
+                      </td>
+
+                      <td className="px-3 py-5 text-sm text-gray-500">
+                        {instruction.remarks || "—"}
                       </td>
                     </tr>
                   ))}
@@ -8223,6 +8378,91 @@ const Summary: React.FC<{
     return medicines;
   };
 
+  /* ------------------------------------------------------------
+     SAVE ADMIN INSTRUCTIONS
+     Persists the selected regimen protocol's administration
+     instructions (route, infusion, frequency, timing, remarks,
+     administration detail) to localStorage keyed by patient so the
+     patient-details Order Summary "Instructions" card can show them.
+  ------------------------------------------------------------ */
+
+  const saveAdminInstructions = async (): Promise<void> => {
+    try {
+      const savedProtocolId = localStorage.getItem(
+        `hms_selected_protocol_id_${resolvedPatientId}`
+      );
+      let protocolId = savedProtocolId ?? "";
+
+      if (!protocolId) {
+        const planResponse = await API.get<{
+          success: boolean;
+          data: {
+            chemotherapy_regimen_protocol?: {
+              protocol_id?: string;
+            } | null;
+          }[];
+        }>("/chemotherapy/plans", {
+          params: {
+            patient_id: resolvedPatientId,
+            branchId:
+              getActiveBranchId() ?? getUser()?.branch_id ?? undefined,
+          },
+        });
+        protocolId =
+          planResponse.data.data?.[0]?.chemotherapy_regimen_protocol
+            ?.protocol_id ?? "";
+      }
+
+      if (!protocolId) return;
+
+      const protocolResponse = await API.get<{
+        success: boolean;
+        data: RegimenProtocolDetail;
+      }>(`/chemotherapy/regimen-protocols/${encodeURIComponent(protocolId)}`);
+
+      const items =
+        protocolResponse.data.data?.chemotherapy_regimen_protocol_items ??
+        [];
+
+      const adminInstructions = items
+        .map((item) => ({
+          medicineName:
+            item.medicine_master?.medicine_name ||
+            item.medicine_master?.generic_name ||
+            "",
+          route: item.administration_route || "",
+          infusion: [
+            item.infusion_type,
+            item.infusion_duration_minutes != null
+              ? `${item.infusion_duration_minutes} min`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          dose: item.dosage != null ? String(item.dosage) : "",
+          frequency: item.frequency || "",
+          timing: item.timing_relative_to_primary || "",
+          remarks: item.remarks || "",
+          administrationDetail: item.administration_detail || "",
+        }))
+        .filter(
+          (instruction) =>
+            instruction.administrationDetail ||
+            instruction.route ||
+            instruction.frequency ||
+            instruction.timing ||
+            instruction.remarks
+        );
+
+      localStorage.setItem(
+        `hms_admin_instructions_${resolvedPatientId}`,
+        JSON.stringify(adminInstructions)
+      );
+    } catch (error) {
+      console.error("Failed to save admin instructions:", error);
+    }
+  };
+
   const handleSubmitSummary = async () => {
     if (submittingSummary) return;
 
@@ -8268,6 +8508,8 @@ const Summary: React.FC<{
         ...(plan?.diagnosis_id ? { diagnosis_id: plan.diagnosis_id } : {}),
         medicines,
       });
+
+      await saveAdminInstructions();
 
       localStorage.removeItem(`hms_diagnosis_form_${resolvedPatientId}`);
       setSummarySubmitted(true);

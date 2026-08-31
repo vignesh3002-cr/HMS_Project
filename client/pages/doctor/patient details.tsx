@@ -1347,6 +1347,19 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     PatientAllergyRecord[]
   >([]);
 
+  const [adminInstructions, setAdminInstructions] = useState<
+    {
+      medicineName: string;
+      route: string;
+      infusion: string;
+      dose: string;
+      frequency: string;
+      timing: string;
+      remarks: string;
+      administrationDetail: string;
+    }[]
+  >([]);
+
   const location = useLocation();
   const consultationState = location.state as ConsultationState | null;
   const { selectedBranchId } = useBranchFilter();
@@ -1733,6 +1746,21 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     return () => {
       cancelled = true;
     };
+  }, [consultationState?.patientId]);
+
+  useEffect(() => {
+    const patientId = consultationState?.patientId;
+    if (!patientId) {
+      setAdminInstructions([]);
+      return;
+    }
+    try {
+      const stored = localStorage.getItem(`hms_admin_instructions_${patientId}`);
+      const parsed = stored ? JSON.parse(stored) : [];
+      setAdminInstructions(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setAdminInstructions([]);
+    }
   }, [consultationState?.patientId]);
 
   const patientName = patient
@@ -2679,10 +2707,39 @@ orderDischargeMeds.map((item, index) => (
 <i className="fa-regular fa-file-lines mr-2"></i>
 <h4 className="text-sm font-bold">Instructions</h4>
 </div>
-<p className="text-sm text-[#64748b] mb-3">Premedication tablets to take a day before:</p>
+<p className="text-sm text-[#64748b] mb-3">Administration instructions from the selected regimen protocol:</p>
+{adminInstructions.length === 0 ? (
 <ul className="space-y-2 text-sm text-[#1e293b] font-medium list-disc list-inside">
 <li>No instructions recorded.</li>
 </ul>
+) : (
+<ul className="space-y-3 text-sm text-[#1e293b]">
+{adminInstructions.map((instruction, index) => (
+<li key={index} className="border border-slate-100 rounded-[12px] p-3">
+<div className="flex items-start justify-between gap-3">
+<span className="font-bold text-[#1e293b]">{instruction.medicineName || `Item ${index + 1}`}</span>
+{instruction.dose ? (
+<span className="text-xs text-[#64748b] whitespace-nowrap">{instruction.dose}</span>
+) : null}
+</div>
+{(instruction.route || instruction.infusion || instruction.frequency || instruction.timing) ? (
+<div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#64748b]">
+{instruction.route ? <span>Route: {instruction.route}</span> : null}
+{instruction.infusion ? <span>Infusion: {instruction.infusion}</span> : null}
+{instruction.frequency ? <span>Frequency: {instruction.frequency}</span> : null}
+{instruction.timing ? <span>Timing: {instruction.timing}</span> : null}
+</div>
+) : null}
+{instruction.administrationDetail ? (
+<p className="mt-1.5 text-xs text-[#475569]">{instruction.administrationDetail}</p>
+) : null}
+{instruction.remarks ? (
+<p className="mt-1.5 text-xs italic text-[#64748b]">{instruction.remarks}</p>
+) : null}
+</li>
+))}
+</ul>
+)}
 <a className="inline-block mt-4 text-sm font-semibold text-[#1d4ed8] underline" href="#">Investigation for Next Cycle: —</a>
 </div>
 <div className="bg-slate-50 border border-slate-200 rounded-[12px] p-5 flex flex-col items-center justify-center w-[160px] h-full">
