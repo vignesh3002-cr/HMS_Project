@@ -32,6 +32,8 @@ interface Appointment {
 
 const fallbackHospital = "HMS Main Hospital";
 
+const DASHBOARD_BRANCH_STORAGE_KEY = "hms_dashboard_branch_id";
+
 const chartData = [
   { day: "Mon", completed: 153.59, rescheduled: 51.19 },
   { day: "Tue", completed: 122.88, rescheduled: 81.91 },
@@ -250,7 +252,9 @@ export default function DoctorDashboard() {
   const [branchLoading, setBranchLoading] = useState(false);
   const [checkInLoading, setCheckInLoading] = useState<string | null>(null);
   const [dashboardError, setDashboardError] = useState("");
-  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(() =>
+    localStorage.getItem(DASHBOARD_BRANCH_STORAGE_KEY) || null
+  );
 
   const handleCheckIn = async (appointmentId: string) => {
     setCheckInLoading(appointmentId);
@@ -330,8 +334,17 @@ export default function DoctorDashboard() {
         (branch) => branch.status === undefined || branch.status === 1
       );
 
+      // Drop a stored selection that no longer belongs to this doctor's branches
+      const storedBranchValid =
+        !selectedBranchId ||
+        employeeData.branches?.some((b) => b.branch_id === selectedBranchId);
+      if (!storedBranchValid) {
+        localStorage.removeItem(DASHBOARD_BRANCH_STORAGE_KEY);
+        setSelectedBranchId(null);
+      }
+
       // Use selectedBranchId if set, otherwise fall back to HMS branch selector or first active branch
-      const branchId = selectedBranchId || getActiveBranchId() || firstActiveBranch?.branch_id || null;
+      const branchId = (storedBranchValid ? selectedBranchId : null) || getActiveBranchId() || firstActiveBranch?.branch_id || null;
 
       // Set hospital name based on selected branch
       const selectedBranch = employeeData.branches?.find((b) => b.branch_id === branchId);
@@ -383,7 +396,7 @@ export default function DoctorDashboard() {
               .filter(Boolean)
               .join(" ") || "Unknown Patient",
             image:
-              "https://www.figma.com/api/mcp/asset/0174143d-d6a1-4d40-96d6-22a8b499a788.png",
+              item.patient_bio_data?.patient_photo_url || "",
             dateTime: `${formatDate(item.appointment_date)} - ${formatTime(
               item.appointment_time
             )}`,
@@ -810,11 +823,25 @@ export default function DoctorDashboard() {
                       <td className="h-[50px] overflow-hidden border-b border-slate-100 px-5 py-2 text-xs text-slate-600">
                         <div className="flex items-center gap-3">
                           <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-slate-100">
-                            <img
-                              src={appointment.image}
-                              alt={appointment.patient}
-                              className="h-full w-full object-cover"
-                            />
+                            {appointment.image ? (
+                              <img
+                                src={appointment.image}
+                                alt={appointment.patient}
+                                className="h-full w-full object-cover"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = "none";
+                                }}
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-xs font-bold text-slate-500">
+                                {appointment.patient
+                                  .split(" ")
+                                  .map((w) => w[0])
+                                  .slice(0, 2)
+                                  .join("")
+                                  .toUpperCase()}
+                              </div>
+                            )}
                           </div>
 
                           <span className="overflow-hidden text-ellipsis whitespace-nowrap font-['Manrope',sans-serif] text-xs font-bold text-slate-800">
@@ -1040,6 +1067,11 @@ export default function DoctorDashboard() {
                           onClick={() => {
                             setHospital(branch.branch_name);
                             setSelectedBranchId(branch.branch_id || null);
+                            if (branch.branch_id) {
+                              localStorage.setItem(DASHBOARD_BRANCH_STORAGE_KEY, branch.branch_id);
+                            } else {
+                              localStorage.removeItem(DASHBOARD_BRANCH_STORAGE_KEY);
+                            }
                             setHospitalOpen(false);
                             // Load dashboard for new branch with loading indicator
                             loadDashboard(false, true);
