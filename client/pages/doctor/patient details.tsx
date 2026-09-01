@@ -17,6 +17,7 @@ import {
   useBranchFilter,
 } from "../../context/BranchFilterContext";
 import { computeBsa } from "../../utils/vitals";
+import { generatePrescriptionPdf, type PrescriptionData } from "../../utils/prescriptionPdf";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 
 interface ConsultationState {
@@ -2632,12 +2633,70 @@ const HistoryDashboard: React.FC<{
   const [cycleDetails, setCycleDetails] = useState<ChemoCycleDetail[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
+  const [prescriptions, setPrescriptions] = useState<any[]>([]);
+  const [prescriptionsLoading, setPrescriptionsLoading] = useState(false);
+  const [prescriptionsError, setPrescriptionsError] = useState("");
+  const [selectedPrescription, setSelectedPrescription] = useState<any | null>(null);
+  const [prescriptionIndex, setPrescriptionIndex] = useState<number | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
 
   /* Real treatment history for THIS selected patient:
-     latest chemo plan (GET /chemotherapy/plans?patient_id=) plus
-     each cycle's recorded vitals + adverse events
-     (GET /chemotherapy/cycles/:id). */
+      latest chemo plan (GET /chemotherapy/plans?patient_id=) plus
+      each cycle's recorded vitals + adverse events
+      (GET /chemotherapy/cycles/:id). */
+  const buildPrescriptionData = (p: any) => {
+    return {
+      prescription_id: p.prescription_id,
+      prescription_date: p.prescription_date,
+      advice: p.advice,
+      patient_history: {
+        patient_first_name: p.patient_history?.patient_bio_data?.patient_first_name || '',
+        patient_last_name: p.patient_history?.patient_bio_data?.patient_last_name || '',
+        patient_id: p.patient_history?.patient_bio_data?.patient_id || '',
+        patient_display_id: p.patient_history?.patient_bio_data?.patient_id || '',
+      },
+      employees: {
+        first_name: p.employees?.first_name || '',
+        last_name: p.employees?.last_name || '',
+      },
+      diagnosis: {
+        diagnosis_name: p.diagnosis?.diagnosis_name || '',
+        icd10_code: p.diagnosis?.icd_code || '',
+      },
+      prescription_items: (p.prescription_items || []).map((it: any) => ({
+        medicine_name: it.medicine_master?.medicine_name || '',
+        medicine_master: it.medicine_master,
+        dosage: it.dosage,
+        unit: it.unit,
+        route: it.route,
+        frequency: it.frequency,
+        instruction: it.instruction,
+        drug_role: it.drug_role,
+      })),
+    };
+  };
+
+  const openPrescriptionPdf = (p: any, index: number) => {
+    try {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+      const data = buildPrescriptionData(p);
+      const { url } = generatePrescriptionPdf(data as any);
+      setSelectedPrescription(p);
+      setPrescriptionIndex(index);
+      setPdfUrl(url);
+    } catch (e) {
+      console.error('Failed to generate PDF', e);
+    }
+  };
+
+  const closePdfModal = () => {
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    setPdfUrl(null);
+    setSelectedPrescription(null);
+    setPrescriptionIndex(null);
+  };
+
   useEffect(() => {
     if (!patientId) {
       setPlan(null);
@@ -2681,6 +2740,30 @@ const HistoryDashboard: React.FC<{
     return () => {
       cancelled = true;
     };
+  }, [patientId]);
+
+  useEffect(() => {
+    if (!patientId) {
+      setPrescriptions([]);
+      setPrescriptionsError("");
+      return;
+    }
+    let cancelled = false;
+    setPrescriptionsLoading(true);
+    setPrescriptionsError("");
+    API.get(`/prescriptions/patient/${patientId}`)
+      .then((res) => {
+        if (cancelled) return;
+        const data = res.data?.data?.prescriptions ?? [];
+        setPrescriptions(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setPrescriptionsError(err?.response?.data?.message || "Failed to load prescriptions");
+      })
+      .finally(() => {
+        if (!cancelled) setPrescriptionsLoading(false);
+      });
+    return () => { cancelled = true; };
   }, [patientId]);
 
   const fmtHistoryDate = (value?: string | null) => {
@@ -3040,11 +3123,61 @@ const HistoryDashboard: React.FC<{
               </button>
             </div>
 
-            <div className="space-y-3">
-              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-4 text-center text-xs text-gray-400">
-                No documents uploaded for this patient yet.
+            {prescriptionsLoading ? (
+              <div className="text-xs text-gray-500">Loading prescriptions…</div>
+            ) : prescriptionsError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{prescriptionsError}</div>
+            ) : prescriptions.length === 0 ? (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-4 text-center text-xs text-gray-400">
+                  No prescriptions found for this patient yet.
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-3">
+                {prescriptions.map((p, idx) => {
+                  const date = p.prescription_date ? new Date(p.prescription_date).toLocaleDateString() : '';
+                  const doctor = `${p.employees?.first_name || ''} ${p.employees?.last_name || ''}`.trim();
+                  return (
+                    <div key={p.prescription_id} className="rounded-lg border border-gray-200 p-3 flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900">Prescription #{p.prescription_id}</div>
+                        <div className="text-xs text-gray-500">{date} • {doctor || '—'} • {p.prescription_status || '—'}</div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          className="text-xs text-blue-600 font-bold hover:underline"
+                          onClick={() => openPrescriptionPdf(p, idx)}
+                        >
+                          View PDF
+                        </button>
+                        <a
+                          href="#"
+                          className="text-xs text-gray-600 hover:underline"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            try {
+                              const data = buildPrescriptionData(p);
+                              const { url } = generatePrescriptionPdf(data as any);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = `prescription-${p.prescription_id}.pdf`;
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            } catch (err) {
+                              console.error(err);
+                            }
+                          }}
+                        >
+                          Download
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -4429,10 +4562,83 @@ return (
           )}
 </div>
 </div>
-</main>
+ </main>
 {/* END: Main Content */}
 
       </div>
+
+      {/* Prescription PDF Modal */}
+      {pdfUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={closePdfModal}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b gap-4">
+              <div className="text-sm font-semibold text-gray-900">
+                Prescription {selectedPrescription?.prescription_id || ''} {prescriptionIndex !== null && prescriptions.length > 0 ? `(${prescriptionIndex + 1} / ${prescriptions.length})` : ''}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  disabled={prescriptionIndex === null || prescriptionIndex <= 0}
+                  onClick={() => {
+                    if (prescriptionIndex !== null && prescriptionIndex > 0) {
+                      const newIdx = prescriptionIndex - 1;
+                      openPrescriptionPdf(prescriptions[newIdx], newIdx);
+                    }
+                  }}
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  disabled={prescriptionIndex === null || prescriptionIndex >= prescriptions.length - 1}
+                  onClick={() => {
+                    if (prescriptionIndex !== null && prescriptionIndex < prescriptions.length - 1) {
+                      const newIdx = prescriptionIndex + 1;
+                      openPrescriptionPdf(prescriptions[newIdx], newIdx);
+                    }
+                  }}
+                >
+                  Next
+                </button>
+                <button
+                  type="button"
+                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  onClick={() => {
+                    if (selectedPrescription) {
+                      try {
+                        const data = buildPrescriptionData(selectedPrescription);
+                        const { url } = generatePrescriptionPdf(data as any);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `prescription-${selectedPrescription.prescription_id}.pdf`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      } catch (err) {
+                        console.error(err);
+                      }
+                    }
+                  }}
+                >
+                  Download
+                </button>
+                <button
+                  type="button"
+                  className="text-gray-600 hover:text-gray-900 text-sm ml-2"
+                  onClick={closePdfModal}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto bg-gray-100">
+              <iframe src={pdfUrl} className="w-full h-full" title="Prescription PDF" />
+            </div>
+          </div>
+        </div>
+      )}
+
     </>
   );
 }
