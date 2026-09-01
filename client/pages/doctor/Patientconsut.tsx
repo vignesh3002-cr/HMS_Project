@@ -6384,6 +6384,28 @@ const FollowUp: React.FC<{
   const [notes, setNotes] = useState("");
   const [submittingFollowUp, setSubmittingFollowUp] = useState(false);
   const [followUpError, setFollowUpError] = useState("");
+  const [protocolCycles, setProtocolCycles] = useState<number | null>(null);
+  const [protocolDays, setProtocolDays] = useState<number | null>(null);
+  const [newVisit, setNewVisit] = useState("");
+// Cycle/day parser and treatment end checker
+const parseCycleDay = (value: string) => {
+  const match = value.match(/Cycle\s*(\d+)(?:\s*\/\s*Day\s*(\d+))?/i);
+  if (!match) return null;
+  return { cycle: Number(match[1]), day: match[2] ? Number(match[2]) : null };
+};
+
+const treatmentEnds = React.useMemo(() => {
+  if (!protocolCycles || !protocolDays) return false;
+  const parsed = parseCycleDay(nextCycle);
+  if (!parsed) return false;
+  if (parsed.cycle > protocolCycles) return true;
+  if (parsed.cycle === protocolCycles && parsed.day !== null && protocolDays && parsed.day >= protocolDays) return true;
+  return false;
+}, [nextCycle, protocolCycles, protocolDays]);
+
+// Decide options to display
+const displayedOptions = treatmentEnds ? ["Treatment ends"] : cycleOptions;
+const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
 
   useEffect(() => {
     if (!resolvedPatientId) return;
@@ -6412,7 +6434,7 @@ const FollowUp: React.FC<{
     );
     if (!savedProtocolId) return;
 
-    API.get<{ success: boolean; data: RegimenProtocolDetail }>(
+    API.get<{ success: boolean; data: RegimenProtocolDetail }> (
       `/chemotherapy/regimen-protocols/${savedProtocolId}`
     )
       .then((response) => {
@@ -6421,12 +6443,23 @@ const FollowUp: React.FC<{
           protocol.standard_cycles && protocol.standard_cycles > 0
             ? protocol.standard_cycles
             : 6;
-        const options = Array.from(
-          { length: total },
-          (_, index) => `Cycle ${index + 1}`
-        );
+        const daysPerCycle =
+          protocol.no_of_days && protocol.no_of_days > 0
+            ? protocol.no_of_days
+            : 6;
+        setProtocolCycles(total);
+        setProtocolDays(daysPerCycle);
+        const options: string[] = [];
+        for (let c = 1; c <= total; c++) {
+          for (let d = 1; d <= daysPerCycle; d++) {
+            options.push(`Cycle ${c} / Day ${d}`);
+          }
+        }
         if (normalizedCycle && !options.includes(normalizedCycle)) {
           options.unshift(normalizedCycle);
+        }
+        if (!options.includes("Treatment ends")) {
+          options.push("Treatment ends");
         }
         setCycleOptions(options);
       })
@@ -6677,32 +6710,47 @@ const FollowUp: React.FC<{
                 Next Cycle
               </label>
 
-              <div className="relative">
-                <select
-                  id="nextCycle"
-                  value={nextCycle}
-                  onChange={(event) =>
-                    setNextCycle(event.target.value)
-                  }
-                  className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                >
-                  {cycleOptions.length === 0 ? (
-                    <option value="">Select Next Cycle</option>
-                  ) : (
-                    cycleOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))
-                  )}
-                </select>
-
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
-                  <ChevronDownIcon />
-                </div>
-              </div>
-            </div>
+<div className="relative">
+          <select
+            id="nextCycle"
+            value={displayedValue}
+            onChange={(event) =>
+              setNextCycle(event.target.value)
+            }
+            className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+          >
+            {displayedOptions.length === 0 ? (
+              <option value="">Select Next Cycle</option>
+            ) : (
+              displayedOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))
+            )}
+</select>
+          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
+            <ChevronDownIcon />
           </div>
+        </div>
+</div>
+    </div>
+    {treatmentEnds && (
+      <div className="w-full md:w-1/2 md:pl-4">
+        <label htmlFor="newVisit" className="mb-2 block text-sm font-semibold text-gray-800">
+          New Visit
+        </label>
+        <div className="relative">
+          <input
+            id="newVisit"
+            type="text"
+            value={nextVisitDate}
+            readOnly
+            className="block w-full rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+          />
+        </div>
+      </div>
+    )}
 
           {/* Plan */}
           <div className="w-full md:w-1/2 md:pr-4">

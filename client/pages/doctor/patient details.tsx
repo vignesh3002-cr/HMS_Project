@@ -162,6 +162,21 @@ const MedicationPortal: React.FC<{
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showDischargeDashboard, setShowDischargeDashboard] = useState(false);
 
+  /* Move to the next tab in the tabs array with a single click. */
+  const goNextTab = () => {
+    setActiveTab((current) => {
+      const index = tabs.indexOf(current);
+      const next = tabs[index + 1];
+      if (!next) return current;
+      if (next === "Order Summary") return current;
+      if (next === "Discharge") {
+        setShowDischargeDashboard(true);
+        return current;
+      }
+      return next;
+    });
+  };
+
   /* Live patient vitals for the header strip (same source as the Order
      Summary portal: latest encounter + chemo-cycle fallback, per field). */
   const { vitalEntries } = useLatestPatientVitals(patientId);
@@ -261,6 +276,14 @@ const MedicationPortal: React.FC<{
             )}
             <button onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-slate-500 lg:hidden">
               <i className="fa-solid fa-bars" />
+            </button>
+            <button
+              type="button"
+              onClick={goNextTab}
+              className="flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-100"
+            >
+              Next
+              <i className="fa-solid fa-arrow-right text-xs" />
             </button>
            
           </div>
