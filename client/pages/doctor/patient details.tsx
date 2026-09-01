@@ -162,6 +162,12 @@ const MedicationPortal: React.FC<{
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showDischargeDashboard, setShowDischargeDashboard] = useState(false);
 
+  /* Live patient vitals for the header strip (same source as the Order
+     Summary portal: latest encounter + chemo-cycle fallback, per field). */
+  const { vitalEntries } = useLatestPatientVitals(patientId);
+  const headerVitals = (label: string) =>
+    vitalEntries.find(([key]) => key === label)?.[1] || "—";
+
   /* Recent medication details for THIS selected patient, sourced from
       the fetched chemotherapy plan (GET /chemotherapy/plans?patient_id=). */
   const cycleId = plan?.chemotherapy_cycle?.find(c => c.cycle_number === selectedCycle)?.chemotherapy_cycle_id;
@@ -292,41 +298,41 @@ const MedicationPortal: React.FC<{
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">HEIGHT</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("HEIGHT")}</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BP</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("BP")}</div>
             </div>
             </div>
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">WEIGHT</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("WEIGHT")}</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">PULSE</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("PULSE")}</div>
             </div>
             </div>
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BSA</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("BSA")}</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">TEMP</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("TEMP")}</div>
             </div>
             </div>
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BMI</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("BMI")}</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">SPO2</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("SPO2")}</div>
             </div>
             </div>
             </div>
