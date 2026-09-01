@@ -5546,31 +5546,6 @@ const ChemotherapyOrder: React.FC<{
               </div>
             </div>
 
-            {/* Quick day selector: jump to any day of the current cycle.
-                Only days that actually carry medication are shown, so rest
-                days (e.g. day 2) never produce empty tables. */}
-            {protocolDayCount > 0 ? (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {getAvailableDays(protocolRef.current).map((day) => {
-                  const active =
-                    (getCycleDayNumber(cycleDay) ?? 0) === day;
-                  return (
-                    <button
-                      key={day}
-                      type="button"
-                      onClick={() => selectDay(day)}
-                      className={`h-8 min-w-[36px] rounded-md px-2 text-xs font-semibold transition-colors ${
-                        active
-                          ? "bg-blue-600 text-white"
-                          : "border border-gray-300 bg-white text-gray-700 hover:bg-blue-50"
-                      }`}
-                    >
-                      Day {day}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
           </div>
 
           {/* Start Date */}
