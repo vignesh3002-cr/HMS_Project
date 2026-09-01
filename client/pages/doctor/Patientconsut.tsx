@@ -4389,8 +4389,10 @@ const ChemotherapyOrder: React.FC<{
 
   const protocolRef = useRef<RegimenProtocolDetail | null>(null);
   const protocolDaysRef = useRef<RegimenProtocolDay[]>([]);
+  const cycleDayRef = useRef<string>("");
   const planIdRef = useRef<string>("");
   const planItemsRef = useRef<ChemotherapyPlanItem[]>([]);
+  const selectedProtocolIdRef = useRef<string>("");
   const [savingOrder, setSavingOrder] = useState(false);
 
   /* Administration instructions derived from the selected regimen
@@ -4421,6 +4423,14 @@ const ChemotherapyOrder: React.FC<{
   const latestCycleRef = useRef<
     NonNullable<ChemotherapyPlan["chemotherapy_cycle"]>[number] | null
   >(null);
+
+  /* Single source of truth for cycle/day: always keeps the ref in sync
+     with the state so async protocol loads filter by the CURRENT day
+     (never a stale mount-time closure). */
+  const updateCycleDay = (value: string) => {
+    cycleDayRef.current = value;
+    setCycleDay(value);
+  };
 
   const applyNextCycle = (
     protocol: RegimenProtocolDetail | null,
@@ -4462,6 +4472,12 @@ const ChemotherapyOrder: React.FC<{
     }
     const formCycleDay = storedParsed ? storedParsed.day : 1;
 
+    // Never auto-land on a rest day. Once a cycle's meds are entered the
+    // next scheduled visit should skip to the next day that actually has
+    // drugs in the protocol (some cycles have fewer medication days).
+    const snappedFormDay =
+      nextAvailableDay(protocol, formCycleDay) ?? formCycleDay;
+
     const baseDate = parseDateValue(baseDateValue) ?? new Date();
     const baseStart = new Date(baseDate);
     baseStart.setHours(0, 0, 0, 0);
@@ -4477,8 +4493,12 @@ const ChemotherapyOrder: React.FC<{
       return `${day}-${month}-${date.getFullYear()}`;
     };
 
-    const formCycleStr = `Cycle ${formCycleNumber} / Day ${formCycleDay}`;
-    const nextCycleStr = computeNextCycle(formCycleStr, protocol.no_of_days);
+    const formCycleStr = `Cycle ${formCycleNumber} / Day ${snappedFormDay}`;
+    const nextAvailable = nextAvailableDay(protocol, snappedFormDay + 1);
+    const nextCycleStr =
+      nextAvailable != null
+        ? `Cycle ${formCycleNumber} / Day ${nextAvailable}`
+        : computeNextCycle(formCycleStr, protocol.no_of_days);
 
     const next = getCycleAndDay(nextCycleStr);
     const nextCycleNumber = (next?.cycle ?? formCycleNumber) > maxCycles
@@ -4490,7 +4510,7 @@ const ChemotherapyOrder: React.FC<{
       nextDate.getDate() + (nextCycleNumber - 1) * interval
     );
 
-    setCycleDay(formCycleStr);
+    updateCycleDay(formCycleStr);
     setStartDate(formatDate(formDate));
     localStorage.setItem(
       `hms_next_cycle_${resolvedPatientId}`,
@@ -4549,6 +4569,32 @@ const ChemotherapyOrder: React.FC<{
     return `Cycle ${current.cycle + 1} / Day 1`;
   };
 
+  /* The distinct cycle days that actually have medication in the protocol,
+     derived from the flat items' administration_day. Protocols with rest
+     days (e.g. day 2 has no drugs) simply won't list that day here. */
+  const getAvailableDays = (
+    protocol: RegimenProtocolDetail | null | undefined
+  ): number[] => {
+    const set = new Set<number>();
+    (protocol?.chemotherapy_regimen_protocol_items ?? []).forEach((item) => {
+      const d = Number(item.administration_day);
+      if (Number.isFinite(d) && d > 0) set.add(d);
+    });
+    return [...set].sort((a, b) => a - b);
+  };
+
+  /* The first day >= fromDay that has drugs, so auto-advance never lands
+     on a rest day. Returns null when fromDay has passed the last med day
+     of the cycle (roll to the next cycle). */
+  const nextAvailableDay = (
+    protocol: RegimenProtocolDetail | null | undefined,
+    fromDay: number
+  ): number | null => {
+    const days = getAvailableDays(protocol);
+    if (days.length === 0) return null;
+    return days.find((d) => d >= fromDay) ?? null;
+  };
+
   const resolveProtocolDayItems = (
     days: RegimenProtocolDay[] | null | undefined,
     dayNumber: number
@@ -4597,16 +4643,30 @@ const ChemotherapyOrder: React.FC<{
     dayValue: string,
     days: RegimenProtocolDay[] | null | undefined
   ) => {
-    const dayNumber = getCycleDayNumber(dayValue);
+    let dayNumber = getCycleDayNumber(dayValue);
     const hasDayStructure = (days ?? []).length > 0;
 
+    // If the selected day is a rest day (or not parseable) but the
+    // protocol has medication days, snap forward to the next day that
+    // actually has drugs so the tables are never empty. Explicitly valid
+    // medication days are left untouched.
+    const available = getAvailableDays(protocolRef.current);
+    if (available.length > 0 && (dayNumber == null || !available.includes(dayNumber))) {
+      const fallback =
+        available.find((d) => d >= (dayNumber ?? 1)) ?? available[0];
+      dayNumber = fallback;
+    }
+
     // When the protocol defines a day breakdown, show only the medicines
-    // mapped to the selected day. Otherwise fall back to the full flat
-    // list. Role separation is applied below either way.
+    // mapped to the selected day. If a valid day is missing, show nothing
+    // (never dump the whole cycle across every day). Only protocols
+    // WITHOUT a day breakdown fall back to the full flat item list.
     const items =
-      dayNumber && hasDayStructure
+      !hasDayStructure
+        ? (protocolRef.current?.chemotherapy_regimen_protocol_items ?? [])
+        : dayNumber != null
         ? resolveProtocolDayItems(days, dayNumber)
-        : (protocolRef.current?.chemotherapy_regimen_protocol_items ?? []);
+        : [];
 
     setDrugs(
       items
@@ -4643,7 +4703,7 @@ const ChemotherapyOrder: React.FC<{
       };
 
       if (data.cycleDay) {
-        setCycleDay(data.cycleDay);
+        updateCycleDay(data.cycleDay);
         userTouched.current.cycleDay = true;
       }
 
@@ -4711,6 +4771,68 @@ const ChemotherapyOrder: React.FC<{
     "Admin Instructions",
   ];
 
+  /* Number of days selectable for the current cycle, driven by the
+     protocol's no_of_days (falling back to the distinct administration
+     days present in the flat items). */
+  const protocolDayCount = (() => {
+    const explicit = Number(
+      protocolRef.current?.no_of_days ?? null
+    );
+    if (Number.isFinite(explicit) && explicit > 0) return explicit;
+    const adminDays = new Set<number>();
+    (protocolRef.current?.chemotherapy_regimen_protocol_items ?? []).forEach(
+      (item) => {
+        const d = Number(item.administration_day ?? item.cycle_day);
+        if (Number.isFinite(d) && d > 0) adminDays.add(d);
+      }
+    );
+    return adminDays.size > 0 ? Math.max(...adminDays) : 6;
+  })();
+
+  /* Jump to a specific day in the current cycle, preserving the cycle
+     number already selected in the Cycle / Day field. The filtered drugs
+     are applied immediately (synchronously) so the tables update the
+     instant the day is picked. */
+  const selectDay = (day: number) => {
+    const currentCycle = getCycleNumber(cycleDay) || 1;
+    const value = `Cycle ${currentCycle} / Day ${day}`;
+    updateCycleDay(value);
+    applySelectedDay(value);
+  };
+
+  /* Apply the day's filtered drugs to the three tables. If the regimen
+     protocol has not been loaded yet for this session, load it on demand
+     (using the stored protocol id) so selecting a day always fetches that
+     day's drugs instead of leaving the tables empty. */
+  const applySelectedDay = async (value: string) => {
+    if (protocolRef.current) {
+      applyCycleDayDrugs(value, protocolDaysRef.current);
+      return;
+    }
+    const protocolId = selectedProtocolIdRef.current;
+    if (!protocolId) {
+      applyCycleDayDrugs(value, protocolDaysRef.current);
+      return;
+    }
+    try {
+      const protocolResponse = await API.get<{
+        success: boolean;
+        data: RegimenProtocolDetail;
+      }>(`/chemotherapy/regimen-protocols/${protocolId}`);
+      const protocol = protocolResponse.data.data;
+      protocolRef.current = protocol;
+      protocolDaysRef.current = protocol.chemotherapy_regimen_protocol_days ?? [];
+      setProtocolName(
+        protocol.regimen_code
+          ? `${protocol.regimen_code} - ${protocol.regimen_name}`
+          : protocol.regimen_name
+      );
+      applyCycleDayDrugs(value, protocolDaysRef.current);
+    } catch (error) {
+      console.error("Failed to load regimen protocol on day select:", error);
+    }
+  };
+
   const handleSave = async () => {
     if (savingOrder) return;
 
@@ -4763,12 +4885,15 @@ const ChemotherapyOrder: React.FC<{
       }
     }
     if (!userTouched.current.cycleDay) {
-      setCycleDay("Cycle 1 / Day 1");
+      updateCycleDay("Cycle 1 / Day 1");
     }
 
     const savedProtocolId = localStorage.getItem(
       `hms_selected_protocol_id_${resolvedPatientId}`
     );
+    if (savedProtocolId) {
+      selectedProtocolIdRef.current = savedProtocolId;
+    }
 
     const loadRegimenProtocol = async (protocolId: string) => {
       try {
@@ -4788,7 +4913,7 @@ const ChemotherapyOrder: React.FC<{
 
         protocolRef.current = protocol;
         protocolDaysRef.current = protocol.chemotherapy_regimen_protocol_days ?? [];
-        applyCycleDayDrugs(cycleDay, protocolDaysRef.current);
+        applyCycleDayDrugs(cycleDayRef.current, protocolDaysRef.current);
         setAdminInstructions(
           items.map((item, index) => ({
             id: index,
@@ -4856,7 +4981,7 @@ const ChemotherapyOrder: React.FC<{
         const latestCycle = cycles[cycles.length - 1] ?? null;
         latestCycleRef.current = latestCycle;
         if (!userTouched.current.cycleDay) {
-          setCycleDay(
+          updateCycleDay(
             latestCycle
               ? `Cycle ${latestCycle.cycle_number} / Day ${
                   latestCycle.cycle_day ?? ""
@@ -4922,7 +5047,8 @@ const ChemotherapyOrder: React.FC<{
           const protocolId =
             plan.chemotherapy_regimen_protocol?.protocol_id;
           if (protocolId) {
-            void loadRegimenProtocol(protocolId);
+            selectedProtocolIdRef.current = String(protocolId);
+            void loadRegimenProtocol(String(protocolId));
           }
         }
       })
@@ -4950,10 +5076,17 @@ const ChemotherapyOrder: React.FC<{
   }, [resolvedPatientId]);
 
   /* Re-apply the role-filtered drugs whenever the selected cycle
-     day changes so the tables reflect that day's regimen. */
+     day changes so the tables reflect that day's regimen. The ref is the
+     single source of truth (kept in sync by updateCycleDay), so async
+     loads never filter by a stale mount-time value. We only overwrite
+     the ref when a real value is present, preserving the default set on
+     first mount. */
   useEffect(() => {
-    if (!resolvedPatientId || protocolDaysRef.current.length === 0) return;
-    applyCycleDayDrugs(cycleDay, protocolDaysRef.current);
+    if (!resolvedPatientId) return;
+    if (cycleDay.trim()) {
+      cycleDayRef.current = cycleDay;
+    }
+    applyCycleDayDrugs(cycleDayRef.current, protocolDaysRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cycleDay, resolvedPatientId]);
 
@@ -5402,7 +5535,8 @@ const ChemotherapyOrder: React.FC<{
                 value={cycleDay}
                 onChange={(e) => {
                   userTouched.current.cycleDay = true;
-                  setCycleDay(e.target.value);
+                  updateCycleDay(e.target.value);
+                  void applySelectedDay(e.target.value);
                 }}
                 className="block w-full rounded-md border border-gray-300 py-3 pl-4 pr-10 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               />
@@ -5411,6 +5545,32 @@ const ChemotherapyOrder: React.FC<{
                 <RefreshIcon />
               </div>
             </div>
+
+            {/* Quick day selector: jump to any day of the current cycle.
+                Only days that actually carry medication are shown, so rest
+                days (e.g. day 2) never produce empty tables. */}
+            {protocolDayCount > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {getAvailableDays(protocolRef.current).map((day) => {
+                  const active =
+                    (getCycleDayNumber(cycleDay) ?? 0) === day;
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => selectDay(day)}
+                      className={`h-8 min-w-[36px] rounded-md px-2 text-xs font-semibold transition-colors ${
+                        active
+                          ? "bg-blue-600 text-white"
+                          : "border border-gray-300 bg-white text-gray-700 hover:bg-blue-50"
+                      }`}
+                    >
+                      Day {day}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
 
           {/* Start Date */}
