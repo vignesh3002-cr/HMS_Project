@@ -2766,6 +2766,17 @@ const HistoryDashboard: React.FC<{
     return () => { cancelled = true; };
   }, [patientId]);
 
+  // Auto-load first prescription when list arrives
+  useEffect(() => {
+    if (prescriptions.length > 0 && prescriptionIndex === null) {
+      openPrescriptionPdf(prescriptions[0], 0);
+    }
+    // Reset when patient changes
+    if (prescriptions.length === 0) {
+      closePdfModal();
+    }
+  }, [prescriptions]);
+
   const fmtHistoryDate = (value?: string | null) => {
     if (!value) return "";
     const d = new Date(value);
@@ -3114,13 +3125,59 @@ const HistoryDashboard: React.FC<{
               <h2 className="text-base font-bold text-gray-900">
                 Document History
               </h2>
-
-              <button
-                type="button"
-                className="text-xs text-blue-600 font-bold hover:underline uppercase"
-              >
-                View All
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  disabled={prescriptionIndex === null || prescriptionIndex <= 0}
+                  onClick={() => {
+                    if (prescriptionIndex !== null && prescriptionIndex > 0) {
+                      const newIdx = prescriptionIndex - 1;
+                      openPrescriptionPdf(prescriptions[newIdx], newIdx);
+                    }
+                  }}
+                >
+                  Previous
+                </button>
+                <span className="text-xs text-gray-600">
+                  {prescriptions.length > 0 && prescriptionIndex !== null ? `${prescriptionIndex + 1} / ${prescriptions.length}` : '0 / 0'}
+                </span>
+                <button
+                  type="button"
+                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  disabled={prescriptionIndex === null || prescriptionIndex >= prescriptions.length - 1}
+                  onClick={() => {
+                    if (prescriptionIndex !== null && prescriptionIndex < prescriptions.length - 1) {
+                      const newIdx = prescriptionIndex + 1;
+                      openPrescriptionPdf(prescriptions[newIdx], newIdx);
+                    }
+                  }}
+                >
+                  Next
+                </button>
+                <button
+                  type="button"
+                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  disabled={selectedPrescription == null}
+                  onClick={() => {
+                    if (selectedPrescription) {
+                      try {
+                        const data = buildPrescriptionData(selectedPrescription);
+                        const { url } = generatePrescriptionPdf(data as any);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `prescription-${selectedPrescription.prescription_id}.pdf`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      } catch (err) {
+                        console.error(err);
+                      }
+                    }
+                  }}
+                >
+                  Download
+                </button>
+              </div>
             </div>
 
             {prescriptionsLoading ? (
@@ -3128,41 +3185,44 @@ const HistoryDashboard: React.FC<{
             ) : prescriptionsError ? (
               <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{prescriptionsError}</div>
             ) : prescriptions.length === 0 ? (
-              <div className="space-y-3">
-                <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-4 text-center text-xs text-gray-400">
-                  No prescriptions found for this patient yet.
-                </div>
+              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-4 text-center text-xs text-gray-400">
+                No prescriptions found for this patient yet.
               </div>
             ) : (
               <div className="space-y-3">
-                {prescriptions.map((p, idx) => {
-                  const date = p.prescription_date ? new Date(p.prescription_date).toLocaleDateString() : '';
-                  const doctor = `${p.employees?.first_name || ''} ${p.employees?.last_name || ''}`.trim();
-                  return (
-                    <div key={p.prescription_id} className="rounded-lg border border-gray-200 p-3 flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-semibold text-gray-900">Prescription #{p.prescription_id}</div>
-                        <div className="text-xs text-gray-500">{date} • {doctor || '—'} • {p.prescription_status || '—'}</div>
+                {selectedPrescription && pdfUrl && (
+                  <div className="rounded-lg border border-gray-200 bg-white p-3">
+                    <div className="flex items-start justify-between">
+                        <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 bg-red-50 rounded-lg flex items-center justify-center border border-red-100">
+                          <span className="text-sm font-bold text-red-600">PDF</span>
+                        </div>
+                        <div>
+                          <div className="text-xs font-semibold text-gray-900">Prescription-{selectedPrescription.prescription_id}.pdf</div>
+                          <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">
+                            {selectedPrescription.prescription_date ? new Date(selectedPrescription.prescription_date).toLocaleDateString() : ''} • {`${selectedPrescription.employees?.first_name || ''} ${selectedPrescription.employees?.last_name || ''}`.trim() || '—'} • {selectedPrescription.prescription_status || '—'}
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={pdfUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+                        >
+                          View
+                        </a>
                         <button
                           type="button"
-                          className="text-xs text-blue-600 font-bold hover:underline"
-                          onClick={() => openPrescriptionPdf(p, idx)}
-                        >
-                          View PDF
-                        </button>
-                        <a
-                          href="#"
-                          className="text-xs text-gray-600 hover:underline"
-                          onClick={(e) => {
-                            e.preventDefault();
+                          className="text-[10px] px-2 py-1 rounded border border-gray-300 hover:bg-gray-50"
+                          onClick={() => {
                             try {
-                              const data = buildPrescriptionData(p);
+                              const data = buildPrescriptionData(selectedPrescription);
                               const { url } = generatePrescriptionPdf(data as any);
                               const a = document.createElement('a');
                               a.href = url;
-                              a.download = `prescription-${p.prescription_id}.pdf`;
+                              a.download = `prescription-${selectedPrescription.prescription_id}.pdf`;
                               a.click();
                               URL.revokeObjectURL(url);
                             } catch (err) {
@@ -3171,11 +3231,11 @@ const HistoryDashboard: React.FC<{
                           }}
                         >
                           Download
-                        </a>
+                        </button>
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -4566,78 +4626,6 @@ return (
 {/* END: Main Content */}
 
       </div>
-
-      {/* Prescription PDF Modal */}
-      {pdfUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={closePdfModal}>
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b gap-4">
-              <div className="text-sm font-semibold text-gray-900">
-                Prescription {selectedPrescription?.prescription_id || ''} {prescriptionIndex !== null && prescriptions.length > 0 ? `(${prescriptionIndex + 1} / ${prescriptions.length})` : ''}
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
-                  disabled={prescriptionIndex === null || prescriptionIndex <= 0}
-                  onClick={() => {
-                    if (prescriptionIndex !== null && prescriptionIndex > 0) {
-                      const newIdx = prescriptionIndex - 1;
-                      openPrescriptionPdf(prescriptions[newIdx], newIdx);
-                    }
-                  }}
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
-                  disabled={prescriptionIndex === null || prescriptionIndex >= prescriptions.length - 1}
-                  onClick={() => {
-                    if (prescriptionIndex !== null && prescriptionIndex < prescriptions.length - 1) {
-                      const newIdx = prescriptionIndex + 1;
-                      openPrescriptionPdf(prescriptions[newIdx], newIdx);
-                    }
-                  }}
-                >
-                  Next
-                </button>
-                <button
-                  type="button"
-                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                  onClick={() => {
-                    if (selectedPrescription) {
-                      try {
-                        const data = buildPrescriptionData(selectedPrescription);
-                        const { url } = generatePrescriptionPdf(data as any);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `prescription-${selectedPrescription.prescription_id}.pdf`;
-                        a.click();
-                        URL.revokeObjectURL(url);
-                      } catch (err) {
-                        console.error(err);
-                      }
-                    }
-                  }}
-                >
-                  Download
-                </button>
-                <button
-                  type="button"
-                  className="text-gray-600 hover:text-gray-900 text-sm ml-2"
-                  onClick={closePdfModal}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-auto bg-gray-100">
-              <iframe src={pdfUrl} className="w-full h-full" title="Prescription PDF" />
-            </div>
-          </div>
-        </div>
-      )}
 
     </>
   );
