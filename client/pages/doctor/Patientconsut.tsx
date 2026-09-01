@@ -4474,7 +4474,7 @@ const ChemotherapyOrder: React.FC<{
     };
 
     const formCycleStr = `Cycle ${formCycleNumber} / Day 1`;
-    const nextCycleStr = `Cycle ${nextCycleNumber} / Day 1`;
+    const nextCycleStr = computeNextCycle(formCycleStr, protocol.no_of_days);
 
     setCycleDay(formCycleStr);
     setStartDate(formatDate(formDate));
@@ -4501,6 +4501,38 @@ const ChemotherapyOrder: React.FC<{
   const getCycleDayNumber = (value: string): number | null => {
     const match = value.trim().match(/Day\s*(\d+)/i);
     return match ? Number(match[1]) : null;
+  };
+
+  const getCycleNumber = (value: string): number | null => {
+    const match = value.trim().match(/Cycle\s*(\d+)/i);
+    return match ? Number(match[1]) : null;
+  };
+
+  const getCycleAndDay = (
+    value: string
+  ): { cycle: number; day: number } | null => {
+    const cycle = getCycleNumber(value);
+    const day = getCycleDayNumber(value);
+    if (cycle === null || day === null) return null;
+    return { cycle, day };
+  };
+
+  /* Given the CURRENT cycle/day being treated and the protocol's days
+     per cycle (no_of_days), compute the next scheduled day:
+       - same cycle, next day while the cycle has more days to run
+       - next cycle, Day 1 once the current cycle's last day completes
+     (some protocols run >6 days, some <6, some exactly 6). */
+  const computeNextCycle = (
+    cycleDayValue: string,
+    noOfDays: number | null
+  ): string => {
+    const current = getCycleAndDay(cycleDayValue);
+    if (!current) return "";
+    const daysPerCycle = noOfDays && noOfDays > 0 ? noOfDays : 6;
+    if (current.day < daysPerCycle) {
+      return `Cycle ${current.cycle} / Day ${current.day + 1}`;
+    }
+    return `Cycle ${current.cycle + 1} / Day 1`;
   };
 
   const resolveProtocolDayItems = (
@@ -4908,6 +4940,22 @@ const ChemotherapyOrder: React.FC<{
   useEffect(() => {
     if (!resolvedPatientId || protocolDaysRef.current.length === 0) return;
     applyCycleDayDrugs(cycleDay, protocolDaysRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cycleDay, resolvedPatientId]);
+
+  /* Keep the Follow-Up "Next Cycle" label in sync with the cycle/day
+     selected in this form and the protocol's days-per-cycle. When the
+     current day is not the cycle's last day, the next entry is the next
+     day of the same cycle (e.g. Cycle 2 / Day 1 -> Cycle 2 / Day 2);
+     once the last day is reached it rolls to the next cycle Day 1. */
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    const protocol = protocolRef.current;
+    if (!protocol) return;
+    const next = computeNextCycle(cycleDay, protocol.no_of_days);
+    if (next) {
+      localStorage.setItem(`hms_next_cycle_${resolvedPatientId}`, next);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cycleDay, resolvedPatientId]);
 
@@ -6204,8 +6252,9 @@ const FollowUp: React.FC<{
 
     let normalizedCycle = storedCycle ?? "";
     if (storedCycle) {
-      const cycleMatch = storedCycle.match(/^Cycle\s+(\d+)/i);
-      normalizedCycle = cycleMatch ? `Cycle ${cycleMatch[1]}` : storedCycle;
+      // Preserve the full cycle/day label (e.g. "Cycle 2 / Day 2") so the
+      // next cycle shown reflects the intra-cycle day from the chemo order.
+      normalizedCycle = storedCycle;
       setNextCycle(normalizedCycle);
     }
 
