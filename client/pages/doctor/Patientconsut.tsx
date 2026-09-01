@@ -4442,29 +4442,33 @@ const ChemotherapyOrder: React.FC<{
         : Number.POSITIVE_INFINITY;
     const latestCycleNumber = latestCycle?.cycle_number ?? 0;
 
+    /* The cycle/day to be administered on this visit is whatever the
+       previous visit scheduled as its "next" (hms_next_cycle). This makes
+       the order advance day-by-day within the cycle (Cycle 2 / Day 1 ->
+       Cycle 2 / Day 2 -> ...) and roll to the next cycle's Day 1 once a
+       cycle completes, instead of always starting at Day 1. */
+    const storedNextCycle = localStorage.getItem(
+      `hms_next_cycle_${resolvedPatientId}`
+    );
+    const storedParsed = getCycleAndDay(storedNextCycle ?? "");
+
+    let formCycleNumber = storedParsed
+      ? storedParsed.cycle
+      : latestCycleNumber > 0
+      ? latestCycleNumber + 1
+      : 1;
+    if (formCycleNumber > maxCycles) {
+      formCycleNumber = maxCycles;
+    }
+    const formCycleDay = storedParsed ? storedParsed.day : 1;
+
     const baseDate = parseDateValue(baseDateValue) ?? new Date();
     const baseStart = new Date(baseDate);
     baseStart.setHours(0, 0, 0, 0);
 
-    let formCycleNumber =
-      latestCycleNumber > 0 ? latestCycleNumber + 1 : 1;
-    if (formCycleNumber > maxCycles) {
-      formCycleNumber = maxCycles;
-    }
-
     const formDate = new Date(baseStart);
     formDate.setDate(
       formDate.getDate() + (formCycleNumber - 1) * interval
-    );
-
-    let nextCycleNumber = formCycleNumber + 1;
-    if (nextCycleNumber > maxCycles) {
-      nextCycleNumber = maxCycles;
-    }
-
-    const nextDate = new Date(baseStart);
-    nextDate.setDate(
-      nextDate.getDate() + (nextCycleNumber - 1) * interval
     );
 
     const formatDate = (date: Date) => {
@@ -4473,8 +4477,18 @@ const ChemotherapyOrder: React.FC<{
       return `${day}-${month}-${date.getFullYear()}`;
     };
 
-    const formCycleStr = `Cycle ${formCycleNumber} / Day 1`;
+    const formCycleStr = `Cycle ${formCycleNumber} / Day ${formCycleDay}`;
     const nextCycleStr = computeNextCycle(formCycleStr, protocol.no_of_days);
+
+    const next = getCycleAndDay(nextCycleStr);
+    const nextCycleNumber = (next?.cycle ?? formCycleNumber) > maxCycles
+      ? maxCycles
+      : (next?.cycle ?? formCycleNumber);
+
+    const nextDate = new Date(baseStart);
+    nextDate.setDate(
+      nextDate.getDate() + (nextCycleNumber - 1) * interval
+    );
 
     setCycleDay(formCycleStr);
     setStartDate(formatDate(formDate));
