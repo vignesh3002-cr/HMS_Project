@@ -21,11 +21,7 @@ import {
   type PatientRecord,
 } from "../../api/patient.api";
 import {
-
-
-
-  
-  encounterApi,
+encounterApi,
   type EncounterRecord,
 } from "../../api/encounter.api";
 import {
@@ -4312,6 +4308,41 @@ type ChemotherapyPlan = {
   } | null;
 };
 
+type RegimenProtocolDay = {
+  protocol_day_id: string;
+  day_number: number;
+  day_sequence: number | null;
+  same_as_day_one: boolean | null;
+  protocol_item_id: string | null;
+  medicine_count: string | null;
+  chemotherapy_regimen_protocol_items: RegimenProtocolItem | null;
+};
+
+type RegimenProtocolItem = {
+  protocol_item_id: string;
+  medicine_id: string;
+  drug_role: string | null;
+  drug_sequence: number;
+  drug_type: string | null;
+  dosage: number | null;
+  dosage_unit: string | null;
+  administration_route: string | null;
+  infusion_type: string | null;
+  infusion_duration_minutes: number | null;
+  administration_day: number | null;
+  cycle_day: number | null;
+  frequency: string | null;
+  timing_relative_to_primary: string | null;
+  remarks: string | null;
+  administration_detail: string | null;
+  medicine_master: {
+    medicine_name: string;
+    generic_name: string | null;
+    dosage_form: string | null;
+    unit: string | null;
+  } | null;
+};
+
 type RegimenProtocolDetail = {
   protocol_id: string;
   regimen_code: string | null;
@@ -4319,30 +4350,9 @@ type RegimenProtocolDetail = {
   treatment_intent: string | null;
   standard_cycles: number | null;
   cycle_interval_days: number | null;
-  chemotherapy_regimen_protocol_items: {
-    protocol_item_id: string;
-    medicine_id: string;
-    drug_role: string | null;
-    drug_sequence: number;
-    drug_type: string | null;
-    dosage: number | null;
-    dosage_unit: string | null;
-    administration_route: string | null;
-    infusion_type: string | null;
-    infusion_duration_minutes: number | null;
-    administration_day: number | null;
-    cycle_day: number | null;
-    frequency: string | null;
-    timing_relative_to_primary: string | null;
-    remarks: string | null;
-    administration_detail: string | null;
-    medicine_master: {
-      medicine_name: string;
-      generic_name: string | null;
-      dosage_form: string | null;
-      unit: string | null;
-    } | null;
-  }[];
+  no_of_days: number | null;
+  chemotherapy_regimen_protocol_days: RegimenProtocolDay[] | null;
+  chemotherapy_regimen_protocol_items: RegimenProtocolItem[];
 };
 
 const ChemotherapyOrder: React.FC<{
@@ -4378,6 +4388,7 @@ const ChemotherapyOrder: React.FC<{
   });
 
   const protocolRef = useRef<RegimenProtocolDetail | null>(null);
+  const protocolDaysRef = useRef<RegimenProtocolDay[]>([]);
   const planIdRef = useRef<string>("");
   const planItemsRef = useRef<ChemotherapyPlanItem[]>([]);
   const [savingOrder, setSavingOrder] = useState(false);
@@ -4474,6 +4485,97 @@ const ChemotherapyOrder: React.FC<{
     localStorage.setItem(
       `hms_next_cycle_date_${resolvedPatientId}`,
       formatDate(nextDate)
+    );
+  };
+
+  /* ------------------------------------------------------------
+     CYCLE-DAY DRIVEN DRUG FILTERING
+     The regimen protocol endpoint returns chemotherapy_regimen_
+     protocol_days (one entry per cycle day, each carrying its own
+     nested items, and some days marked same_as_day_one). The drugs
+     shown in the Chemotherapy Orders / Premedication / Supportive
+     tables must reflect only the day selected in the Cycle/Day field
+     (some protocols run >6 days, some <6, some exactly 6).
+  ------------------------------------------------------------ */
+
+  const getCycleDayNumber = (value: string): number | null => {
+    const match = value.trim().match(/Day\s*(\d+)/i);
+    return match ? Number(match[1]) : null;
+  };
+
+  const resolveProtocolDayItems = (
+    days: RegimenProtocolDay[] | null | undefined,
+    dayNumber: number
+  ): RegimenProtocolItem[] => {
+    const entries = days ?? [];
+
+    // A day marked same_as_day_one mirrors the medicines of day 1.
+    if (entries.length > 0) {
+      const day = entries.find((d) => d.day_number === dayNumber);
+      if (day?.same_as_day_one && dayNumber !== 1) {
+        const firstDay = entries.find((d) => d.day_number === 1);
+        if (firstDay) {
+          dayNumber = 1;
+        }
+      }
+    }
+
+    // The daily breakdown is not an array of items per day; instead the
+    // flat chemotherapy_regimen_protocol_items rows carry an
+    // administration_day that maps them onto a protocol day. Filter them
+    // the same way the backend's day view does.
+    const flat = protocolRef.current?.chemotherapy_regimen_protocol_items ?? [];
+    return flat.filter((item) => item.administration_day === dayNumber);
+  };
+
+  const toDrugFromItem = (
+    item: RegimenProtocolItem,
+    index: number
+  ): Drug => ({
+    id: index,
+    name:
+      item.medicine_master?.medicine_name ||
+      item.medicine_master?.generic_name ||
+      "",
+    form:
+      item.medicine_master?.dosage_form ||
+      item.administration_route ||
+      "",
+    dose: item.dosage != null ? String(item.dosage) : "",
+    unit: item.dosage_unit || item.medicine_master?.unit || "",
+    volume: "",
+    medicineId: item.medicine_id,
+  });
+
+  const applyCycleDayDrugs = (
+    dayValue: string,
+    days: RegimenProtocolDay[] | null | undefined
+  ) => {
+    const dayNumber = getCycleDayNumber(dayValue);
+    const hasDayStructure = (days ?? []).length > 0;
+
+    // When the protocol defines a day breakdown, show only the medicines
+    // mapped to the selected day. Otherwise fall back to the full flat
+    // list. Role separation is applied below either way.
+    const items =
+      dayNumber && hasDayStructure
+        ? resolveProtocolDayItems(days, dayNumber)
+        : (protocolRef.current?.chemotherapy_regimen_protocol_items ?? []);
+
+    setDrugs(
+      items
+        .filter((item) => item.drug_role === "PRIMARY")
+        .map(toDrugFromItem)
+    );
+    setPremedicationDrugs(
+      items
+        .filter((item) => item.drug_role?.toUpperCase() === "PREMEDICATION")
+        .map(toDrugFromItem)
+    );
+    setSupportiveDrugs(
+      items
+        .filter((item) => item.drug_role === "SUPPORTIVE")
+        .map(toDrugFromItem)
     );
   };
 
@@ -4637,41 +4739,10 @@ const ChemotherapyOrder: React.FC<{
         );
         const items =
           protocol.chemotherapy_regimen_protocol_items ?? [];
-        const toDrug = (item: RegimenProtocolDetail["chemotherapy_regimen_protocol_items"][number], index: number): Drug => ({
-          id: index,
-          name:
-            item.medicine_master?.medicine_name ||
-            item.medicine_master?.generic_name ||
-            "",
-          form:
-            item.medicine_master?.dosage_form ||
-            item.administration_route ||
-            "",
-          dose: item.dosage != null ? String(item.dosage) : "",
-          unit:
-            item.dosage_unit ||
-            item.medicine_master?.unit ||
-            "",
-          volume: "",
-          medicineId: item.medicine_id,
-        });
 
-        setDrugs(
-          items
-            .filter((item) => item.drug_role === "PRIMARY")
-            .map(toDrug)
-        );
-        setPremedicationDrugs(
-          items
-            .filter((item) => item.drug_role?.toUpperCase() === "PREMEDICATION")
-            .map(toDrug)
-        );
-        setSupportiveDrugs(
-          items
-            .filter((item) => item.drug_role === "SUPPORTIVE")
-            .map(toDrug)
-        );
         protocolRef.current = protocol;
+        protocolDaysRef.current = protocol.chemotherapy_regimen_protocol_days ?? [];
+        applyCycleDayDrugs(cycleDay, protocolDaysRef.current);
         setAdminInstructions(
           items.map((item, index) => ({
             id: index,
@@ -4831,6 +4902,14 @@ const ChemotherapyOrder: React.FC<{
     if (!resolvedPatientId) return;
     setSupportiveDrugs([]);
   }, [resolvedPatientId]);
+
+  /* Re-apply the role-filtered drugs whenever the selected cycle
+     day changes so the tables reflect that day's regimen. */
+  useEffect(() => {
+    if (!resolvedPatientId || protocolDaysRef.current.length === 0) return;
+    applyCycleDayDrugs(cycleDay, protocolDaysRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cycleDay, resolvedPatientId]);
 
   const handleAddDrug = () => {
     userTouched.current.drugs = true;
