@@ -6735,52 +6735,69 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
         </div>
 </div>
     </div>
-    {treatmentEnds && (
-      <div className="w-full md:w-1/2 md:pl-4">
-        <label htmlFor="newVisit" className="mb-2 block text-sm font-semibold text-gray-800">
-          New Visit
-        </label>
-        <div className="relative">
-          <input
-            id="newVisit"
-            type="text"
-            value={nextVisitDate}
-            readOnly
-            className="block w-full rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-          />
-        </div>
-      </div>
-    )}
-
-          {/* Plan */}
-          <div className="w-full md:w-1/2 md:pr-4">
-            <label
-              htmlFor="plan"
-              className="mb-2 block text-sm font-semibold text-gray-800"
-            >
-              Plan
-            </label>
-
-            <div className="relative">
-              <select
-                id="plan"
-                value={plan}
-                onChange={(event) =>
-                  setPlan(event.target.value)
-                }
-                className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+{/* Plan + New Visit (when treatment ends) */}
+          <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+            <div className="w-full md:pr-4">
+              <label
+                htmlFor="plan"
+                className="mb-2 block text-sm font-semibold text-gray-800"
               >
-                <option>Continue Treatment</option>
-                <option>Complete Treatment</option>
-                <option>Hold Treatment</option>
-                <option>Refer for Review</option>
-              </select>
+                Plan
+              </label>
 
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
-                <ChevronDownIcon />
+              <div className="relative">
+                <select
+                  id="plan"
+                  value={plan}
+                  onChange={(event) =>
+                    setPlan(event.target.value)
+                  }
+                  className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                >
+                  <option>Continue Treatment</option>
+                  <option>Complete Treatment</option>
+                  <option>Hold Treatment</option>
+                  <option>Refer for Review</option>
+                </select>
+
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
+                  <ChevronDownIcon />
+                </div>
               </div>
             </div>
-          </div>
+
+            {treatmentEnds && (
+              <div className="w-full md:pl-4">
+                <label
+                  htmlFor="newVisit"
+                  className="mb-2 block text-sm font-semibold text-gray-800"
+                >
+                  New Visit
+                </label>
+                <div className="relative">
+                  <select
+                    id="newVisit"
+                    value={newVisit}
+                    onChange={(event) =>
+                      setNewVisit(event.target.value)
+                    }
+                    className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  >
+                    <option value="">Select Visit Type</option>
+                    <option>New visit</option>
+                    <option>Follow-up</option>
+                    <option>Review visit</option>
+                    <option>Routine visit</option>
+                    <option>Emergency Visit</option>
+                    <option>Referral Visit</option>
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
+                    <ChevronDownIcon />
+                  </div>
+                </div>
+              </div>
+            )}
+</div>
 
           {/* Notes */}
           <div>
