@@ -518,7 +518,17 @@ const resolveStagingDetailId = async (patientId: string): Promise<string> => {
    one is already on record; otherwise POSTs a new one. */
 const createChemotherapyPlanForPatient = async (
   patientId: string,
-  startDateValue?: string | null
+  startDateValue?: string | null,
+  planItems?: Array<{
+    medicine_id: string;
+    drug_role: string;
+    drug_sequence: number;
+    dosage?: number;
+    dosage_unit?: string;
+    administration_route?: string;
+    remarks?: string;
+  }>,
+  plannedCycles?: number
 ): Promise<{ planId: string | null; error?: string }> => {
   const { encounter, scopeError } = await findActiveEncounter(patientId);
   if (!encounter) {
@@ -571,13 +581,6 @@ const createChemotherapyPlanForPatient = async (
         "No oncology staging detail found for this patient. Complete the Diagnosis step first.",
     };
   }
-  if (!diagnosisId) {
-    return {
-      planId: null,
-      error:
-        "Could not resolve a diagnosis for this patient. Complete the Diagnosis step first.",
-    };
-  }
   if (!employeeId) {
     return { planId: null, error: "Consulting doctor could not be identified." };
   }
@@ -601,7 +604,7 @@ const createChemotherapyPlanForPatient = async (
     }>("/chemotherapy/plans", {
       patient_id: patientId,
       staging_detail_id: stagingDetailId,
-      diagnosis_id: diagnosisId,
+      ...(diagnosisId ? { diagnosis_id: diagnosisId } : {}),
       employee_id: employeeId,
       department_id: departmentId,
       branch_id: branchId,
@@ -612,6 +615,8 @@ const createChemotherapyPlanForPatient = async (
         ? { treatment_start_date: treatmentStartDate }
         : {}),
       confirm_suggested_therapy: true,
+      ...(plannedCycles ? { planned_cycles: plannedCycles } : {}),
+      ...(planItems && planItems.length > 0 ? { plan_items: planItems } : {}),
     });
     return { planId: response.data.data?.chemotherapy_plan_id ?? null };
   } catch (error: any) {
@@ -5136,9 +5141,63 @@ const ChemotherapyOrder: React.FC<{
     setSavingOrder(true);
 
     try {
+      const planItems: Array<{
+        medicine_id: string;
+        drug_role: string;
+        drug_sequence: number;
+        dosage?: number;
+        dosage_unit?: string;
+        administration_route?: string;
+        remarks?: string;
+      }> = [];
+
+      drugs.forEach((drug, index) => {
+        if (drug.medicineId) {
+          planItems.push({
+            medicine_id: drug.medicineId,
+            drug_role: "PRIMARY",
+            drug_sequence: index + 1,
+            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
+            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
+            administration_route: "IV",
+          });
+        }
+      });
+
+      premedicationDrugs.forEach((drug, index) => {
+        if (drug.medicineId) {
+          planItems.push({
+            medicine_id: drug.medicineId,
+            drug_role: "PREMEDICATION",
+            drug_sequence: 90 + index,
+            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
+            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
+            administration_route: "IV",
+          });
+        }
+      });
+
+      supportiveDrugs.forEach((drug, index) => {
+        if (drug.medicineId) {
+          planItems.push({
+            medicine_id: drug.medicineId,
+            drug_role: "SUPPORTIVE",
+            drug_sequence: 100 + index,
+            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
+            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
+            administration_route: "IV",
+          });
+        }
+      });
+
+      const plannedCycles =
+        protocolRef.current?.standard_cycles ?? undefined;
+
       const { planId, error } = await createChemotherapyPlanForPatient(
         resolvedPatientId,
-        startDate
+        startDate,
+        planItems.length > 0 ? planItems : undefined,
+        plannedCycles
       );
       if (error) {
         setPlanError(error);
