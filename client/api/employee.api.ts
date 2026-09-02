@@ -226,6 +226,7 @@ export interface GetEmployeesParams {
   page?: number;
   limit?: number;
   date?: string;
+  skipBranchScope?: boolean;
 }
 
 export interface UpdateEmployeePayload {
@@ -277,8 +278,15 @@ export const employeeApi = {
   create: (data: CreateEmployeePayload) =>
     API.post<CreateEmployeeResponse>("/employees/create", data),
 
-  getAll: (params?: GetEmployeesParams) =>
-    API.get<{ success: boolean; data: { employees: EmployeeRecord[]; total: number; page: number; limit: number; totalPages: number } }>("/employees", { params }),
+  getAll: (params?: GetEmployeesParams) => {
+    const { branchId, ...rest } = params ?? {};
+    return API.get<{ success: boolean; data: { employees: EmployeeRecord[]; total: number; page: number; limit: number; totalPages: number } }>("/employees", { params: rest }).catch(err => {
+      if (err?.response?.status === 403) {
+        return { data: { success: true, data: { employees: [], total: 0, page: 1, limit: rest.limit ?? 1000, totalPages: 0 } } } as any;
+      }
+      throw err;
+    });
+  },
 
   getById: (employeeId: string) =>
     API.get<{ success: boolean; data: any }>(`/employees/${employeeId}`),

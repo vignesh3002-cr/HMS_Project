@@ -11,12 +11,17 @@ import {
   type EncounterRecord,
 } from "../../api/encounter.api";
 import {
+  labOrderItemApi,
+  type LabOrderItemRecord,
+} from "../../api/labOrder.api";
+import {
   ALL_BRANCHES_VALUE,
   BranchFilterProvider,
   NO_BRANCH_VALUE,
   useBranchFilter,
 } from "../../context/BranchFilterContext";
 import { computeBsa } from "../../utils/vitals";
+import { generatePrescriptionPdf, type PrescriptionData } from "../../utils/prescriptionPdf";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 
 interface ConsultationState {
@@ -140,6 +145,8 @@ const MedicationPortal: React.FC<{
   patientId?: string;
   plan?: SummaryPlan | null;
   allergies?: PatientAllergyRecord[];
+  selectedCycle?: number;
+  cycleMedicationsMap?: Record<string, any[]>;
 }> = ({
   onBackToProfile,
   patientName = "",
@@ -149,14 +156,40 @@ const MedicationPortal: React.FC<{
   patientId = "",
   plan = null,
   allergies = [],
+  selectedCycle,
+  cycleMedicationsMap,
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>("Medications");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showDischargeDashboard, setShowDischargeDashboard] = useState(false);
 
+  /* Move to the next tab in the tabs array with a single click. */
+  const goNextTab = () => {
+    setActiveTab((current) => {
+      const index = tabs.indexOf(current);
+      const next = tabs[index + 1];
+      if (!next) return current;
+      if (next === "Order Summary") return current;
+      if (next === "Discharge") {
+        setShowDischargeDashboard(true);
+        return current;
+      }
+      return next;
+    });
+  };
+
+  /* Live patient vitals for the header strip (same source as the Order
+     Summary portal: latest encounter + chemo-cycle fallback, per field). */
+  const { vitalEntries } = useLatestPatientVitals(patientId);
+  const headerVitals = (label: string) =>
+    vitalEntries.find(([key]) => key === label)?.[1] || "—";
+
   /* Recent medication details for THIS selected patient, sourced from
-     the fetched chemotherapy plan (GET /chemotherapy/plans?patient_id=). */
-  const medPlanItems = plan?.chemotherapy_plan_items ?? [];
+      the fetched chemotherapy plan (GET /chemotherapy/plans?patient_id=). */
+  const cycleId = plan?.chemotherapy_cycle?.find(c => c.cycle_number === selectedCycle)?.chemotherapy_cycle_id;
+  const medPlanItems = cycleId && cycleMedicationsMap?.[cycleId]?.length
+    ? cycleMedicationsMap[cycleId]
+    : plan?.chemotherapy_plan_items ?? [];
   const medPremedications = medPlanItems.filter(
     (item) => (item.drug_role ?? "").toUpperCase() === "PREMEDICATION",
   );
@@ -245,6 +278,14 @@ const MedicationPortal: React.FC<{
             <button onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-slate-500 lg:hidden">
               <i className="fa-solid fa-bars" />
             </button>
+            <button
+              type="button"
+              onClick={goNextTab}
+              className="flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-100"
+            >
+              Next
+              <i className="fa-solid fa-arrow-right text-xs" />
+            </button>
            
           </div>
           <div className="flex items-center gap-5">
@@ -281,41 +322,41 @@ const MedicationPortal: React.FC<{
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">HEIGHT</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("HEIGHT")}</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BP</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("BP")}</div>
             </div>
             </div>
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">WEIGHT</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("WEIGHT")}</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">PULSE</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("PULSE")}</div>
             </div>
             </div>
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BSA</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("BSA")}</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">TEMP</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("TEMP")}</div>
             </div>
             </div>
             <div className="space-y-4">
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">BMI</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("BMI")}</div>
             </div>
             <div>
             <div className="text-[10px] text-[#64748b] font-semibold uppercase tracking-wider mb-0.5">SPO2</div>
-            <div className="font-bold text-sm">—</div>
+            <div className="font-bold text-sm">{headerVitals("SPO2")}</div>
             </div>
             </div>
             </div>
@@ -379,7 +420,7 @@ const MedicationPortal: React.FC<{
             {activeTab === "Medications" ? (
               <>
                 {/* Summary cards */}
-                <div className="grid grid-cols-1 gap-4 pt-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="grid gap-4 pt-4 sm:grid-cols-2 xl:grid-cols-4">
                   {[
                     ["TOTAL MEDS", String(medPlanItems.length), "fa-solid fa-pills", "bg-blue-50 text-[#0052cc]"],
                     ["PREMEDS", String(medPremedications.length), "fa-solid fa-syringe", "bg-purple-50 text-purple-600"],
@@ -1087,11 +1128,13 @@ const formatLastChecked = (values: (string | null | undefined)[]) => {
 function useLatestPatientVitals(
   patientId?: string,
   /** Changes when the user picks a different branch - triggers refetch
-     so scoped calls use the fresh x-branch-id header. */
+      so scoped calls use the fresh x-branch-id header. */
   scopeKey?: string
 ): UseLatestPatientVitalsResult {
   const [latestEncounter, setLatestEncounter] =
     useState<EncounterRecord | null>(null);
+  const [encounterRows, setEncounterRows] =
+    useState<EncounterRecord[]>([]);
   const [latestChemoVitals, setLatestChemoVitals] =
     useState<ChemoVitalsEntry | null>(null);
   const [adverseEventCount, setAdverseEventCount] = useState(0);
@@ -1101,6 +1144,7 @@ function useLatestPatientVitals(
   useEffect(() => {
     if (!patientId) {
       setLatestEncounter(null);
+      setEncounterRows([]);
       setLatestChemoVitals(null);
       setAdverseEventCount(0);
       setScopeHint(false);
@@ -1126,10 +1170,17 @@ function useLatestPatientVitals(
        empty, so single-branch auto-scoping / a valid selection still
        shows vitals. */
     const loadEncounterVitals = async () => {
+      let rows: EncounterRecord[] = [];
       let latest: EncounterRecord | null = null;
       try {
-        const response = await encounterApi.getLatest(patientId, 1);
-        latest = response.data?.data?.encounters?.[0] ?? null;
+        const response = await encounterApi.getLatest(patientId, 20);
+        const encs = response.data?.data?.encounters ?? [];
+        rows = [...encs].sort(
+          (a, b) =>
+            new Date(b.created_at).getTime() -
+            new Date(a.created_at).getTime()
+        );
+        latest = rows[0] ?? null;
       } catch (error: any) {
         const message = error?.response?.data?.message;
         console.error(
@@ -1138,14 +1189,14 @@ function useLatestPatientVitals(
         );
         noteScopeError(message);
       }
-      if (!latest) {
+      if (!latest || rows.length === 0) {
         try {
           const response = await encounterApi.getAll({
             patientId,
-            limit: 10,
+            limit: 20,
           });
           if (cancelled) return;
-          const rows = [...(response.data?.data?.encounters ?? [])].sort(
+          rows = [...(response.data?.data?.encounters ?? [])].sort(
             (a, b) =>
               new Date(b.created_at).getTime() -
               new Date(a.created_at).getTime()
@@ -1160,7 +1211,10 @@ function useLatestPatientVitals(
           noteScopeError(message);
         }
       }
-      if (!cancelled) setLatestEncounter(latest);
+      if (!cancelled) {
+        setLatestEncounter(latest);
+        setEncounterRows(rows);
+      }
     };
     loadEncounterVitals();
 
@@ -1226,28 +1280,39 @@ function useLatestPatientVitals(
   const encNum = (value: number | string | null | undefined) =>
     num(value ?? null);
 
+  const firstNonNull = <T,>(rows: T[], getter: (r: T) => any) => {
+    for (const r of rows) {
+      const v = getter(r);
+      if (v !== null && v !== undefined && v !== "") return v;
+    }
+    return null;
+  };
+  const firstEncounterValue = (getter: (e: EncounterRecord) => any) => {
+    return firstNonNull(encounterRows, getter);
+  };
+
   const heightValue =
-    encNum(latestEncounter?.height) ?? num(latestChemoVitals?.height);
+    encNum(firstEncounterValue(e => e.height)) ?? num(latestChemoVitals?.height);
   const weightValue =
-    encNum(latestEncounter?.weight) ?? num(latestChemoVitals?.weight);
+    encNum(firstEncounterValue(e => e.weight)) ?? num(latestChemoVitals?.weight);
 
   const vitals: LatestPatientVitalsValues = {
     height: heightValue,
     weight: weightValue,
     bpSystolic:
-      encNum(latestEncounter?.systolic_bp) ??
+      encNum(firstEncounterValue(e => e.systolic_bp)) ??
       num(latestChemoVitals?.blood_pressure_systolic),
     bpDiastolic:
-      encNum(latestEncounter?.diastolic_bp) ??
+      encNum(firstEncounterValue(e => e.diastolic_bp)) ??
       num(latestChemoVitals?.blood_pressure_diastolic),
-    pulse: encNum(latestEncounter?.pulse) ?? num(latestChemoVitals?.pulse_rate),
+    pulse: encNum(firstEncounterValue(e => e.pulse)) ?? num(latestChemoVitals?.pulse_rate),
     temp:
-      encNum(latestEncounter?.temperature) ??
+      encNum(firstEncounterValue(e => e.temperature)) ??
       num(latestChemoVitals?.body_temperature),
-    spo2: encNum(latestEncounter?.spo2) ?? num(latestChemoVitals?.spo2),
-    bmi: encNum(latestEncounter?.BMI) ?? num(latestChemoVitals?.bmi),
+    spo2: encNum(firstEncounterValue(e => e.spo2)) ?? num(latestChemoVitals?.spo2),
+    bmi: encNum(firstEncounterValue(e => e.BMI)) ?? num(latestChemoVitals?.bmi),
     /* Recorded chemo value wins; otherwise derive from height & weight
-       (Mosteller - see utils/vitals.ts). */
+        (Mosteller - see utils/vitals.ts). */
     bsa:
       num(latestChemoVitals?.body_surface_area) ??
       computeBsa(heightValue, weightValue),
@@ -1290,18 +1355,39 @@ function useLatestPatientVitals(
 function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [activeTab, setActiveTab] = useState("Order Summary");
   const [selectedDay, setSelectedDay] = useState("Day 1");
-  const [selectedCycle, setSelectedCycle] = useState(1);
+  const [selectedCycle] = useState(1);
   const [showMedicationPortal, setShowMedicationPortal] = useState(false);
   const [showDischargePortal, setShowDischargePortal] = useState(false);
 
   const [savedPlan, setSavedPlan] = useState<SummaryPlan | null>(null);
   const [planNotice, setPlanNotice] = useState("");
+  const [regimenProtocol, setRegimenProtocol] = useState<any | null>(null);
+  const [regimenLoading, setRegimenLoading] = useState(false);
+  const [regimenError, setRegimenError] = useState("");
+  const [currentPlan, setCurrentPlan] = useState<any | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState("");
+  const [cycleMedications, setCycleMedications] = useState<any[]>([]);
+  const [cycleMedicationsMap, setCycleMedicationsMap] = useState<Record<string, any[]>>({});
   const [nextAppointment, setNextAppointment] = useState<{
     date: string;
     detail: string;
   } | null>(null);
   const [patientAllergies, setPatientAllergies] = useState<
     PatientAllergyRecord[]
+  >([]);
+
+  const [adminInstructions, setAdminInstructions] = useState<
+    {
+      medicineName: string;
+      route: string;
+      infusion: string;
+      dose: string;
+      frequency: string;
+      timing: string;
+      remarks: string;
+      administrationDetail: string;
+    }[]
   >([]);
 
   const location = useLocation();
@@ -1319,6 +1405,74 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     vitalEntries.find(([key]) => key === label)?.[1] || "—";
 
   const [patient, setPatient] = useState<PatientRecord | null>(null);
+
+  const [labItems, setLabItems] = useState<LabOrderItemRecord[]>([]);
+  const [labItemsLoading, setLabItemsLoading] = useState(false);
+  const [labItemsError, setLabItemsError] = useState("");
+
+  useEffect(() => {
+    const pid = consultationState?.patientId;
+    if (!pid) return;
+    let cancelled = false;
+    setLabItemsLoading(true);
+    setLabItemsError("");
+
+    const storedItemIds: string[] = (() => {
+      try {
+        return JSON.parse(localStorage.getItem(`hms_lab_item_ids_${pid}`) || "[]");
+      } catch {
+        return [];
+      }
+    })();
+
+    if (storedItemIds.length > 0) {
+      Promise.all(
+        storedItemIds.map((id) =>
+          labOrderItemApi.getById(id).then((r) => r.data.data).catch(() => null)
+        )
+      )
+        .then((results) => {
+          if (cancelled) return;
+          const items = results.filter(Boolean) as LabOrderItemRecord[];
+          if (items.length > 0) {
+            setLabItems(items);
+            return;
+          }
+          fetchAllAndFilter();
+        })
+        .catch(() => { fetchAllAndFilter(); })
+        .finally(() => { if (!cancelled) setLabItemsLoading(false); });
+    } else {
+      fetchAllAndFilter();
+    }
+
+    function fetchAllAndFilter() {
+      labOrderItemApi
+        .getAll()
+        .then((response) => {
+          if (cancelled) return;
+          const allItems = response.data.data ?? [];
+          const forPatient = allItems.filter(
+            (item) => item.lab_order?.patient_history?.patient_id === pid
+          );
+          setLabItems(forPatient);
+        })
+        .catch((error: any) => {
+          if (!cancelled) {
+            setLabItemsError(
+              error?.response?.data?.message ||
+                error?.message ||
+                "Failed to load lab investigations."
+            );
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setLabItemsLoading(false);
+        });
+    }
+
+    return () => { cancelled = true; };
+  }, [consultationState?.patientId]);
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
@@ -1374,6 +1528,110 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
       cancelled = true;
     };
   }, [consultationState?.patientId, activeTab, selectedBranchId]);
+
+  // Pre-fetch doctor-described medications for all cycles
+  useEffect(() => {
+    if (!savedPlan?.chemotherapy_cycle?.length) {
+      setCycleMedicationsMap({});
+      return;
+    }
+    let cancelled = false;
+    const fetchAllCycles = async () => {
+      const map: Record<string, any[]> = {};
+      const cycles = savedPlan.chemotherapy_cycle.filter(c => c?.chemotherapy_cycle_id);
+      await Promise.all(
+        cycles.map(async (cycle) => {
+          try {
+            const response = await API.get<{ success: boolean; data: any }>(
+              `/chemotherapy/cycles/${encodeURIComponent(cycle.chemotherapy_cycle_id)}`
+            );
+            if (cancelled) return;
+            const items = response.data?.data?.chemotherapy_plan_items ?? response.data?.data?.items ?? response.data?.data?.chemotherapy_plan?.chemotherapy_plan_items ?? [];
+            map[cycle.chemotherapy_cycle_id] = items;
+          } catch {
+            map[cycle.chemotherapy_cycle_id] = [];
+          }
+        })
+      );
+      if (!cancelled) setCycleMedicationsMap(map);
+    };
+    fetchAllCycles();
+    return () => { cancelled = true; };
+  }, [savedPlan?.chemotherapy_plan_id, selectedBranchId]);
+
+  useEffect(() => {
+    const protocolId = savedPlan?.source_protocol_id;
+    if (!protocolId) {
+      setRegimenProtocol(null);
+      setRegimenError("");
+      return;
+    }
+    let cancelled = false;
+    const loadRegimenProtocol = async () => {
+      setRegimenLoading(true);
+      setRegimenError("");
+      try {
+        const response = await API.get<{ success: boolean; data: any }>(
+          `/chemotherapy/regimen-protocols/${encodeURIComponent(protocolId)}`
+        );
+        if (cancelled) return;
+        setRegimenProtocol(response.data?.data ?? null);
+      } catch (err: any) {
+        if (cancelled) return;
+        setRegimenError(err?.response?.data?.message ?? "Failed to load regimen protocol");
+        setRegimenProtocol(null);
+      } finally {
+        if (!cancelled) setRegimenLoading(false);
+      }
+    };
+    loadRegimenProtocol();
+    return () => {
+      cancelled = true;
+    };
+  }, [savedPlan?.source_protocol_id]);
+
+  useEffect(() => {
+    const planId = savedPlan?.chemotherapy_plan_id;
+    if (!planId) {
+      setCurrentPlan(null);
+      setPlanError("");
+      return;
+    }
+    let cancelled = false;
+    const loadPlanDetails = async () => {
+      setPlanLoading(true);
+      setPlanError("");
+      try {
+        const response = await API.get<{ success: boolean; data: any }>(
+          `/chemotherapy/plans/${encodeURIComponent(planId)}`
+        );
+        if (cancelled) return;
+        setCurrentPlan(response.data?.data ?? null);
+      } catch (err: any) {
+        if (cancelled) return;
+        setPlanError(err?.response?.data?.message ?? "Failed to load plan details");
+        setCurrentPlan(null);
+      } finally {
+        if (!cancelled) setPlanLoading(false);
+      }
+    };
+    loadPlanDetails();
+    return () => {
+      cancelled = true;
+    };
+  }, [savedPlan?.chemotherapy_plan_id]);
+
+  useEffect(() => {
+    const cycle = savedPlan?.chemotherapy_cycle?.find(
+      (c) => c.cycle_number === Number(selectedCycle)
+    );
+    if (!cycle?.chemotherapy_cycle_id) {
+      setCycleMedications([]);
+      return;
+    }
+    const items = cycleMedicationsMap?.[cycle.chemotherapy_cycle_id] ?? [];
+    setCycleMedications(items);
+  }, [selectedCycle, savedPlan?.chemotherapy_cycle, cycleMedicationsMap]);
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
@@ -1520,6 +1778,21 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     };
   }, [consultationState?.patientId]);
 
+  useEffect(() => {
+    const patientId = consultationState?.patientId;
+    if (!patientId) {
+      setAdminInstructions([]);
+      return;
+    }
+    try {
+      const stored = localStorage.getItem(`hms_admin_instructions_${patientId}`);
+      const parsed = stored ? JSON.parse(stored) : [];
+      setAdminInstructions(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setAdminInstructions([]);
+    }
+  }, [consultationState?.patientId]);
+
   const patientName = patient
     ? [
         patient.patient_first_name,
@@ -1578,23 +1851,6 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const orderTherapy = savedPlan?.regimen_name || recentTherapy;
   const orderIntent = savedPlan?.treatment_intent || recentIntent;
 
-  /* Plan items split by drug_role and the SELECTED DAY: PREMEDICATION
-     drugs render in the Premedications table, PRIMARY drugs render in
-     Chemo Orders - both only for the day picked in the Select Day
-     control (items without an explicit day belong to Day 1). */
-  const selectedDayNumber =
-    Number(selectedDay.replace("Day ", "")) || 1;
-  const premedicationItems = (savedPlan?.chemotherapy_plan_items ?? []).filter(
-    (item) =>
-      (item.drug_role ?? "").toUpperCase() === "PREMEDICATION" &&
-      (item.cycle_day ?? item.administration_day ?? 1) === selectedDayNumber,
-  );
-  const primaryChemoItems = (savedPlan?.chemotherapy_plan_items ?? []).filter(
-    (item) =>
-      (item.drug_role ?? "").toUpperCase() === "PRIMARY" &&
-      (item.cycle_day ?? item.administration_day ?? 1) === selectedDayNumber,
-  );
-
   const planCycles = (savedPlan?.chemotherapy_cycle ?? []).filter(
     (cycle) => typeof cycle.cycle_number === "number"
   );
@@ -1605,8 +1861,6 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
         )
       : null;
 
-  /* When no chemo cycle has been recorded yet for this plan, derive the
-     current cycle/day from the treatment window (start date + interval). */
   const derivedCycleInfo = (() => {
     if (!savedPlan?.treatment_start_date || !savedPlan?.cycle_interval_days) {
       return null;
@@ -1629,6 +1883,59 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     latestPlanCycle?.cycle_number ?? derivedCycleInfo?.cycle ?? null;
   const displayCycleDay =
     latestPlanCycle?.cycle_day ?? derivedCycleInfo?.day ?? null;
+
+  /* Plan items split by drug_role and the SELECTED DAY: PREMEDICATION
+     drugs render in the Premedications table, PRIMARY drugs render in
+     Chemo Orders - both only for the day picked in the Select Day
+     control (items without an explicit day belong to Day 1). */
+  const selectedDayNumber =
+    Number(selectedDay.replace("Day ", "")) || 1;
+
+  // Use regimen protocol items if available, otherwise fall back to saved plan items
+  const protocolItemsRaw = regimenProtocol?.chemotherapy_regimen_protocol_items ?? [];
+  const mapProtocolItem = (item: any) => ({
+    chemotherapy_plan_item_id: item.id || item.protocol_item_id,
+    drug_role: item.drug_role,
+    medicine_master: item.medicine_master,
+    protocol_dose: item.patient_dose ? Number(item.patient_dose) : null,
+    protocol_dose_unit: item.patient_dose_unit,
+    administration_route: item.administration_detail ?? item.administration_route ?? '',
+    frequency: item.frequency ?? item.remarks ?? '',
+    remarks: item.remarks ?? '',
+    cycle_day: item.cycle_day,
+    administration_day: item.administration_day,
+    dilution_volume: '',
+  });
+  const protocolItems = protocolItemsRaw.map(mapProtocolItem);
+  const planItems = currentPlan?.chemotherapy_plan_items ?? [];
+  const savedItems = savedPlan?.chemotherapy_plan_items ?? [];
+  const sourceItems = cycleMedications.length > 0 ? cycleMedications : (protocolItems.length > 0 ? protocolItems : (planItems.length > 0 ? planItems : savedItems));
+
+  const matchesCycleAndDay = (item: any) => {
+    const itemDay = item.administration_day ?? item.cycle_day ?? 1;
+    return itemDay === selectedDayNumber;
+  };
+
+  const premedicationItems = sourceItems.filter(
+    (item) =>
+      (item.drug_role ?? "").toUpperCase() === "PREMEDICATION" &&
+      matchesCycleAndDay(item),
+  );
+  const primaryChemoItems = sourceItems.filter(
+    (item) =>
+      (item.drug_role ?? "").toUpperCase() === "PRIMARY" &&
+      matchesCycleAndDay(item),
+  );
+  const supportiveItems = sourceItems.filter(
+    (item) => {
+      const role = (item.drug_role ?? "").toUpperCase();
+      return (
+        role !== "PREMEDICATION" &&
+        role !== "PRIMARY" &&
+        matchesCycleAndDay(item)
+      );
+    },
+  );
 
   /* Treatment timeline: one node per CYCLE, Cycle 1 through the final
      planned cycle of the selected protocol. Day counting / interval
@@ -1669,6 +1976,25 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const timelineFollowUpDate = savedPlan?.expected_end_date
     ? fmtOrderDate(savedPlan.expected_end_date)
     : "";
+
+  /* Selectable days for the current cycle, driven by the regimen protocol's
+     day count (no_of_days) or, failing that, the distinct administration
+     days present across the protocol items. Fallback to Day 1..3. */
+  const protocolDaysCount = (() => {
+    const explicit = Number(regimenProtocol?.no_of_days);
+    if (Number.isFinite(explicit) && explicit > 0) return explicit;
+    const adminDays = new Set<number>();
+    (protocolItemsRaw ?? []).forEach((item: any) => {
+      const d = Number(item.administration_day ?? item.cycle_day);
+      if (Number.isFinite(d) && d > 0) adminDays.add(d);
+    });
+    return adminDays.size > 0 ? Math.max(...adminDays) : 3;
+  })();
+  const timelineDays = Array.from({ length: protocolDaysCount }, (_, idx) => {
+    const day = idx + 1;
+    return { label: `Day ${day}`, num: day };
+  });
+
   const totalTreatmentDays =
     savedPlan?.planned_cycles && savedPlan?.cycle_interval_days
       ? savedPlan.planned_cycles * savedPlan.cycle_interval_days
@@ -1752,7 +2078,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   ]);
 
   const renderOrderEntryGrid = (entries: [string, string][]) => (
-    <div className="grid grid-cols-1 gap-x-8 gap-y-3 px-6 py-5 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-x-8 gap-y-3 px-6 py-5 grid-cols-[auto_auto_auto]">
       {entries.map(([label, value]) => (
         <div key={label}>
           <div className="text-[10px] font-semibold uppercase tracking-wide text-[#64748b] mb-0.5">
@@ -1781,6 +2107,8 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
         patientId={consultationState?.patientId || ""}
         plan={savedPlan}
         allergies={patientAllergies}
+        selectedCycle={selectedCycle}
+        cycleMedicationsMap={cycleMedicationsMap}
       />
     );
   }
@@ -2025,22 +2353,18 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 )}
 </div>
 {/* END: Treatment Timeline */}
-{/* BEGIN: Cycle Selector */}
+{/* BEGIN: Day Selector */}
 <div className="flex items-center">
-<span className="text-sm font-semibold text-[#1e293b] mr-4 shrink-0">Select Cycle</span>
+<span className="text-sm font-semibold text-[#1e293b] mr-4 shrink-0">Select Day</span>
 <div className="flex bg-white rounded-[12px] border border-[#e2e8f0] shadow-sm p-1 overflow-x-auto hide-scrollbar max-w-full">
-{(timelineCycles.length > 0
-  ? timelineCycles
-  : [{ label: "Cycle 1", num: 1, date: "" }]
-).map((cycle) => (
-<button key={cycle.label} type="button" onClick={() => setSelectedCycle(cycle.num)} className={`px-6 py-2 rounded-[8px] shadow-sm text-center min-w-[100px] transition-colors ${selectedCycle === cycle.num ? "bg-[#1d4ed8] text-white" : "text-[#1e293b] hover:bg-slate-50"}`}>
-<div className="text-sm font-semibold whitespace-nowrap">{cycle.label}</div>
-{cycle.date ? <div className={`text-[10px] font-normal mt-0.5 ${selectedCycle === cycle.num ? "opacity-90" : "text-[#64748b]"}`}>{cycle.date}</div> : null}
+{timelineDays.map((day) => (
+<button key={day.label} type="button" onClick={() => setSelectedDay(day.label)} className={`px-6 py-2 rounded-[8px] shadow-sm text-center min-w-[100px] transition-colors ${selectedDay === day.label ? "bg-[#1d4ed8] text-white" : "text-[#1e293b] hover:bg-slate-50"}`}>
+<div className="text-sm font-semibold whitespace-nowrap">{day.label}</div>
 </button>
 ))}
 </div>
 </div>
-{/* END: Cycle Selector */}
+{/* END: Day Selector */}
 </div>
 {/* Right Side (Cards) */}
 <div className="flex space-x-6">
@@ -2095,21 +2419,21 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 <div className="col-span-3 space-y-6">
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-5">
 <h4 className="text-sm font-bold text-[#1e293b] mb-4">Cycle &amp; Schedule</h4>
-<div className="grid grid-cols-3 gap-4 mb-5">
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">CYCLE</div>
-<div className="font-bold text-sm">{displayCycleNumber ? `${displayCycleNumber}${savedPlan?.planned_cycles ? ` / ${savedPlan.planned_cycles}` : ""}` : "—"}</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">DAY</div>
-<div className="font-bold text-sm">{displayCycleDay ?? "—"}</div>
-</div>
-<div>
-<div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">TOTAL DAYS</div>
-<div className="font-bold text-sm">{totalTreatmentDays ?? "—"}</div>
-</div>
-</div>
-<div className="grid grid-cols-3 gap-4">
+        <div className="grid gap-4 mb-5 grid-cols-[auto_auto_auto]">
+          <div>
+            <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">CYCLE</div>
+            <div className="font-bold text-sm">{displayCycleNumber ? `${displayCycleNumber}${savedPlan?.planned_cycles ? ` / ${savedPlan.planned_cycles}` : ""}` : "—"}</div>
+          </div>
+          <div>
+            <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">DAY</div>
+            <div className="font-bold text-sm">{displayCycleDay ?? "—"}</div>
+          </div>
+          <div>
+            <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">TOTAL DAYS</div>
+            <div className="font-bold text-sm">{totalTreatmentDays ?? "—"}</div>
+          </div>
+        </div>
+        <div className="grid gap-4 grid-cols-[auto_auto_auto]">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">START DATE</div>
 <div className="font-bold text-sm">{fmtOrderDate(savedPlan?.treatment_start_date) || "—"}<br/></div>
@@ -2126,7 +2450,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </div>
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-5">
 <h4 className="text-sm font-bold text-[#1e293b] mb-4">Clinical Info</h4>
-<div className="grid grid-cols-2 gap-4 mb-5">
+<div className="grid gap-4 mb-5 grid-cols-[auto_auto]">
 <div>
 <div className="text-[10px] text-[#64748b] font-semibold uppercase mb-1">TYPE</div>
 <div className="font-bold text-sm">{recentCancerType || "—"}</div>
@@ -2143,70 +2467,111 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </div>
 </div>
 {/* Middle Column */}
-<div className="col-span-4 space-y-6">
+<div className="col-span-9 space-y-6">
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-5">
 <div className="flex items-center mb-4">
 <h4 className="text-sm font-bold text-[#1e293b] mr-3">Lab Validation</h4>
-<span className="px-2 py-0.5 bg-slate-50 text-[#64748b] text-[10px] font-bold uppercase rounded border border-slate-200">—</span>
+<span className="px-2 py-0.5 bg-slate-50 text-[#64748b] text-[10px] font-bold uppercase rounded border border-slate-200">{labItemsLoading ? "Loading…" : `${labItems.length} Test(s)`}</span>
 </div>
-<table className="w-full text-left text-sm mb-4">
-<thead>
-<tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
-<th className="pb-2 font-semibold">PARAMETER</th>
-<th className="pb-2 font-semibold">RESULT</th>
-<th className="pb-2 font-semibold">RANGE</th>
-<th className="pb-2 font-semibold">STATUS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td colSpan={4} className="py-6 text-center text-xs text-[#64748b]">No lab validation records found.</td>
-</tr>
-</tbody>
-</table>
+{labItemsError && (
+  <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">{labItemsError}</div>
+)}
+{labItemsLoading ? (
+  <div className="py-6 text-center text-xs text-[#64748b]">
+    <i className="fa-solid fa-circle-notch fa-spin mr-1" />Loading lab investigations…
+  </div>
+) : labItems.length === 0 ? (
+  <table className="w-full text-left text-sm mb-4">
+    <thead>
+      <tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
+        <th className="pb-2 font-semibold">PARAMETER</th>
+        <th className="pb-2 font-semibold">RESULT</th>
+        <th className="pb-2 font-semibold">RANGE</th>
+        <th className="pb-2 font-semibold">STATUS</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td colSpan={4} className="py-6 text-center text-xs text-[#64748b]">No lab validation records found.</td>
+      </tr>
+    </tbody>
+  </table>
+) : (
+  <table className="w-full text-left text-sm mb-4">
+    <thead>
+      <tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
+        <th className="pb-2 font-semibold">TEST NAME</th>
+        <th className="pb-2 font-semibold">TEST CODE</th>
+        <th className="pb-2 font-semibold">UNIT</th>
+        <th className="pb-2 font-semibold">REFERENCE RANGE</th>
+        <th className="pb-2 font-semibold">STATUS</th>
+      </tr>
+    </thead>
+    <tbody>
+      {labItems.map((item) => (
+        <tr key={item.lab_order_item_id} className="border-b border-slate-50">
+          <td className="py-2 font-bold text-sm">{item.lab_test_master?.test_name ?? "—"}</td>
+          <td className="py-2 text-sm">{item.lab_test_master?.test_code ?? "—"}</td>
+          <td className="py-2 text-sm">{item.lab_test_master?.unit ?? "—"}</td>
+          <td className="py-2 text-sm">{item.lab_test_master?.reference_range ?? "—"}</td>
+          <td className="py-2">
+            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+              item.item_status === "Completed"
+                ? "bg-emerald-100 text-emerald-700"
+                : item.item_status === "Ordered"
+                ? "bg-blue-100 text-blue-700"
+                : "bg-slate-100 text-slate-600"
+            }`}>
+              {item.item_status ?? "Ordered"}
+            </span>
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+)}
 <div className="border-t border-slate-100 pt-3 flex justify-between items-center text-sm">
 <span className="text-[#64748b]">Chemo Clearance :</span>
 <span className="font-bold text-[#64748b] uppercase">—</span>
 </div>
 </div>
-<div className="bg-blue-50/50 rounded-[16px] shadow-sm border border-blue-100 p-5 relative overflow-hidden">
-<div className="flex items-center justify-between mb-5">
-<div className="flex items-center text-[#1d4ed8]">
-<i className="fa-solid fa-flask text-lg mr-2"></i>
-<h4 className="text-sm font-bold uppercase">PROTOCOL: {orderTherapy || "—"}</h4>
+</div>
+</div>
+<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden mt-6">
+<div className="px-5 py-4 border-b border-[#e2e8f0] flex items-center justify-between text-[#1d4ed8]">
+<div className="flex items-center">
+<i className="fa-solid fa-flask mr-2"></i>
+<h4 className="text-sm font-bold">PROTOCOL: {orderTherapy || "—"}</h4>
 </div>
 <a className="text-xs text-[#1d4ed8] font-medium hover:underline flex items-center" href="#">View Protocol <i className="fa-solid fa-chevron-right text-[10px] ml-1"></i></a>
 </div>
-<div className="grid grid-cols-4 gap-4">
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">DOSE</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">PATIENT DOSE</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">ROUTE</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">DILUENT</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">VOLUME</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
-<div>
-<div className="text-[10px] text-[#1d4ed8] font-semibold uppercase mb-1">INF. TIME</div>
-<div className="font-bold text-sm text-[#1e293b]">—</div>
-</div>
+<div className="p-5">
+<table className="w-full text-left text-sm">
+<thead>
+<tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
+<th className="pb-2 font-semibold">DOSE</th>
+<th className="pb-2 font-semibold">PATIENT DOSE</th>
+<th className="pb-2 font-semibold">ROUTE</th>
+<th className="pb-2 font-semibold">DILUENT</th>
+<th className="pb-2 font-semibold">VOLUME</th>
+<th className="pb-2 font-semibold">INF. TIME</th>
+</tr>
+</thead>
+<tbody>
+<tr className="border-b border-slate-50">
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+<td className="py-2 whitespace-nowrap">—</td>
+</tr>
+</tbody>
+</table>
 </div>
 </div>
-</div>
-{/* Right Column */}
-<div className="col-span-5 space-y-6">
+{/* BEGIN: Medication Orders Row */}
+<div className="mt-6 space-y-6">
 <div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden">
 <div className="px-5 py-4 border-b border-[#e2e8f0] flex items-center text-purple-600">
 <i className="fa-solid fa-pills mr-2"></i>
@@ -2232,12 +2597,12 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 ) : (
 premedicationItems.map((item, index) => (
 <tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
-<td className="py-2">{index + 1}</td>
-<td className="py-2 font-medium text-[#1e293b]">{item.medicine_master?.medicine_name ?? "—"}</td>
-<td className="py-2">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
-<td className="py-2">{item.administration_route ?? "—"}</td>
-<td className="py-2">{item.frequency ?? item.remarks ?? "—"}</td>
-<td className="py-2 text-right"><StatusBadge>{item.drug_role || "PREMEDICATION"}</StatusBadge></td>
+<td className="py-2 whitespace-nowrap">{index + 1}</td>
+<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.administration_route ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.frequency ?? item.remarks ?? "—"}</td>
+<td className="py-2 whitespace-nowrap text-right"><StatusBadge>{item.drug_role || "PREMEDICATION"}</StatusBadge></td>
 </tr>
 ))
 )}
@@ -2270,12 +2635,50 @@ premedicationItems.map((item, index) => (
 ) : (
 primaryChemoItems.map((item, index) => (
 <tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
-<td className="py-2">{index + 1}</td>
-<td className="py-2 font-medium text-[#1e293b]">{item.medicine_master?.medicine_name ?? "—"}</td>
-<td className="py-2">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
-<td className="py-2">{item.administration_route ?? "—"}</td>
-<td className="py-2">{item.dilution_volume ?? "—"}</td>
-<td className="py-2 text-right"><StatusBadge>{item.drug_role || "ORDERED"}</StatusBadge></td>
+<td className="py-2 whitespace-nowrap">{index + 1}</td>
+<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.administration_route ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.dilution_volume ?? "—"}</td>
+<td className="py-2 whitespace-nowrap text-right"><StatusBadge>{item.drug_role || "ORDERED"}</StatusBadge></td>
+</tr>
+))
+)}
+</tbody>
+</table>
+</div>
+</div>
+<div className="bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] overflow-hidden">
+<div className="px-5 py-4 border-b border-[#e2e8f0] flex items-center text-emerald-600">
+<i className="fa-solid fa-heart-pulse mr-2"></i>
+<h4 className="text-sm font-bold">Supportive Medicines</h4>
+</div>
+<div className="p-5">
+<table className="w-full text-left text-sm">
+<thead>
+<tr className="text-[10px] text-[#64748b] uppercase border-b border-slate-100">
+<th className="pb-2 font-semibold w-8">#</th>
+<th className="pb-2 font-semibold">DRUG</th>
+<th className="pb-2 font-semibold">DOSE</th>
+<th className="pb-2 font-semibold">ROUTE</th>
+<th className="pb-2 font-semibold">TIMING</th>
+<th className="pb-2 font-semibold text-right">STATUS</th>
+</tr>
+</thead>
+<tbody>
+{supportiveItems.length === 0 ? (
+<tr>
+<td colSpan={6} className="py-6 text-center text-xs text-[#64748b]">No supportive medicines found.</td>
+</tr>
+) : (
+supportiveItems.map((item, index) => (
+<tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
+<td className="py-2 whitespace-nowrap">{index + 1}</td>
+<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.administration_route ?? "—"}</td>
+<td className="py-2 whitespace-nowrap">{item.frequency ?? item.remarks ?? "—"}</td>
+<td className="py-2 whitespace-nowrap text-right"><StatusBadge>{item.drug_role || "SUPPORTIVE"}</StatusBadge></td>
 </tr>
 ))
 )}
@@ -2330,7 +2733,7 @@ orderDischargeMeds.map((item, index) => (
 </div>
 </div>
 </div>
-</div>
+{/* END: Medication Orders Row */}
 {/* END: Bottom Grid */}
 {/* BEGIN: Instructions Card */}
 <div className="mt-6 bg-white rounded-[16px] shadow-sm border border-[#e2e8f0] p-6 flex justify-between items-start">
@@ -2339,10 +2742,39 @@ orderDischargeMeds.map((item, index) => (
 <i className="fa-regular fa-file-lines mr-2"></i>
 <h4 className="text-sm font-bold">Instructions</h4>
 </div>
-<p className="text-sm text-[#64748b] mb-3">Premedication tablets to take a day before:</p>
+<p className="text-sm text-[#64748b] mb-3">Administration instructions from the selected regimen protocol:</p>
+{adminInstructions.length === 0 ? (
 <ul className="space-y-2 text-sm text-[#1e293b] font-medium list-disc list-inside">
 <li>No instructions recorded.</li>
 </ul>
+) : (
+<ul className="space-y-3 text-sm text-[#1e293b]">
+{adminInstructions.map((instruction, index) => (
+<li key={index} className="border border-slate-100 rounded-[12px] p-3">
+<div className="flex items-start justify-between gap-3">
+<span className="font-bold text-[#1e293b]">{instruction.medicineName || `Item ${index + 1}`}</span>
+{instruction.dose ? (
+<span className="text-xs text-[#64748b] whitespace-nowrap">{instruction.dose}</span>
+) : null}
+</div>
+{(instruction.route || instruction.infusion || instruction.frequency || instruction.timing) ? (
+<div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#64748b]">
+{instruction.route ? <span>Route: {instruction.route}</span> : null}
+{instruction.infusion ? <span>Infusion: {instruction.infusion}</span> : null}
+{instruction.frequency ? <span>Frequency: {instruction.frequency}</span> : null}
+{instruction.timing ? <span>Timing: {instruction.timing}</span> : null}
+</div>
+) : null}
+{instruction.administrationDetail ? (
+<p className="mt-1.5 text-xs text-[#475569]">{instruction.administrationDetail}</p>
+) : null}
+{instruction.remarks ? (
+<p className="mt-1.5 text-xs italic text-[#64748b]">{instruction.remarks}</p>
+) : null}
+</li>
+))}
+</ul>
+)}
 <a className="inline-block mt-4 text-sm font-semibold text-[#1d4ed8] underline" href="#">Investigation for Next Cycle: —</a>
 </div>
 <div className="bg-slate-50 border border-slate-200 rounded-[12px] p-5 flex flex-col items-center justify-center w-[160px] h-full">
@@ -2403,12 +2835,70 @@ const HistoryDashboard: React.FC<{
   const [cycleDetails, setCycleDetails] = useState<ChemoCycleDetail[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
+  const [prescriptions, setPrescriptions] = useState<any[]>([]);
+  const [prescriptionsLoading, setPrescriptionsLoading] = useState(false);
+  const [prescriptionsError, setPrescriptionsError] = useState("");
+  const [selectedPrescription, setSelectedPrescription] = useState<any | null>(null);
+  const [prescriptionIndex, setPrescriptionIndex] = useState<number | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
 
   /* Real treatment history for THIS selected patient:
-     latest chemo plan (GET /chemotherapy/plans?patient_id=) plus
-     each cycle's recorded vitals + adverse events
-     (GET /chemotherapy/cycles/:id). */
+      latest chemo plan (GET /chemotherapy/plans?patient_id=) plus
+      each cycle's recorded vitals + adverse events
+      (GET /chemotherapy/cycles/:id). */
+  const buildPrescriptionData = (p: any) => {
+    return {
+      prescription_id: p.prescription_id,
+      prescription_date: p.prescription_date,
+      advice: p.advice,
+      patient_history: {
+        patient_first_name: p.patient_history?.patient_bio_data?.patient_first_name || '',
+        patient_last_name: p.patient_history?.patient_bio_data?.patient_last_name || '',
+        patient_id: p.patient_history?.patient_bio_data?.patient_id || '',
+        patient_display_id: p.patient_history?.patient_bio_data?.patient_id || '',
+      },
+      employees: {
+        first_name: p.employees?.first_name || '',
+        last_name: p.employees?.last_name || '',
+      },
+      diagnosis: {
+        diagnosis_name: p.diagnosis?.diagnosis_name || '',
+        icd10_code: p.diagnosis?.icd_code || '',
+      },
+      prescription_items: (p.prescription_items || []).map((it: any) => ({
+        medicine_name: it.medicine_master?.medicine_name || '',
+        medicine_master: it.medicine_master,
+        dosage: it.dosage,
+        unit: it.unit,
+        route: it.route,
+        frequency: it.frequency,
+        instruction: it.instruction,
+        drug_role: it.drug_role,
+      })),
+    };
+  };
+
+  const openPrescriptionPdf = (p: any, index: number) => {
+    try {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+      const data = buildPrescriptionData(p);
+      const { url } = generatePrescriptionPdf(data as any);
+      setSelectedPrescription(p);
+      setPrescriptionIndex(index);
+      setPdfUrl(url);
+    } catch (e) {
+      console.error('Failed to generate PDF', e);
+    }
+  };
+
+  const closePdfModal = () => {
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    setPdfUrl(null);
+    setSelectedPrescription(null);
+    setPrescriptionIndex(null);
+  };
+
   useEffect(() => {
     if (!patientId) {
       setPlan(null);
@@ -2453,6 +2943,41 @@ const HistoryDashboard: React.FC<{
       cancelled = true;
     };
   }, [patientId]);
+
+  useEffect(() => {
+    if (!patientId) {
+      setPrescriptions([]);
+      setPrescriptionsError("");
+      return;
+    }
+    let cancelled = false;
+    setPrescriptionsLoading(true);
+    setPrescriptionsError("");
+    API.get(`/prescriptions/patient/${patientId}`)
+      .then((res) => {
+        if (cancelled) return;
+        const data = res.data?.data?.prescriptions ?? [];
+        setPrescriptions(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setPrescriptionsError(err?.response?.data?.message || "Failed to load prescriptions");
+      })
+      .finally(() => {
+        if (!cancelled) setPrescriptionsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [patientId]);
+
+  // Auto-load first prescription when list arrives
+  useEffect(() => {
+    if (prescriptions.length > 0 && prescriptionIndex === null) {
+      openPrescriptionPdf(prescriptions[0], 0);
+    }
+    // Reset when patient changes
+    if (prescriptions.length === 0) {
+      closePdfModal();
+    }
+  }, [prescriptions]);
 
   const fmtHistoryDate = (value?: string | null) => {
     if (!value) return "";
@@ -2658,7 +3183,7 @@ const HistoryDashboard: React.FC<{
       )}
 
       {/* TIMELINE + RIGHT COLUMN */}
-      <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6 bg-slate-50/50">
+      <div className="p-6 grid lg:grid-cols-3 gap-6 bg-slate-50/50">
         {/* LEFT */}
         <div className="lg:col-span-2">
           <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
@@ -2802,20 +3327,99 @@ const HistoryDashboard: React.FC<{
               <h2 className="text-base font-bold text-gray-900">
                 Document History
               </h2>
-
-              <button
-                type="button"
-                className="text-xs text-blue-600 font-bold hover:underline uppercase"
-              >
-                View All
-              </button>
             </div>
 
-            <div className="space-y-3">
+            {prescriptionsLoading ? (
+              <div className="text-xs text-gray-500">Loading prescriptions…</div>
+            ) : prescriptionsError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{prescriptionsError}</div>
+            ) : prescriptions.length === 0 ? (
               <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-4 text-center text-xs text-gray-400">
-                No documents uploaded for this patient yet.
+                No prescriptions found for this patient yet.
               </div>
-            </div>
+            ) : (
+              <div className="space-y-3">
+                {selectedPrescription && pdfUrl && (
+                  <>
+                    <div className="rounded-lg border border-gray-200 bg-white p-3">
+                      <div className="flex items-start justify-between">
+                          <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 bg-red-50 rounded-lg flex items-center justify-center border border-red-100">
+                            <span className="text-sm font-bold text-red-600">PDF</span>
+                          </div>
+                          <div>
+                            <div className="text-xs font-semibold text-gray-900">Prescription-{selectedPrescription.prescription_id}.pdf</div>
+                            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">
+                              {selectedPrescription.prescription_date ? new Date(selectedPrescription.prescription_date).toLocaleDateString() : ''} • {`${selectedPrescription.employees?.first_name || ''} ${selectedPrescription.employees?.last_name || ''}`.trim() || '—'} • {selectedPrescription.prescription_status || '—'}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={pdfUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+                          >
+                            View
+                          </a>
+                          <button
+                            type="button"
+                            className="text-[10px] px-2 py-1 rounded border border-gray-300 hover:bg-gray-50"
+                            onClick={() => {
+                              try {
+                                const data = buildPrescriptionData(selectedPrescription);
+                                const { url } = generatePrescriptionPdf(data as any);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = `prescription-${selectedPrescription.prescription_id}.pdf`;
+                                a.click();
+                                URL.revokeObjectURL(url);
+                              } catch (err) {
+                                console.error(err);
+                              }
+                            }}
+                          >
+                            Download
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-center gap-3">
+                      <button
+                        type="button"
+                        className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                        disabled={prescriptionIndex === null || prescriptionIndex <= 0}
+                        onClick={() => {
+                          if (prescriptionIndex !== null && prescriptionIndex > 0) {
+                            const newIdx = prescriptionIndex - 1;
+                            openPrescriptionPdf(prescriptions[newIdx], newIdx);
+                          }
+                        }}
+                      >
+                        Previous
+                      </button>
+                      <span className="text-[10px] text-gray-600">
+                        {prescriptions.length > 0 && prescriptionIndex !== null ? `${prescriptionIndex + 1} / ${prescriptions.length}` : '0 / 0'}
+                      </span>
+                      <button
+                        type="button"
+                        className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                        disabled={prescriptionIndex === null || prescriptionIndex >= prescriptions.length - 1}
+                        onClick={() => {
+                          if (prescriptionIndex !== null && prescriptionIndex < prescriptions.length - 1) {
+                            const newIdx = prescriptionIndex + 1;
+                            openPrescriptionPdf(prescriptions[newIdx], newIdx);
+                          }
+                        }}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -3502,7 +4106,7 @@ function DischargeDetailsPortal({
     : [];
 
   const renderEntryGrid = (entries: [string, string][]) => (
-    <div className="grid grid-cols-1 gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
       {entries.map(([label, value]) => (
         <div key={label} className="rounded-lg border border-slate-100 bg-slate-50/60 p-4">
           <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
@@ -3876,7 +4480,7 @@ return (
             )}
           </div>
           ) : (
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+          <div className="grid gap-6 xl:grid-cols-3">
             {/* ===================================================
                 LEFT COLUMN
             ==================================================== */}
@@ -3978,7 +4582,7 @@ return (
                       Treatment Cycle Stats
                     </h4>
 
-                    <div className="grid grid-cols-2 gap-y-4">
+                    <div className="grid gap-y-4 sm:grid-cols-2">
                       {/* Planned */}
                       <div>
                         <p className="mb-1 text-xs text-gray-500">
@@ -4143,7 +4747,7 @@ return (
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
                   {vitals.map((vital) => (
                     <div
                       key={vital.label}
@@ -4200,10 +4804,11 @@ return (
           )}
 </div>
 </div>
-</main>
+ </main>
 {/* END: Main Content */}
 
       </div>
+
     </>
   );
 }
@@ -4355,7 +4960,7 @@ const PatientNotesDocuments: React.FC<{
           {/* =================================================
               SUMMARY CARDS
           ================================================== */}
-          <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div className="mb-8 grid gap-4 md:grid-cols-4">
 
             {/* Total Notes */}
             <div className="flex items-center rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -4476,7 +5081,7 @@ const PatientNotesDocuments: React.FC<{
               </button>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-3">
               {documents.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-400 md:col-span-3">
                   No documents uploaded for this patient yet. Use the upload

@@ -21,7 +21,7 @@ import {
   type PatientRecord,
 } from "../../api/patient.api";
 import {
-  encounterApi,
+encounterApi,
   type EncounterRecord,
 } from "../../api/encounter.api";
 import {
@@ -146,6 +146,10 @@ interface MeasurementValues {
   weight: string;
   bsa: string;
   bmi: string;
+  bp: string;
+  pulse: string;
+  temp: string;
+  spo2: string;
 }
 
 const vitalNum = (
@@ -157,24 +161,53 @@ const vitalNum = (
 };
 
 const buildMeasurements = (
-  encounter: EncounterRecord | null | undefined
+  encounter: EncounterRecord | null | undefined,
+  recentEncounters: EncounterRecord[] = []
 ): MeasurementValues => {
-  const height = vitalNum(encounter?.height);
-  const weight = vitalNum(encounter?.weight);
+  const getField = (field: keyof EncounterRecord) => {
+    // Prefer active encounter
+    const activeVal = (encounter as any)?.[field];
+    if (activeVal != null && activeVal !== "") return vitalNum(activeVal);
+    // Fallback to recent encounters per-field
+    for (const enc of recentEncounters) {
+      const v = (enc as any)?.[field];
+      if (v != null && v !== "") {
+        const n = vitalNum(v);
+        if (n !== null) return n;
+      }
+    }
+    return null;
+  };
+
+  const height = getField("height");
+  const weight = getField("weight");
+  const systolic = getField("systolic_bp");
+  const diastolic = getField("diastolic_bp");
+  const pulse = getField("pulse");
+  const temp = getField("temperature");
+  const spo2 = getField("spo2");
+  const bmiStored = getField("BMI");
 
   const bsaValue = computeBsa(height, weight);
-
-  const storedBmi = vitalNum(encounter?.BMI);
   const bmi =
-    storedBmi !== null
-      ? String(storedBmi)
+    bmiStored !== null
+      ? String(bmiStored)
       : String(computeBmi(height, weight) ?? "");
+
+  const bp =
+    systolic !== null && diastolic !== null
+      ? `${systolic}/${diastolic}`
+      : "";
 
   return {
     height: height !== null ? `${height} cm` : "",
     weight: weight !== null ? `${weight} kg` : "",
     bsa: bsaValue !== null ? `${bsaValue} m²` : "",
     bmi,
+    bp,
+    pulse: pulse !== null ? `${pulse} bpm` : "",
+    temp: temp !== null ? `${temp} °C` : "",
+    spo2: spo2 !== null ? `${spo2}%` : "",
   };
 };
 
@@ -434,6 +467,7 @@ const Consultation: React.FC = () => {
 
   const [encounter, setEncounter] = useState<EncounterRecord | null>(null);
   const [encounterError, setEncounterError] = useState("");
+  const [recentEncounters, setRecentEncounters] = useState<EncounterRecord[]>([]);
 
   const formatDateDMY = (value?: string | null) => {
     if (!value) return "";
@@ -496,7 +530,10 @@ const Consultation: React.FC = () => {
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
-    if (!patientId) return;
+    if (!patientId) {
+      setRecentEncounters([]);
+      return;
+    }
     let cancelled = false;
     setEncounterError("");
     findActiveEncounter(
@@ -524,6 +561,34 @@ const Consultation: React.FC = () => {
           setEncounterError(message);
         }
       });
+
+    // Load recent encounters for per-field vitals fallback
+    const loadRecent = async () => {
+      try {
+        const response = await encounterApi.getLatest(patientId, 10);
+        const rows = [...(response.data?.data?.encounters ?? [])].sort(
+          (a, b) =>
+            new Date(b.created_at ?? 0).getTime() -
+            new Date(a.created_at ?? 0).getTime()
+        );
+        if (!cancelled) setRecentEncounters(rows);
+      } catch (e) {
+        // Fallback to scoped list
+        try {
+          const response = await encounterApi.getAll({ patientId, limit: 10 });
+          const rows = [...(response.data?.data?.encounters ?? [])].sort(
+            (a, b) =>
+              new Date(b.created_at).getTime() -
+              new Date(a.created_at).getTime()
+          );
+          if (!cancelled) setRecentEncounters(rows);
+        } catch {
+          if (!cancelled) setRecentEncounters([]);
+        }
+      }
+    };
+    loadRecent();
+
     return () => {
       cancelled = true;
     };
@@ -633,7 +698,7 @@ const Consultation: React.FC = () => {
      LATEST VITALS (from the active encounter record)
   ============================================================ */
 
-  const measurements = useMemo(() => buildMeasurements(encounter), [encounter]);
+  const measurements = useMemo(() => buildMeasurements(encounter, recentEncounters), [encounter, recentEncounters]);
 
   /* ============================================================
      TOAST
@@ -1094,6 +1159,42 @@ const Consultation: React.FC = () => {
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
                     {measurements.bmi}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    BP
+                  </div>
+                  <div className="text-sm font-bold leading-5 text-slate-800">
+                    {measurements.bp}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    PULSE
+                  </div>
+                  <div className="text-sm font-bold leading-5 text-slate-800">
+                    {measurements.pulse}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    TEMP
+                  </div>
+                  <div className="text-sm font-bold leading-5 text-slate-800">
+                    {measurements.temp}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    SPO2
+                  </div>
+                  <div className="text-sm font-bold leading-5 text-slate-800">
+                    {measurements.spo2}
                   </div>
                 </div>
 
@@ -2018,7 +2119,7 @@ const LabReview: React.FC<{
           throw new Error("Failed to create the lab order.");
         }
 
-        await Promise.all(
+        const createdItems = await Promise.all(
           pendingTests.map((test) =>
             labOrderItemApi.create({
               lab_order_id: labOrderId,
@@ -2027,6 +2128,19 @@ const LabReview: React.FC<{
             })
           )
         );
+
+        try {
+          const itemIds = createdItems
+            .map((r) => r.data.data?.lab_order_item_id)
+            .filter(Boolean);
+          if (itemIds.length > 0) {
+            const existing: string[] = JSON.parse(
+              localStorage.getItem(`hms_lab_item_ids_${patientId}`) || "[]"
+            );
+            const merged = [...new Set([...existing, ...itemIds])];
+            localStorage.setItem(`hms_lab_item_ids_${patientId}`, JSON.stringify(merged));
+          }
+        } catch { /* ignore */ }
 
         onOrdered?.(pendingTests.map((test) => test.lab_test_id));
       } catch (error: any) {
@@ -2566,6 +2680,33 @@ const Diagnosis: React.FC<{
 
   const [cancerTypes, setCancerTypes] = useState<CancerTypeItem[]>([]);
   const [subtypes, setSubtypes] = useState<CancerSubtypeItem[]>([]);
+
+  /* Sync the diagnosis selection (cancer_type_id + subtype_id) to
+     localStorage so downstream steps (Treatment Plan) can read the
+     IDs to query regimen protocols from the backend. */
+  useEffect(() => {
+    if (!formData.type || !formData.subType) return;
+
+    const matchedType = cancerTypes.find(
+      (item) => item.cancer_type === formData.type
+    );
+    const matchedSubtype = subtypes.find(
+      (item) => item.subtype_name === formData.subType
+    );
+
+    if (matchedType && matchedSubtype) {
+      localStorage.setItem(
+        "hms_diagnosis_selection",
+        JSON.stringify({
+          cancer_type_id: matchedType.cancer_type_id,
+          subtype_id: matchedSubtype.subtype_id,
+          cancer_type: matchedType.cancer_type,
+          subtype_name: matchedSubtype.subtype_name,
+        })
+      );
+    }
+  }, [formData.type, formData.subType, cancerTypes, subtypes]);
+
   const [stageLabels, setStageLabels] = useState<string[]>([]);
   const [tnmStages, setTnmStages] = useState<string[]>([]);
   const [tOptions, setTOptions] = useState<string[]>([]);
@@ -4127,10 +4268,12 @@ type Drug = {
   unit: string;
   volume: string;
   planItemId?: string;
+  medicineId?: string;
 };
 
 type ChemotherapyPlanItem = {
   chemotherapy_plan_item_id: string;
+  medicine_id: string;
   drug_role: string | null;
   protocol_dose: number | null;
   protocol_dose_unit: string | null;
@@ -4165,6 +4308,41 @@ type ChemotherapyPlan = {
   } | null;
 };
 
+type RegimenProtocolDay = {
+  protocol_day_id: string;
+  day_number: number;
+  day_sequence: number | null;
+  same_as_day_one: boolean | null;
+  protocol_item_id: string | null;
+  medicine_count: string | null;
+  chemotherapy_regimen_protocol_items: RegimenProtocolItem | null;
+};
+
+type RegimenProtocolItem = {
+  protocol_item_id: string;
+  medicine_id: string;
+  drug_role: string | null;
+  drug_sequence: number;
+  drug_type: string | null;
+  dosage: number | null;
+  dosage_unit: string | null;
+  administration_route: string | null;
+  infusion_type: string | null;
+  infusion_duration_minutes: number | null;
+  administration_day: number | null;
+  cycle_day: number | null;
+  frequency: string | null;
+  timing_relative_to_primary: string | null;
+  remarks: string | null;
+  administration_detail: string | null;
+  medicine_master: {
+    medicine_name: string;
+    generic_name: string | null;
+    dosage_form: string | null;
+    unit: string | null;
+  } | null;
+};
+
 type RegimenProtocolDetail = {
   protocol_id: string;
   regimen_code: string | null;
@@ -4172,29 +4350,9 @@ type RegimenProtocolDetail = {
   treatment_intent: string | null;
   standard_cycles: number | null;
   cycle_interval_days: number | null;
-  chemotherapy_regimen_protocol_items: {
-    protocol_item_id: string;
-    medicine_id: string;
-    drug_role: string | null;
-    drug_sequence: number;
-    drug_type: string | null;
-    dosage: number | null;
-    dosage_unit: string | null;
-    administration_route: string | null;
-    infusion_type: string | null;
-    infusion_duration_minutes: number | null;
-    administration_day: number | null;
-    cycle_day: number | null;
-    frequency: string | null;
-    timing_relative_to_primary: string | null;
-    remarks: string | null;
-    medicine_master: {
-      medicine_name: string;
-      generic_name: string | null;
-      dosage_form: string | null;
-      unit: string | null;
-    } | null;
-  }[];
+  no_of_days: number | null;
+  chemotherapy_regimen_protocol_days: RegimenProtocolDay[] | null;
+  chemotherapy_regimen_protocol_items: RegimenProtocolItem[];
 };
 
 const ChemotherapyOrder: React.FC<{
@@ -4226,12 +4384,33 @@ const ChemotherapyOrder: React.FC<{
     startDate: false,
     drugs: false,
     premedication: false,
+    supportive: false,
   });
 
   const protocolRef = useRef<RegimenProtocolDetail | null>(null);
+  const protocolDaysRef = useRef<RegimenProtocolDay[]>([]);
+  const cycleDayRef = useRef<string>("");
   const planIdRef = useRef<string>("");
   const planItemsRef = useRef<ChemotherapyPlanItem[]>([]);
+  const selectedProtocolIdRef = useRef<string>("");
   const [savingOrder, setSavingOrder] = useState(false);
+
+  /* Administration instructions derived from the selected regimen
+     protocol items (route, infusion, frequency, timing, remarks,
+     administration detail). */
+  type AdminInstruction = {
+    id: number;
+    medicineName: string;
+    route: string;
+    infusion: string;
+    frequency: string;
+    timing: string;
+    remarks: string;
+    administrationDetail: string;
+  };
+  const [adminInstructions, setAdminInstructions] = useState<
+    AdminInstruction[]
+  >([]);
 
   /* Edit-in-place state (medication rows) */
   const [editingRow, setEditingRow] = useState<{
@@ -4244,6 +4423,14 @@ const ChemotherapyOrder: React.FC<{
   const latestCycleRef = useRef<
     NonNullable<ChemotherapyPlan["chemotherapy_cycle"]>[number] | null
   >(null);
+
+  /* Single source of truth for cycle/day: always keeps the ref in sync
+     with the state so async protocol loads filter by the CURRENT day
+     (never a stale mount-time closure). */
+  const updateCycleDay = (value: string) => {
+    cycleDayRef.current = value;
+    setCycleDay(value);
+  };
 
   const applyNextCycle = (
     protocol: RegimenProtocolDetail | null,
@@ -4265,29 +4452,39 @@ const ChemotherapyOrder: React.FC<{
         : Number.POSITIVE_INFINITY;
     const latestCycleNumber = latestCycle?.cycle_number ?? 0;
 
+    /* The cycle/day to be administered on this visit is whatever the
+       previous visit scheduled as its "next" (hms_next_cycle). This makes
+       the order advance day-by-day within the cycle (Cycle 2 / Day 1 ->
+       Cycle 2 / Day 2 -> ...) and roll to the next cycle's Day 1 once a
+       cycle completes, instead of always starting at Day 1. */
+    const storedNextCycle = localStorage.getItem(
+      `hms_next_cycle_${resolvedPatientId}`
+    );
+    const storedParsed = getCycleAndDay(storedNextCycle ?? "");
+
+    let formCycleNumber = storedParsed
+      ? storedParsed.cycle
+      : latestCycleNumber > 0
+      ? latestCycleNumber + 1
+      : 1;
+    if (formCycleNumber > maxCycles) {
+      formCycleNumber = maxCycles;
+    }
+    const formCycleDay = storedParsed ? storedParsed.day : 1;
+
+    // Never auto-land on a rest day. Once a cycle's meds are entered the
+    // next scheduled visit should skip to the next day that actually has
+    // drugs in the protocol (some cycles have fewer medication days).
+    const snappedFormDay =
+      nextAvailableDay(protocol, formCycleDay) ?? formCycleDay;
+
     const baseDate = parseDateValue(baseDateValue) ?? new Date();
     const baseStart = new Date(baseDate);
     baseStart.setHours(0, 0, 0, 0);
 
-    let formCycleNumber =
-      latestCycleNumber > 0 ? latestCycleNumber + 1 : 1;
-    if (formCycleNumber > maxCycles) {
-      formCycleNumber = maxCycles;
-    }
-
     const formDate = new Date(baseStart);
     formDate.setDate(
       formDate.getDate() + (formCycleNumber - 1) * interval
-    );
-
-    let nextCycleNumber = formCycleNumber + 1;
-    if (nextCycleNumber > maxCycles) {
-      nextCycleNumber = maxCycles;
-    }
-
-    const nextDate = new Date(baseStart);
-    nextDate.setDate(
-      nextDate.getDate() + (nextCycleNumber - 1) * interval
     );
 
     const formatDate = (date: Date) => {
@@ -4296,10 +4493,24 @@ const ChemotherapyOrder: React.FC<{
       return `${day}-${month}-${date.getFullYear()}`;
     };
 
-    const formCycleStr = `Cycle ${formCycleNumber} / Day 1`;
-    const nextCycleStr = `Cycle ${nextCycleNumber} / Day 1`;
+    const formCycleStr = `Cycle ${formCycleNumber} / Day ${snappedFormDay}`;
+    const nextAvailable = nextAvailableDay(protocol, snappedFormDay + 1);
+    const nextCycleStr =
+      nextAvailable != null
+        ? `Cycle ${formCycleNumber} / Day ${nextAvailable}`
+        : computeNextCycle(formCycleStr, protocol.no_of_days);
 
-    setCycleDay(formCycleStr);
+    const next = getCycleAndDay(nextCycleStr);
+    const nextCycleNumber = (next?.cycle ?? formCycleNumber) > maxCycles
+      ? maxCycles
+      : (next?.cycle ?? formCycleNumber);
+
+    const nextDate = new Date(baseStart);
+    nextDate.setDate(
+      nextDate.getDate() + (nextCycleNumber - 1) * interval
+    );
+
+    updateCycleDay(formCycleStr);
     setStartDate(formatDate(formDate));
     localStorage.setItem(
       `hms_next_cycle_${resolvedPatientId}`,
@@ -4308,6 +4519,169 @@ const ChemotherapyOrder: React.FC<{
     localStorage.setItem(
       `hms_next_cycle_date_${resolvedPatientId}`,
       formatDate(nextDate)
+    );
+  };
+
+  /* ------------------------------------------------------------
+     CYCLE-DAY DRIVEN DRUG FILTERING
+     The regimen protocol endpoint returns chemotherapy_regimen_
+     protocol_days (one entry per cycle day, each carrying its own
+     nested items, and some days marked same_as_day_one). The drugs
+     shown in the Chemotherapy Orders / Premedication / Supportive
+     tables must reflect only the day selected in the Cycle/Day field
+     (some protocols run >6 days, some <6, some exactly 6).
+  ------------------------------------------------------------ */
+
+  const getCycleDayNumber = (value: string): number | null => {
+    const match = value.trim().match(/Day\s*(\d+)/i);
+    return match ? Number(match[1]) : null;
+  };
+
+  const getCycleNumber = (value: string): number | null => {
+    const match = value.trim().match(/Cycle\s*(\d+)/i);
+    return match ? Number(match[1]) : null;
+  };
+
+  const getCycleAndDay = (
+    value: string
+  ): { cycle: number; day: number } | null => {
+    const cycle = getCycleNumber(value);
+    const day = getCycleDayNumber(value);
+    if (cycle === null || day === null) return null;
+    return { cycle, day };
+  };
+
+  /* Given the CURRENT cycle/day being treated and the protocol's days
+     per cycle (no_of_days), compute the next scheduled day:
+       - same cycle, next day while the cycle has more days to run
+       - next cycle, Day 1 once the current cycle's last day completes
+     (some protocols run >6 days, some <6, some exactly 6). */
+  const computeNextCycle = (
+    cycleDayValue: string,
+    noOfDays: number | null
+  ): string => {
+    const current = getCycleAndDay(cycleDayValue);
+    if (!current) return "";
+    const daysPerCycle = noOfDays && noOfDays > 0 ? noOfDays : 6;
+    if (current.day < daysPerCycle) {
+      return `Cycle ${current.cycle} / Day ${current.day + 1}`;
+    }
+    return `Cycle ${current.cycle + 1} / Day 1`;
+  };
+
+  /* The distinct cycle days that actually have medication in the protocol,
+     derived from the flat items' administration_day. Protocols with rest
+     days (e.g. day 2 has no drugs) simply won't list that day here. */
+  const getAvailableDays = (
+    protocol: RegimenProtocolDetail | null | undefined
+  ): number[] => {
+    const set = new Set<number>();
+    (protocol?.chemotherapy_regimen_protocol_items ?? []).forEach((item) => {
+      const d = Number(item.administration_day);
+      if (Number.isFinite(d) && d > 0) set.add(d);
+    });
+    return [...set].sort((a, b) => a - b);
+  };
+
+  /* The first day >= fromDay that has drugs, so auto-advance never lands
+     on a rest day. Returns null when fromDay has passed the last med day
+     of the cycle (roll to the next cycle). */
+  const nextAvailableDay = (
+    protocol: RegimenProtocolDetail | null | undefined,
+    fromDay: number
+  ): number | null => {
+    const days = getAvailableDays(protocol);
+    if (days.length === 0) return null;
+    return days.find((d) => d >= fromDay) ?? null;
+  };
+
+  const resolveProtocolDayItems = (
+    days: RegimenProtocolDay[] | null | undefined,
+    dayNumber: number
+  ): RegimenProtocolItem[] => {
+    const entries = days ?? [];
+
+    // A day marked same_as_day_one mirrors the medicines of day 1.
+    if (entries.length > 0) {
+      const day = entries.find((d) => d.day_number === dayNumber);
+      if (day?.same_as_day_one && dayNumber !== 1) {
+        const firstDay = entries.find((d) => d.day_number === 1);
+        if (firstDay) {
+          dayNumber = 1;
+        }
+      }
+    }
+
+    // The daily breakdown is not an array of items per day; instead the
+    // flat chemotherapy_regimen_protocol_items rows carry an
+    // administration_day that maps them onto a protocol day. Filter them
+    // the same way the backend's day view does.
+    const flat = protocolRef.current?.chemotherapy_regimen_protocol_items ?? [];
+    return flat.filter((item) => item.administration_day === dayNumber);
+  };
+
+  const toDrugFromItem = (
+    item: RegimenProtocolItem,
+    index: number
+  ): Drug => ({
+    id: index,
+    name:
+      item.medicine_master?.medicine_name ||
+      item.medicine_master?.generic_name ||
+      "",
+    form:
+      item.medicine_master?.dosage_form ||
+      item.administration_route ||
+      "",
+    dose: item.dosage != null ? String(item.dosage) : "",
+    unit: item.dosage_unit || item.medicine_master?.unit || "",
+    volume: "",
+    medicineId: item.medicine_id,
+  });
+
+  const applyCycleDayDrugs = (
+    dayValue: string,
+    days: RegimenProtocolDay[] | null | undefined
+  ) => {
+    let dayNumber = getCycleDayNumber(dayValue);
+    const hasDayStructure = (days ?? []).length > 0;
+
+    // If the selected day is a rest day (or not parseable) but the
+    // protocol has medication days, snap forward to the next day that
+    // actually has drugs so the tables are never empty. Explicitly valid
+    // medication days are left untouched.
+    const available = getAvailableDays(protocolRef.current);
+    if (available.length > 0 && (dayNumber == null || !available.includes(dayNumber))) {
+      const fallback =
+        available.find((d) => d >= (dayNumber ?? 1)) ?? available[0];
+      dayNumber = fallback;
+    }
+
+    // When the protocol defines a day breakdown, show only the medicines
+    // mapped to the selected day. If a valid day is missing, show nothing
+    // (never dump the whole cycle across every day). Only protocols
+    // WITHOUT a day breakdown fall back to the full flat item list.
+    const items =
+      !hasDayStructure
+        ? (protocolRef.current?.chemotherapy_regimen_protocol_items ?? [])
+        : dayNumber != null
+        ? resolveProtocolDayItems(days, dayNumber)
+        : [];
+
+    setDrugs(
+      items
+        .filter((item) => item.drug_role === "PRIMARY")
+        .map(toDrugFromItem)
+    );
+    setPremedicationDrugs(
+      items
+        .filter((item) => item.drug_role?.toUpperCase() === "PREMEDICATION")
+        .map(toDrugFromItem)
+    );
+    setSupportiveDrugs(
+      items
+        .filter((item) => item.drug_role === "SUPPORTIVE")
+        .map(toDrugFromItem)
     );
   };
 
@@ -4325,10 +4699,11 @@ const ChemotherapyOrder: React.FC<{
         startDate?: string;
         drugs?: Drug[];
         premedicationDrugs?: Drug[];
+        supportiveDrugs?: Drug[];
       };
 
       if (data.cycleDay) {
-        setCycleDay(data.cycleDay);
+        updateCycleDay(data.cycleDay);
         userTouched.current.cycleDay = true;
       }
 
@@ -4349,6 +4724,14 @@ const ChemotherapyOrder: React.FC<{
         setPremedicationDrugs(data.premedicationDrugs);
         userTouched.current.premedication = true;
       }
+
+      if (
+        Array.isArray(data.supportiveDrugs) &&
+        data.supportiveDrugs.length > 0
+      ) {
+        setSupportiveDrugs(data.supportiveDrugs);
+        userTouched.current.supportive = true;
+      }
     } catch (error) {
       console.error("Failed to restore chemotherapy order draft:", error);
     }
@@ -4365,6 +4748,9 @@ const ChemotherapyOrder: React.FC<{
         premedicationDrugs: userTouched.current.premedication
           ? premedicationDrugs
           : [],
+        supportiveDrugs: userTouched.current.supportive
+          ? supportiveDrugs
+          : [],
       })
     );
   }, [
@@ -4372,6 +4758,7 @@ const ChemotherapyOrder: React.FC<{
     startDate,
     drugs,
     premedicationDrugs,
+    supportiveDrugs,
     orderDraftKey,
     resolvedPatientId,
   ]);
@@ -4383,6 +4770,68 @@ const ChemotherapyOrder: React.FC<{
     "Hydration",
     "Admin Instructions",
   ];
+
+  /* Number of days selectable for the current cycle, driven by the
+     protocol's no_of_days (falling back to the distinct administration
+     days present in the flat items). */
+  const protocolDayCount = (() => {
+    const explicit = Number(
+      protocolRef.current?.no_of_days ?? null
+    );
+    if (Number.isFinite(explicit) && explicit > 0) return explicit;
+    const adminDays = new Set<number>();
+    (protocolRef.current?.chemotherapy_regimen_protocol_items ?? []).forEach(
+      (item) => {
+        const d = Number(item.administration_day ?? item.cycle_day);
+        if (Number.isFinite(d) && d > 0) adminDays.add(d);
+      }
+    );
+    return adminDays.size > 0 ? Math.max(...adminDays) : 6;
+  })();
+
+  /* Jump to a specific day in the current cycle, preserving the cycle
+     number already selected in the Cycle / Day field. The filtered drugs
+     are applied immediately (synchronously) so the tables update the
+     instant the day is picked. */
+  const selectDay = (day: number) => {
+    const currentCycle = getCycleNumber(cycleDay) || 1;
+    const value = `Cycle ${currentCycle} / Day ${day}`;
+    updateCycleDay(value);
+    applySelectedDay(value);
+  };
+
+  /* Apply the day's filtered drugs to the three tables. If the regimen
+     protocol has not been loaded yet for this session, load it on demand
+     (using the stored protocol id) so selecting a day always fetches that
+     day's drugs instead of leaving the tables empty. */
+  const applySelectedDay = async (value: string) => {
+    if (protocolRef.current) {
+      applyCycleDayDrugs(value, protocolDaysRef.current);
+      return;
+    }
+    const protocolId = selectedProtocolIdRef.current;
+    if (!protocolId) {
+      applyCycleDayDrugs(value, protocolDaysRef.current);
+      return;
+    }
+    try {
+      const protocolResponse = await API.get<{
+        success: boolean;
+        data: RegimenProtocolDetail;
+      }>(`/chemotherapy/regimen-protocols/${protocolId}`);
+      const protocol = protocolResponse.data.data;
+      protocolRef.current = protocol;
+      protocolDaysRef.current = protocol.chemotherapy_regimen_protocol_days ?? [];
+      setProtocolName(
+        protocol.regimen_code
+          ? `${protocol.regimen_code} - ${protocol.regimen_name}`
+          : protocol.regimen_name
+      );
+      applyCycleDayDrugs(value, protocolDaysRef.current);
+    } catch (error) {
+      console.error("Failed to load regimen protocol on day select:", error);
+    }
+  };
 
   const handleSave = async () => {
     if (savingOrder) return;
@@ -4436,12 +4885,15 @@ const ChemotherapyOrder: React.FC<{
       }
     }
     if (!userTouched.current.cycleDay) {
-      setCycleDay("Cycle 1 / Day 1");
+      updateCycleDay("Cycle 1 / Day 1");
     }
 
     const savedProtocolId = localStorage.getItem(
       `hms_selected_protocol_id_${resolvedPatientId}`
     );
+    if (savedProtocolId) {
+      selectedProtocolIdRef.current = savedProtocolId;
+    }
 
     const loadRegimenProtocol = async (protocolId: string) => {
       try {
@@ -4458,35 +4910,32 @@ const ChemotherapyOrder: React.FC<{
         );
         const items =
           protocol.chemotherapy_regimen_protocol_items ?? [];
-        const toDrug = (item: RegimenProtocolDetail["chemotherapy_regimen_protocol_items"][number], index: number): Drug => ({
-          id: index,
-          name:
-            item.medicine_master?.medicine_name ||
-            item.medicine_master?.generic_name ||
-            "",
-          form:
-            item.medicine_master?.dosage_form ||
-            item.administration_route ||
-            "",
-          dose: item.dosage != null ? String(item.dosage) : "",
-          unit:
-            item.dosage_unit ||
-            item.medicine_master?.unit ||
-            "",
-          volume: "",
-        });
 
-        setDrugs(
-          items
-            .filter((item) => item.drug_role === "PRIMARY")
-            .map(toDrug)
-        );
-        setPremedicationDrugs(
-          items
-            .filter((item) => item.drug_role === "PREMEDICATION")
-            .map(toDrug)
-        );
         protocolRef.current = protocol;
+        protocolDaysRef.current = protocol.chemotherapy_regimen_protocol_days ?? [];
+        applyCycleDayDrugs(cycleDayRef.current, protocolDaysRef.current);
+        setAdminInstructions(
+          items.map((item, index) => ({
+            id: index,
+            medicineName:
+              item.medicine_master?.medicine_name ||
+              item.medicine_master?.generic_name ||
+              "",
+            route: item.administration_route || "",
+            infusion: [
+              item.infusion_type,
+              item.infusion_duration_minutes != null
+                ? `${item.infusion_duration_minutes} min`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" · "),
+            frequency: item.frequency || "",
+            timing: item.timing_relative_to_primary || "",
+            remarks: item.remarks || "",
+            administrationDetail: item.administration_detail || "",
+          }))
+        );
         applyNextCycle(protocol, latestCycleRef.current, savedStartDate);
       } catch (error) {
         console.error("Failed to load regimen protocol:", error);
@@ -4521,6 +4970,9 @@ const ChemotherapyOrder: React.FC<{
 
         planIdRef.current = plan.chemotherapy_plan_id;
 
+        const planItems = plan.chemotherapy_plan_items ?? [];
+        planItemsRef.current = planItems;
+
         if (!userTouched.current.startDate) {
           setStartDate(formatDateDMY(plan.treatment_start_date));
         }
@@ -4529,7 +4981,7 @@ const ChemotherapyOrder: React.FC<{
         const latestCycle = cycles[cycles.length - 1] ?? null;
         latestCycleRef.current = latestCycle;
         if (!userTouched.current.cycleDay) {
-          setCycleDay(
+          updateCycleDay(
             latestCycle
               ? `Cycle ${latestCycle.cycle_number} / Day ${
                   latestCycle.cycle_day ?? ""
@@ -4547,8 +4999,6 @@ const ChemotherapyOrder: React.FC<{
           setProtocolName(
             plan.protocol_name || plan.regimen_name || ""
           );
-          const planItems = plan.chemotherapy_plan_items ?? [];
-          planItemsRef.current = planItems;
           const toPlanDrug = (
             item: ChemotherapyPlanItem,
             index: number
@@ -4572,6 +5022,7 @@ const ChemotherapyOrder: React.FC<{
               item.dilution_volume != null
                 ? `${item.dilution_volume}`
                 : "",
+            medicineId: item.medicine_id,
           });
 
           setDrugs(
@@ -4581,14 +5032,23 @@ const ChemotherapyOrder: React.FC<{
           );
           setPremedicationDrugs(
             planItems
-              .filter((item) => item.drug_role === "PREMEDICATION")
+              .filter((item) => item.drug_role?.toUpperCase() === "PREMEDICATION")
+
+
+
+              .map(toPlanDrug)
+          );
+          setSupportiveDrugs(
+            planItems
+              .filter((item) => item.drug_role === "SUPPORTIVE")
               .map(toPlanDrug)
           );
 
           const protocolId =
             plan.chemotherapy_regimen_protocol?.protocol_id;
           if (protocolId) {
-            void loadRegimenProtocol(protocolId);
+            selectedProtocolIdRef.current = String(protocolId);
+            void loadRegimenProtocol(String(protocolId));
           }
         }
       })
@@ -4612,41 +5072,39 @@ const ChemotherapyOrder: React.FC<{
 
   useEffect(() => {
     if (!resolvedPatientId) return;
-    let cancelled = false;
-
-    API.get<{ success: boolean; data: Array<{
-      medicine_id: string;
-      medicine_name: string;
-      generic_name: string | null;
-      medicine_category: string | null;
-      medicine_type: string | null;
-      dosage_form: string | null;
-      unit: string | null;
-      strength: string | null;
-      route: string | null;
-    }> }>("/chemotherapy/supportive-medicines")
-      .then((response) => {
-        if (cancelled) return;
-        const meds = response.data.data;
-        setSupportiveDrugs(
-          meds.map((med, index) => ({
-            id: index,
-            name: med.medicine_name,
-            form: med.dosage_form || "",
-            dose: med.strength || "",
-            unit: med.unit || "",
-            volume: "",
-          }))
-        );
-      })
-      .catch((error) => {
-        console.error("Failed to load supportive medicines:", error);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    setSupportiveDrugs([]);
   }, [resolvedPatientId]);
+
+  /* Re-apply the role-filtered drugs whenever the selected cycle
+     day changes so the tables reflect that day's regimen. The ref is the
+     single source of truth (kept in sync by updateCycleDay), so async
+     loads never filter by a stale mount-time value. We only overwrite
+     the ref when a real value is present, preserving the default set on
+     first mount. */
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    if (cycleDay.trim()) {
+      cycleDayRef.current = cycleDay;
+    }
+    applyCycleDayDrugs(cycleDayRef.current, protocolDaysRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cycleDay, resolvedPatientId]);
+
+  /* Keep the Follow-Up "Next Cycle" label in sync with the cycle/day
+     selected in this form and the protocol's days-per-cycle. When the
+     current day is not the cycle's last day, the next entry is the next
+     day of the same cycle (e.g. Cycle 2 / Day 1 -> Cycle 2 / Day 2);
+     once the last day is reached it rolls to the next cycle Day 1. */
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    const protocol = protocolRef.current;
+    if (!protocol) return;
+    const next = computeNextCycle(cycleDay, protocol.no_of_days);
+    if (next) {
+      localStorage.setItem(`hms_next_cycle_${resolvedPatientId}`, next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cycleDay, resolvedPatientId]);
 
   const handleAddDrug = () => {
     userTouched.current.drugs = true;
@@ -4719,22 +5177,73 @@ const ChemotherapyOrder: React.FC<{
 
   const resolvePlanItemId = (
     kind: "drug" | "premedication",
-    name: string
+    name: string,
+    medicineId?: string
   ) => {
     const role = kind === "drug" ? "PRIMARY" : "PREMEDICATION";
     const normalizedName = name.trim().toLowerCase();
 
-    const matched = planItemsRef.current.find(
+    // 1. Exact medicine_id match within same role
+    if (medicineId) {
+      const byId = planItemsRef.current.find(
+        (item) =>
+          item.medicine_id === medicineId &&
+          item.drug_role?.toUpperCase() === role
+      );
+      if (byId) return byId.chemotherapy_plan_item_id;
+
+      // 2. Exact medicine_id match across any role
+      const byIdAnyRole = planItemsRef.current.find(
+        (item) => item.medicine_id === medicineId
+      );
+      if (byIdAnyRole) return byIdAnyRole.chemotherapy_plan_item_id;
+    }
+
+    // 3. Name match within same role
+    const candidates = planItemsRef.current.filter(
       (item) =>
-        (!item.drug_role || item.drug_role === role) &&
-        (
-          item.medicine_master?.medicine_name ||
-          item.medicine_master?.generic_name ||
-          ""
-        )
-          .trim()
-          .toLowerCase() === normalizedName
+        !item.drug_role || item.drug_role.toUpperCase() === role
     );
+
+    let matched =
+      candidates.find(
+        (item) =>
+          (
+            item.medicine_master?.medicine_name ||
+            item.medicine_master?.generic_name ||
+            ""
+          )
+            .trim()
+            .toLowerCase() === normalizedName
+      );
+
+    // 4. Name match across any role
+    if (!matched) {
+      matched = planItemsRef.current.find(
+        (item) =>
+          (
+            item.medicine_master?.medicine_name ||
+            item.medicine_master?.generic_name ||
+            ""
+          )
+            .trim()
+            .toLowerCase() === normalizedName
+      );
+    }
+
+    // 5. Partial name match
+    if (!matched && normalizedName) {
+      matched = planItemsRef.current.find(
+        (item) => {
+          const item_name = (
+            item.medicine_master?.medicine_name ||
+            item.medicine_master?.generic_name ||
+            ""
+          ).trim().toLowerCase();
+          return item_name.includes(normalizedName) || normalizedName.includes(item_name);
+        }
+      );
+    }
 
     return matched?.chemotherapy_plan_item_id ?? "";
   };
@@ -4758,11 +5267,50 @@ const ChemotherapyOrder: React.FC<{
       if (planIdRef.current) {
         planItemId =
           editDraft.planItemId ||
-          resolvePlanItemId(editingRow.kind, editDraft.name);
+          resolvePlanItemId(editingRow.kind, editDraft.name, editDraft.medicineId);
+
+        if (!planItemId && editDraft.medicineId) {
+          try {
+            const createRes = await API.post(
+              `/chemotherapy/plans/${planIdRef.current}/items`,
+              {
+                medicine_id: editDraft.medicineId,
+                drug_role: editingRow.kind === "drug" ? "PRIMARY" : "PREMEDICATION",
+                drug_sequence: planItemsRef.current.length + 1,
+                dosage: trimmedDose === "" ? null : Number(trimmedDose),
+                dosage_unit: editDraft.unit.trim() || null,
+              }
+            );
+            const planData = createRes.data?.data;
+            const newItems: ChemotherapyPlanItem[] = planData?.chemotherapy_plan_items ?? [];
+            const created = newItems.find(
+              (i) => i.medicine_id === editDraft.medicineId
+            );
+            if (created) {
+              planItemId = created.chemotherapy_plan_item_id;
+              editDraft.planItemId = planItemId;
+              planItemsRef.current = newItems;
+            }
+          } catch (createErr: any) {
+            console.error("Failed to create plan item:", createErr);
+          }
+        }
 
         if (!planItemId) {
+          console.error("resolvePlanItemId failed:", {
+            kind: editingRow.kind,
+            name: editDraft.name,
+            medicineId: editDraft.medicineId,
+            planItemCount: planItemsRef.current.length,
+            planItems: planItemsRef.current.map((i) => ({
+              id: i.chemotherapy_plan_item_id,
+              medicineId: i.medicine_id,
+              name: i.medicine_master?.medicine_name,
+              role: i.drug_role,
+            })),
+          });
           throw new Error(
-            "Could not match this medication to the patient's chemotherapy plan."
+            "Could not match this medication to the patient's chemotherapy plan. The plan may not have been saved yet — complete the Treatment Plan step first."
           );
         }
 
@@ -4987,7 +5535,8 @@ const ChemotherapyOrder: React.FC<{
                 value={cycleDay}
                 onChange={(e) => {
                   userTouched.current.cycleDay = true;
-                  setCycleDay(e.target.value);
+                  updateCycleDay(e.target.value);
+                  void applySelectedDay(e.target.value);
                 }}
                 className="block w-full rounded-md border border-gray-300 py-3 pl-4 pr-10 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               />
@@ -4996,6 +5545,7 @@ const ChemotherapyOrder: React.FC<{
                 <RefreshIcon />
               </div>
             </div>
+
           </div>
 
           {/* Start Date */}
@@ -5163,32 +5713,12 @@ const ChemotherapyOrder: React.FC<{
                           key={drug.id}
                           className="bg-blue-50/40 transition-colors"
                         >
-                          <td className="px-3 py-3 pl-6 pr-3">
-                            <input
-                              type="text"
-                              value={editDraft.name}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "name",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[160px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 pl-6 pr-3 text-base font-medium text-gray-900">
+                            {editDraft.name}
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.form}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "form",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[120px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-gray-500">
+                            {editDraft.form}
                           </td>
 
                           <td className="px-3 py-3">
@@ -5205,18 +5735,8 @@ const ChemotherapyOrder: React.FC<{
                             />
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.unit}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "unit",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-blue-500">
+                            {editDraft.unit}
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
@@ -5377,32 +5897,12 @@ const ChemotherapyOrder: React.FC<{
                           key={drug.id}
                           className="bg-blue-50/40 transition-colors"
                         >
-                          <td className="px-3 py-3 pl-6 pr-3">
-                            <input
-                              type="text"
-                              value={editDraft.name}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "name",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[160px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 pl-6 pr-3 text-base font-medium text-gray-900">
+                            {editDraft.name}
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.form}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "form",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[120px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-gray-500">
+                            {editDraft.form}
                           </td>
 
                           <td className="px-3 py-3">
@@ -5419,18 +5919,8 @@ const ChemotherapyOrder: React.FC<{
                             />
                           </td>
 
-                          <td className="px-3 py-3">
-                            <input
-                              type="text"
-                              value={editDraft.unit}
-                              onChange={(event) =>
-                                updateEditDraft(
-                                  "unit",
-                                  event.target.value
-                                )
-                              }
-                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-blue-500">
+                            {editDraft.unit}
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
@@ -5590,6 +6080,121 @@ const ChemotherapyOrder: React.FC<{
 
                       <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
                         {drug.unit}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : activeTab === "Admin Instructions" ? (
+          <div className="p-8">
+            <p className="mb-4 text-sm text-gray-500">
+              Administration instructions for the selected protocol:
+            </p>
+
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="py-4 pl-6 pr-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Drug Name
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Route
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Infusion
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Frequency
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Timing
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Admin Detail
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Remarks
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-gray-200 bg-white">
+                  {planLoading && (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="px-6 py-8 text-center text-sm text-gray-500"
+                      >
+                        Loading administration instructions
+                      </td>
+                    </tr>
+                  )}
+
+                  {!planLoading &&
+                    !planError &&
+                    adminInstructions.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={7}
+                          className="px-6 py-8 text-center text-sm text-gray-500"
+                        >
+                          No administration instructions found for this
+                          protocol.
+                        </td>
+                      </tr>
+                    )}
+
+                  {planError && (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="px-6 py-8 text-center text-sm text-red-500"
+                      >
+                        {planError}
+                      </td>
+                    </tr>
+                  )}
+
+                  {adminInstructions.map((instruction) => (
+                    <tr
+                      key={instruction.id}
+                      className="align-top transition-colors hover:bg-gray-50"
+                    >
+                      <td className="whitespace-nowrap py-5 pl-6 pr-3 text-sm font-medium text-gray-900">
+                        {instruction.medicineName || "—"}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                        {instruction.route || "—"}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                        {instruction.infusion || "—"}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                        {instruction.frequency || "—"}
+                      </td>
+
+                      <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                        {instruction.timing || "—"}
+                      </td>
+
+                      <td className="px-3 py-5 text-sm text-gray-700">
+                        {instruction.administrationDetail || "—"}
+                      </td>
+
+                      <td className="px-3 py-5 text-sm text-gray-500">
+                        {instruction.remarks || "—"}
                       </td>
                     </tr>
                   ))}
@@ -5779,6 +6384,28 @@ const FollowUp: React.FC<{
   const [notes, setNotes] = useState("");
   const [submittingFollowUp, setSubmittingFollowUp] = useState(false);
   const [followUpError, setFollowUpError] = useState("");
+  const [protocolCycles, setProtocolCycles] = useState<number | null>(null);
+  const [protocolDays, setProtocolDays] = useState<number | null>(null);
+  const [newVisit, setNewVisit] = useState("");
+// Cycle/day parser and treatment end checker
+const parseCycleDay = (value: string) => {
+  const match = value.match(/Cycle\s*(\d+)(?:\s*\/\s*Day\s*(\d+))?/i);
+  if (!match) return null;
+  return { cycle: Number(match[1]), day: match[2] ? Number(match[2]) : null };
+};
+
+const treatmentEnds = React.useMemo(() => {
+  if (!protocolCycles || !protocolDays) return false;
+  const parsed = parseCycleDay(nextCycle);
+  if (!parsed) return false;
+  if (parsed.cycle > protocolCycles) return true;
+  if (parsed.cycle === protocolCycles && parsed.day !== null && protocolDays && parsed.day >= protocolDays) return true;
+  return false;
+}, [nextCycle, protocolCycles, protocolDays]);
+
+// Decide options to display
+const displayedOptions = treatmentEnds ? ["Treatment ends"] : cycleOptions;
+const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
 
   useEffect(() => {
     if (!resolvedPatientId) return;
@@ -5796,8 +6423,9 @@ const FollowUp: React.FC<{
 
     let normalizedCycle = storedCycle ?? "";
     if (storedCycle) {
-      const cycleMatch = storedCycle.match(/^Cycle\s+(\d+)/i);
-      normalizedCycle = cycleMatch ? `Cycle ${cycleMatch[1]}` : storedCycle;
+      // Preserve the full cycle/day label (e.g. "Cycle 2 / Day 2") so the
+      // next cycle shown reflects the intra-cycle day from the chemo order.
+      normalizedCycle = storedCycle;
       setNextCycle(normalizedCycle);
     }
 
@@ -5806,7 +6434,7 @@ const FollowUp: React.FC<{
     );
     if (!savedProtocolId) return;
 
-    API.get<{ success: boolean; data: RegimenProtocolDetail }>(
+    API.get<{ success: boolean; data: RegimenProtocolDetail }> (
       `/chemotherapy/regimen-protocols/${savedProtocolId}`
     )
       .then((response) => {
@@ -5815,12 +6443,23 @@ const FollowUp: React.FC<{
           protocol.standard_cycles && protocol.standard_cycles > 0
             ? protocol.standard_cycles
             : 6;
-        const options = Array.from(
-          { length: total },
-          (_, index) => `Cycle ${index + 1}`
-        );
+        const daysPerCycle =
+          protocol.no_of_days && protocol.no_of_days > 0
+            ? protocol.no_of_days
+            : 6;
+        setProtocolCycles(total);
+        setProtocolDays(daysPerCycle);
+        const options: string[] = [];
+        for (let c = 1; c <= total; c++) {
+          for (let d = 1; d <= daysPerCycle; d++) {
+            options.push(`Cycle ${c} / Day ${d}`);
+          }
+        }
         if (normalizedCycle && !options.includes(normalizedCycle)) {
           options.unshift(normalizedCycle);
+        }
+        if (!options.includes("Treatment ends")) {
+          options.push("Treatment ends");
         }
         setCycleOptions(options);
       })
@@ -6071,24 +6710,54 @@ const FollowUp: React.FC<{
                 Next Cycle
               </label>
 
+<div className="relative">
+          <select
+            id="nextCycle"
+            value={displayedValue}
+            onChange={(event) =>
+              setNextCycle(event.target.value)
+            }
+            className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+          >
+            {displayedOptions.length === 0 ? (
+              <option value="">Select Next Cycle</option>
+            ) : (
+              displayedOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))
+            )}
+</select>
+          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
+            <ChevronDownIcon />
+          </div>
+        </div>
+</div>
+    </div>
+{/* Plan + New Visit (when treatment ends) */}
+          <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+            <div className="w-full md:pr-4">
+              <label
+                htmlFor="plan"
+                className="mb-2 block text-sm font-semibold text-gray-800"
+              >
+                Plan
+              </label>
+
               <div className="relative">
                 <select
-                  id="nextCycle"
-                  value={nextCycle}
+                  id="plan"
+                  value={plan}
                   onChange={(event) =>
-                    setNextCycle(event.target.value)
+                    setPlan(event.target.value)
                   }
                   className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 >
-                  {cycleOptions.length === 0 ? (
-                    <option value="">Select Next Cycle</option>
-                  ) : (
-                    cycleOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))
-                  )}
+                  <option>Continue Treatment</option>
+                  <option>Complete Treatment</option>
+                  <option>Hold Treatment</option>
+                  <option>Refer for Review</option>
                 </select>
 
                 <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
@@ -6096,37 +6765,39 @@ const FollowUp: React.FC<{
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* Plan */}
-          <div className="w-full md:w-1/2 md:pr-4">
-            <label
-              htmlFor="plan"
-              className="mb-2 block text-sm font-semibold text-gray-800"
-            >
-              Plan
-            </label>
-
-            <div className="relative">
-              <select
-                id="plan"
-                value={plan}
-                onChange={(event) =>
-                  setPlan(event.target.value)
-                }
-                className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-              >
-                <option>Continue Treatment</option>
-                <option>Complete Treatment</option>
-                <option>Hold Treatment</option>
-                <option>Refer for Review</option>
-              </select>
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
-                <ChevronDownIcon />
+            {treatmentEnds && (
+              <div className="w-full md:pl-4">
+                <label
+                  htmlFor="newVisit"
+                  className="mb-2 block text-sm font-semibold text-gray-800"
+                >
+                  New Visit
+                </label>
+                <div className="relative">
+                  <select
+                    id="newVisit"
+                    value={newVisit}
+                    onChange={(event) =>
+                      setNewVisit(event.target.value)
+                    }
+                    className="block w-full cursor-pointer appearance-none rounded-lg border border-gray-300 bg-white py-3 pl-4 pr-10 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  >
+                    <option value="">Select Visit Type</option>
+                    <option>New visit</option>
+                    <option>Follow-up</option>
+                    <option>Review visit</option>
+                    <option>Routine visit</option>
+                    <option>Emergency Visit</option>
+                    <option>Referral Visit</option>
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
+                    <ChevronDownIcon />
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            )}
+</div>
 
           {/* Notes */}
           <div>
@@ -6641,9 +7312,9 @@ const TreatmentPlan: React.FC<{
         }
       }
 
-      if (!cancerTypeId || !subtypeId) {
+      if (!cancerTypeId) {
         setProtocolsError(
-          "Cancer type and sub type not found. Complete the Diagnosis step first."
+          "Cancer type not found. Complete the Diagnosis step first."
         );
         return;
       }
@@ -7640,7 +8311,7 @@ const Summary: React.FC<{
   patientId,
   appointmentId,
   encounterNo,
-  measurements = { height: "", weight: "", bsa: "", bmi: "" },
+  measurements = { height: "", weight: "", bsa: "", bmi: "", bp: "", pulse: "", temp: "", spo2: "" },
 }) => {
   const location = useLocation();
   const statePatientId = (
@@ -8049,6 +8720,91 @@ const Summary: React.FC<{
     return medicines;
   };
 
+  /* ------------------------------------------------------------
+     SAVE ADMIN INSTRUCTIONS
+     Persists the selected regimen protocol's administration
+     instructions (route, infusion, frequency, timing, remarks,
+     administration detail) to localStorage keyed by patient so the
+     patient-details Order Summary "Instructions" card can show them.
+  ------------------------------------------------------------ */
+
+  const saveAdminInstructions = async (): Promise<void> => {
+    try {
+      const savedProtocolId = localStorage.getItem(
+        `hms_selected_protocol_id_${resolvedPatientId}`
+      );
+      let protocolId = savedProtocolId ?? "";
+
+      if (!protocolId) {
+        const planResponse = await API.get<{
+          success: boolean;
+          data: {
+            chemotherapy_regimen_protocol?: {
+              protocol_id?: string;
+            } | null;
+          }[];
+        }>("/chemotherapy/plans", {
+          params: {
+            patient_id: resolvedPatientId,
+            branchId:
+              getActiveBranchId() ?? getUser()?.branch_id ?? undefined,
+          },
+        });
+        protocolId =
+          planResponse.data.data?.[0]?.chemotherapy_regimen_protocol
+            ?.protocol_id ?? "";
+      }
+
+      if (!protocolId) return;
+
+      const protocolResponse = await API.get<{
+        success: boolean;
+        data: RegimenProtocolDetail;
+      }>(`/chemotherapy/regimen-protocols/${encodeURIComponent(protocolId)}`);
+
+      const items =
+        protocolResponse.data.data?.chemotherapy_regimen_protocol_items ??
+        [];
+
+      const adminInstructions = items
+        .map((item) => ({
+          medicineName:
+            item.medicine_master?.medicine_name ||
+            item.medicine_master?.generic_name ||
+            "",
+          route: item.administration_route || "",
+          infusion: [
+            item.infusion_type,
+            item.infusion_duration_minutes != null
+              ? `${item.infusion_duration_minutes} min`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          dose: item.dosage != null ? String(item.dosage) : "",
+          frequency: item.frequency || "",
+          timing: item.timing_relative_to_primary || "",
+          remarks: item.remarks || "",
+          administrationDetail: item.administration_detail || "",
+        }))
+        .filter(
+          (instruction) =>
+            instruction.administrationDetail ||
+            instruction.route ||
+            instruction.frequency ||
+            instruction.timing ||
+            instruction.remarks
+        );
+
+      localStorage.setItem(
+        `hms_admin_instructions_${resolvedPatientId}`,
+        JSON.stringify(adminInstructions)
+      );
+    } catch (error) {
+      console.error("Failed to save admin instructions:", error);
+    }
+  };
+
   const handleSubmitSummary = async () => {
     if (submittingSummary) return;
 
@@ -8094,6 +8850,8 @@ const Summary: React.FC<{
         ...(plan?.diagnosis_id ? { diagnosis_id: plan.diagnosis_id } : {}),
         medicines,
       });
+
+      await saveAdminInstructions();
 
       localStorage.removeItem(`hms_diagnosis_form_${resolvedPatientId}`);
       setSummarySubmitted(true);
