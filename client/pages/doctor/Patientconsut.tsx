@@ -7176,10 +7176,21 @@ const TreatmentPlan: React.FC<{
   onNext?: () => void;
 }> = ({ embedded = false, patientId, measurements, onNext }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
+
+  const handleBack = () => {
+    window.history.back();
+  };
+
+  const handleViewProfile = () => {
+    navigate("/doctor/patient-details", {
+      state: { patientId: resolvedPatientId },
+    });
+  };
 
   const [treatmentIntent, setTreatmentIntent] =
     useState("");
