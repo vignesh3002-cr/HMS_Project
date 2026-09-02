@@ -1,18 +1,21 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
-
+ 
 export default defineConfig({
   plugins: [react()],
+ 
   build: {
     outDir: "dist",
   },
+ 
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./client"),
-      "@shared": path.resolve(__dirname, "./shared"),
+      "@": path.resolve(import.meta.dirname, "./client"),
+      "@shared": path.resolve(import.meta.dirname, "./shared"),
     },
   },
+ 
   server: {
     proxy: {
       "/api": {
@@ -22,3 +25,4 @@ export default defineConfig({
     },
   },
 });
+ 

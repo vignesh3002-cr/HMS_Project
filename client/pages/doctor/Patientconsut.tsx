@@ -393,6 +393,238 @@ const findActiveEncounter = async (
   };
 };
 
+/* ============================================================
+   ONCOLOGY DIAGNOSIS + CHEMOTHERAPY PLAN HELPERS
+   Shared by the Diagnosis (staging-detail persist) and
+   ChemotherapyOrder (plan persist) steps. These resolve foreign
+   keys the backend requires that the UI form fields alone don't
+   capture: the diagnosis_id comes from the ICD catalog (with a
+   malignancy fallback), the staging_detail_id comes from the
+   [diagnosis|staging] steps, and employee/department/branch come
+   from the active encounter + the logged-in session.
+   ============================================================ */
+
+const toIsoDate = (value?: string | null): string | undefined => {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const dmy = trimmed.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (dmy) {
+    return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  }
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date.toISOString().slice(0, 10);
+};
+
+/* Load every diagnosis (ICD catalog) the backend exposes so a
+   diagnosis_id can be matched from an ICD code. The DB has few
+   oncology-friendly codes, so a malignancy regex fallback targets
+   DIS000130 (Z85.9 "Personal History of Malignant Neoplasm"). */
+const loadAllIcdDiagnoses = async (): Promise<
+  { diagnosis_id: string; icd_code: string | null }[]
+> => {
+  const categoriesResponse = await API.get<{
+    success: boolean;
+    data: { categories: { diagnosis_catogory_id: string }[] };
+  }>("/diagnosis/categories");
+  const categories = (
+    categoriesResponse.data.data?.categories ?? []
+  ).filter((category) => Boolean(category.diagnosis_catogory_id));
+  const responses = await Promise.all(
+    categories.map((category) =>
+      API.get<{
+        success: boolean;
+        data: {
+          diagnoses: { diagnosis_id: string; icd_code: string | null }[];
+        };
+      }>(`/diagnosis/categories/${category.diagnosis_catogory_id}/diagnoses`)
+    )
+  );
+  return responses.flatMap((response) => response.data.data?.diagnoses ?? []);
+};
+
+/* Resolve the patient's diagnosis_id from the ICD catalog. Priority:
+   1. The active encounter's diagnosis_id when already recorded.
+   2. Exact ICD code match (from the Diagnosis form's icdCode).
+   3. Malignancy fallback (regex / ICD [CZ]\d prefix). */
+const resolveDiagnosisId = async (
+  patientId: string,
+  icdCodeOverride?: string
+): Promise<string> => {
+  let icdCode = icdCodeOverride?.trim() ?? "";
+  if (!icdCode) {
+    try {
+      const draft = JSON.parse(
+        localStorage.getItem(`hms_diagnosis_form_${patientId}`) ?? ""
+      ) as Partial<FormData> | null;
+      icdCode = draft?.icdCode?.trim() ?? "";
+    } catch {
+      icdCode = "";
+    }
+  }
+
+  try {
+    const diagnoses = await loadAllIcdDiagnoses();
+    if (icdCode) {
+      const exact = diagnoses.find(
+        (d) =>
+          d.icd_code?.trim().toUpperCase() === icdCode.toUpperCase()
+      );
+      if (exact?.diagnosis_id) return exact.diagnosis_id;
+    }
+    const fallback = diagnoses.find(
+      (d) =>
+        /malign|neoplasm|carcinom|tumou?r|leuk|lymphoma|oncol/i.test(
+          d.icd_code ?? ""
+        ) || /^[CZ]\d/i.test(d.icd_code ?? "")
+    );
+    if (fallback?.diagnosis_id) return fallback.diagnosis_id;
+  } catch (error) {
+    console.error("Failed to resolve diagnosis_id from ICD catalog:", error);
+  }
+  return "";
+};
+
+/* Resolve the patient's most recent staging_detail_id (persisted by
+   the Diagnosis step, else the latest on record). */
+const resolveStagingDetailId = async (patientId: string): Promise<string> => {
+  try {
+    const stored = JSON.parse(
+      localStorage.getItem(`hms_staging_detail_id_${patientId}`) ?? ""
+    ) as { staging_detail_id?: string } | null;
+    if (stored?.staging_detail_id) return stored.staging_detail_id;
+  } catch {
+    // Malformed draft - fall through to the server lookup.
+  }
+  try {
+    const response = await API.get<{
+      success: boolean;
+      data: { staging_detail_id: string }[];
+    }>("/oncology/staging-details", {
+      params: { patient_id: patientId, page: 1, limit: 1 },
+    });
+    return response.data.data?.[0]?.staging_detail_id ?? "";
+  } catch (error) {
+    console.error("Failed to resolve staging_detail_id:", error);
+    return "";
+  }
+};
+
+/* Ensure a chemotherapy plan exists for the patient, returning its id.
+   Used by the ChemotherapyOrder Save button and as a safety net before
+   the Summary step creates a prescription. Re-uses an existing plan when
+   one is already on record; otherwise POSTs a new one. */
+const createChemotherapyPlanForPatient = async (
+  patientId: string,
+  startDateValue?: string | null
+): Promise<{ planId: string | null; error?: string }> => {
+  const { encounter, scopeError } = await findActiveEncounter(patientId);
+  if (!encounter) {
+    return {
+      planId: null,
+      error:
+        scopeError ||
+        "No active encounter found. Open this page from a patient consultation to continue.",
+    };
+  }
+
+  const employeeId =
+    getUser()?.employee_id ?? encounter.employee_id ?? "";
+  const departmentId = encounter.department_id ?? "";
+  const branchId =
+    getActiveBranchId() ??
+    getUser()?.branch_id ??
+    encounter.branch_id ??
+    "";
+  const protocolId =
+    localStorage.getItem(`hms_selected_protocol_id_${patientId}`) ?? "";
+
+  const diagnosisId = await resolveDiagnosisId(patientId);
+  const stagingDetailId = await resolveStagingDetailId(patientId);
+  const treatmentStartDate = toIsoDate(
+    startDateValue ??
+      localStorage.getItem(`hms_planned_start_date_${patientId}`)
+  );
+
+  /* Prefer an existing plan for this patient; creation only happens once
+     per diagnosis so repeated Saves don't stack duplicates. */
+  try {
+    const existing = await API.get<{
+      success: boolean;
+      data: { chemotherapy_plan_id: string }[];
+    }>("/chemotherapy/plans", {
+      params: { patient_id: patientId, page: 1, limit: 1 },
+    });
+    const planId = existing.data.data?.[0]?.chemotherapy_plan_id;
+    if (planId) return { planId };
+  } catch (error) {
+    // Missing/incapable plan lookups fall through to creation.
+    console.error("Existing plan lookup failed:", error);
+  }
+
+  if (!stagingDetailId) {
+    return {
+      planId: null,
+      error:
+        "No oncology staging detail found for this patient. Complete the Diagnosis step first.",
+    };
+  }
+  if (!diagnosisId) {
+    return {
+      planId: null,
+      error:
+        "Could not resolve a diagnosis for this patient. Complete the Diagnosis step first.",
+    };
+  }
+  if (!employeeId) {
+    return { planId: null, error: "Consulting doctor could not be identified." };
+  }
+  if (!departmentId) {
+    return {
+      planId: null,
+      error: "The patient's encounter has no department assigned.",
+    };
+  }
+  if (!branchId) {
+    return {
+      planId: null,
+      error: "Please select a branch from the selector in the header.",
+    };
+  }
+
+  try {
+    const response = await API.post<{
+      success: boolean;
+      data: { chemotherapy_plan_id: string };
+    }>("/chemotherapy/plans", {
+      patient_id: patientId,
+      staging_detail_id: stagingDetailId,
+      diagnosis_id: diagnosisId,
+      employee_id: employeeId,
+      department_id: departmentId,
+      branch_id: branchId,
+      appointment_id: encounter.appointment_id ?? undefined,
+      encounter_no: encounter.encounter_no ?? undefined,
+      ...(protocolId ? { protocol_id: protocolId } : {}),
+      ...(treatmentStartDate
+        ? { treatment_start_date: treatmentStartDate }
+        : {}),
+      confirm_suggested_therapy: true,
+    });
+    return { planId: response.data.data?.chemotherapy_plan_id ?? null };
+  } catch (error: any) {
+    console.error("Failed to create chemotherapy plan:", error);
+    return {
+      planId: null,
+      error:
+        error?.response?.data?.message ||
+        "Failed to create the chemotherapy plan.",
+    };
+  }
+};
+
 const Consultation: React.FC = () => {
   /* ============================================================
      STATE
@@ -3033,7 +3265,55 @@ const Diagnosis: React.FC<{
     }
 
     setDiagnosisError("");
-    onNext?.();
+    setSavingDiagnosis(true);
+
+    try {
+      const matchedType = cancerTypes.find(
+        (item) => item.cancer_type === formData.type
+      );
+      const matchedSubtype = subtypes.find(
+        (item) => item.subtype_name === formData.subType
+      );
+
+      const diagnosisId = await resolveDiagnosisId(
+        resolvedPatientId,
+        formData.icdCode
+      );
+
+      const response = await API.post<{
+        success: boolean;
+        data: { staging_detail_id: string };
+      }>("/oncology/staging-details", {
+        patient_id: resolvedPatientId,
+        cancer_type_id: matchedType?.cancer_type_id ?? "",
+        cancer_subtype_id: matchedSubtype?.subtype_id ?? "",
+        ...(diagnosisId ? { diagnosis_id: diagnosisId } : {}),
+        ...(formData.cancerStage
+          ? { clinical_stage: formData.cancerStage }
+          : {}),
+        ...(formData.tStage ? { t_stage: formData.tStage } : {}),
+        ...(formData.nStage ? { n_stage: formData.nStage } : {}),
+        ...(formData.mStage ? { m_stage: formData.mStage } : {}),
+      });
+
+      const stagingDetailId = response.data.data?.staging_detail_id ?? "";
+      if (stagingDetailId) {
+        localStorage.setItem(
+          `hms_staging_detail_id_${resolvedPatientId}`,
+          JSON.stringify({ staging_detail_id: stagingDetailId })
+        );
+      }
+
+      onNext?.();
+    } catch (error: any) {
+      console.error("Failed to save oncology staging details:", error);
+      setDiagnosisError(
+        error?.response?.data?.message ||
+          "Failed to save the oncology diagnosis. Please try again."
+      );
+    } finally {
+      setSavingDiagnosis(false);
+    }
   };
 
   const handleBack = () => {
@@ -4853,7 +5133,34 @@ const ChemotherapyOrder: React.FC<{
     }
 
     setPlanError("");
-    onNext?.();
+    setSavingOrder(true);
+
+    try {
+      const { planId, error } = await createChemotherapyPlanForPatient(
+        resolvedPatientId,
+        startDate
+      );
+      if (error) {
+        setPlanError(error);
+        return;
+      }
+      if (planId) {
+        planIdRef.current = planId;
+        localStorage.setItem(
+          `hms_planned_start_date_${resolvedPatientId}`,
+          startDate
+        );
+      }
+      onNext?.();
+    } catch (error: any) {
+      console.error("Failed to save chemotherapy order:", error);
+      setPlanError(
+        error?.response?.data?.message ||
+          "Failed to save the chemotherapy order. Please try again."
+      );
+    } finally {
+      setSavingOrder(false);
+    }
   };
 
   const formatDateDMY = (value?: string | null) => {
