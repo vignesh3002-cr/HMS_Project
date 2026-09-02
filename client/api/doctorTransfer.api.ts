@@ -35,6 +35,7 @@ export interface InitiateTransferPayload {
     end_time?: string;
     reason?: string;
     change_id?: number;
+    consultation_minutes?: number;
   };
 }
 

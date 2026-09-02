@@ -11,6 +11,7 @@ import { clearAccountActivity } from "@/utils/accountActivity";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
 import { usePermission } from "@/context/PermissionContext";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
+import { UserAvatar } from "@/components/ui/UserAvatar";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
@@ -30,6 +31,7 @@ import {
   Shield,
   Key,
   ClipboardList,
+  ClipboardPlus,
   Activity,
 } from "lucide-react";
 
@@ -43,6 +45,7 @@ const navIcon: Record<string, React.ReactNode> = {
   Billing: <Receipt size={16} />,
   Protocol: <FileText size={16} />,
   Cancer: <Activity size={16} />,
+  Orders: <ClipboardPlus size={16} />,
   Admin: <Settings size={16} />,
   Permissions: <Shield size={16} />,
   Roles: <Key size={16} />,
@@ -112,6 +115,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
     remove();
     clearAccountActivity();
     localStorage.removeItem("user_info");
+    localStorage.removeItem("user_photo");
     navigate("/");
   };
 
@@ -130,7 +134,11 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
     branch_area: "",
     branch: "",
   });
-  const [adminPhoto, setAdminPhoto] = useState("");
+  // Profile photo of the logged-in user. Cached in localStorage so a page
+  // refresh renders the avatar instantly instead of flashing the fallback;
+  // the network refresh below then silently updates it if it changed.
+  const [adminPhoto, setAdminPhoto] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [photoLoading, setPhotoLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const { can, loading: permissionsLoading } = usePermission();
   const hasPermission = (perm?: string) => !perm || permissionsLoading || can(perm);
@@ -169,6 +177,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
       label: "Protocol",
       children: protocolChildren,
     },
+    { label: "Orders", to: "/orders", permission: "chemo.plan.read" },
     ...(adminChildren.length > 0
       ? [
           {
@@ -208,28 +217,52 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
   }, []);
 
   // Keep the sidebar / header avatar in sync with the logged-in user's
-  // profile photo. It is loaded once on mount and then updated live
-  // whenever the photo changes on the Account page (profile-photo-updated).
+  // profile photo. The last known URL is cached in localStorage ("user_photo")
+  // so refreshes don't flash the fallback avatar; getMe() refreshes it once on
+  // mount (with a single retry for transient network/5xx failures) and the
+  // Account page updates it live via the profile-photo-updated event.
   useEffect(() => {
     let mounted = true;
+    let attempt = 0;
 
-    const handlePhotoUpdate = (e: Event) => {
-      const url = (e as CustomEvent<string>).detail;
-      if (url) setAdminPhoto(url);
+    const persistPhoto = (url: string) => {
+      if (url) localStorage.setItem("user_photo", url);
+      else localStorage.removeItem("user_photo");
     };
 
-    employeeApi
-      .getMe()
-      .then((res) => {
-        if (!mounted) return;
-        const emp = res.data?.data?.employee;
-        const url = emp?.employee_photo_URL || emp?.photo || "";
-        if (url) setAdminPhoto(url);
-      })
-      .catch(() => {
-        /* keep the placeholder avatar */
-      });
+    const handlePhotoUpdate = (e: Event) => {
+      const url = (e as CustomEvent<string>).detail || "";
+      setAdminPhoto(url);
+      persistPhoto(url);
+    };
 
+    const fetchPhoto = () => {
+      employeeApi
+        .getMe()
+        .then((res) => {
+          if (!mounted) return;
+          const emp = res.data?.data?.employee;
+          const url = emp?.employee_photo_URL || "";
+          setAdminPhoto(url);
+          persistPhoto(url);
+          setPhotoLoading(false);
+        })
+        .catch((err: any) => {
+          // One retry for transient failures (network drop, timeout, 5xx).
+          // Non-transient failures (401/403/404) stop here and the initials
+          // fallback avatar is shown instead of a random external image.
+          const transient =
+            !err?.response || err?.response?.status >= 500 || err?.code === "ECONNABORTED";
+          if (transient && attempt < 1) {
+            attempt += 1;
+            setTimeout(fetchPhoto, 2000);
+            return;
+          }
+          if (mounted) setPhotoLoading(false);
+        });
+    };
+
+    fetchPhoto();
     window.addEventListener("profile-photo-updated", handlePhotoUpdate);
     return () => {
       mounted = false;
@@ -366,10 +399,12 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
           {/* USER */}
           <div className="pt-4">
             <div className="flex items-center gap-2 p-3 rounded-lg bg-[#F2F4F6]">
-              <img
-                src={adminPhoto || "https://i.pravatar.cc/40"}
-                alt="Admin"
-                className="w-8 h-8 rounded-xl object-cover"
+              <UserAvatar
+                src={adminPhoto || undefined}
+                name={userData.username || "HMS Admin"}
+                loading={photoLoading}
+                className="w-8 h-8 rounded-xl"
+                spinnerClass="w-4 h-4"
               />
               <div>
                 <div className="text-[#191C1E] font-bold text-[12px]">
@@ -415,6 +450,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
                 userName={userData.username || "HMS"}
                 userSubtext={userData.user_id || "Admin user"}
                 userAvatar={adminPhoto || undefined}
+                avatarLoading={photoLoading}
                 onLogout={() => setLogoutOpen(true)}
               />
             </div>

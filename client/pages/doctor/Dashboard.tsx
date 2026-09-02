@@ -575,7 +575,7 @@ export default function DoctorDashboard() {
           </div>
 
 <div className="flex items-center gap-4 max-[700px]:hidden">
-            <BellNotificationButton size="md" />
+            < NotificationButton size="md" />
 
             <div className="h-8 w-px bg-[#c3c6d6]" />
 
