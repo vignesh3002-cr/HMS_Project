@@ -679,12 +679,11 @@ const Consultation: React.FC = () => {
     () => new Set(["CONSULTATION", "LAB REPORT REVIEW"])
   );
 
-  const markStepCompleted = (stepName: string) => {
-    setCompletedSteps((prev) => {
-      const next = new Set(prev);
-      next.add(stepName);
-      return next;
-    });
+  const markStepCompleted = (stepName: string): Set<string> => {
+    const next = new Set(completedSteps);
+    next.add(stepName);
+    setCompletedSteps(next);
+    return next;
   };
 
   const [orderedTestIds, setOrderedTestIds] = useState<Set<string>>(
@@ -1107,8 +1106,7 @@ const Consultation: React.FC = () => {
 
       showToast("Consultation saved");
 
-      markStepCompleted("CONSULTATION");
-      selectStep("LAB REPORT REVIEW");
+      selectStep("LAB REPORT REVIEW", markStepCompleted("CONSULTATION"));
     } catch (error: any) {
       console.error("Failed to save consultation details:", error);
       showToast(
@@ -1125,13 +1123,14 @@ const Consultation: React.FC = () => {
      STEP
   ============================================================ */
 
-  const selectStep = (name: string) => {
+  const selectStep = (name: string, completedOverride?: Set<string>) => {
     const currentIndex = STEP_ORDER.indexOf(activeStep);
     const targetIndex = STEP_ORDER.indexOf(name);
+    const checkComplete = completedOverride ?? completedSteps;
 
     if (targetIndex > currentIndex && !DIRECT_ACCESS_STEPS.includes(name)) {
       for (let i = currentIndex; i < targetIndex; i++) {
-        if (!completedSteps.has(STEP_ORDER[i])) {
+        if (!checkComplete.has(STEP_ORDER[i])) {
           showToast(
             "Please select or enter the important field in the previous form."
           );
@@ -1606,26 +1605,26 @@ const Consultation: React.FC = () => {
                     encounterNo={encounter?.encounter_no}
                     pendingTests={pendingLabTests}
                     onOrdered={handleTestsOrdered}
-                    onNext={() => { markStepCompleted("LAB REPORT REVIEW"); selectStep("DIAGNOSIS"); }}
+                    onNext={() => { selectStep("DIAGNOSIS", markStepCompleted("LAB REPORT REVIEW")); }}
                   />
                 ) : activeStep === "DIAGNOSIS" ? (
                   <Diagnosis
                     embedded
                     patientId={patientDisplayId}
-                    onNext={() => { markStepCompleted("DIAGNOSIS"); selectStep("TREATMENT PLAN"); }}
+                    onNext={() => { selectStep("TREATMENT PLAN", markStepCompleted("DIAGNOSIS")); }}
                   />
                 ) : activeStep === "TREATMENT PLAN" ? (
                   <TreatmentPlan
                     embedded
                     patientId={patientDisplayId}
                     measurements={measurements}
-                    onNext={() => { markStepCompleted("TREATMENT PLAN"); selectStep("CHEMOTHERAPY ORDER"); }}
+                    onNext={() => { selectStep("CHEMOTHERAPY ORDER", markStepCompleted("TREATMENT PLAN")); }}
                   />
                 ) : activeStep === "CHEMOTHERAPY ORDER" ? (
                   <ChemotherapyOrder
                     embedded
                     patientId={patientDisplayId}
-                    onNext={() => { markStepCompleted("CHEMOTHERAPY ORDER"); selectStep("DISCHARGE MEDICATION"); }}
+                    onNext={() => { selectStep("DISCHARGE MEDICATION", markStepCompleted("CHEMOTHERAPY ORDER")); }}
                   />
                 ) : activeStep === "DISCHARGE MEDICATION" ? (
                   <DischargeMedication
@@ -1635,14 +1634,14 @@ const Consultation: React.FC = () => {
                     branchId={consultationState?.branchId}
                     encounterNo={encounter?.encounter_no}
                     measurements={measurements}
-                    onNext={() => { markStepCompleted("DISCHARGE MEDICATION"); selectStep("FOLLOW UP"); }}
+                    onNext={() => { selectStep("FOLLOW UP", markStepCompleted("DISCHARGE MEDICATION")); }}
                   />
                 ) : activeStep === "FOLLOW UP" ? (
                   <FollowUp
                     embedded
                     patientId={patientDisplayId}
                     measurements={measurements}
-                    onNext={() => { markStepCompleted("FOLLOW UP"); selectStep("SUMMARY"); }}
+                    onNext={() => { selectStep("SUMMARY", markStepCompleted("FOLLOW UP")); }}
                   />
 ) : activeStep === "SUMMARY" ? (
                   <Summary
