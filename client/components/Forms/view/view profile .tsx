@@ -193,12 +193,10 @@ const Profile = () => {
       if (!isMounted) return;
 
       setProfile(data);
-      setPhotoUrl(
-        data.employee.employee_photo_URL || data.employee.photo || ""
-      );
+      setPhotoUrl(data.employee.employee_photo_URL || "");
       window.dispatchEvent(
         new CustomEvent("profile-photo-updated", {
-          detail: data.employee.employee_photo_URL || data.employee.photo || "",
+          detail: data.employee.employee_photo_URL || "",
         })
       );
       setForm({

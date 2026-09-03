@@ -80,28 +80,59 @@ function ProtocolActionMenu({
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const { can } = usePermission();
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  if (!can("chemo.protocol.read") && !can("chemo.protocol.manage")) return null;
 
   const canView = can("chemo.protocol.read") || can("chemo.protocol.manage");
   const canEdit = can("chemo.protocol.manage");
   const canDelete = can("chemo.protocol.manage");
 
+  if (!canView && !canEdit && !canDelete) return null;
+
+  const placeMenu = () => {
+    const btn = btnRef.current;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    // Anchor the dropdown to the button's bottom-right corner.
+    setCoords({ top: rect.bottom + 4, left: rect.right - 176 });
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    placeMenu();
+    const handleOutside = (e: MouseEvent) => {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target as Node) &&
+        btnRef.current &&
+        !btnRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    const handleScroll = () => setOpen(false);
+    const handleResize = () => setOpen(false);
+    document.addEventListener("mousedown", handleOutside);
+    window.addEventListener("scroll", handleScroll, true);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      window.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [open]);
+
+  const items: Array<{ label: string; onClick: () => void; danger?: boolean }> = [];
+  if (canView) items.push({ label: "View Protocol", onClick: onView });
+  if (canEdit) items.push({ label: "Edit Protocol", onClick: onEdit });
+  if (canDelete) items.push({ label: "Delete Protocol", onClick: onDelete, danger: true });
+
   return (
-    <div className="relative inline-block text-left" ref={wrapperRef}>
+    <>
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         className="flex items-center justify-center p-1.5 border border-[#E5E7EB] rounded-md hover:border-[#00488D] transition-colors"
@@ -109,40 +140,34 @@ function ProtocolActionMenu({
         <MoreVertical className="w-4 h-4 text-[#6B7280]" />
       </button>
 
-      <div
-        className={`absolute right-0 top-full mt-1 w-44 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-40 transition-all duration-150 ${
-          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
-        }`}
-      >
-        {canView && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onView(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{ position: "fixed", top: coords.top, left: coords.left, zIndex: 9999 }}
+            className="w-44 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden"
           >
-            View Protocol
-          </button>
+            {items.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  item.onClick();
+                }}
+                className={`flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors ${
+                  item.danger
+                    ? "text-red-600 hover:bg-red-50"
+                    : "text-[#374151] hover:bg-[#F2F4F6]"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>,
+          document.body
         )}
-        {canEdit && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onEdit(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-[#374151] hover:bg-[#F2F4F6]"
-          >
-            Edit Protocol
-          </button>
-        )}
-        {canDelete && (
-          <button
-            type="button"
-            onClick={() => { setOpen(false); onDelete(); }}
-            className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-left transition-colors text-red-600 hover:bg-red-50"
-          >
-            Delete Protocol
-          </button>
-        )}
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -458,7 +483,6 @@ export default function ProtocolMaster() {
 
           {/* ==================== MAIN CARD ==================== */}
           <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col transition-all duration-300 hover:shadow-md">
-              {/* mt-auto will be added to push footer to bottom */}
 
             {/* ==================== TOOLBAR ==================== */}
             <div className="px-5 py-4 border-b border-[#E5E7EB] flex flex-wrap items-center justify-between gap-4">
@@ -528,7 +552,11 @@ export default function ProtocolMaster() {
                 Loading protocols...
               </div>
             ) : (
-              <div className="flex-1 min-h-[450px] hide-scrollbar">
+              /* Flex column + [&>div]:flex-1 stretches HmsTable's root so the
+                 mt-auto pagination footer stays pinned to the bottom of the
+                 card (the wrapper keeps a 450px min-height even with few
+                 rows) — same behavior as Dashboard/Staff. */
+              <div className="flex-1 flex flex-col min-h-[450px] hide-scrollbar [&>div]:flex-1">
                 <HmsTable
                   scrollable={true}
                   columns={[
@@ -536,8 +564,8 @@ export default function ProtocolMaster() {
                     key: "select",
                     label: "",
                     sortable: false,
-                    className: "w-10 pl-5",
-                    headerClassName: "w-10 pl-5",
+                    className: "w-12 pl-5",
+                    headerClassName: "w-12 pl-5",
                     render: (r: any) => (
                       <input
                         type="checkbox"
@@ -580,7 +608,7 @@ export default function ProtocolMaster() {
                   },
                   {
                     key: "updated_at",
-                    label: "Updated By",
+                    label: "Updated",
                     sortable: true,
                     render: (r: any) => (
                       <div>
@@ -593,8 +621,8 @@ export default function ProtocolMaster() {
                     key: "actions",
                     label: "Actions",
                     sortable: false,
-                    className: "w-px",
-                    headerClassName: "w-px",
+                    className: "w-12 !whitespace-normal",
+                    headerClassName: "w-12",
                     render: (r: any) => (
                       <ProtocolActionMenu
                         onView={() => handleView(r as ProtocolRow)}

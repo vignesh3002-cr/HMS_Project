@@ -330,10 +330,12 @@ export default function DoctorProfile() {
     WEEK_DAYS.forEach(([day]) => {
       map[day.toUpperCase()] = [];
     });
-    doctorSchedules.forEach((s) => {
-      const key = (s.day_of_week || "").toUpperCase();
-      if (!(key in map)) return;
-      map[key].push({
+    doctorSchedules
+      .filter((s) => s.is_active !== false)
+      .forEach((s) => {
+        const key = (s.day_of_week || "").toUpperCase();
+        if (!(key in map)) return;
+        map[key].push({
         time: `${formatScheduleTime(s.start_time)} - ${formatScheduleTime(s.end_time)}`,
         branch: s.branch?.branch_name || "",
         branchId: s.branch_id,
@@ -402,7 +404,9 @@ export default function DoctorProfile() {
 
     const perDay: WeekBlock[][] = WEEK_DAYS.map((_, dayIdx) => {
       const iso = weekDateToISO(weekDates[dayIdx]);
-      const dayChanges = weekChanges.filter((c) => normalizeChangeDate(c.change_date) === iso);
+      const dayChanges = weekChanges.filter(
+        (c) => normalizeChangeDate(c.change_date) === iso && c.is_active !== false,
+      );
 
       const cancelChange = dayChanges.find((c) => c.mode === "CANCEL");
       if (cancelChange) {
@@ -526,6 +530,7 @@ export default function DoctorProfile() {
     changeId,
     transferReason,
     bypassPending,
+    consultationMinutes,
   }: {
     day: string;
     date: string;
@@ -536,6 +541,7 @@ export default function DoctorProfile() {
     changeId?: string | number | null;
     transferReason?: string;
     bypassPending?: boolean;
+    consultationMinutes?: number | null;
   }): Promise<boolean> => {
     if (!date) {
       showAlert("Date is required.", "destructive");
@@ -633,6 +639,8 @@ export default function DoctorProfile() {
           end_time: changeMode === "CANCEL" ? undefined : endTime,
           reason: transferReason?.trim(),
           change_id: changeId != null ? Number(changeId) : undefined,
+          consultation_minutes:
+            consultationMinutes != null ? Number(consultationMinutes) : undefined,
         },
       }, bypassPending);
 
@@ -678,6 +686,8 @@ export default function DoctorProfile() {
         changeMode: payload.changeMode,
         transferReason: payload.transferReason,
         bypassPending: payload.bypassPending,
+        consultationMinutes:
+          payload.consultationMinutes != null ? Number(payload.consultationMinutes) : null,
       });
     }
 
@@ -743,6 +753,8 @@ export default function DoctorProfile() {
         changeId: payload.changeId,
         transferReason: payload.transferReason,
         bypassPending: payload.bypassPending,
+        consultationMinutes:
+          payload.consultationMinutes != null ? Number(payload.consultationMinutes) : null,
       });
     }
 
@@ -779,10 +791,14 @@ export default function DoctorProfile() {
         await refetchWeekChanges();
         showAlert("Schedule slot removed.");
       } else if (payload.scheduleId != null) {
-        const slot = doctorSchedules.find(
-          (s) => String(s.schedule_id) === String(payload.scheduleId),
-        );
+        const slot = doctorSchedules
+          .filter((s) => s.is_active !== false)
+          .find((s) => String(s.schedule_id) === String(payload.scheduleId));
         const slotBranchId = slot?.branch_id;
+        if (!slot) {
+          showAlert("This schedule slot is already inactive.", "destructive");
+          return;
+        }
         if (!slotBranchId) {
           showAlert("Unable to resolve the branch for this schedule slot.", "destructive");
           return;
@@ -828,16 +844,29 @@ export default function DoctorProfile() {
     if (activeTab === "week" && weekDateToISO(weekDates[colIndex]) < todayIso) return;
     const cell = (activeTab === "week" ? weekSchedule : schedule)[rowIndex]?.[colIndex] as any[] | undefined;
     if (!cell) return;
-    slotModalRef.current?.openCancelSlot(
-      WEEK_DAYS[colIndex][0],
-      rowIndex,
-      colIndex,
-      cell[0],
-      cell[2],
-      cell[3] ?? null,
-      cell[7] ?? null,
-      cell[8],
-    );
+    if (activeTab === "week") {
+      slotModalRef.current?.openCancelSlot(
+        WEEK_DAYS[colIndex][0],
+        rowIndex,
+        colIndex,
+        cell[0],
+        cell[2],
+        cell[3] ?? null,
+        cell[7] ?? null,
+        cell[8],
+      );
+    } else {
+      slotModalRef.current?.openCancelSlot(
+        WEEK_DAYS[colIndex][0],
+        rowIndex,
+        colIndex,
+        cell[0],
+        cell[2],
+        cell[3] ?? null,
+        null,
+        null,
+      );
+    }
   };
 
   const showDelete = canManageSchedule && (activeTab !== "week" || weekDates.some((date) => weekDateToISO(date) >= todayIso));
@@ -1495,7 +1524,7 @@ export default function DoctorProfile() {
                                       : "border-l-[#A8720F] bg-[#FCF3E4] text-[#A8720F] hover:bg-[#FAEBD3]"
                                   }`}
                                 >
-                                  {showDelete && (
+                                  {showDelete && !(activeTab === "week" && type === "template") && (
                                     <button
                                       type="button"
                                       title={activeTab === "week" && changeId != null ? "Remove this date change" : "Delete slot"}
@@ -1913,7 +1942,7 @@ export default function DoctorProfile() {
         onUpdateSlot={handleUpdateSlot}
         onCancelSlot={handleCancelSlot}
         isSubmitting={savingSlot}
-        showBypassOption={viewerIsAdmin}
+        showBypassOption={false}
       />
     </div>
   );
