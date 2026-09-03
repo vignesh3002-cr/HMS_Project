@@ -3934,6 +3934,7 @@ const DischargeMedication: React.FC<{
   const [savingMeds, setSavingMeds] = useState(false);
   const [medsError, setMedsError] = useState("");
   const [medsLoading, setMedsLoading] = useState(false);
+  const [medsProtocolId, setMedsProtocolId] = useState("");
 
   /* ============================================================
      LOAD DISCHARGE MEDICINES
@@ -3947,6 +3948,7 @@ const DischargeMedication: React.FC<{
     if (!resolvedPatientId) return;
 
     let cancelled = false;
+    setMedsProtocolId("");
 
     const mapRecord = (
       item: DischargeMedicineRecord,
@@ -3988,6 +3990,29 @@ const DischargeMedication: React.FC<{
         // Malformed draft - continue with the plan lookup.
       }
 
+      // Prefer the branch-independent latest-plan lookup (returns data:null
+      // cleanly instead of a branch-scope 403), then fall back to the
+      // scoped /plans listing.
+      try {
+        const latest = await API.get<{
+          success: boolean;
+          data: {
+            chemotherapy_regimen_protocol?: { protocol_id?: string } | null;
+          } | null;
+        }>("/chemotherapy/plans/latest-for-patient", {
+          params: { patient_id: resolvedPatientId },
+        });
+        const plan = latest.data.data;
+        if (plan?.chemotherapy_regimen_protocol?.protocol_id) {
+          return plan.chemotherapy_regimen_protocol.protocol_id;
+        }
+      } catch (error: any) {
+        console.warn(
+          "Latest plan fallback failed:",
+          error?.response?.data?.message ?? error?.message
+        );
+      }
+
       const response = await API.get<{
         success: boolean;
         data: {
@@ -4008,6 +4033,7 @@ const DischargeMedication: React.FC<{
 
     resolveProtocolId()
       .then(async (protocolId) => {
+        setMedsProtocolId(protocolId);
         if (!protocolId) return [];
 
         const response = await API.get<{
@@ -4191,7 +4217,9 @@ if (embedded) {
                     colSpan={5}
                     className="px-8 py-8 text-center text-sm text-gray-500"
                   >
-                    No discharge medicines found for this patient's protocol.
+                    {medsProtocolId
+                      ? "No discharge medicines recorded on this patient's protocol yet."
+                      : "No treatment protocol selected yet. Select a protocol in the Treatment Plan step to load its discharge medicines."}
                   </td>
                 </tr>
               )}
@@ -4470,7 +4498,9 @@ if (embedded) {
                           colSpan={5}
                           className="px-8 py-8 text-center text-sm text-gray-500"
                         >
-                          No discharge medicines found for this patient's protocol.
+                          {medsProtocolId
+                            ? "No discharge medicines recorded on this patient's protocol yet."
+                            : "No treatment protocol selected yet. Select a protocol in the Treatment Plan step to load its discharge medicines."}
                         </td>
                       </tr>
                     )}
@@ -8708,6 +8738,7 @@ const Summary: React.FC<{
   >([]);
   const [dischargeLoading, setDischargeLoading] = useState(false);
   const [dischargeError, setDischargeError] = useState("");
+  const [dischargeProtocolId, setDischargeProtocolId] = useState("");
 
   useEffect(() => {
     if (!resolvedPatientId) return;
@@ -8769,6 +8800,26 @@ const Summary: React.FC<{
         // Malformed draft - continue with the plan lookup.
       }
 
+      try {
+        const latest = await API.get<{
+          success: boolean;
+          data: {
+            chemotherapy_regimen_protocol?: { protocol_id?: string } | null;
+          } | null;
+        }>("/chemotherapy/plans/latest-for-patient", {
+          params: { patient_id: resolvedPatientId },
+        });
+        const plan = latest.data.data;
+        if (plan?.chemotherapy_regimen_protocol?.protocol_id) {
+          return plan.chemotherapy_regimen_protocol.protocol_id;
+        }
+      } catch (error: any) {
+        console.warn(
+          "Latest plan fallback failed:",
+          error?.response?.data?.message ?? error?.message
+        );
+      }
+
       const response = await API.get<{
         success: boolean;
         data: {
@@ -8789,9 +8840,11 @@ const Summary: React.FC<{
 
     setDischargeLoading(true);
     setDischargeError("");
+    setDischargeProtocolId("");
 
     resolveProtocolId()
       .then(async (protocolId) => {
+        setDischargeProtocolId(protocolId);
         if (!protocolId) return [];
 
         const response = await API.get<{
@@ -9479,7 +9532,9 @@ const Summary: React.FC<{
             )}
             {!dischargeLoading && !dischargeError && dischargeMedications.length === 0 && (
               <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
-                No discharge medicines found for this patient's protocol.
+                {dischargeProtocolId
+                  ? "No discharge medicines recorded on this patient's protocol yet."
+                  : "No treatment protocol selected yet. Select a protocol in the Treatment Plan step to load its discharge medicines."}
               </div>
             )}
 
