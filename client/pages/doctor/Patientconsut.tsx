@@ -4098,6 +4098,98 @@ const DischargeMedication: React.FC<{
       setSavingMeds(true);
       setMedsError("");
 
+      const chemoOrderDraftKey = `hms_chemo_order_${resolvedPatientId}`;
+      const draft = (() => {
+        try {
+          const raw = localStorage.getItem(chemoOrderDraftKey);
+          return raw
+            ? (JSON.parse(raw) as {
+                cycleDay?: string;
+                startDate?: string;
+                drugs?: Drug[];
+                premedicationDrugs?: Drug[];
+                supportiveDrugs?: Drug[];
+              })
+            : null;
+        } catch (error) {
+          console.error("Failed to read chemotherapy order draft:", error);
+          return null;
+        }
+      })();
+
+      const planItems: Array<{
+        medicine_id: string;
+        drug_role: string;
+        drug_sequence: number;
+        dosage?: number;
+        dosage_unit?: string;
+        administration_route?: string;
+        remarks?: string;
+      }> = [];
+
+      (draft?.drugs ?? []).forEach((drug, index) => {
+        if (drug.medicineId) {
+          planItems.push({
+            medicine_id: drug.medicineId,
+            drug_role: "PRIMARY",
+            drug_sequence: index + 1,
+            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
+            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
+            administration_route: "IV",
+          });
+        }
+      });
+
+      (draft?.premedicationDrugs ?? []).forEach((drug, index) => {
+        if (drug.medicineId) {
+          planItems.push({
+            medicine_id: drug.medicineId,
+            drug_role: "PREMEDICATION",
+            drug_sequence: 90 + index,
+            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
+            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
+            administration_route: "IV",
+          });
+        }
+      });
+
+      (draft?.supportiveDrugs ?? []).forEach((drug, index) => {
+        if (drug.medicineId) {
+          planItems.push({
+            medicine_id: drug.medicineId,
+            drug_role: "SUPPORTIVE",
+            drug_sequence: 100 + index,
+            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
+            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
+            administration_route: "IV",
+          });
+        }
+      });
+
+      const planStartDate =
+        toIsoDate(draft?.startDate) ||
+        toIsoDate(
+          localStorage.getItem(`hms_planned_start_date_${resolvedPatientId}`)
+        ) ||
+        toIsoDate(new Date().toISOString());
+
+      const { planId, error } = await createChemotherapyPlanForPatient(
+        resolvedPatientId,
+        planStartDate,
+        planItems.length > 0 ? planItems : undefined,
+        undefined
+      );
+      if (error) {
+        setMedsError(error);
+        return;
+      }
+      if (planId) {
+        localStorage.setItem(
+          `hms_planned_start_date_${resolvedPatientId}`,
+          planStartDate ?? ""
+        );
+      }
+
       const targetEncounterNo = await resolveEncounterNo();
 
       if (!targetEncounterNo) {
@@ -4163,7 +4255,7 @@ const DischargeMedication: React.FC<{
   };
 
   const handleViewProfile = () => {
-    console.log("View Full Profile");
+    
   };
 
 if (embedded) {
@@ -4708,7 +4800,6 @@ const ChemotherapyOrder: React.FC<{
   const planIdRef = useRef<string>("");
   const planItemsRef = useRef<ChemotherapyPlanItem[]>([]);
   const selectedProtocolIdRef = useRef<string>("");
-  const [savingOrder, setSavingOrder] = useState(false);
 
   /* Administration instructions derived from the selected regimen
      protocol items (route, infusion, frequency, timing, remarks,
@@ -5148,9 +5239,7 @@ const ChemotherapyOrder: React.FC<{
     }
   };
 
-  const handleSave = async () => {
-    if (savingOrder) return;
-
+  const handleNext = () => {
     if (!resolvedPatientId) {
       setPlanError(
         "Patient is not selected. Open this page from a patient consultation to continue."
@@ -5168,88 +5257,7 @@ const ChemotherapyOrder: React.FC<{
     }
 
     setPlanError("");
-    setSavingOrder(true);
-
-    try {
-      const planItems: Array<{
-        medicine_id: string;
-        drug_role: string;
-        drug_sequence: number;
-        dosage?: number;
-        dosage_unit?: string;
-        administration_route?: string;
-        remarks?: string;
-      }> = [];
-
-      drugs.forEach((drug, index) => {
-        if (drug.medicineId) {
-          planItems.push({
-            medicine_id: drug.medicineId,
-            drug_role: "PRIMARY",
-            drug_sequence: index + 1,
-            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
-            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
-            administration_route: "IV",
-          });
-        }
-      });
-
-      premedicationDrugs.forEach((drug, index) => {
-        if (drug.medicineId) {
-          planItems.push({
-            medicine_id: drug.medicineId,
-            drug_role: "PREMEDICATION",
-            drug_sequence: 90 + index,
-            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
-            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
-            administration_route: "IV",
-          });
-        }
-      });
-
-      supportiveDrugs.forEach((drug, index) => {
-        if (drug.medicineId) {
-          planItems.push({
-            medicine_id: drug.medicineId,
-            drug_role: "SUPPORTIVE",
-            drug_sequence: 100 + index,
-            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
-            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
-            administration_route: "IV",
-          });
-        }
-      });
-
-      const plannedCycles =
-        protocolRef.current?.standard_cycles ?? undefined;
-
-      const { planId, error } = await createChemotherapyPlanForPatient(
-        resolvedPatientId,
-        startDate,
-        planItems.length > 0 ? planItems : undefined,
-        plannedCycles
-      );
-      if (error) {
-        setPlanError(error);
-        return;
-      }
-      if (planId) {
-        planIdRef.current = planId;
-        localStorage.setItem(
-          `hms_planned_start_date_${resolvedPatientId}`,
-          startDate
-        );
-      }
-      onNext?.();
-    } catch (error: any) {
-      console.error("Failed to save chemotherapy order:", error);
-      setPlanError(
-        error?.response?.data?.message ||
-          "Failed to save the chemotherapy order. Please try again."
-      );
-    } finally {
-      setSavingOrder(false);
-    }
+    onNext?.();
   };
 
   const formatDateDMY = (value?: string | null) => {
@@ -5843,22 +5851,6 @@ const ChemotherapyOrder: React.FC<{
     </svg>
   );
 
-  const SaveIcon = () => (
-    <svg
-      className="-ml-1 mr-2 h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-
   const EditIcon = () => (
     <svg
       className="h-6 w-6"
@@ -6015,16 +6007,14 @@ const ChemotherapyOrder: React.FC<{
               })}
             </nav>
 
-            {/* Save */}
+            {/* Next */}
             <div className="pb-3">
               <button
                 type="button"
-                onClick={handleSave}
-                disabled={savingOrder}
+                onClick={handleNext}
                 className="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <SaveIcon />
-                {savingOrder ? "Saving" : "Save"}
+                Next
               </button>
             </div>
           </div>
