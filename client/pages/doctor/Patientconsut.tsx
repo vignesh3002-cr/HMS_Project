@@ -1440,11 +1440,15 @@ const Consultation: React.FC = () => {
               {/* PROFILE */}
 
               <button
-                onClick={() =>
+                onClick={() => {
+                  const pid = consultationState?.patientId;
+                  if (pid) {
+                    localStorage.setItem("hms_last_viewed_patient_id", pid);
+                  }
                   navigate("/doctor/patient-details", {
-                    state: { patientId: consultationState?.patientId },
-                  })
-                }
+                    state: { patientId: pid },
+                  });
+                }}
                 className="h-9 w-full rounded-md border border-blue-600 bg-white text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
               >
                 View Full Profile
@@ -3925,6 +3929,7 @@ const DischargeMedication: React.FC<{
   onNext,
 }) => {
   const resolvedPatientId = patientId || "";
+  const navigate = useNavigate();
 
   const [medications, setMedications] = useState<DischargeMedicationItem[]>(
     []
@@ -4255,7 +4260,10 @@ const DischargeMedication: React.FC<{
   };
 
   const handleViewProfile = () => {
-    
+    if (!resolvedPatientId) return;
+    navigate("/doctor/patient-details", {
+      state: { patientId: resolvedPatientId },
+    });
   };
 
 if (embedded) {
@@ -8700,6 +8708,7 @@ const Summary: React.FC<{
   measurements = { height: "", weight: "", bsa: "", bmi: "", bp: "", pulse: "", temp: "", spo2: "" },
 }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
@@ -9733,6 +9742,12 @@ const Summary: React.FC<{
         <div className="px-6 pb-6">
           <button
             type="button"
+            onClick={() => {
+              if (!resolvedPatientId) return;
+              navigate("/doctor/patient-details", {
+                state: { patientId: resolvedPatientId },
+              });
+            }}
             className="w-full rounded-md border border-blue-600 px-4 py-2.5 font-medium text-blue-600 transition-colors hover:bg-blue-50"
           >
             View Full Profile

@@ -1351,13 +1351,7 @@ function useLatestPatientVitals(
   };
 }
 
-function HMSPatientPortal({
-  onBack,
-  initialPatientId,
-}: {
-  onBack?: () => void;
-  initialPatientId?: string;
-}) {
+function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [activeTab, setActiveTab] = useState("Order Summary");
   const [selectedDay, setSelectedDay] = useState("Day 1");
   const [selectedCycle] = useState(1);
@@ -1398,22 +1392,12 @@ function HMSPatientPortal({
   const location = useLocation();
   const consultationState = location.state as ConsultationState | null;
   const { selectedBranchId } = useBranchFilter();
-  const resolvedPatientId =
-    initialPatientId ||
-    consultationState?.patientId ||
-    (() => {
-      try {
-        return localStorage.getItem("hms_last_viewed_patient_id") ?? "";
-      } catch {
-        return "";
-      }
-    })();
 
   /* Latest vitals (encounter + chemo merged) for the header strip.
      Re-runs when the branch selection changes so scoped fallbacks and
      the chemo chain pick up the new x-branch-id header. */
   const { vitalEntries, scopeHint } = useLatestPatientVitals(
-    resolvedPatientId,
+    consultationState?.patientId,
     selectedBranchId
   );
   const summaryHeaderVitals = (label: string) =>
@@ -1426,7 +1410,7 @@ function HMSPatientPortal({
   const [labItemsError, setLabItemsError] = useState("");
 
   useEffect(() => {
-    const pid = resolvedPatientId;
+    const pid = consultationState?.patientId;
     if (!pid) return;
     let cancelled = false;
     setLabItemsLoading(true);
@@ -1487,10 +1471,10 @@ function HMSPatientPortal({
     }
 
     return () => { cancelled = true; };
-  }, [resolvedPatientId]);
+  }, [consultationState?.patientId]);
 
   useEffect(() => {
-    const patientId = resolvedPatientId;
+    const patientId = consultationState?.patientId;
     if (!patientId) return;
     let cancelled = false;
     patientApi
@@ -1505,10 +1489,10 @@ function HMSPatientPortal({
     return () => {
       cancelled = true;
     };
-  }, [resolvedPatientId]);
+  }, [consultationState?.patientId]);
 
   useEffect(() => {
-    const patientId = resolvedPatientId;
+    const patientId = consultationState?.patientId;
     if (!patientId) return;
     let cancelled = false;
 
@@ -1542,7 +1526,7 @@ function HMSPatientPortal({
     return () => {
       cancelled = true;
     };
-  }, [resolvedPatientId, activeTab, selectedBranchId]);
+  }, [consultationState?.patientId, activeTab, selectedBranchId]);
 
   // Pre-fetch doctor-described medications for all cycles
   useEffect(() => {
@@ -1649,7 +1633,7 @@ function HMSPatientPortal({
   }, [selectedCycle, savedPlan?.chemotherapy_cycle, cycleMedicationsMap]);
 
   useEffect(() => {
-    const patientId = resolvedPatientId;
+    const patientId = consultationState?.patientId;
     if (!patientId) return;
     let cancelled = false;
 
@@ -1771,10 +1755,10 @@ function HMSPatientPortal({
     return () => {
       cancelled = true;
     };
-  }, [resolvedPatientId, selectedBranchId]);
+  }, [consultationState?.patientId, selectedBranchId]);
 
   useEffect(() => {
-    const patientId = resolvedPatientId;
+    const patientId = consultationState?.patientId;
     if (!patientId) return;
     let cancelled = false;
     API.get<{ success: boolean; data: PatientAllergyRecord[] }>(
@@ -1791,10 +1775,10 @@ function HMSPatientPortal({
     return () => {
       cancelled = true;
     };
-  }, [resolvedPatientId]);
+  }, [consultationState?.patientId]);
 
   useEffect(() => {
-    const patientId = resolvedPatientId;
+    const patientId = consultationState?.patientId;
     if (!patientId) {
       setAdminInstructions([]);
       return;
@@ -1806,7 +1790,7 @@ function HMSPatientPortal({
     } catch {
       setAdminInstructions([]);
     }
-  }, [resolvedPatientId]);
+  }, [consultationState?.patientId]);
 
   const patientName = patient
     ? [
@@ -1906,33 +1890,8 @@ function HMSPatientPortal({
   const selectedDayNumber =
     Number(selectedDay.replace("Day ", "")) || 1;
 
-  // Use regimen protocol day-specific items if available, otherwise fall back to flat items
-  const protocolDays = Array.isArray(regimenProtocol?.chemotherapy_regimen_protocol_days)
-    ? regimenProtocol.chemotherapy_regimen_protocol_days
-    : [];
-  const selectedDayProtocolData = protocolDays.find((d: any) => Number(d.day_number) === selectedDayNumber);
-  const selectedProtocolItems = selectedDayProtocolData?.chemotherapy_regimen_protocol_items;
-  const daySpecificItems = Array.isArray(selectedProtocolItems) ? selectedProtocolItems : [];
-  
-  const mapDayItem = (item: any) => ({
-    chemotherapy_plan_item_id: item.id || item.protocol_item_id,
-    drug_role: item.drug_role,
-    medicine_master: item.medicine_master,
-    protocol_dose: item.patient_dose ? Number(item.patient_dose) : (item.protocol_dose ? Number(item.protocol_dose) : null),
-    protocol_dose_unit: item.patient_dose_unit ?? item.protocol_dose_unit,
-    administration_route: item.administration_detail ?? item.administration_route ?? '',
-    frequency: item.frequency ?? item.remarks ?? '',
-    remarks: item.remarks ?? '',
-    cycle_day: item.cycle_day,
-    administration_day: item.administration_day,
-    dilution_volume: '',
-  });
-  const dayMappedItems = daySpecificItems.map(mapDayItem);
-  
-  // Fallback to flat protocol items filtered by day
-  const protocolItemsRaw = Array.isArray(regimenProtocol?.chemotherapy_regimen_protocol_items)
-    ? regimenProtocol.chemotherapy_regimen_protocol_items
-    : [];
+  // Use regimen protocol items if available, otherwise fall back to saved plan items
+  const protocolItemsRaw = regimenProtocol?.chemotherapy_regimen_protocol_items ?? [];
   const mapProtocolItem = (item: any) => ({
     chemotherapy_plan_item_id: item.id || item.protocol_item_id,
     drug_role: item.drug_role,
@@ -1947,33 +1906,9 @@ function HMSPatientPortal({
     dilution_volume: '',
   });
   const protocolItems = protocolItemsRaw.map(mapProtocolItem);
-  const planItems = Array.isArray(currentPlan?.chemotherapy_plan_items)
-    ? currentPlan.chemotherapy_plan_items
-    : [];
-  const savedItems = Array.isArray(savedPlan?.chemotherapy_plan_items)
-    ? savedPlan.chemotherapy_plan_items
-    : [];
-  const cycleItems = Array.isArray(cycleMedications)
-    ? (cycleMedications.length > 0 ? cycleMedications : [])
-    : [];
-  
-  // Priority: day-specific items > cycle medications > flat protocol items filtered by day > plan items > saved items
-  const fallbackProtocolItems = protocolItems.filter(
-    (item) => (item.administration_day ?? item.cycle_day ?? 1) === selectedDayNumber
-  );
-  const fallbackPlanItems = planItems.filter(
-    (item) => (item.administration_day ?? item.cycle_day ?? 1) === selectedDayNumber
-  );
-  const fallbackSavedItems = savedItems.filter(
-    (item) => (item.administration_day ?? item.cycle_day ?? 1) === selectedDayNumber
-  );
-  const fallbackCycleItems = cycleItems.filter(
-    (item) => (item.administration_day ?? item.cycle_day ?? 1) === selectedDayNumber
-  );
-  
-  const sourceItems = dayMappedItems.length > 0 
-    ? dayMappedItems 
-    : (fallbackCycleItems.length > 0 ? fallbackCycleItems : (fallbackProtocolItems.length > 0 ? fallbackProtocolItems : (fallbackPlanItems.length > 0 ? fallbackPlanItems : fallbackSavedItems)));
+  const planItems = currentPlan?.chemotherapy_plan_items ?? [];
+  const savedItems = savedPlan?.chemotherapy_plan_items ?? [];
+  const sourceItems = cycleMedications.length > 0 ? cycleMedications : (protocolItems.length > 0 ? protocolItems : (planItems.length > 0 ? planItems : savedItems));
 
   const matchesCycleAndDay = (item: any) => {
     const itemDay = item.administration_day ?? item.cycle_day ?? 1;
@@ -2042,31 +1977,22 @@ function HMSPatientPortal({
     : "";
 
   /* Selectable days for the current cycle, driven by the regimen protocol's
-     chemotherapy_regimen_protocol_days array (day_number) which contains
-     day-specific drug items. Fallback to no_of_days or distinct administration
-     days from flat items. */
-  const timelineDays = (() => {
-    const protocolDays = regimenProtocol?.chemotherapy_regimen_protocol_days ?? [];
-    if (protocolDays.length > 0) {
-      const uniqueDays = Array.from(
-        new Set(protocolDays.map((d: any) => Number(d.day_number)).filter((d: number) => Number.isFinite(d) && d > 0))
-      ).sort((a: number, b: number) => a - b);
-      return uniqueDays.map((day) => ({ label: `Day ${day}`, num: day }));
-    }
+     day count (no_of_days) or, failing that, the distinct administration
+     days present across the protocol items. Fallback to Day 1..3. */
+  const protocolDaysCount = (() => {
     const explicit = Number(regimenProtocol?.no_of_days);
-    if (Number.isFinite(explicit) && explicit > 0) {
-      return Array.from({ length: explicit }, (_, idx) => ({ label: `Day ${idx + 1}`, num: idx + 1 }));
-    }
+    if (Number.isFinite(explicit) && explicit > 0) return explicit;
     const adminDays = new Set<number>();
     (protocolItemsRaw ?? []).forEach((item: any) => {
       const d = Number(item.administration_day ?? item.cycle_day);
       if (Number.isFinite(d) && d > 0) adminDays.add(d);
     });
-    if (adminDays.size > 0) {
-      return Array.from(adminDays).sort((a, b) => a - b).map((day) => ({ label: `Day ${day}`, num: day }));
-    }
-    return [{ label: "Day 1", num: 1 }, { label: "Day 2", num: 2 }, { label: "Day 3", num: 3 }];
+    return adminDays.size > 0 ? Math.max(...adminDays) : 3;
   })();
+  const timelineDays = Array.from({ length: protocolDaysCount }, (_, idx) => {
+    const day = idx + 1;
+    return { label: `Day ${day}`, num: day };
+  });
 
   const totalTreatmentDays =
     savedPlan?.planned_cycles && savedPlan?.cycle_interval_days
@@ -2177,7 +2103,7 @@ function HMSPatientPortal({
         patientPhoto={patientPhoto}
         patientAgeSex={patientAgeSex}
         patientDisplayId={patientDisplayId}
-        patientId={resolvedPatientId || ""}
+        patientId={consultationState?.patientId || ""}
         plan={savedPlan}
         allergies={patientAllergies}
         selectedCycle={selectedCycle}
@@ -2190,7 +2116,7 @@ function HMSPatientPortal({
     return (
       <DischargeDetailsPortal
         onBack={() => setShowDischargePortal(false)}
-        patientId={resolvedPatientId || ""}
+        patientId={consultationState?.patientId || ""}
       />
     );
   }
@@ -2317,7 +2243,7 @@ function HMSPatientPortal({
 <span>Central Line Available</span>
 </div>
 </div>
-<a className="text-[#1d4ed8] font-semibold hover:underline" href="#">View Full Alerts (2)</a>
+
 </div>
 {/* END: Alerts Banner */}
 {/* BEGIN: Branch scope hint */}
@@ -2348,9 +2274,9 @@ function HMSPatientPortal({
 </div>
 {/* END: Tabs */}
 {activeTab === "History" ? (
-<HistoryDashboard embedded patientId={resolvedPatientId} />
+<HistoryDashboard embedded patientId={consultationState?.patientId} />
 ) : activeTab === "Notes & Documents" ? (
-<PatientNotesDocuments embedded patientId={resolvedPatientId} />
+<PatientNotesDocuments embedded patientId={consultationState?.patientId} />
 ) : (
 <>
 {planNotice && (
@@ -5421,83 +5347,12 @@ function InlineBranchPicker() {
   );
 }
 
-class PortalErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  { hasError: boolean; message: string }
-> {
-  constructor(props: { children: React.ReactNode }) {
-    super(props);
-    this.state = { hasError: false, message: "" };
-  }
-
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, message: error?.message || "Unexpected error" };
-  }
-
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error("PortalErrorBoundary caught:", error, info);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="flex min-h-[70vh] flex-col items-center justify-center gap-4 bg-[#f8fafc] p-8 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-50">
-            <i className="fa-solid fa-triangle-exclamation text-lg text-red-600"></i>
-          </div>
-          <div>
-            <p className="text-base font-bold text-[#1e293b]">
-              Something went wrong loading this patient
-            </p>
-            <p className="mx-auto mt-1 max-w-sm text-xs text-[#64748b]">
-              {this.state.message}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => this.setState({ hasError: false, message: "" })}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-            >
-              Try again
-            </button>
-            <button
-              type="button"
-              onClick={() => window.history.back()}
-              className="rounded-xl bg-[#004785] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#003A6B]"
-            >
-              Go back
-            </button>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
 const PatientDetails: React.FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  const statePid = (location.state as ConsultationState | null)?.patientId ?? "";
-  const storagePid = (() => {
-    try {
-      return localStorage.getItem("hms_last_viewed_patient_id") ?? "";
-    } catch {
-      return "";
-    }
-  })();
-  const patientId = statePid || storagePid || "";
   return (
-    <PortalErrorBoundary>
-      <BranchFilterProvider>
-        <HMSPatientPortal
-          key={patientId}
-          onBack={() => navigate(-1)}
-          initialPatientId={patientId}
-        />
-      </BranchFilterProvider>
-    </PortalErrorBoundary>
+    <BranchFilterProvider>
+      <HMSPatientPortal onBack={() => navigate(-1)} />
+    </BranchFilterProvider>
   );
 };
 
