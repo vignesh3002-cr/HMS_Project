@@ -8738,6 +8738,30 @@ const Summary: React.FC<{
   const [dischargeLoading, setDischargeLoading] = useState(false);
   const [dischargeError, setDischargeError] = useState("");
   const [dischargeProtocolId, setDischargeProtocolId] = useState("");
+  const [patientName, setPatientName] = useState("");
+
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    let cancelled = false;
+    patientApi
+      .getById(resolvedPatientId)
+      .then((response) => {
+        if (cancelled) return;
+        const p = response.data.data;
+        const name = [
+          p?.patient_first_name,
+          p?.patient_middle_name,
+          p?.patient_last_name,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        setPatientName(name);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId]);
 
   useEffect(() => {
     if (!resolvedPatientId) return;
@@ -8986,7 +9010,7 @@ const Summary: React.FC<{
     doc.setFontSize(9);
     doc.setTextColor(100, 116, 139);
     const infoLine = [
-      `Patient: ${resolvedPatientId}`,
+      `Patient: ${patientName || resolvedPatientId}`,
       cancerType && `Cancer Type: ${cancerType}`,
       stage && `Stage: ${stage}`,
       context && `Context: ${context}`,
