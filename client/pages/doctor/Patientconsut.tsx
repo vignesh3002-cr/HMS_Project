@@ -71,6 +71,116 @@ const parseDateValue = (value?: string | null): Date | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+/* ============================================================
+   PROTOCOL-DRIVEN NEXT VISIT DATE
+   The "Next Visit Date" shown in the Follow Up and Summary steps
+   is derived from the selected regimen protocol's cycle interval
+   and the treatment start date stated in the Treatment Plan /
+   Chemo Order: next visit = start date + protocol.cycle_interval_days.
+   ============================================================ */
+
+const computeProtocolNextVisitDate = (
+  startDateValue?: string | null,
+  intervalDays?: number | null
+): string => {
+  const begin = parseDateValue(startDateValue);
+  if (!begin) return "";
+  const interval =
+    intervalDays && intervalDays > 0 ? Math.round(intervalDays) : 21;
+  const next = new Date(begin);
+  next.setHours(0, 0, 0, 0);
+  next.setDate(next.getDate() + interval);
+  const day = String(next.getDate()).padStart(2, "0");
+  const month = String(next.getMonth() + 1).padStart(2, "0");
+  return `${day}-${month}-${next.getFullYear()}`;
+};
+
+/* Resolve the date the oncologist stated for the treatment start:
+   prefer the Chemo Order's stated start date, fall back to the
+   Treatment Plan's planned start date. */
+const getStatedTreatmentStartDate = (patientId: string): string => {
+  try {
+    const draft = JSON.parse(
+      localStorage.getItem(`hms_chemo_order_${patientId}`) ?? ""
+    ) as { startDate?: string } | null;
+    if (draft?.startDate) return draft.startDate;
+  } catch {
+    // Malformed draft - fall through to the treatment plan.
+  }
+  return localStorage.getItem(`hms_planned_start_date_${patientId}`) ?? "";
+};
+
+/* Pull the cycle number out of a "Cycle N / Day M" label. */
+const getStoredCycleNumber = (value: string): number | null => {
+  const match = value.trim().match(/^Cycle\s+(\d+)/i);
+  return match ? Number(match[1]) : null;
+};
+
+/* Resolve the effective treatment start date used to derive the next
+   visit date. If neither the Chemo Order nor the Treatment Plan has an
+   explicit date (the user accepted the auto-filled default), reconstruct
+   the base date from the Chemo Order's pushed next-cycle value - the
+   Chemotherapy Order always persists that value, keyed off the same
+   base start date + (cycleNumber - 1) * interval. */
+const resolveEffectiveStartDate = (
+  patientId: string,
+  intervalDays?: number | null
+): string => {
+  const typedStartDate = getStatedTreatmentStartDate(patientId);
+  if (typedStartDate) return typedStartDate;
+
+  const interval =
+    intervalDays && intervalDays > 0 ? Math.round(intervalDays) : 21;
+  const pushedDate = parseDateValue(
+    localStorage.getItem(`hms_next_cycle_date_${patientId}`)
+  );
+  if (!pushedDate) return "";
+
+  const cycleNumber =
+    getStoredCycleNumber(
+      localStorage.getItem(`hms_next_cycle_${patientId}`) ?? ""
+    ) ?? 1;
+  const base = new Date(pushedDate);
+  base.setHours(0, 0, 0, 0);
+  base.setDate(base.getDate() - (cycleNumber - 1) * interval);
+  const day = String(base.getDate()).padStart(2, "0");
+  const month = String(base.getMonth() + 1).padStart(2, "0");
+  return `${day}-${month}-${base.getFullYear()}`;
+};
+
+/* Compute and persist the protocol-driven next visit date for the
+   patient. Shared by Follow Up and Summary so both steps stay in
+   sync with the selected protocol's interval days. */
+const computeNextVisitDateForPatient = async (
+  patientId: string
+): Promise<string> => {
+  const protocolId =
+    localStorage.getItem(`hms_selected_protocol_id_${patientId}`) ?? "";
+  if (!protocolId) return "";
+
+  try {
+    const response = await API.get<{
+      success: boolean;
+      data: { cycle_interval_days: number | null };
+    }>(`/chemotherapy/regimen-protocols/${encodeURIComponent(protocolId)}`);
+    const intervalDays = response.data.data?.cycle_interval_days;
+    const startDateValue = resolveEffectiveStartDate(patientId, intervalDays);
+    if (!startDateValue) return "";
+
+    const computed = computeProtocolNextVisitDate(startDateValue, intervalDays);
+    if (computed) {
+      localStorage.setItem(
+        `hms_next_cycle_date_${patientId}`,
+        computed
+      );
+    }
+    return computed;
+  } catch (error) {
+    console.error("Failed to compute next visit date from protocol:", error);
+    return "";
+  }
+};
+
 type ToastMessage = string;
 
 interface Medication {
@@ -3272,6 +3382,16 @@ const Diagnosis: React.FC<{
       return;
     }
 
+    if (
+      formData.mStage.trim().toUpperCase().startsWith("M1") &&
+      metastasisSites.length === 0
+    ) {
+      setDiagnosisError(
+        "Please select at least one Metastasis Site when the M stage is M1."
+      );
+      return;
+    }
+
     setDiagnosisError("");
     setSavingDiagnosis(true);
 
@@ -3302,6 +3422,9 @@ const Diagnosis: React.FC<{
         ...(formData.tStage ? { t_stage: formData.tStage } : {}),
         ...(formData.nStage ? { n_stage: formData.nStage } : {}),
         ...(formData.mStage ? { m_stage: formData.mStage } : {}),
+        ...(metastasisSites.length > 0
+          ? { metastasis_sites: metastasisSites }
+          : {}),
       });
 
       const stagingDetailId = response.data.data?.staging_detail_id ?? "";
@@ -4869,11 +4992,18 @@ const ChemotherapyOrder: React.FC<{
        previous visit scheduled as its "next" (hms_next_cycle). This makes
        the order advance day-by-day within the cycle (Cycle 2 / Day 1 ->
        Cycle 2 / Day 2 -> ...) and roll to the next cycle's Day 1 once a
-       cycle completes, instead of always starting at Day 1. */
-    const storedNextCycle = localStorage.getItem(
-      `hms_next_cycle_${resolvedPatientId}`
-    );
-    const storedParsed = getCycleAndDay(storedNextCycle ?? "");
+       cycle completes, instead of always starting at Day 1.
+       That stored value is only authoritative when the patient actually
+       has a recorded cycle in the DB. A brand-new treatment (no recorded
+       cycle yet) must always present Cycle 1 / Day 1, never a leftover
+       hms_next_cycle value from an abandoned earlier session - which this
+       very function (and the follow-up effect) also rewrite during the
+       same mount. */
+    const storedParsed = latestCycle
+      ? getCycleAndDay(
+          localStorage.getItem(`hms_next_cycle_${resolvedPatientId}`) ?? ""
+        )
+      : null;
 
     let formCycleNumber = storedParsed
       ? storedParsed.cycle
@@ -6855,6 +6985,26 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
           options.push("Treatment ends");
         }
         setCycleOptions(options);
+
+        /* Next Visit Date derives from the selected protocol's cycle
+           interval and the treatment start date stated in the Treatment
+           Plan / Chemo Order so it stays in sync when the protocol or
+           date changes. */
+        const statedStartDate = resolveEffectiveStartDate(
+          resolvedPatientId,
+          protocol.cycle_interval_days
+        );
+        const protocolNextVisit = computeProtocolNextVisitDate(
+          statedStartDate,
+          protocol.cycle_interval_days
+        );
+        if (protocolNextVisit) {
+          localStorage.setItem(
+            `hms_next_cycle_date_${resolvedPatientId}`,
+            protocolNextVisit
+          );
+          setNextVisitDate(protocolNextVisit);
+        }
       })
       .catch((error) => {
         console.error("Failed to load follow-up protocol:", error);
@@ -8713,7 +8863,7 @@ const Summary: React.FC<{
   );
   const resolvedPatientId = patientId || statePatientId;
 
-  const [nextVisitDate] = useState(() =>
+  const [nextVisitDate, setNextVisitDate] = useState(() =>
     resolvedPatientId
       ? (localStorage.getItem(
           `hms_next_cycle_date_${resolvedPatientId}`
@@ -8797,6 +8947,22 @@ const Summary: React.FC<{
       .finally(() => {
         if (!cancelled) setPlanLoading(false);
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId]);
+
+  /* Keep the Next Visit Date in sync with the selected protocol's
+     cycle interval and the treatment start date so the Summary reflects
+     the exact interval days of the chosen protocol / cancer type. */
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    let cancelled = false;
+
+    computeNextVisitDateForPatient(resolvedPatientId).then((computed) => {
+      if (!cancelled && computed) setNextVisitDate(computed);
+    });
+
     return () => {
       cancelled = true;
     };
