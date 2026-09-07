@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { employeeApi } from "@/api/employee.api";
+import { formatMobile } from "@/utils/formatters";
 
 // Mirrors APPOINTMENT_STATUS in appointment.constants.ts exactly -- keep
 // these keys in sync with the backend enum (previously had "BOOKED" where
@@ -309,7 +310,7 @@ const AppointmentDetails: React.FC = () => {
               <div className="mt-6 space-y-4">
                 <ContactItem
                   icon={<Phone className="h-5 w-5" />}
-                  text={appointment.employees?.mobile_no ?? "—"}
+                  text={formatMobile(appointment.employees?.mobile_no ?? "—")}
                 />
               </div>
             </section>

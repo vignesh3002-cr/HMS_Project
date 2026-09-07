@@ -7,6 +7,7 @@ import {
   MapPin,
   Phone,
   Mail,
+  Cake,
   Loader2,
   ArrowLeft,
 } from "lucide-react";
@@ -138,6 +139,24 @@ export default function PatientProfile() {
     const d = new Date(dob);
     return d.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
   }
+
+  function calculateAge(dob: string | null | undefined): string {
+    if (!dob) return "—";
+    const birthDate = new Date(dob);
+    if (isNaN(birthDate.getTime())) return "—";
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age >= 0 ? `${age}` : "—";
+  }
+
+  const assignedDoctorId = useMemo(() => {
+    const apt = appointments.find((a) => a.doctorId && a.doctorId !== "—");
+    return apt ? apt.doctorId : null;
+  }, [appointments]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -370,14 +389,12 @@ export default function PatientProfile() {
                       )}
                     </div>
                     <div className="mt-2 flex flex-col gap-2 text-sm text-slate-600 sm:flex-row sm:items-center">
-                      {patient.patient_primary_mobile && (
-                        <div className="flex items-center gap-1.5 border-r border-slate-200 pr-4">
-                          <Phone className="h-4 w-4 text-slate-400 shrink-0" />
-                          <span>Phone : {patient.patient_primary_mobile}</span>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-1.5 border-r border-slate-200 pr-4">
+                        <Cake className="h-4 w-4 text-slate-400 shrink-0" />
+                        <span>Age : <span className="font-medium text-slate-900">{calculateAge(patient.patient_dob)} Yrs</span></span>
+                      </div>
                       <div className="flex items-center gap-1.5">
-                        <Calendar className="h-4 w-4 text-slate-400 shrink-0" />
+                        <UserRound className="h-4 w-4 text-slate-400 shrink-0" />
                         <span>Gender : <span className="font-medium text-slate-900">{patient.patient_gender ?? "—"}</span></span>
                       </div>
                     </div>
@@ -385,9 +402,22 @@ export default function PatientProfile() {
               </div>
               <div className="z-10 flex w-full flex-col items-center gap-4 md:w-auto md:flex-row">
                 <div className="flex flex-col items-center gap-11 sm:items-stretch">
-                  <a href="#" className="text-center text-sm font-semibold text-[#00488D] hover:underline">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (assignedDoctorId) {
+                        navigate(`/doctor/view/${assignedDoctorId}`);
+                      } else {
+                        toast({
+                          title: "No Assigned Doctor",
+                          description: "This patient does not currently have an assigned doctor with an employee record.",
+                        });
+                      }
+                    }}
+                    className="text-center text-sm font-semibold text-[#00488D] hover:underline cursor-pointer"
+                  >
                     View Full Record
-                  </a>
+                  </button>
                   <Button
                     className="flex w-full items-center gap-2 bg-[#004785] hover:bg-[#003a6b] sm:w-auto"
                     onClick={() => navigate("/appointments/book", { state: { patient } })}
@@ -514,13 +544,21 @@ export default function PatientProfile() {
                 }},
                 { key: "doctor", label: "Assigned Doctor", sortable: true, render: (apt) => {
                   const a = apt as any;
+                  const hasDoctor = a.doctorId && a.doctorId !== "—";
                   return (
-                    <div className="flex items-center gap-3">
+                    <div
+                      className={`flex items-center gap-3 ${hasDoctor ? "cursor-pointer group" : ""}`}
+                      onClick={() => {
+                        if (hasDoctor) {
+                          navigate(`/doctor/view/${a.doctorId}`);
+                        }
+                      }}
+                    >
                       <div className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text" style={{ backgroundColor: a.doctorAvatarBg ?? "#D6E3FF", color: a.doctorAvatarColor ?? "#00488D" }}>
-                        {a.doctor.split(" ").slice(1).map((w: string) => w[0]).join("")}
+                        {a.doctor.split(" ").slice(1).map((w: string) => w[0]).join("") || a.doctor[0] || "D"}
                       </div>
                       <div>
-                        <p className="hms-name-text">{a.doctor}</p>
+                        <p className={`hms-name-text ${hasDoctor ? "group-hover:text-[#00488D] group-hover:underline" : ""}`}>{a.doctor}</p>
                         <p className="hms-id-text">{a.doctorId}</p>
                       </div>
                     </div>

@@ -230,12 +230,13 @@ const AppointmentSchedule: React.FC = () => {
       setAppointments((prev) =>
         prev.map((appt) =>
           appt.id === cancelTarget.id
-            ? cancelled
+            ? cancelled && cancelled.patient_bio_data
               ? mapAppointmentRecord(cancelled, 0)
               : { ...appt, status: "Cancelled" }
             : appt,
         ),
       );
+      fetchAppointments();
       toast({
         title: "Appointment cancelled",
         description: `Appointment ${cancelTarget.id} has been cancelled.`,

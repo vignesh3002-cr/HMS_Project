@@ -9,6 +9,7 @@ import {
   EmployeeDetailResponse,
 } from "@/api/employee.api";
 import { format } from "date-fns";
+import { parseDate, calculateYearsSince } from "@/utils/parseDate";
 import {
   ArrowLeft,
   IdCard,
@@ -209,10 +210,11 @@ export default function DoctorDetailView() {
   const doctorLocation =
     doctorEmployee?.current_address || doctorEmployee?.parmanent_address || "—";
   const doctorBloodGroup = doctorEmployee?.blood_group || "—";
-  const doctorExperience =
-    doctorEmployee?.employee_no_experence != null
-      ? `${doctorEmployee.employee_no_experence}+ yrs`
-      : "—";
+  const priorExperience = doctorEmployee?.employee_no_experence != null ? Number(doctorEmployee.employee_no_experence) || 0 : 0;
+  const joiningDate = doctorEmployee?.joining_date ? parseDate(doctorEmployee.joining_date) : null;
+  const yearsSinceJoining = calculateYearsSince(joiningDate);
+  const totalExperience = priorExperience + yearsSinceJoining;
+  const doctorExperience = totalExperience > 0 ? `${totalExperience}+ yrs` : "—";
   const doctorDOB = (doctorEmployee as any)?.dob
     ? format(new Date((doctorEmployee as any).dob), "dd MMM yyyy")
     : "—";

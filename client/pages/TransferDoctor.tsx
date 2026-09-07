@@ -104,11 +104,11 @@ export default function TransferDoctor() {
   const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
   const [recentTransfers, setRecentTransfers] = useState<BranchTransfer[]>([]);
 
-  // Step 2 modal ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â which recent transfer is being viewed
+  // Step 2 modal — which recent transfer is being viewed
   const [viewingTransferId, setViewingTransferId] = useState<string | null>(null);
 
   // Set after a transfer completes so the admin deliberately acknowledges
-  // before starting another one ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â prevents the accidental rapid-fire
+  // before starting another one — prevents the accidental rapid-fire
   // transfer chains that left behind duplicate/closed mapping rows.
   const [justCompleted, setJustCompleted] = useState(false);
 
@@ -131,7 +131,7 @@ export default function TransferDoctor() {
   // Any of the doctor's OTHER currently-active schedule rows (from the
   // freshly fetched employee payload) that overlap a newly requested slot
   // in day/time. Rows being replaced (the From branch in TRANSFER mode)
-  // are excluded ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â everything else is untouchable and a conflict there
+  // are excluded — everything else is untouchable and a conflict there
   // must block the transfer before anything is sent to the backend.
   const findOverlappingExistingSlots = (rows: ScheduleEntry[]) => {
     const existing = employee?.doctorSchedules?.filter((s) => s.is_active !== false) ?? [];
@@ -147,7 +147,7 @@ export default function TransferDoctor() {
         const end = timeToMinutes(s.end_time);
         if (newStart < end && start < newEnd) {
           overlaps.push(
-            `${s.day_of_week} ${s.start_time}ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“${s.end_time} at ${branchLabelOf(s.branch_id)}`,
+            `${s.day_of_week} ${s.start_time}–${s.end_time} at ${branchLabelOf(s.branch_id)}`,
           );
         }
       }
@@ -218,7 +218,7 @@ export default function TransferDoctor() {
   }, [employee]);
 
   // Doctor's currently assigned branches (from user_branch_mapping, active
-  // status 1 only) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â for the From Branch dropdown. Transfer requires a real
+  // status 1 only) — for the From Branch dropdown. Transfer requires a real
   // source branch: "None" is not an option (that's the separate Add Branch
   // operation), so the list has no empty-value entry.
   const fromBranchOptions = useMemo(
@@ -233,7 +233,7 @@ export default function TransferDoctor() {
   );
 
   // Branch ids the doctor is currently assigned to (active mappings). Both
-  // TRANSFER and ADD_BRANCH on this page target NEW assignments only ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the
+  // TRANSFER and ADD_BRANCH on this page target NEW assignments only — the
   // doctor must never be "moved to" a branch they already hold, otherwise
   // the operation silently closes the source while doing nothing useful at
   // the destination. Adding extra slots at an existing branch belongs to
@@ -248,7 +248,7 @@ export default function TransferDoctor() {
     [employee],
   );
 
-  // All branches the doctor is NOT currently assigned to ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â for To Branch
+  // All branches the doctor is NOT currently assigned to — for To Branch
   // dropdown.
   const toBranchOptions = useMemo(
     () =>
@@ -262,7 +262,7 @@ export default function TransferDoctor() {
     [branches, fromBranchId, activeBranchIds],
   );
 
-  // In TRANSFER mode the doctor leaves ONLY the From branch ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â every other
+  // In TRANSFER mode the doctor leaves ONLY the From branch — every other
   // active assignment stays. Show the admin exactly what is kept so a
   // "transfer" is never mistaken for "move the doctor everywhere".
   const keptBranches = useMemo(
@@ -274,7 +274,7 @@ export default function TransferDoctor() {
   );
 
   const branchLabelOf = (branchId: string | undefined | null) => {
-    if (!branchId) return "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â";
+    if (!branchId) return "—";
     const b = branches.find((x) => x.branch_id === branchId);
     if (!b) return branchId;
     return b.branch_name ? b.branch_name : b.branch_id;
@@ -335,7 +335,7 @@ export default function TransferDoctor() {
 
   const handleInitiate = async () => {
     if (!id) return;
-    // A transfer must always name the branch the doctor is leaving ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the
+    // A transfer must always name the branch the doctor is leaving — the
     // From dropdown has no "None" option here. Adding a branch without
     // leaving one is the separate Add Branch operation (opMode).
     if (opMode === "TRANSFER" && !fromBranchId) {
@@ -391,13 +391,13 @@ export default function TransferDoctor() {
 
     // Client-side conflict check: the new working hours must not overlap
     // any schedule the doctor KEEPS (every branch except the From branch
-    // in TRANSFER mode). The backend enforces the same rule ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â this just
+    // in TRANSFER mode). The backend enforces the same rule — this just
     // fails fast with a friendly message.
     const overlaps = findOverlappingExistingSlots(schedules);
     if (overlaps.length > 0) {
       toast({
         title: "Working hours conflict with an existing slot",
-        description: `${overlaps.join(", ")} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â nothing was changed. Edit or cancel the conflicting slot first, or choose different hours.`,
+        description: `${overlaps.join(", ")} — nothing was changed. Edit or cancel the conflicting slot first, or choose different hours.`,
         variant: "destructive",
       });
       return;
@@ -434,7 +434,7 @@ export default function TransferDoctor() {
       setRecentTransfers((prev) => [newTransfer, ...prev]);
       // Reset form for next transfer (reset both From and To)
       resetForm();
-      // Refetch so the From branch list and schedules are fresh ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the
+      // Refetch so the From branch list and schedules are fresh — the
       // branch just left must disappear from the dropdown immediately.
       await refreshEmployee();
       setJustCompleted(true);
@@ -444,8 +444,8 @@ export default function TransferDoctor() {
         title: allCompleted ? (opMode === "TRANSFER" ? "Transfer completed" : "Branch added") : "Transfer request created",
         description:
           opMode === "TRANSFER"
-            ? `Transfer initiated for ${branchLabelOf(fromBranchId)} ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ${branchLabelOf(toBranchId)}.`
-            : `Doctor assigned to ${branchLabelOf(toBranchId)} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â existing branches kept.`,
+            ? `Transfer initiated for ${branchLabelOf(fromBranchId)} → ${branchLabelOf(toBranchId)}.`
+            : `Doctor assigned to ${branchLabelOf(toBranchId)} —  existing branches kept.`,
       });
     } catch (err: any) {
       toast({
@@ -549,19 +549,19 @@ export default function TransferDoctor() {
               Dr. {doctorSummary.name}
             </div>
             <div className="text-xs text-[#64748B] mt-0.5">
-              {doctorSummary.designation} Ãƒâ€šÃ‚Â· {doctorSummary.specialization}
+              {doctorSummary.designation} · {doctorSummary.specialization}
             </div>
           </div>
           <StatusBadge status={doctorSummary.active ? "active" : "inactive"} />
         </div>
       )}
 
-      {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ STEP 1: New Transfer ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
+      {/* ─── STEP 1: New Transfer ─── */}
       <div className="bg-white rounded-xl border border-[#E5E7EB] p-5 space-y-5">
         {justCompleted && (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
             <p className="text-xs text-[#00488D] leading-relaxed">
-              Transfer completed ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the doctor's assignment was updated and the form was reset.
+              Transfer completed — the doctor's assignment was updated and the form was reset.
               Review the doctor's current branches above before starting another transfer.
             </p>
             <button
@@ -575,7 +575,7 @@ export default function TransferDoctor() {
         )}
         <h2 className="font-bold text-sm text-[#191C1E]">1. New Transfer</h2>
 
-        {/* Operation type ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Transfer vs Add Branch are distinct operations */}
+        {/* Operation type — Transfer vs Add Branch are distinct operations */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             type="button"
@@ -593,7 +593,7 @@ export default function TransferDoctor() {
           >
             <div className="text-sm font-bold text-[#191C1E]">Transfer Branch</div>
             <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
-              Doctor leaves the From branch ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â that assignment is deactivated. From and To branches are both required.
+              Doctor leaves the From branch — that assignment is deactivated. From and To branches are both required.
             </p>
           </button>
           <button
@@ -632,7 +632,7 @@ export default function TransferDoctor() {
                 emptyMessage="No branches assigned to this doctor"
               />
               <p className="text-[11px] text-[#94A3B8] mt-1">
-                Required ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the branch the doctor is leaving.
+                Required — the branch the doctor is leaving.
               </p>
               {keptBranches.length > 0 && (
                 <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2 leading-relaxed">
@@ -721,11 +721,11 @@ export default function TransferDoctor() {
           </div>
           {!toBranchId ? (
             <p className="text-[13px] text-gray-400">
-              Select a To Branch first ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â working hours are tied to the destination branch.
+              Select a To Branch first — working hours are tied to the destination branch.
             </p>
           ) : schedules.length === 0 ? (
             <p className="text-[13px] text-gray-400">
-              No working hours for this branch yet ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â add at least one slot.
+              No working hours for this branch yet — add at least one slot.
             </p>
           ) : (
             <div className="space-y-2.5">
@@ -796,7 +796,7 @@ export default function TransferDoctor() {
         </div>
       </div>
 
-      {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Recent Transfers ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
+      {/* ─── Recent Transfers ─── */}
       {recentTransfers.length > 0 && (
         <div className="bg-white rounded-xl border border-[#E5E7EB] overflow-hidden">
           <div className="px-4 py-3 border-b border-[#EEF1F4] text-xs font-bold text-gray-600 uppercase tracking-wide">
@@ -836,7 +836,7 @@ export default function TransferDoctor() {
           </div>
         </div>
       )}
-      {/* Ã¢â€â‚¬Ã¢â€â‚¬ STEP 2 modal: affected appointments + action Ã¢â€â‚¬Ã¢â€â‚¬ */}
+      {/* ─── STEP 2 modal: affected appointments + action ─── */}
       <AffectedAppointmentsDialog
         open={viewingTransfer !== null}
         onOpenChange={(open) => {
