@@ -21,6 +21,7 @@ import {
   useBranchFilter,
 } from "../../context/BranchFilterContext";
 import { computeBsa } from "../../utils/vitals";
+import { generatePrescriptionPdf, type PrescriptionData } from "../../utils/prescriptionPdf";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 
 interface ConsultationState {
@@ -1351,13 +1352,7 @@ function useLatestPatientVitals(
   };
 }
 
-function HMSPatientPortal({
-  onBack,
-  initialPatientId,
-}: {
-  onBack?: () => void;
-  initialPatientId?: string;
-}) {
+function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [activeTab, setActiveTab] = useState("Order Summary");
   const [selectedDay, setSelectedDay] = useState("Day 1");
   const [selectedCycle] = useState(1);
@@ -1398,22 +1393,12 @@ function HMSPatientPortal({
   const location = useLocation();
   const consultationState = location.state as ConsultationState | null;
   const { selectedBranchId } = useBranchFilter();
-  const resolvedPatientId =
-    initialPatientId ||
-    consultationState?.patientId ||
-    (() => {
-      try {
-        return localStorage.getItem("hms_last_viewed_patient_id") ?? "";
-      } catch {
-        return "";
-      }
-    })();
 
   /* Latest vitals (encounter + chemo merged) for the header strip.
      Re-runs when the branch selection changes so scoped fallbacks and
      the chemo chain pick up the new x-branch-id header. */
   const { vitalEntries, scopeHint } = useLatestPatientVitals(
-    resolvedPatientId,
+    consultationState?.patientId,
     selectedBranchId
   );
   const summaryHeaderVitals = (label: string) =>
@@ -1426,7 +1411,7 @@ function HMSPatientPortal({
   const [labItemsError, setLabItemsError] = useState("");
 
   useEffect(() => {
-    const pid = resolvedPatientId;
+    const pid = consultationState?.patientId;
     if (!pid) return;
     let cancelled = false;
     setLabItemsLoading(true);
@@ -1487,10 +1472,10 @@ function HMSPatientPortal({
     }
 
     return () => { cancelled = true; };
-  }, [resolvedPatientId]);
+  }, [consultationState?.patientId]);
 
   useEffect(() => {
-    const patientId = resolvedPatientId;
+    const patientId = consultationState?.patientId;
     if (!patientId) return;
     let cancelled = false;
     patientApi
@@ -1505,10 +1490,10 @@ function HMSPatientPortal({
     return () => {
       cancelled = true;
     };
-  }, [resolvedPatientId]);
+  }, [consultationState?.patientId]);
 
   useEffect(() => {
-    const patientId = resolvedPatientId;
+    const patientId = consultationState?.patientId;
     if (!patientId) return;
     let cancelled = false;
 
@@ -1542,7 +1527,7 @@ function HMSPatientPortal({
     return () => {
       cancelled = true;
     };
-  }, [resolvedPatientId, activeTab, selectedBranchId]);
+  }, [consultationState?.patientId, activeTab, selectedBranchId]);
 
   // Pre-fetch doctor-described medications for all cycles
   useEffect(() => {
@@ -1649,7 +1634,7 @@ function HMSPatientPortal({
   }, [selectedCycle, savedPlan?.chemotherapy_cycle, cycleMedicationsMap]);
 
   useEffect(() => {
-    const patientId = resolvedPatientId;
+    const patientId = consultationState?.patientId;
     if (!patientId) return;
     let cancelled = false;
 
@@ -1771,10 +1756,10 @@ function HMSPatientPortal({
     return () => {
       cancelled = true;
     };
-  }, [resolvedPatientId, selectedBranchId]);
+  }, [consultationState?.patientId, selectedBranchId]);
 
   useEffect(() => {
-    const patientId = resolvedPatientId;
+    const patientId = consultationState?.patientId;
     if (!patientId) return;
     let cancelled = false;
     API.get<{ success: boolean; data: PatientAllergyRecord[] }>(
@@ -1791,10 +1776,10 @@ function HMSPatientPortal({
     return () => {
       cancelled = true;
     };
-  }, [resolvedPatientId]);
+  }, [consultationState?.patientId]);
 
   useEffect(() => {
-    const patientId = resolvedPatientId;
+    const patientId = consultationState?.patientId;
     if (!patientId) {
       setAdminInstructions([]);
       return;
@@ -1806,7 +1791,7 @@ function HMSPatientPortal({
     } catch {
       setAdminInstructions([]);
     }
-  }, [resolvedPatientId]);
+  }, [consultationState?.patientId]);
 
   const patientName = patient
     ? [
@@ -1906,33 +1891,8 @@ function HMSPatientPortal({
   const selectedDayNumber =
     Number(selectedDay.replace("Day ", "")) || 1;
 
-  // Use regimen protocol day-specific items if available, otherwise fall back to flat items
-  const protocolDays = Array.isArray(regimenProtocol?.chemotherapy_regimen_protocol_days)
-    ? regimenProtocol.chemotherapy_regimen_protocol_days
-    : [];
-  const selectedDayProtocolData = protocolDays.find((d: any) => Number(d.day_number) === selectedDayNumber);
-  const selectedProtocolItems = selectedDayProtocolData?.chemotherapy_regimen_protocol_items;
-  const daySpecificItems = Array.isArray(selectedProtocolItems) ? selectedProtocolItems : [];
-  
-  const mapDayItem = (item: any) => ({
-    chemotherapy_plan_item_id: item.id || item.protocol_item_id,
-    drug_role: item.drug_role,
-    medicine_master: item.medicine_master,
-    protocol_dose: item.patient_dose ? Number(item.patient_dose) : (item.protocol_dose ? Number(item.protocol_dose) : null),
-    protocol_dose_unit: item.patient_dose_unit ?? item.protocol_dose_unit,
-    administration_route: item.administration_detail ?? item.administration_route ?? '',
-    frequency: item.frequency ?? item.remarks ?? '',
-    remarks: item.remarks ?? '',
-    cycle_day: item.cycle_day,
-    administration_day: item.administration_day,
-    dilution_volume: '',
-  });
-  const dayMappedItems = daySpecificItems.map(mapDayItem);
-  
-  // Fallback to flat protocol items filtered by day
-  const protocolItemsRaw = Array.isArray(regimenProtocol?.chemotherapy_regimen_protocol_items)
-    ? regimenProtocol.chemotherapy_regimen_protocol_items
-    : [];
+  // Use regimen protocol items if available, otherwise fall back to saved plan items
+  const protocolItemsRaw = regimenProtocol?.chemotherapy_regimen_protocol_items ?? [];
   const mapProtocolItem = (item: any) => ({
     chemotherapy_plan_item_id: item.id || item.protocol_item_id,
     drug_role: item.drug_role,
@@ -1947,33 +1907,9 @@ function HMSPatientPortal({
     dilution_volume: '',
   });
   const protocolItems = protocolItemsRaw.map(mapProtocolItem);
-  const planItems = Array.isArray(currentPlan?.chemotherapy_plan_items)
-    ? currentPlan.chemotherapy_plan_items
-    : [];
-  const savedItems = Array.isArray(savedPlan?.chemotherapy_plan_items)
-    ? savedPlan.chemotherapy_plan_items
-    : [];
-  const cycleItems = Array.isArray(cycleMedications)
-    ? (cycleMedications.length > 0 ? cycleMedications : [])
-    : [];
-  
-  // Priority: day-specific items > cycle medications > flat protocol items filtered by day > plan items > saved items
-  const fallbackProtocolItems = protocolItems.filter(
-    (item) => (item.administration_day ?? item.cycle_day ?? 1) === selectedDayNumber
-  );
-  const fallbackPlanItems = planItems.filter(
-    (item) => (item.administration_day ?? item.cycle_day ?? 1) === selectedDayNumber
-  );
-  const fallbackSavedItems = savedItems.filter(
-    (item) => (item.administration_day ?? item.cycle_day ?? 1) === selectedDayNumber
-  );
-  const fallbackCycleItems = cycleItems.filter(
-    (item) => (item.administration_day ?? item.cycle_day ?? 1) === selectedDayNumber
-  );
-  
-  const sourceItems = dayMappedItems.length > 0 
-    ? dayMappedItems 
-    : (fallbackCycleItems.length > 0 ? fallbackCycleItems : (fallbackProtocolItems.length > 0 ? fallbackProtocolItems : (fallbackPlanItems.length > 0 ? fallbackPlanItems : fallbackSavedItems)));
+  const planItems = currentPlan?.chemotherapy_plan_items ?? [];
+  const savedItems = savedPlan?.chemotherapy_plan_items ?? [];
+  const sourceItems = cycleMedications.length > 0 ? cycleMedications : (protocolItems.length > 0 ? protocolItems : (planItems.length > 0 ? planItems : savedItems));
 
   const matchesCycleAndDay = (item: any) => {
     const itemDay = item.administration_day ?? item.cycle_day ?? 1;
@@ -2042,31 +1978,22 @@ function HMSPatientPortal({
     : "";
 
   /* Selectable days for the current cycle, driven by the regimen protocol's
-     chemotherapy_regimen_protocol_days array (day_number) which contains
-     day-specific drug items. Fallback to no_of_days or distinct administration
-     days from flat items. */
-  const timelineDays = (() => {
-    const protocolDays = regimenProtocol?.chemotherapy_regimen_protocol_days ?? [];
-    if (protocolDays.length > 0) {
-      const uniqueDays = Array.from(
-        new Set(protocolDays.map((d: any) => Number(d.day_number)).filter((d: number) => Number.isFinite(d) && d > 0))
-      ).sort((a: number, b: number) => a - b);
-      return uniqueDays.map((day) => ({ label: `Day ${day}`, num: day }));
-    }
+     day count (no_of_days) or, failing that, the distinct administration
+     days present across the protocol items. Fallback to Day 1..3. */
+  const protocolDaysCount = (() => {
     const explicit = Number(regimenProtocol?.no_of_days);
-    if (Number.isFinite(explicit) && explicit > 0) {
-      return Array.from({ length: explicit }, (_, idx) => ({ label: `Day ${idx + 1}`, num: idx + 1 }));
-    }
+    if (Number.isFinite(explicit) && explicit > 0) return explicit;
     const adminDays = new Set<number>();
     (protocolItemsRaw ?? []).forEach((item: any) => {
       const d = Number(item.administration_day ?? item.cycle_day);
       if (Number.isFinite(d) && d > 0) adminDays.add(d);
     });
-    if (adminDays.size > 0) {
-      return Array.from(adminDays).sort((a, b) => a - b).map((day) => ({ label: `Day ${day}`, num: day }));
-    }
-    return [{ label: "Day 1", num: 1 }, { label: "Day 2", num: 2 }, { label: "Day 3", num: 3 }];
+    return adminDays.size > 0 ? Math.max(...adminDays) : 3;
   })();
+  const timelineDays = Array.from({ length: protocolDaysCount }, (_, idx) => {
+    const day = idx + 1;
+    return { label: `Day ${day}`, num: day };
+  });
 
   const totalTreatmentDays =
     savedPlan?.planned_cycles && savedPlan?.cycle_interval_days
@@ -2177,7 +2104,7 @@ function HMSPatientPortal({
         patientPhoto={patientPhoto}
         patientAgeSex={patientAgeSex}
         patientDisplayId={patientDisplayId}
-        patientId={resolvedPatientId || ""}
+        patientId={consultationState?.patientId || ""}
         plan={savedPlan}
         allergies={patientAllergies}
         selectedCycle={selectedCycle}
@@ -2190,7 +2117,7 @@ function HMSPatientPortal({
     return (
       <DischargeDetailsPortal
         onBack={() => setShowDischargePortal(false)}
-        patientId={resolvedPatientId || ""}
+        patientId={consultationState?.patientId || ""}
       />
     );
   }
@@ -2317,7 +2244,7 @@ function HMSPatientPortal({
 <span>Central Line Available</span>
 </div>
 </div>
-<a className="text-[#1d4ed8] font-semibold hover:underline" href="#">View Full Alerts (2)</a>
+
 </div>
 {/* END: Alerts Banner */}
 {/* BEGIN: Branch scope hint */}
@@ -2348,9 +2275,9 @@ function HMSPatientPortal({
 </div>
 {/* END: Tabs */}
 {activeTab === "History" ? (
-<HistoryDashboard embedded patientId={resolvedPatientId} />
+<HistoryDashboard embedded patientId={consultationState?.patientId} />
 ) : activeTab === "Notes & Documents" ? (
-<PatientNotesDocuments embedded patientId={resolvedPatientId} />
+<PatientNotesDocuments embedded patientId={consultationState?.patientId} />
 ) : (
 <>
 {planNotice && (
@@ -2908,12 +2835,70 @@ const HistoryDashboard: React.FC<{
   const [cycleDetails, setCycleDetails] = useState<ChemoCycleDetail[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
+  const [prescriptions, setPrescriptions] = useState<any[]>([]);
+  const [prescriptionsLoading, setPrescriptionsLoading] = useState(false);
+  const [prescriptionsError, setPrescriptionsError] = useState("");
+  const [selectedPrescription, setSelectedPrescription] = useState<any | null>(null);
+  const [prescriptionIndex, setPrescriptionIndex] = useState<number | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
 
   /* Real treatment history for THIS selected patient:
-     latest chemo plan (GET /chemotherapy/plans?patient_id=) plus
-     each cycle's recorded vitals + adverse events
-     (GET /chemotherapy/cycles/:id). */
+      latest chemo plan (GET /chemotherapy/plans?patient_id=) plus
+      each cycle's recorded vitals + adverse events
+      (GET /chemotherapy/cycles/:id). */
+  const buildPrescriptionData = (p: any) => {
+    return {
+      prescription_id: p.prescription_id,
+      prescription_date: p.prescription_date,
+      advice: p.advice,
+      patient_history: {
+        patient_first_name: p.patient_history?.patient_bio_data?.patient_first_name || '',
+        patient_last_name: p.patient_history?.patient_bio_data?.patient_last_name || '',
+        patient_id: p.patient_history?.patient_bio_data?.patient_id || '',
+        patient_display_id: p.patient_history?.patient_bio_data?.patient_id || '',
+      },
+      employees: {
+        first_name: p.employees?.first_name || '',
+        last_name: p.employees?.last_name || '',
+      },
+      diagnosis: {
+        diagnosis_name: p.diagnosis?.diagnosis_name || '',
+        icd10_code: p.diagnosis?.icd_code || '',
+      },
+      prescription_items: (p.prescription_items || []).map((it: any) => ({
+        medicine_name: it.medicine_master?.medicine_name || '',
+        medicine_master: it.medicine_master,
+        dosage: it.dosage,
+        unit: it.unit,
+        route: it.route,
+        frequency: it.frequency,
+        instruction: it.instruction,
+        drug_role: it.drug_role,
+      })),
+    };
+  };
+
+  const openPrescriptionPdf = (p: any, index: number) => {
+    try {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+      const data = buildPrescriptionData(p);
+      const { url } = generatePrescriptionPdf(data as any);
+      setSelectedPrescription(p);
+      setPrescriptionIndex(index);
+      setPdfUrl(url);
+    } catch (e) {
+      console.error('Failed to generate PDF', e);
+    }
+  };
+
+  const closePdfModal = () => {
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    setPdfUrl(null);
+    setSelectedPrescription(null);
+    setPrescriptionIndex(null);
+  };
+
   useEffect(() => {
     if (!patientId) {
       setPlan(null);
@@ -2958,6 +2943,41 @@ const HistoryDashboard: React.FC<{
       cancelled = true;
     };
   }, [patientId]);
+
+  useEffect(() => {
+    if (!patientId) {
+      setPrescriptions([]);
+      setPrescriptionsError("");
+      return;
+    }
+    let cancelled = false;
+    setPrescriptionsLoading(true);
+    setPrescriptionsError("");
+    API.get(`/prescriptions/patient/${patientId}`)
+      .then((res) => {
+        if (cancelled) return;
+        const data = res.data?.data?.prescriptions ?? [];
+        setPrescriptions(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setPrescriptionsError(err?.response?.data?.message || "Failed to load prescriptions");
+      })
+      .finally(() => {
+        if (!cancelled) setPrescriptionsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [patientId]);
+
+  // Auto-load first prescription when list arrives
+  useEffect(() => {
+    if (prescriptions.length > 0 && prescriptionIndex === null) {
+      openPrescriptionPdf(prescriptions[0], 0);
+    }
+    // Reset when patient changes
+    if (prescriptions.length === 0) {
+      closePdfModal();
+    }
+  }, [prescriptions]);
 
   const fmtHistoryDate = (value?: string | null) => {
     if (!value) return "";
@@ -3307,20 +3327,99 @@ const HistoryDashboard: React.FC<{
               <h2 className="text-base font-bold text-gray-900">
                 Document History
               </h2>
-
-              <button
-                type="button"
-                className="text-xs text-blue-600 font-bold hover:underline uppercase"
-              >
-                View All
-              </button>
             </div>
 
-            <div className="space-y-3">
+            {prescriptionsLoading ? (
+              <div className="text-xs text-gray-500">Loading prescriptions…</div>
+            ) : prescriptionsError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{prescriptionsError}</div>
+            ) : prescriptions.length === 0 ? (
               <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-4 text-center text-xs text-gray-400">
-                No documents uploaded for this patient yet.
+                No prescriptions found for this patient yet.
               </div>
-            </div>
+            ) : (
+              <div className="space-y-3">
+                {selectedPrescription && pdfUrl && (
+                  <>
+                    <div className="rounded-lg border border-gray-200 bg-white p-3">
+                      <div className="flex items-start justify-between">
+                          <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 bg-red-50 rounded-lg flex items-center justify-center border border-red-100">
+                            <span className="text-sm font-bold text-red-600">PDF</span>
+                          </div>
+                          <div>
+                            <div className="text-xs font-semibold text-gray-900">Prescription-{selectedPrescription.prescription_id}.pdf</div>
+                            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">
+                              {selectedPrescription.prescription_date ? new Date(selectedPrescription.prescription_date).toLocaleDateString() : ''} • {`${selectedPrescription.employees?.first_name || ''} ${selectedPrescription.employees?.last_name || ''}`.trim() || '—'} • {selectedPrescription.prescription_status || '—'}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={pdfUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+                          >
+                            View
+                          </a>
+                          <button
+                            type="button"
+                            className="text-[10px] px-2 py-1 rounded border border-gray-300 hover:bg-gray-50"
+                            onClick={() => {
+                              try {
+                                const data = buildPrescriptionData(selectedPrescription);
+                                const { url } = generatePrescriptionPdf(data as any);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = `prescription-${selectedPrescription.prescription_id}.pdf`;
+                                a.click();
+                                URL.revokeObjectURL(url);
+                              } catch (err) {
+                                console.error(err);
+                              }
+                            }}
+                          >
+                            Download
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-center gap-3">
+                      <button
+                        type="button"
+                        className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                        disabled={prescriptionIndex === null || prescriptionIndex <= 0}
+                        onClick={() => {
+                          if (prescriptionIndex !== null && prescriptionIndex > 0) {
+                            const newIdx = prescriptionIndex - 1;
+                            openPrescriptionPdf(prescriptions[newIdx], newIdx);
+                          }
+                        }}
+                      >
+                        Previous
+                      </button>
+                      <span className="text-[10px] text-gray-600">
+                        {prescriptions.length > 0 && prescriptionIndex !== null ? `${prescriptionIndex + 1} / ${prescriptions.length}` : '0 / 0'}
+                      </span>
+                      <button
+                        type="button"
+                        className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                        disabled={prescriptionIndex === null || prescriptionIndex >= prescriptions.length - 1}
+                        onClick={() => {
+                          if (prescriptionIndex !== null && prescriptionIndex < prescriptions.length - 1) {
+                            const newIdx = prescriptionIndex + 1;
+                            openPrescriptionPdf(prescriptions[newIdx], newIdx);
+                          }
+                        }}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -4705,10 +4804,11 @@ return (
           )}
 </div>
 </div>
-</main>
+ </main>
 {/* END: Main Content */}
 
       </div>
+
     </>
   );
 }
@@ -5421,83 +5521,12 @@ function InlineBranchPicker() {
   );
 }
 
-class PortalErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  { hasError: boolean; message: string }
-> {
-  constructor(props: { children: React.ReactNode }) {
-    super(props);
-    this.state = { hasError: false, message: "" };
-  }
-
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, message: error?.message || "Unexpected error" };
-  }
-
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error("PortalErrorBoundary caught:", error, info);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="flex min-h-[70vh] flex-col items-center justify-center gap-4 bg-[#f8fafc] p-8 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-50">
-            <i className="fa-solid fa-triangle-exclamation text-lg text-red-600"></i>
-          </div>
-          <div>
-            <p className="text-base font-bold text-[#1e293b]">
-              Something went wrong loading this patient
-            </p>
-            <p className="mx-auto mt-1 max-w-sm text-xs text-[#64748b]">
-              {this.state.message}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => this.setState({ hasError: false, message: "" })}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-            >
-              Try again
-            </button>
-            <button
-              type="button"
-              onClick={() => window.history.back()}
-              className="rounded-xl bg-[#004785] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#003A6B]"
-            >
-              Go back
-            </button>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
 const PatientDetails: React.FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  const statePid = (location.state as ConsultationState | null)?.patientId ?? "";
-  const storagePid = (() => {
-    try {
-      return localStorage.getItem("hms_last_viewed_patient_id") ?? "";
-    } catch {
-      return "";
-    }
-  })();
-  const patientId = statePid || storagePid || "";
   return (
-    <PortalErrorBoundary>
-      <BranchFilterProvider>
-        <HMSPatientPortal
-          key={patientId}
-          onBack={() => navigate(-1)}
-          initialPatientId={patientId}
-        />
-      </BranchFilterProvider>
-    </PortalErrorBoundary>
+    <BranchFilterProvider>
+      <HMSPatientPortal onBack={() => navigate(-1)} />
+    </BranchFilterProvider>
   );
 };
 
