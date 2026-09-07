@@ -2686,10 +2686,11 @@ const Diagnosis: React.FC<{
 
   const [cancerTypes, setCancerTypes] = useState<CancerTypeItem[]>([]);
   const [subtypes, setSubtypes] = useState<CancerSubtypeItem[]>([]);
+  const [diagnosisCatalogReady, setDiagnosisCatalogReady] = useState(false);
 
-  /* Sync the diagnosis selection (cancer_type_id + subtype_id) to
-     localStorage so downstream steps (Treatment Plan) can read the
-     IDs to query regimen protocols from the backend. */
+  /* Sync the diagnosis selection (cancer_type_id + subtype_id +
+     diagnosis_id) to localStorage so downstream steps (Treatment Plan)
+     can read the IDs to query regimen protocols from the backend. */
   useEffect(() => {
     if (!formData.type || !formData.subType) return;
 
@@ -2701,6 +2702,18 @@ const Diagnosis: React.FC<{
     );
 
     if (matchedType && matchedSubtype) {
+      /* Resolve diagnosis_id by matching the subtype's ICD-10 code
+         against the loaded diagnosis catalog. */
+      let diagnosisId = "";
+      const subtypeIcd = matchedSubtype.icd10_subtype?.trim();
+      if (subtypeIcd && diagnosisCatalogRef.current.length > 0) {
+        const match = diagnosisCatalogRef.current.find(
+          (entry) =>
+            entry.icd_code?.toUpperCase() === subtypeIcd.toUpperCase()
+        );
+        if (match) diagnosisId = match.diagnosis_id;
+      }
+
       localStorage.setItem(
         "hms_diagnosis_selection",
         JSON.stringify({
@@ -2708,10 +2721,11 @@ const Diagnosis: React.FC<{
           subtype_id: matchedSubtype.subtype_id,
           cancer_type: matchedType.cancer_type,
           subtype_name: matchedSubtype.subtype_name,
+          diagnosis_id: diagnosisId,
         })
       );
     }
-  }, [formData.type, formData.subType, cancerTypes, subtypes]);
+  }, [formData.type, formData.subType, cancerTypes, subtypes, diagnosisCatalogReady]);
 
   const [stageLabels, setStageLabels] = useState<string[]>([]);
   const [tnmStages, setTnmStages] = useState<string[]>([]);
@@ -2972,6 +2986,7 @@ const Diagnosis: React.FC<{
       .then((diagnoses) => {
         if (cancelled) return;
         diagnosisCatalogRef.current = diagnoses;
+        setDiagnosisCatalogReady(true);
       })
       .catch((error) => {
         console.error("Failed to load diagnosis catalog:", error);
@@ -6991,8 +7006,16 @@ setSaveError("");
             params: { patient_id: resolvedPatientId, limit: 1 },
           });
           const latest = stagingResponse.data?.data?.[0];
-          stagingDetailId = latest?.staging_detail_id ?? "";
-          diagnosisId = latest?.diagnosis_id ?? "";
+          /* Only fill what is still missing. The diagnosis_id resolved
+             by the Diagnosis step (localStorage, ICD-matched) must win
+             over the latest staging detail's value so plans created for
+             different cancer types are not stamped with the same ID. */
+          if (!stagingDetailId) {
+            stagingDetailId = latest?.staging_detail_id ?? "";
+          }
+          if (!diagnosisId) {
+            diagnosisId = latest?.diagnosis_id ?? "";
+          }
         } catch (error) {
           console.error("Failed to load staging details:", error);
         }
