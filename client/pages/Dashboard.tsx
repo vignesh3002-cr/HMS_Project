@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2 } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays, startOfWeek, endOfWeek, subWeeks, startOfMonth, endOfMonth, subMonths } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import CalendarPicker from "@/components/hms/Calender";
+import CalendarPicker, { type DateRange as CalendarDateRange } from "@/components/hms/Calender";
 import { useFilterPanel, useDashboardFilters } from "@/components/Filter";
 import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { applySearchAndFilter } from "@/components/Filter/utils";
@@ -186,6 +187,59 @@ function formatAppointmentStatus(status: string | null): string {
     .join(" ");
 }
 
+function calculatePercentage(actual: number, total: number): number {
+  if (!total || total <= 0) return 0;
+  return Math.min(100, Math.max(0, Math.round((actual / total) * 100)));
+}
+
+function systemSharePct(branchBookedCount: number, totalSystemBookedCount: number): number {
+  if (totalSystemBookedCount <= 0) return 0;
+  return Math.round((branchBookedCount / totalSystemBookedCount) * 100);
+}
+
+function utilizationPct(bookedCount: number, totalSlots: number): number | null {
+  if (totalSlots <= 0) return null; // no capacity data -> render "N/A", never 0% or 100%
+  return Math.round((bookedCount / totalSlots) * 100);
+}
+
+function utilizationConfidence(totalSlots: number): "low" | "normal" {
+  return totalSlots < 5 ? "low" : "normal";
+}
+
+type Trend =
+  | { kind: "none" }
+  | { kind: "new"; count: number }
+  | { kind: "dropped"; count: number }
+  | { kind: "change"; pct: number; delta: number };
+
+function computeTrend(current: number, previous: number): Trend {
+  if (previous === 0 && current === 0) return { kind: "none" };
+  if (previous === 0 && current > 0) return { kind: "new", count: current };
+  if (previous > 0 && current === 0) return { kind: "dropped", count: previous };
+  const delta = current - previous;
+  const pct = Math.round((delta / previous) * 100);
+  return { kind: "change", pct, delta };
+}
+
+function formatTrend(t: Trend): string {
+  switch (t.kind) {
+    case "none":
+      return "No change";
+    case "new":
+      return `+${t.count} appt${t.count === 1 ? "" : "s"} (new)`;
+    case "dropped":
+      return `-${t.count} appt${t.count === 1 ? "" : "s"} (-100%)`;
+    case "change": {
+      const sign = t.delta > 0 ? "+" : "";
+      return `${sign}${t.delta} appt${Math.abs(t.delta) === 1 ? "" : "s"} (${sign}${t.pct}%)`;
+    }
+  }
+}
+
+function formatComparisonRange(from: Date, to: Date): string {
+  return `${format(from, "MMM d")} – ${format(to, "MMM d")}`;
+}
+
 function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
   const patientPalette = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
   const doctorPalette = AVATAR_PALETTE[(index + 1) % AVATAR_PALETTE.length];
@@ -199,6 +253,11 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
   const doctorName = doctor
     ? `${doctor.first_name} ${doctor.middle_name ? doctor.middle_name + " " : ""}${doctor.last_name}`.trim()
     : doc.doctor_name || "Unassigned";
+  const branchName = doc.branch
+    ? doc.branch.branch_area
+      ? `${doc.branch.branch_name} (${doc.branch.branch_area})`
+      : doc.branch.branch_name
+    : doc.branch_id || "—";
 
   return {
     id: doc.appointment_id,
@@ -213,6 +272,8 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
     doctorAvatar: getInitials(doctorName),
     doctorAvatarcolor: doctorPalette.avatarColor,
     doctorAvatarBg: doctorPalette.initBg,
+    branch: branchName,
+    branchId: doc.branch_id ?? "—",
     reason: doc.reason_for_visit || "—",
     date: formatDateOnly(doc.appointment_date),
     time: formatTimeOnly(doc.appointment_time),
@@ -221,7 +282,7 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
   };
 }
 
-type BranchPerfRange = "today" | "yesterday" | "tomorrow" | "thisWeek" | "lastWeek" | "thisMonth" | "lastMonth";
+type BranchPerfRange = "today" | "yesterday" | "tomorrow" | "thisWeek" | "lastWeek" | "thisMonth" | "lastMonth" | "custom";
 
 const BRANCH_PERF_RANGE_OPTIONS: { value: BranchPerfRange; label: string }[] = [
   { value: "today", label: "Today" },
@@ -231,9 +292,19 @@ const BRANCH_PERF_RANGE_OPTIONS: { value: BranchPerfRange; label: string }[] = [
   { value: "lastWeek", label: "Last Week" },
   { value: "thisMonth", label: "This Month" },
   { value: "lastMonth", label: "Last Month" },
+  { value: "custom", label: "Custom Range" },
 ];
 
-function getBranchPerfRangeDates(range: BranchPerfRange, base: Date): { dateFrom: string; dateTo: string } {
+interface BranchPerfRangeResult {
+  dateFrom: string;
+  dateTo: string;
+  prevDateFrom: string;
+  prevDateTo: string;
+  dateLabel: string;
+  compareLabel: string;
+}
+
+function getBranchPerfRangeDates(range: BranchPerfRange, base: Date, customRange?: CalendarDateRange | null): BranchPerfRangeResult {
   const weekStart = startOfWeek(base, { weekStartsOn: 1 });
   const weekEnd = endOfWeek(base, { weekStartsOn: 1 });
   const lastWeekStart = subWeeks(weekStart, 1);
@@ -243,48 +314,136 @@ function getBranchPerfRangeDates(range: BranchPerfRange, base: Date): { dateFrom
   const lastMonthStart = startOfMonth(subMonths(base, 1));
   const lastMonthEnd = endOfMonth(subMonths(base, 1));
 
-  const ranges: Record<BranchPerfRange, { dateFrom: Date; dateTo: Date }> = {
-    today: { dateFrom: base, dateTo: base },
-    yesterday: { dateFrom: subDays(base, 1), dateTo: subDays(base, 1) },
-    tomorrow: { dateFrom: addDays(base, 1), dateTo: addDays(base, 1) },
-    thisWeek: { dateFrom: weekStart, dateTo: weekEnd },
-    lastWeek: { dateFrom: lastWeekStart, dateTo: lastWeekEnd },
-    thisMonth: { dateFrom: monthStart, dateTo: monthEnd },
-    lastMonth: { dateFrom: lastMonthStart, dateTo: lastMonthEnd },
-  };
+  let currentFrom: Date;
+  let currentTo: Date;
+  let prevFrom: Date;
+  let prevTo: Date;
 
-  const { dateFrom, dateTo } = ranges[range];
-  return { dateFrom: format(dateFrom, "yyyy-MM-dd"), dateTo: format(dateTo, "yyyy-MM-dd") };
+  if (range === "custom" && customRange?.from && customRange?.to) {
+    currentFrom = customRange.from;
+    currentTo = customRange.to;
+    const durationMs = currentTo.getTime() - currentFrom.getTime();
+    prevFrom = new Date(currentFrom.getTime() - durationMs);
+    prevTo = new Date(currentTo.getTime() - durationMs);
+  } else {
+    const ranges: Record<string, { dateFrom: Date; dateTo: Date; prevFrom: Date; prevTo: Date }> = {
+      today: {
+        dateFrom: base, dateTo: base,
+        prevFrom: subDays(base, 1), prevTo: subDays(base, 1),
+      },
+      yesterday: {
+        dateFrom: subDays(base, 1), dateTo: subDays(base, 1),
+        prevFrom: subDays(base, 2), prevTo: subDays(base, 2),
+      },
+      tomorrow: {
+        dateFrom: addDays(base, 1), dateTo: addDays(base, 1),
+        prevFrom: base, prevTo: base,
+      },
+      thisWeek: {
+        dateFrom: weekStart, dateTo: weekEnd,
+        prevFrom: lastWeekStart, prevTo: lastWeekEnd,
+      },
+      lastWeek: {
+        dateFrom: lastWeekStart, dateTo: lastWeekEnd,
+        prevFrom: subWeeks(lastWeekStart, 1), prevTo: subWeeks(lastWeekEnd, 1),
+      },
+      thisMonth: {
+        dateFrom: monthStart, dateTo: monthEnd,
+        prevFrom: lastMonthStart, prevTo: lastMonthEnd,
+      },
+      lastMonth: {
+        dateFrom: lastMonthStart, dateTo: lastMonthEnd,
+        prevFrom: startOfMonth(subMonths(base, 2)), prevTo: endOfMonth(subMonths(base, 2)),
+      },
+    };
+
+    const r = ranges[range] || ranges.today;
+    currentFrom = r.dateFrom;
+    currentTo = r.dateTo;
+    prevFrom = r.prevFrom;
+    prevTo = r.prevTo;
+  }
+
+  return {
+    dateFrom: format(currentFrom, "yyyy-MM-dd"),
+    dateTo: format(currentTo, "yyyy-MM-dd"),
+    prevDateFrom: format(prevFrom, "yyyy-MM-dd"),
+    prevDateTo: format(prevTo, "yyyy-MM-dd"),
+    dateLabel: formatComparisonRange(currentFrom, currentTo),
+    compareLabel: `Compared with ${formatComparisonRange(prevFrom, prevTo)}`,
+  };
 }
 
-function parseStatValue(value: string): number {
-  return Number(value.replace(/,/g, ""));
+function parseStatValue(value: string | number | undefined | null): number {
+  if (value == null) return 0;
+  if (typeof value === "number") return isNaN(value) ? 0 : value;
+  const num = Number(String(value).replace(/,/g, "").trim());
+  return isNaN(num) ? 0 : num;
 }
 
 function formatStatValue(value: number): string {
   return value.toLocaleString();
 }
 
-function CountUp({ target, duration = 1800 }: { target: number; duration?: number }) {
+function CountUp({ target, duration = 900 }: { target: number; duration?: number }) {
+  const safeTarget = typeof target === "number" && !isNaN(target) ? Math.round(target) : 0;
   const [count, setCount] = useState(0);
-  const startTime = useRef<number | null>(null);
-  const rafId = useRef<number>(0);
+  const countRef = useRef(0);
+  countRef.current = count;
+
+  const prevTargetRef = useRef<number | null>(null);
+  const rafIdRef = useRef<number | null>(null);
 
   useEffect(() => {
-    startTime.current = null;
+    // If target is 0 and we're already at 0, nothing to animate
+    if (safeTarget === 0 && countRef.current === 0) {
+      prevTargetRef.current = 0;
+      return;
+    }
+
+    // If target has not changed and count already reached it, don't re-animate
+    if (prevTargetRef.current === safeTarget && countRef.current === safeTarget) {
+      return;
+    }
+
+    const startVal = countRef.current;
+    const endVal = safeTarget;
+    prevTargetRef.current = safeTarget;
+
+    if (startVal === endVal) {
+      return;
+    }
+
+    let startTime: number | null = null;
+
     const animate = (now: number) => {
-      if (startTime.current === null) startTime.current = now;
-      const elapsed = now - startTime.current;
+      if (startTime === null) startTime = now;
+      const elapsed = now - startTime;
       const progress = Math.min(elapsed / duration, 1);
+
+      // Smooth ease-out cubic: starts quickly, lands smoothly
       const eased = 1 - Math.pow(1 - progress, 3);
-      setCount(Math.round(eased * target));
+      const nextValue = Math.round(startVal + (endVal - startVal) * eased);
+
+      setCount(nextValue);
+
       if (progress < 1) {
-        rafId.current = requestAnimationFrame(animate);
+        rafIdRef.current = requestAnimationFrame(animate);
+      } else {
+        setCount(endVal);
+        rafIdRef.current = null;
       }
     };
-    rafId.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(rafId.current);
-  }, [target, duration]);
+
+    rafIdRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+    };
+  }, [safeTarget, duration]);
 
   return <>{formatStatValue(count)}</>;
 }
@@ -326,152 +485,189 @@ export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
-  const fetchEmployees = useCallback(async () => {
-    if (!permissions.some((p) => p === "employee.read" || p === "doctor.read")) {
-      setIsEmployeesLoading(false);
-      setRealDoctors(null);
-      setRealStaff(null);
-      return;
-    }
-    setIsEmployeesLoading(true);
-    try {
-      console.log("[Dashboard] Fetching all employees from employeeApi...");
+  const canReadEmployees = permissions.some((p) => p === "employee.read" || p === "doctor.read");
+  // React Query: fetch employees once and keep them cached keyed by branch + date.
+  // Refreshing the branch filter or date re-fetches in the background while the
+  // previous data stays on-screen (stale-while-revalidate) -> snappier navigation.
+  const employeesQuery = useQuery({
+    queryKey: ["dashboard-employees", isAllBranches ? "all" : selectedBranchId, format(selectedDate, "yyyy-MM-dd")],
+    queryFn: async () => {
       const res = await employeeApi.getAll({
         branchId: isAllBranches ? undefined : selectedBranchId,
         limit: 1000,
-        // Pass the selected date so the backend computes doctor_status
-        // (Active/Leave/Inactive) for doctors; no statusType is sent so
-        // staff rows are preserved (the shared fetch feeds the staff tab).
         date: format(selectedDate, "yyyy-MM-dd"),
       });
-      console.log("[Dashboard] Response:", res.data);
-      const allEmployees = res.data?.data?.employees || [];
-      const doctors = allEmployees.filter((e) => e.user_table?.role_type === "DOCTOR");
-      const staff = allEmployees.filter((e) => e.user_table?.role_type !== "DOCTOR");
+      const all = res.data?.data?.employees || [];
+      const doctors = all.filter((e) => e.user_table?.role_type === "DOCTOR");
+      const staff = all.filter((e) => e.user_table?.role_type !== "DOCTOR");
+      return { doctors: doctors.map(mapEmployeeRecord), staff: staff.map(mapEmployeeRecord) };
+    },
+    enabled: canReadEmployees,
+    refetchOnWindowFocus: false,
+    staleTime: 1000 * 60 * 5,
+  });
 
-      // Store previous counts before updating
-      prevDoctorsRef.current = realDoctors?.length ?? 0;
-      prevStaffRef.current = realStaff?.length ?? 0;
-
-      setRealDoctors(doctors.map(mapEmployeeRecord));
-      setRealStaff(staff.map(mapEmployeeRecord));
-
-      if (doctors.length === 0) {
-        toast({
-          title: "No doctor records found",
-          description: "The employees API returned no doctor records.",
-        });
-      }
-      if (staff.length === 0) {
-        toast({
-          title: "No staff records found",
-          description: "The employees API returned no staff records.",
-        });
-      }
-    } catch (err: any) {
-      console.error("[Dashboard] Error:", err);
-      console.error("[Dashboard] Error response:", err.response?.data);
-      console.error("[Dashboard] Error status:", err.response?.status);
-      toast({
-        title: "Failed to load employees",
-        description: err.response?.data?.message || "Couldn't reach the employees API.",
-        variant: "destructive",
-      });
-      // Explicitly set to empty arrays on error so the table renders empty state
-      setRealDoctors([]);
-      setRealStaff([]);
-    } finally {
-      setIsEmployeesLoading(false);
-    }
-  }, [toast, selectedBranchId, isAllBranches, permissions, selectedDate]);
+  // Keep the local doctors/staff arrays in sync with the query result.
+  useEffect(() => {
+    if (!employeesQuery.data) return;
+    prevDoctorsRef.current = realDoctors?.length ?? 0;
+    prevStaffRef.current = realStaff?.length ?? 0;
+    setRealDoctors(employeesQuery.data.doctors);
+    setRealStaff(employeesQuery.data.staff);
+  }, [employeesQuery.data]);
 
   // Branch progress bar state — branches come from the real /branch API.
-  // Each branch's pct/color is driven purely by its own real total
-  // appointment count (not a share of the other branches' totals), bucketed
-  // into fixed tiers rather than scaled linearly.
-  const [branches, setBranches] = useState<{ id: string; name: string; count: number; pct: number; color: string }[]>([]);
+  // Each branch's pct/color is driven by its relative appointment volume
+  // compared to the busiest branch (not tier-based).
+  const [branches, setBranches] = useState<
+    { id: string; name: string; count: number; previousCount: number; totalSlots: number; systemShare: number; color: string }[]
+  >([]);
   const [branchPerfLoading, setBranchPerfLoading] = useState(false);
+  const [branchPerfError, setBranchPerfError] = useState<string | null>(null);
   const [branchPerfRange, setBranchPerfRange] = useState<BranchPerfRange>("today");
+  const [customDateRange, setCustomDateRange] = useState<CalendarDateRange | null>(null);
+  const [isCustomRangeOpen, setIsCustomRangeOpen] = useState(false);
+  const [branchPerfDateLabel, setBranchPerfDateLabel] = useState("");
+  const [branchPerfCompareLabel, setBranchPerfCompareLabel] = useState("");
 
-  // Appointment count -> progress bar percentage + color tiers:
-  //   1-6   booked -> 5%   green   (6 grouped into the 1-5 tier)
-  //   7-12  booked -> 25%  yellow
-  //   13-19 booked -> 65%  orange
-  //   20+   booked -> 100% red     (uncapped above 30, stays red)
-  function getAppointmentProgress(count: number): { pct: number; color: string } {
-    if (count <= 0) return { pct: 0, color: "#00488D" };
-    if (count <= 6) return { pct: 5, color: "#22C55E" };
-    if (count <= 12) return { pct: 25, color: "#EAB308" };
-    if (count <= 19) return { pct: 65, color: "#F97316" };
-    return { pct: 100, color: "#EF4444" };
-  }
+  // Hover card state — fetched on demand when user hovers a branch row.
+  const [hoveredBranchId, setHoveredBranchId] = useState<string | null>(null);
+  const [hoveredBranchDetails, setHoveredBranchDetails] = useState<{
+    total: number;
+    booked: number;
+    completed: number;
+    cancelled: number;
+    noShow: number;
+    scheduled: number;
+  } | null>(null);
+  const [isHoverDetailsLoading, setIsHoverDetailsLoading] = useState(false);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchBranchPerformance = useCallback(async (range: BranchPerfRange) => {
-    setBranchPerfLoading(true);
-    try {
+  const canReadAppointments = permissions.includes("appointment.read");
+  // React Query-backed branch performance. Runs its own appointment-count sweep
+  // (the slow part) so switching branch Perf range or the main date keeps the
+  // previous result on screen while a background refetch refreshes branch data.
+  const branchPerfQuery = useQuery({
+    queryKey: ["dashboard-branch-perf", branchPerfRange, format(selectedDate, "yyyy-MM-dd"), customDateRange],
+    queryFn: async () => {
       const branchRes = await branchApi.getAll();
       const branchList = branchRes.data?.data || [];
 
-      // Only appointments booked within the selected date range (relative to
-      // the main date picker) count toward each branch's volume.
-      const { dateFrom, dateTo } = getBranchPerfRangeDates(range, selectedDate);
+      const { dateFrom, dateTo, prevDateFrom, prevDateTo, dateLabel, compareLabel } = getBranchPerfRangeDates(branchPerfRange, selectedDate, customDateRange);
 
-      // Use each branch's real `total` count from the API (not a
-      // truncated page of rows) so the percentage reflects every
-      // appointment booked at that branch in the range, not just the
-      // first page fetched.
-      const counts = await Promise.all(
-        branchList.map((b) =>
-          appointmentApi
+      const results = await Promise.all(
+        branchList.map(async (b) => {
+          const currentCount = await appointmentApi
             .getAll({ branchId: b.branch_id, limit: 1, dateFrom, dateTo, excludeStatuses: "CANCELLED,NO_SHOW" })
             .then((res) => res.data?.data?.total ?? 0)
-            .catch(() => 0),
-        ),
-      );
-
-      setBranches(
-        branchList.map((b, index) => {
-          const count = counts[index];
-          const { pct, color } = getAppointmentProgress(count);
-          return {
-            id: b.branch_id,
-            name: b.branch_area ? `${b.branch_name} (${b.branch_area})` : (b.branch_name || b.branch_id),
-            count,
-            pct,
-            color,
-          };
+            .catch(() => 0);
+          const previousCount = await appointmentApi
+            .getAll({ branchId: b.branch_id, limit: 1, dateFrom: prevDateFrom, dateTo: prevDateTo, excludeStatuses: "CANCELLED,NO_SHOW" })
+            .then((res) => res.data?.data?.total ?? 0)
+            .catch(() => 0);
+          const totalSlots = await appointmentApi
+            .getAll({ branchId: b.branch_id, limit: 1, dateFrom, dateTo })
+            .then((res) => res.data?.data?.total ?? 0)
+            .catch(() => 0);
+          return { currentCount, previousCount, totalSlots };
         }),
       );
-    } catch (err) {
-      console.error("[Dashboard] Failed to load branch performance:", err);
-    } finally {
-      setBranchPerfLoading(false);
-    }
-  }, [selectedDate]);
 
-  // Load branch performance independently of the Appointments tab fetch so
-  // the widget always gets data — previously it only ran as a side effect of
-  // fetchAppointments, so it stayed empty when that fetch was skipped (no
-  // appointment.read permission) or failed. Refetches when the date range
-  // selector changes or when the main date picker moves.
+      const branchData = branchList.map((b, index) => ({
+        id: b.branch_id,
+        name: b.branch_area ? `${b.branch_name} (${b.branch_area})` : (b.branch_name || b.branch_id),
+        count: results[index]?.currentCount ?? 0,
+        previousCount: results[index]?.previousCount ?? 0,
+        totalSlots: results[index]?.totalSlots ?? 0,
+      }));
+
+      const ranked = [...branchData].sort((a, b) => b.count - a.count);
+      const totalSystemBookedCount = ranked.reduce((sum, b) => sum + b.count, 0);
+
+      return {
+        branches: ranked.map((b) => ({
+          ...b,
+          systemShare: systemSharePct(b.count, totalSystemBookedCount),
+          color: "#00488D",
+        })),
+        dateLabel,
+        compareLabel,
+      };
+    },
+    enabled: canReadAppointments,
+    refetchOnWindowFocus: false,
+    staleTime: 1000 * 60 * 2,
+  });
+
   useEffect(() => {
-    if (!permissions.includes("appointment.read")) {
-      setBranches([]);
-      setBranchPerfLoading(false);
-      return;
+    if (branchPerfQuery.data) {
+      setBranches(branchPerfQuery.data.branches);
+      setBranchPerfDateLabel(branchPerfQuery.data.dateLabel);
+      setBranchPerfCompareLabel(branchPerfQuery.data.compareLabel);
     }
-    fetchBranchPerformance(branchPerfRange);
-  }, [permissions, branchPerfRange, selectedDate, fetchBranchPerformance]);
+  }, [branchPerfQuery.data]);
 
-  const fetchAppointments = useCallback(async () => {
-    if (!permissions.includes("appointment.read")) {
-      setIsAppointmentsLoading(false);
-      setRealAppointments(null);
-      setAppointmentCount(0);
-      return;
-    }
-    setIsAppointmentsLoading(true);
+  useEffect(() => {
+    setBranchPerfLoading(branchPerfQuery.isLoading || branchPerfQuery.isFetching);
+  }, [branchPerfQuery.isLoading, branchPerfQuery.isFetching]);
+
+  useEffect(() => {
+    if (!branchPerfQuery.error) return;
+    console.error("[Dashboard] Failed to load branch performance:", branchPerfQuery.error);
+    setBranchPerfError("Failed to load branch performance.");
+    setBranches([]);
+  }, [branchPerfQuery.error]);
+
+  // Fetch detailed branch KPIs on demand when a branch row is hovered.
+  const fetchBranchHoverDetails = useCallback(async (branchId: string) => {
+    setIsHoverDetailsLoading(true);
     try {
+      const { dateFrom, dateTo } = getBranchPerfRangeDates(branchPerfRange, selectedDate, customDateRange);
+      const res = await appointmentApi.getAll({
+        branchId,
+        limit: 100,
+        dateFrom,
+        dateTo,
+      });
+      const appointments = res.data?.data?.appointments || [];
+
+      let completed = 0;
+      let cancelled = 0;
+      let noShow = 0;
+      let scheduled = 0;
+
+      appointments.forEach((a: AppointmentRecord) => {
+        const s = (a.status || "").toUpperCase();
+        if (s === "COMPLETED") completed++;
+        else if (s === "CANCELLED") cancelled++;
+        else if (s === "NO_SHOW") noShow++;
+        else if (s === "SCHEDULED" || s === "RESCHEDULED" || s === "NOT_CHECKED_IN" || s === "IN_CONSULTATION") scheduled++;
+      });
+
+      setHoveredBranchDetails({
+        total: appointments.length,
+        booked: appointments.length - cancelled - noShow,
+        completed,
+        cancelled,
+        noShow,
+        scheduled,
+      });
+    } catch {
+      setHoveredBranchDetails(null);
+    } finally {
+      setIsHoverDetailsLoading(false);
+    }
+  }, [branchPerfRange, selectedDate, customDateRange]);
+
+  useEffect(() => {
+    if (!hoveredBranchId) return;
+    fetchBranchHoverDetails(hoveredBranchId);
+}, [hoveredBranchId, fetchBranchHoverDetails]);
+
+  // React Query-backed appointments fetch. Cached per branch + date so switching
+  const appointmentsQuery = useQuery({
+    queryKey: ["dashboard-appointments", isAllBranches ? "all" : selectedBranchId, format(selectedDate, "yyyy-MM-dd")],
+    queryFn: async () => {
       const res = await appointmentApi.getAll({
         limit: 100,
         sortBy: "appointment_date",
@@ -480,54 +676,86 @@ export default function Dashboard() {
         date: format(selectedDate, "yyyy-MM-dd"),
       });
       const rows = res.data?.data?.appointments || [];
+      return { rows: rows.map(mapAppointmentRecord), total: res.data?.data?.total ?? rows.length };
+    },
+    enabled: canReadAppointments,
+    refetchOnWindowFocus: false,
+    staleTime: 1000 * 60 * 2,
+  });
 
-      // Store previous count before updating
-      prevAppointmentsRef.current = appointmentCount;
+  useEffect(() => {
+    if (!appointmentsQuery.data) return;
+    prevAppointmentsRef.current = appointmentCount;
+    setRealAppointments(appointmentsQuery.data.rows);
+    setAppointmentCount(appointmentsQuery.data.total);
+  }, [appointmentsQuery.data]);
 
-      setRealAppointments(rows.map(mapAppointmentRecord));
-      setAppointmentCount(res.data?.data?.total ?? rows.length);
-    } catch (err: any) {
-      console.error("[Dashboard] Failed to load appointments:", err);
-      toast({
-        title: "Failed to load appointments",
-        description: err.response?.data?.message || "Couldn't reach the appointments API.",
-        variant: "destructive",
+  useEffect(() => {
+    setIsAppointmentsLoading(appointmentsQuery.isLoading || appointmentsQuery.isFetching);
+  }, [appointmentsQuery.isLoading, appointmentsQuery.isFetching]);
+
+  useEffect(() => {
+    if (!appointmentsQuery.error) return;
+    const err: any = appointmentsQuery.error;
+    console.error("[Dashboard] Failed to load appointments:", err);
+    toast({
+      title: "Failed to load appointments",
+      description: err.response?.data?.message || "Couldn't reach the appointments API.",
+      variant: "destructive",
+    });
+  }, [appointmentsQuery.error, toast]);
+
+  // Stable refetch helper reused by check-in/check-out + onVitalsSaved, now
+  // backed by React Query so repeated calls avoid redundant network requests.
+  const fetchAppointments = useCallback(() => {
+    appointmentsQuery.refetch();
+  }, [appointmentsQuery.refetch]);
+
+  const canReadPatients = permissions.includes("patient.read");
+  const dateStr = format(selectedDate, "yyyy-MM-dd");
+  const patientsQuery = useQuery({
+    queryKey: ["dashboard-patients", isAllBranches ? "all" : selectedBranchId, dateStr],
+    queryFn: async () => {
+      const res = await patientApi.getAll({
+        limit: 1,
+        branchId: isAllBranches ? undefined : selectedBranchId,
+        dateFrom: dateStr,
+        dateTo: dateStr,
       });
-    } finally {
-      setIsAppointmentsLoading(false);
-    }
-  }, [toast, selectedBranchId, isAllBranches, selectedDate]);
+      return res.data?.data?.total ?? 0;
+    },
+    enabled: canReadPatients,
+    refetchOnWindowFocus: false,
+    staleTime: 1000 * 60 * 2,
+  });
 
   useEffect(() => {
-    fetchAppointments();
-  }, [fetchAppointments]);
-
-  useEffect(() => {
-    if (!permissions.includes("patient.read")) {
-      setPatientCount(0);
-      setPatientLoading(false);
-      return;
-    }
-    setPatientLoading(true);
-    // Store previous count before updating
+    if (patientsQuery.data === undefined) return;
     prevPatientsRef.current = patientCount;
-    const dateStr = format(selectedDate, "yyyy-MM-dd");
-    patientApi
-      .getAll({ limit: 1, branchId: isAllBranches ? undefined : selectedBranchId, dateFrom: dateStr, dateTo: dateStr })
-      .then((res) => {
-        setPatientCount(res.data?.data?.total ?? 0);
-      })
-      .catch(() => {
-        setPatientCount(0);
-      })
-      .finally(() => {
-        setPatientLoading(false);
-      });
-  }, [selectedBranchId, isAllBranches, permissions, selectedDate]);
+    setPatientCount(patientsQuery.data);
+  }, [patientsQuery.data]);
 
   useEffect(() => {
-    fetchEmployees();
-  }, [fetchEmployees]);
+    setPatientLoading(patientsQuery.isLoading || patientsQuery.isFetching);
+  }, [patientsQuery.isLoading, patientsQuery.isFetching]);
+
+  // Reflect React Query's pending state into the UI loading flags so the
+  // table spinner and stat-card skeletons stay in sync with real requests.
+  useEffect(() => {
+    setIsEmployeesLoading(employeesQuery.isLoading || employeesQuery.isFetching);
+  }, [employeesQuery.isLoading, employeesQuery.isFetching]);
+
+  useEffect(() => {
+    if (!employeesQuery.error) return;
+    const err: any = employeesQuery.error;
+    toast({
+      title: "Failed to load employees",
+      description: err.response?.data?.message || "Couldn't reach the employees API.",
+      variant: "destructive",
+    });
+    setRealDoctors([]);
+    setRealStaff([]);
+  }, [employeesQuery.error, toast]);
 
   const liveStats = useMemo(() => {
     const currentDoctors = realDoctors?.length ?? 0;
@@ -548,6 +776,7 @@ export default function Dashboard() {
       {
         label: "Doctors",
         permission: "doctor.read",
+        route: "/doctor",
         loading: isEmployeesLoading,
         value: currentDoctors.toLocaleString(),
         change: showDelta && doctorDelta > 0 ? `+${doctorDelta}` : "",
@@ -561,6 +790,7 @@ export default function Dashboard() {
       {
         label: "Patients",
         permission: "patient.read",
+        route: "/patients",
         loading: patientLoading,
         value: currentPatients.toLocaleString(),
         change: showDelta && patientDelta > 0 ? `+${patientDelta}` : "",
@@ -574,6 +804,7 @@ export default function Dashboard() {
       {
         label: "Staff",
         permission: "employee.read",
+        route: "/Staff",
         loading: isEmployeesLoading,
         value: currentStaff.toLocaleString(),
         change: showDelta && staffDelta > 0 ? `+${staffDelta}` : "",
@@ -587,6 +818,7 @@ export default function Dashboard() {
       {
         label: "Appointments",
         permission: "appointment.read",
+        route: "/appointments",
         loading: isAppointmentsLoading,
         value: currentAppointments.toLocaleString(),
         change: showDelta && appointmentDelta > 0 ? `+${appointmentDelta}` : "",
@@ -600,7 +832,7 @@ export default function Dashboard() {
     {
       label: "Prescription Generated",
       permission: undefined,
-      value: "8,432",
+      value: "0",
       change: "124",
       changeType: "negative",
       bg: "#E6E8EA",
@@ -612,7 +844,7 @@ export default function Dashboard() {
     {
       label: "Bills Generated",
       permission: undefined,
-      value: "2700",
+      value: "0",
       change: "+160",
       changeType: "positive",
       bg: "#D6E3FF",
@@ -726,7 +958,7 @@ export default function Dashboard() {
 
   const searchableFields =
     activeTab === "appointments"
-      ? ["appointmentNo", "patientName", "doctorName", "reason", "status"]
+      ? ["appointmentNo", "patientName", "doctorName", "branch", "reason", "status"]
       : ["name", "id", "dept", "branch", "status"];
 
   // Dashboard receives its filtered rows straight from Filter/'s
@@ -764,31 +996,54 @@ export default function Dashboard() {
   const visibleEnd = Math.min(endIndex, totalRecords);
 
   const [animatedValues, setAnimatedValues] = useState<Record<string, number>>({});
+  // Mirror of `animatedValues` that lives in a ref so the animation effect
+  // below can read the latest displayed % WITHOUT listing `animatedValues` as
+  // a dependency. Listing it caused an infinite update loop: the effect sets
+  // animatedValues, which changed the dep, which re-ran the effect, ad infinitum.
+  const animatedValuesRef = useRef<Record<string, number>>(animatedValues);
+  animatedValuesRef.current = animatedValues;
 
   // Animate each branch's bar from its current displayed value to its real
-  // pct whenever `branches` loads/changes -- no scroll-visibility gating,
-  // since that depended on this card being the first thing to intersect the
-  // viewport and silently never animated otherwise. Cleans up its own
-  // intervals so repeated branch/date changes can't leak overlapping timers.
+  // pct whenever `branches` loads/changes. Cleans up its own intervals so
+  // repeated branch/date changes can't leak overlapping timers.
   useEffect(() => {
-    const intervals = branches.map((branch) => {
-      const interval = window.setInterval(() => {
-        setAnimatedValues((prev) => {
-          const value = prev[branch.id] ?? 0;
-
-          if (value === branch.pct) {
-            window.clearInterval(interval);
-            return prev;
-          }
-
-          return {
-            ...prev,
-            [branch.id]: value < branch.pct ? value + 1 : value - 1,
-          };
-        });
-      }, 30);
-      return interval;
+    const validIds = new Set(branches.map((b) => b.id));
+    setAnimatedValues((prev) => {
+      let changed = false;
+      const next: Record<string, number> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        if (validIds.has(k)) {
+          next[k] = v;
+        } else {
+          changed = true;
+        }
+      }
+      // Only update state when something actually changed. Returning a brand
+      // new object every run (even with identical content) made the effect's
+      // dependency appear "changed" and caused the reverse infinite loop.
+      return changed ? next : prev;
     });
+
+    const intervals = branches
+      .filter((b) => b.systemShare !== (animatedValuesRef.current[b.id] ?? 0))
+      .map((branch) => {
+        const interval = window.setInterval(() => {
+          setAnimatedValues((prev) => {
+            const value = prev[branch.id] ?? 0;
+
+            if (value === branch.systemShare) {
+              window.clearInterval(interval);
+              return prev;
+            }
+
+            return {
+              ...prev,
+              [branch.id]: value < branch.systemShare ? value + 1 : value - 1,
+            };
+          });
+        }, 30);
+        return interval;
+      });
 
     return () => intervals.forEach((interval) => window.clearInterval(interval));
   }, [branches]);
@@ -839,12 +1094,13 @@ export default function Dashboard() {
       setRealAppointments((prev) =>
         (prev ?? []).map((appt, index) =>
           appt.id === targetId
-            ? cancelled
+            ? cancelled && cancelled.patient_bio_data
               ? mapAppointmentRecord(cancelled, index)
               : { ...appt, status: "Cancelled" }
             : appt,
         ),
       );
+      fetchAppointments();
       toast({
         title: "Appointment cancelled",
         description: `Appointment ${targetId} has been cancelled.`,
@@ -925,7 +1181,20 @@ export default function Dashboard() {
             {visibleStats.map((stat) => (
               <div
                 key={stat.label}
-                className="flex flex-col p-4 rounded-xl shadow-[2px_2px_16px_0_rgba(0,0,0,0.25)] transition-all duration-200 hover:-translate-y-1 hover:shadow-lg cursor-pointer"
+                onClick={stat.route ? () => navigate(stat.route) : undefined}
+                role={stat.route ? "button" : undefined}
+                tabIndex={stat.route ? 0 : undefined}
+                onKeyDown={
+                  stat.route
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          navigate(stat.route);
+                        }
+                      }
+                    : undefined
+                }
+                className={`flex flex-col p-4 rounded-xl shadow-[2px_2px_16px_0_rgba(0,0,0,0.25)] transition-all duration-200 hover:-translate-y-1 hover:shadow-lg ${stat.route ? "cursor-pointer" : "cursor-default"}`}
                 style={{ background: stat.bg, border: `0.2px solid ${stat.border}` }}
               >
                 <div className="flex justify-between items-start">
@@ -1077,7 +1346,7 @@ export default function Dashboard() {
                   onOpenChange={setIsFilterOpen}
                 />
                 <RefreshButton
-                  onClick={activeTab === "appointments" ? fetchAppointments : fetchEmployees}
+                  onClick={activeTab === "appointments" ? fetchAppointments : () => employeesQuery.refetch()}
                   isLoading={activeTab === "appointments" ? isAppointmentsLoading : isEmployeesLoading}
                 />
               </div>
@@ -1108,6 +1377,9 @@ export default function Dashboard() {
                       <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.doctorAvatarBg, color: r.doctorAvatarcolor }}>{r.doctorAvatar}</div>
                       <div><div className="hms-name-text">{r.doctorName}</div><div className="hms-id-text">{r.doctorId}</div></div>
                     </div>
+                  )},
+                  { key: "branch", label: "Branch", render: (r: any) => (
+                    <span className="text-[#191C1E] hms-content-text leading-4">{r.branch}</span>
                   )},
                   { key: "reason", label: "Reason", render: (r: any) => <span className="text-[#191C1E] hms-content-text leading-4">{r.reason}</span> },
                   { key: "date", label: "Timing", render: (r: any) => (
@@ -1197,48 +1469,312 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
             {/* Branch Performance */}
             {can("appointment.read") && (
-            <div className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+            <div className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-3 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="text-[#191C1E] font-extrabold text-base leading-6 tracking-[-0.4px]">Branch Performance</h3>
-                  <p className="text-[#424752] text-[9px] font-semibold tracking-[0.9px] capitalize">Efficiency</p>
+                  {branchPerfDateLabel && (
+                    <p className="text-[#424752] text-[10px] font-semibold mt-0.5">{branchPerfDateLabel}</p>
+                  )}
+                  {branchPerfCompareLabel && (
+                    <p className="text-[#8C8D8F] text-[9px] font-medium">{branchPerfCompareLabel}</p>
+                  )}
                 </div>
-                <select
-                  value={branchPerfRange}
-                  onChange={(e) => setBranchPerfRange(e.target.value as BranchPerfRange)}
-                  className="px-2 py-1 rounded border border-[rgba(194,198,212,0.40)] bg-white text-[#424752] text-[9px] font-semibold tracking-[0.9px] outline-none cursor-pointer focus:border-[#00488D]"
-                >
-                  {BRANCH_PERF_RANGE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-2">
+                  {(branchPerfRange === "custom" && (
+                    <Popover
+                      open={isCustomRangeOpen}
+                      onOpenChange={(open) => {
+                        setIsCustomRangeOpen(open);
+                        if (open) {
+                          setHoveredBranchId(null);
+                          setHoveredBranchDetails(null);
+                        }
+                      }}
+                    >
+                      <PopoverTrigger asChild>
+                        <button
+                          className="px-2 py-1 rounded border border-[#00488D] bg-[#D6E3FF] text-[#00488D] text-[9px] font-semibold tracking-[0.9px] outline-none cursor-pointer"
+                        >
+                          {customDateRange
+                            ? `${formatComparisonRange(customDateRange.from, customDateRange.to)}`
+                            : "Pick Range"}
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg" align="end">
+                        <CalendarPicker
+                          mode="range"
+                          selected={customDateRange}
+                          hideThemePicker
+                          onSelect={(range) => {
+                            if (range && typeof range === "object" && "from" in range && "to" in range) {
+                              setCustomDateRange(range);
+                              setIsCustomRangeOpen(false);
+                            }
+                          }}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  )) || null}
+                  <select
+                    value={branchPerfRange}
+                    onChange={(e) => {
+                      const next = e.target.value as BranchPerfRange;
+                      setBranchPerfRange(next);
+                      if (next === "custom" && !customDateRange) {
+                        setHoveredBranchId(null);
+                        setHoveredBranchDetails(null);
+                        setIsCustomRangeOpen(true);
+                      }
+                    }}
+                    className="px-2 py-1 rounded border border-[rgba(194,198,212,0.40)] bg-white text-[#424752] text-[9px] font-semibold tracking-[0.9px] outline-none cursor-pointer focus:border-[#00488D]"
+                  >
+                    {BRANCH_PERF_RANGE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              <div className="flex flex-col gap-4 max-h-[220px] overflow-y-auto hide-scrollbar pr-1">
+              <div className="flex flex-col gap-3 max-h-[260px] overflow-y-auto hide-scrollbar pr-1">
+                {/* Loading skeleton */}
                 {branchPerfLoading && branches.length === 0 && (
-                  <div className="flex items-center justify-center gap-2 py-6 text-[#6B7280] text-xs">
-                    <Loader2 size={14} className="animate-spin text-[#00488D]" />
-                    Loading branch data...
+                  <div className="flex flex-col gap-3 py-2">
+                    {[1, 2, 3, 4].map((i) => (
+                      <div key={i} className="flex flex-col gap-1">
+                        <div className="flex justify-between">
+                          <div className="w-24 h-2.5 bg-slate-200 rounded animate-pulse" />
+                          <div className="w-12 h-2.5 bg-slate-200 rounded animate-pulse" />
+                        </div>
+                        <div className="h-1.5 rounded-full bg-slate-100 animate-pulse" />
+                      </div>
+                    ))}
                   </div>
                 )}
-                {!branchPerfLoading && branches.length === 0 && (
+
+                {/* Error state */}
+                {!branchPerfLoading && branchPerfError && (
+                  <div className="flex flex-col items-center justify-center gap-2 py-6">
+                    <p className="text-[#6B7280] text-xs">{branchPerfError}</p>
+                    <button
+                      onClick={() => branchPerfQuery.refetch()}
+                      className="px-3 py-1 rounded border border-[rgba(194,198,212,0.40)] text-[#00488D] text-[9px] font-semibold tracking-[0.9px] hover:bg-[#F2F4F6]"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+
+                {/* Empty state */}
+                {!branchPerfLoading && !branchPerfError && branches.length === 0 && (
                   <div className="py-6 text-center text-[#6B7280] text-xs">
                     No branch data available.
                   </div>
                 )}
-                {branches.map((branch) => (
-                  <div key={branch.id} className="flex flex-col gap-1">
-                    <div className="flex justify-between">
-                      <span className="text-[#191C1E] text-[9px] font-semibold tracking-[0.9px] capitalize">{branch.name}</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] font-semibold tracking-[0.9px] text-[#8C8D8F]">{branch.count} {branch.count === 1 ? "appt" : "appts"}</span>
-                        <span className="text-[9px] font-semibold tracking-[0.9px] uppercase" style={{ color: branch.color }}>{animatedValues[branch.id] ?? 0}%</span>
-                      </div>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-[#ECEEF0] overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${animatedValues[branch.id] ?? 0}%`, background: branch.color }} />
-                    </div>
-                  </div>
-                ))}
+
+                {/* Ranked branch bars */}
+                {branches.map((branch, index) => {
+                  const trendObj = computeTrend(branch.count, branch.previousCount);
+                  const formattedTrendText = formatTrend(trendObj);
+                  const isTop = index === 0 && branch.count > 0;
+                  const isOpen = hoveredBranchId === branch.id;
+
+                  const trendColor =
+                    trendObj.kind === "none"
+                      ? "#8C8D8F"
+                      : trendObj.kind === "new" || (trendObj.kind === "change" && trendObj.delta > 0)
+                      ? "#16A34A"
+                      : "#EF4444";
+
+                  const sharePct = animatedValues[branch.id] ?? branch.systemShare;
+                  const uPct = utilizationPct(branch.count, branch.totalSlots);
+                  const uConf = utilizationConfidence(branch.totalSlots);
+                  const unusedCapacity = branch.totalSlots > 0 ? branch.totalSlots - branch.count : null;
+
+                  return (
+                    <Popover key={branch.id} open={isOpen}>
+                      <PopoverTrigger asChild>
+                        <div
+                          className="relative flex flex-col gap-1 cursor-pointer rounded-md px-1.5 py-1 transition-colors duration-150 hover:bg-[#F8FAFC]"
+                          onMouseEnter={() => {
+                            if (isCustomRangeOpen) return;
+                            if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+                            setHoveredBranchId(branch.id);
+                          }}
+                          onMouseLeave={() => {
+                            if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+                            hoverTimerRef.current = setTimeout(() => {
+                              setHoveredBranchId(null);
+                              setHoveredBranchDetails(null);
+                            }, 150);
+                          }}
+                        >
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-[#8C8D8F] text-[9px] font-bold w-3 flex-shrink-0">{index + 1}.</span>
+                              <span className="text-[#191C1E] text-[10px] font-semibold tracking-[0.3px] capitalize truncate">
+                                {branch.name}
+                              </span>
+                              {isTop && (
+                                <span className="text-[#00488D] text-[9px] leading-none" title="Highest volume">★</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span className="text-[10px] font-semibold text-[#424752]">
+                                {branch.count} {branch.count === 1 ? "appt" : "appts"}
+                              </span>
+                              <span className="text-[9px] font-semibold tracking-[0.5px] uppercase" style={{ color: branch.color }}>
+                                {sharePct}% share
+                              </span>
+                            </div>
+                          </div>
+                          {/* System Share bar */}
+                          <div className="h-1.5 rounded-full bg-[#ECEEF0] overflow-hidden">
+                            <div className="h-full rounded-full transition-all duration-300" style={{ width: `${sharePct}%`, background: branch.color }} />
+                          </div>
+                          {/* Trend badge */}
+                          <div className="flex items-center gap-1 pl-[18px]">
+                            <span className="text-[8px] font-semibold" style={{ color: trendColor }}>
+                              {formattedTrendText}
+                            </span>
+                          </div>
+                        </div>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        side="right"
+                        align="start"
+                        sideOffset={10}
+                        className="w-72 p-0 border-[#E5E7EB] shadow-lg"
+                        onMouseEnter={() => {
+                          if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+                        }}
+                        onMouseLeave={() => {
+                          setHoveredBranchId(null);
+                          setHoveredBranchDetails(null);
+                        }}
+                      >
+                        {/* Hover card header */}
+                        <div className="px-4 pt-3 pb-2">
+                          <div className="text-[#191C1E] font-bold text-xs tracking-[0.2px]">{branch.name}</div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[#424752] text-[11px] font-semibold">
+                              {branch.count} appointment{branch.count === 1 ? "" : "s"}
+                            </span>
+                            <span className="text-[10px] font-semibold" style={{ color: trendColor }}>
+                              {formattedTrendText}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-[#E5E7EB] mx-3" />
+
+                        {/* Volume & Capacity metrics */}
+                        <div className="px-4 py-2.5 flex flex-col gap-2">
+                          {/* System Share */}
+                          <div className="flex justify-between items-center">
+                            <span className="text-[#6B7280] text-[10px] font-medium">System Share</span>
+                            <span className="text-[#191C1E] text-[11px] font-semibold">{branch.systemShare}%</span>
+                          </div>
+
+                          {/* Utilization */}
+                          <div className="flex justify-between items-start">
+                            <span className="text-[#6B7280] text-[10px] font-medium">Utilization</span>
+                            <div className="flex flex-col items-end gap-0.5">
+                              {uPct !== null ? (
+                                <>
+                                  <span className="text-[#191C1E] text-[11px] font-semibold flex items-center gap-1">
+                                    {uPct}%
+                                    {uConf === "low" && (
+                                      <span
+                                        className="text-[7px] px-1 py-px rounded bg-amber-100 text-amber-700 font-medium cursor-help"
+                                        title="Based on small sample (<5 slots)"
+                                      >
+                                        ⚠ Low sample
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="text-[#8C8D8F] text-[9px] font-normal">
+                                    {branch.count} / {branch.totalSlots} slots
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="text-[#8C8D8F] text-[11px] font-semibold">N/A</span>
+                                  <span className="text-[#8C8D8F] text-[8px] font-normal">Capacity unavailable</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Capacity Breakdown */}
+                          {branch.totalSlots > 0 && (
+                            <>
+                              <div className="flex justify-between items-center">
+                                <span className="text-[#6B7280] text-[10px] font-medium">Capacity</span>
+                                <span className="text-[#191C1E] text-[10px] font-semibold">{branch.totalSlots} slots</span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="text-[#6B7280] text-[10px] font-medium">Unused</span>
+                                <span className="text-[#191C1E] text-[10px] font-semibold">
+                                  {unusedCapacity !== null && unusedCapacity >= 0 ? unusedCapacity : 0}
+                                </span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+
+                        <div className="border-t border-[#E5E7EB] mx-3" />
+
+                        {/* Appointment Outcomes */}
+                        <div className="px-4 py-2.5 pb-3">
+                          {isHoverDetailsLoading && !hoveredBranchDetails ? (
+                            <div className="flex items-center gap-2 text-[#6B7280] text-[10px] py-1">
+                              <Loader2 size={12} className="animate-spin text-[#00488D]" />
+                              Loading...
+                            </div>
+                          ) : hoveredBranchDetails ? (
+                            branchPerfRange === "tomorrow" ? (
+                              <div className="flex flex-col gap-1.5 text-[10px]">
+                                <div className="text-[#424752] text-[10px] font-semibold tracking-[0.3px] mb-0.5">Upcoming</div>
+                                <div className="flex justify-between">
+                                  <span className="text-[#6B7280] font-medium">Scheduled</span>
+                                  <span className="text-[#191C1E] font-semibold">{hoveredBranchDetails.scheduled}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-[#6B7280] font-medium">Total Appointments</span>
+                                  <span className="text-[#191C1E] font-semibold">{hoveredBranchDetails.total}</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col gap-1.5 text-[10px]">
+                                <div className="text-[#424752] text-[10px] font-semibold tracking-[0.3px] mb-0.5">Appointment Outcomes</div>
+                                <div className="flex justify-between">
+                                  <span className="text-[#6B7280] font-medium">Completed</span>
+                                  <span className="text-[#191C1E] font-semibold">
+                                    {hoveredBranchDetails.completed} · {calculatePercentage(hoveredBranchDetails.completed, hoveredBranchDetails.booked)}%
+                                  </span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-[#6B7280] font-medium">Cancelled</span>
+                                  <span className="text-[#191C1E] font-semibold">
+                                    {hoveredBranchDetails.cancelled} · {calculatePercentage(hoveredBranchDetails.cancelled, hoveredBranchDetails.booked)}%
+                                  </span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-[#6B7280] font-medium">No-show</span>
+                                  <span className="text-[#191C1E] font-semibold">
+                                    {hoveredBranchDetails.noShow} · {calculatePercentage(hoveredBranchDetails.noShow, hoveredBranchDetails.booked)}%
+                                  </span>
+                                </div>
+                              </div>
+                            )
+                          ) : (
+                            <div className="text-[#8C8D8F] text-[10px]">No appointment data.</div>
+                          )}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  );
+                })}
               </div>
             </div>
             )}

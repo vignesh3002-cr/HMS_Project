@@ -279,10 +279,9 @@ export const employeeApi = {
     API.post<CreateEmployeeResponse>("/employees/create", data),
 
   getAll: (params?: GetEmployeesParams) => {
-    const { branchId, ...rest } = params ?? {};
-    return API.get<{ success: boolean; data: { employees: EmployeeRecord[]; total: number; page: number; limit: number; totalPages: number } }>("/employees", { params: rest }).catch(err => {
+    return API.get<{ success: boolean; data: { employees: EmployeeRecord[]; total: number; page: number; limit: number; totalPages: number } }>("/employees", { params }).catch(err => {
       if (err?.response?.status === 403) {
-        return { data: { success: true, data: { employees: [], total: 0, page: 1, limit: rest.limit ?? 1000, totalPages: 0 } } } as any;
+        return { data: { success: true, data: { employees: [], total: 0, page: 1, limit: params?.limit ?? 1000, totalPages: 0 } } } as any;
       }
       throw err;
     });

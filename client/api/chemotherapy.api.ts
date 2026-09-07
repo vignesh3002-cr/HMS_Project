@@ -12,6 +12,7 @@ export interface MedicineOption {
 
 export interface RegimenProtocolDilution {
   protocol_dilution_id?: string;
+  administration_day?: number | null;
   medicine_id?: string | null;
   form?: string | null;
   dose?: string | number | null;
@@ -24,6 +25,7 @@ export interface RegimenProtocolDilution {
 
 export interface RegimenProtocolDilutionInput {
   protocol_dilution_id?: string;
+  administration_day?: number | null;
   medicine_id?: string | null;
   form?: string | null;
   dose?: string | number | null;
@@ -39,6 +41,7 @@ export interface DischargeInstruction {
   protocol_id: string;
   medicine_id: string | null;
   drug_sequence: number | null;
+  administration_day: number | null;
   drug_from: string | null;
   frequency: string | null;
   composition: string | null;
@@ -57,6 +60,7 @@ export interface DischargeInstructionInput {
   discharge_instruction_id?: string;
   medicine_id?: string | null;
   drug_sequence?: number | null;
+  administration_day?: number | null;
   drug_from?: string | null;
   frequency?: string | null;
   duration?: string | null;

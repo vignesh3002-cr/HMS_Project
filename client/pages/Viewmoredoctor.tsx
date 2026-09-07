@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { format } from "date-fns";
+import { parseDate, calculateYearsSince } from "@/utils/parseDate";
+import { formatAadhaar, formatPan, formatLicenseNo, formatPassportNo, formatMobile } from "@/utils/formatters";
 import {
   IdCard,
   Phone,
@@ -18,16 +20,7 @@ import {
 } from "lucide-react";
 import { employeeApi, type EmployeeDetailResponse } from "@/api/employee.api";
 import { DoctorBranchDisplay } from "@/components/hms/DoctorBranchDisplay";
-
-// Role-based extra fields, mirroring Addemployee.tsx's ROLE_CONFIG /
-// isMedical logic exactly: only Doctor/Nurse/Pharmacist/Lab Technician are
-// "medical" roles with a qualification + license/registration number, each
-// under its own label; Branch Admin/Staff Admin/Staff show "Department"
-// instead of "Specialization" and never have a qualification or license
-// number (that form never collects one for them). Bio only exists for
-// Doctor -- it comes from a separate doctorProfile join, not a field every
-// employee has.
-interface RoleMeta {
+export interface RoleMeta {
   displayRole: string;
   isMedical: boolean;
   licenseLabel: string;
@@ -180,7 +173,7 @@ export default function ViewEmployee() {
   // Addemployee.tsx's isMedical ? "specialization" : "department" labeling.
   const specializationOrDept = detail.doctorProfile?.specialization || employee?.specialization || "—";
   const qualification = detail.doctorProfile?.qualification || employee?.qualification || "—";
-  const licenseNo = detail.doctorProfile?.license_no || employee?.license_no || "—";
+  const licenseNo = formatLicenseNo(detail.doctorProfile?.license_no || employee?.license_no || "—");
   const bio = detail.doctorProfile?.doctor_bio?.trim() || "—";
 
   // getEmployeeById returns every mapping this employee ever had (status
@@ -194,9 +187,14 @@ export default function ViewEmployee() {
       : [];
   const isAvailable = employee?.emp_status === true || detail.user?.user_status === 0;
   const photo = employee?.employee_photo_URL || "";
-  const phone = employee?.mobile_no || "—";
+  const phone = formatMobile(employee?.mobile_no || "—");
   const email = employee?.email || "—";
-  const experience = employee?.employee_no_experence != null ? `${employee.employee_no_experence}+ yrs` : "—";
+
+  const priorExperience = employee?.employee_no_experence != null ? Number(employee.employee_no_experence) || 0 : 0;
+  const joiningDate = employee?.joining_date ? parseDate(employee.joining_date) : null;
+  const yearsSinceJoining = calculateYearsSince(joiningDate);
+  const totalExperience = priorExperience + yearsSinceJoining;
+  const experience = totalExperience > 0 ? `${totalExperience}+ yrs` : "—";
   const dob = (employee as any)?.dob ? format(new Date((employee as any).dob), "dd MMM yyyy") : "—";
   const age = calculateAge((employee as any)?.dob);
   const gender = (employee as any)?.gender || "—";
@@ -260,9 +258,9 @@ export default function ViewEmployee() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <InfoItem icon={User} title="Nationality" value={val(employee?.nationality)} />
             <InfoItem icon={Award} title="Marital Status" value={val(employee?.marital_status)} />
-            <InfoItem icon={IdCard} title="Aadhaar No" value={val(employee?.aadhaar_no)} />
-            <InfoItem icon={FileText} title="PAN No" value={val(employee?.pan_no)} />
-            <InfoItem icon={FileText} title="Passport No" value={val(employee?.passport_no)} />
+            <InfoItem icon={IdCard} title="Aadhaar No" value={val(formatAadhaar(employee?.aadhaar_no))} />
+            <InfoItem icon={FileText} title="PAN No" value={val(formatPan(employee?.pan_no))} />
+            <InfoItem icon={FileText} title="Passport No" value={val(formatPassportNo(employee?.passport_no))} />
             <InfoItem icon={Briefcase} title="Designation" value={designation} />
             {meta.isMedical && <InfoItem icon={Award} title="Qualification" value={val(qualification)} />}
           </div>

@@ -16,28 +16,28 @@ import {
   Calendar,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { FormDropdown } from "@/components/ui/form-dropdown";
+import { FormProtocolDropdown } from "@/components/ui/form-protocol-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { chemotherapyApi, MedicineOption, RegimenProtocolDilutionInput, DischargeInstructionInput } from "@/api/chemotherapy.api";
 import { format, addDays, parseISO, isValid } from "date-fns";
 
-// Shared styling tokens - matches PatientRegistrationForm / Addemployee conventions
+// Styling tokens - merged from the mFOLFOX6 "Protocol Builder" mockup:
+// soft grey canvas, white cards with hairline borders, muted uppercase grid
+// headers, borderless cell inputs that reveal a border on hover/focus.
+const cardCls = "bg-white border border-[#e1e7ee] rounded-2xl overflow-hidden w-full";
 const inputCls =
-  "w-full h-10 px-4 bg-white border border-gray-200 rounded-xl text-[13.5px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-[3px] focus:ring-blue-500/15 focus:border-blue-500 transition-all duration-200 disabled:bg-gray-50 disabled:text-gray-400";
-const labelCls = "block text-[12.5px] font-semibold text-gray-700 mb-1.5";
-const Req = () => <span className="text-red-600 ml-0.5">*</span>;
+  "w-full h-10 px-3.5 bg-[#f8fafc] border border-[#dde4ec] rounded-[11px] text-[13.5px] text-[#17212e] placeholder:text-[#a7b2bf] outline-none transition-all duration-150 hover:border-[#c7d2dd] hover:bg-[#f5f8fb] focus:border-[#12335c] focus:bg-white focus:ring-[3px] focus:ring-[#12335c]/15 disabled:bg-[#f1f3f5] disabled:text-[#9aa5b1] disabled:cursor-not-allowed";
+const labelCls = "block text-[12.5px] font-semibold text-[#5b6b7c] mb-[7px]";
+const Req = () => <span className="text-[#c0374a] ml-0.5">*</span>;
 
-// Grid-table styling matching the Edit Protocol mockup: rounded bordered container,
-// muted uppercase header, centered index column, borderless inputs that reveal a
-// border on hover/focus.
-const ptGridWrap = "overflow-x-auto w-full";
-const ptGridBox = "min-w-[760px] border border-[#e3e8ee] rounded-lg bg-white";
+const ptGridWrap = "overflow-x-auto w-full px-5 pt-4";
+const ptGridBox = "min-w-[900px] border border-[#edf1f5] rounded-xl bg-white";
 const ptGridHead =
-  "grid items-center gap-3 px-4 py-3 bg-[#f7f9fb] border-b border-[#e3e8ee] text-[11px] font-bold uppercase tracking-wide text-[#8a97a6]";
+  "grid items-center gap-2.5 px-4 py-3 bg-[#f7f9fb] border-b border-[#edf1f5] text-[10.5px] font-bold uppercase tracking-[0.05em] text-[#8a97a6]";
 const ptGridRow =
-  "grid items-center gap-3 px-4 py-2 border-b border-[#eef1f4] hover:bg-[#f8f9fb] transition-colors last:border-0";
+  "grid items-center gap-2.5 px-4 py-3 border-b border-[#edf1f5] last:border-0 hover:bg-[#f8f9fb] transition-colors";
 const ptInput =
-  "w-full border border-transparent hover:border-[#e3e8ee] focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none rounded-md px-2 py-1.5 text-[12.5px] bg-transparent transition-all disabled:bg-transparent disabled:text-[#5b6b7c] disabled:cursor-not-allowed";
+  "w-full h-[34px] px-2.5 bg-transparent border border-transparent rounded-lg text-[12.5px] text-[#17212e] placeholder:text-[#aeb8c3] transition-all duration-150 hover:border-[#dde4ec] hover:bg-[#f8fafc] focus:border-[#12335c] focus:bg-white focus:ring-[3px] focus:ring-[#12335c]/15 focus:outline-none disabled:bg-transparent disabled:text-[#5b6b7c] disabled:cursor-not-allowed";
 
 function ProtocolGridTable({
   columns,
@@ -46,7 +46,7 @@ function ProtocolGridTable({
   addLabel,
   onAdd,
   disabled,
-  addClassName = "text-[#12335c] hover:bg-[#f0f2f5]",
+  addClassName = "text-[#12335c] hover:bg-[#eaf0f7]",
   boxClassName = ptGridBox,
 }: {
   columns: string[];
@@ -81,7 +81,7 @@ function ProtocolGridTable({
         </div>
       </div>
       <div
-        className={`text-center py-3.5 bg-[#fafbfc] font-bold text-sm cursor-pointer border-t border-[#e3e8ee] ${addClassName}`}
+        className={`text-center py-[13px] bg-[#fafbfc] font-bold text-[13px] cursor-pointer border-t border-[#edf1f5] transition-colors ${addClassName}`}
         onClick={() => !disabled && onAdd()}
       >
         {addLabel}
@@ -90,6 +90,24 @@ function ProtocolGridTable({
   );
 }
 
+interface DilutionDetail {
+  dilutionId: string;
+  id: string;
+  medication: string;
+  form: string;
+  dose: string;
+  unit: string;
+  volume: string;
+  volumeUnit: string;
+  diluent: string;
+}
+
+const isLegacyDilution = (item: any) =>
+  item.drug_role === "SUPPORTIVE" &&
+  (item.dosage != null || item.dosage_unit != null) &&
+  !item.administration_detail &&
+  !item.remarks;
+
 interface Premed {
   id: string;
   medication: string;
@@ -97,6 +115,7 @@ interface Premed {
   unit: string;
   adminNotes: string;
   remarks: string;
+  dilutions?: DilutionDetail[];
 }
 interface ChemoPlan {
   id: string;
@@ -109,23 +128,14 @@ interface ChemoPlan {
   adminNotes: string;
   toxicity: string;
   remarks: string;
+  dilutions?: DilutionDetail[];
 }
 interface SupportiveCare {
   id: string;
   medication: string;
   adminNotes: string;
   remarks: string;
-}
-interface DilutionDetail {
-  dilutionId: string;
-  id: string;
-  medication: string;
-  form: string;
-  dose: string;
-  unit: string;
-  volume: string;
-  volumeUnit: string;
-  diluent: string;
+  dilutions?: DilutionDetail[];
 }
 interface PostTreatment {
   id: string;
@@ -139,7 +149,7 @@ interface PostTreatment {
   remarks: string;
 }
 
-const TREATMENT_INTENT_OPTIONS = ["curative", "palliative", "adjuvant", "neoadjuvant", "maintenance"];
+
 
 const DOSE_CALC_OPTIONS = ["BSA", "IBW", "BMI", "AUC 1.5", "AUC 2", "AUC 5", "KG", "Fixed Dose"];
 
@@ -159,7 +169,7 @@ export default function CreateProtocol() {
   const [regimenName, setRegimenName] = useState("");
   const [cancerTypeId, setCancerTypeId] = useState("");
   const [subtypeId, setSubtypeId] = useState("");
-  const [treatmentIntent, setTreatmentIntent] = useState("");
+  
   const [standardCycles, setStandardCycles] = useState<number>(6);
   const [cycleIntervalDays, setCycleIntervalDays] = useState<number>(21);
   const [scheduleDate, setScheduleDate] = useState("");
@@ -167,18 +177,20 @@ export default function CreateProtocol() {
   const [days, setDays] = useState<Array<{ dayNumber: number; date: string; protocolDayId?: string }>>([{ dayNumber: 1, date: "" }]);
   const [activeDay, setActiveDay] = useState(1);
 
-  const emptyPremed = (): Premed => ({ id: "", medication: "", dose: "", unit: "", adminNotes: "", remarks: "" });
-  const emptyChemo = (): ChemoPlan => ({ id: "", medication: "", doseCalc: "", dose: "", unit: "", patientDose: "", patientUnit: "", adminNotes: "", toxicity: "", remarks: "" });
-  const emptySupportive = (): SupportiveCare => ({ id: "", medication: "", adminNotes: "", remarks: "" });
-  const emptyDilution = (): DilutionDetail => ({ dilutionId: "", id: "", medication: "", form: "", dose: "", unit: "", volume: "", volumeUnit: "", diluent: "" });
+  const emptyPremed = (): Premed => ({ id: "", medication: "", dose: "", unit: "", adminNotes: "", remarks: "", dilutions: [] });
+    const emptyChemo = (): ChemoPlan => ({ id: "", medication: "", doseCalc: "", dose: "", unit: "", patientDose: "", patientUnit: "", adminNotes: "", toxicity: "", remarks: "", dilutions: [] });
+    const emptySupportive = (): SupportiveCare => ({ id: "", medication: "", adminNotes: "", remarks: "", dilutions: [] });
+    const emptyDilution = (): DilutionDetail => ({ dilutionId: "", id: "", medication: "", form: "", dose: "", unit: "", volume: "", volumeUnit: "", diluent: "" });
+    const emptyPost = (): PostTreatment => ({ id: "", form: "", medication: "", dose: "", unit: "", frequency: "", instructions: "", duration: "", remarks: "" });
 
-  // Per-day maps for protocol items (each day owns its own rows; preserves
-  // administration_day per item so repeated edits never re-stamp items onto
-  // a single active day).
-  const [premedsByDay, setPremedsByDay] = useState<Record<number, Premed[]>>({ 1: [emptyPremed()] });
-  const [chemoPlansByDay, setChemoPlansByDay] = useState<Record<number, ChemoPlan[]>>({ 1: [emptyChemo()] });
-  const [supportiveByDay, setSupportiveByDay] = useState<Record<number, SupportiveCare[]>>({ 1: [emptySupportive()] });
-  const [dilutionByDay, setDilutionByDay] = useState<Record<number, DilutionDetail[]>>({ 1: [emptyDilution()] });
+    // Per-day maps for protocol items (each day owns its own rows; preserves
+    // administration_day per item so repeated edits never re-stamp items onto
+    // a single active day).
+    const [premedsByDay, setPremedsByDay] = useState<Record<number, Premed[]>>({ 1: [emptyPremed()] });
+    const [chemoPlansByDay, setChemoPlansByDay] = useState<Record<number, ChemoPlan[]>>({ 1: [emptyChemo()] });
+    const [supportiveByDay, setSupportiveByDay] = useState<Record<number, SupportiveCare[]>>({ 1: [emptySupportive()] });
+    const [dilutionByDay, setDilutionByDay] = useState<Record<number, DilutionDetail[]>>({ 1: [emptyDilution()] });
+    const [postByDay, setPostByDay] = useState<Record<number, PostTreatment[]>>({ 1: [emptyPost()] });
 
   // Active-day views + setters - the existing table JSX and row handlers keep
   // operating on `premeds`/`chemoPlans`/`supportive`/`dilution`, which now
@@ -188,12 +200,11 @@ export default function CreateProtocol() {
   const chemoPlans = chemoPlansByDay[activeDay] ?? [];
   const setChemoPlans = (list: ChemoPlan[]) => setChemoPlansByDay((prev) => ({ ...prev, [activeDay]: list }));
   const supportive = supportiveByDay[activeDay] ?? [];
-  const setSupportive = (list: SupportiveCare[]) => setSupportiveByDay((prev) => ({ ...prev, [activeDay]: list }));
-  const dilution = dilutionByDay[activeDay] ?? [];
-  const setDilution = (list: DilutionDetail[]) => setDilutionByDay((prev) => ({ ...prev, [activeDay]: list }));
-  const [post, setPost] = useState<PostTreatment[]>([
-    { id: "", form: "", medication: "", dose: "", unit: "", frequency: "", instructions: "", duration: "", remarks: "" },
-  ]);
+    const setSupportive = (list: SupportiveCare[]) => setSupportiveByDay((prev) => ({ ...prev, [activeDay]: list }));
+    const dilution = dilutionByDay[activeDay] ?? [];
+    const setDilution = (list: DilutionDetail[]) => setDilutionByDay((prev) => ({ ...prev, [activeDay]: list }));
+    const post = postByDay[activeDay] ?? [];
+    const setPost = (list: PostTreatment[]) => setPostByDay((prev) => ({ ...prev, [activeDay]: list }));
 
   const [cancerTypes, setCancerTypes] = useState<Array<{ cancer_type_id: string; cancer_type: string }>>([]);
   const [subtypes, setSubtypes] = useState<Array<{ subtype_id: string; subtype_name: string }>>([]);
@@ -287,6 +298,7 @@ export default function CreateProtocol() {
       })
       .catch(() => setDilutionMeds([]))
       .finally(() => setLoadingDilutionMeds(false));
+
   }, []);
 
   // Fetch distinct option values (FORM / DOSE UNIT / VOLUME UNIT / dosage
@@ -342,14 +354,24 @@ export default function CreateProtocol() {
         setRegimenName(p.regimen_name ?? (p as any).original_protocol ?? "");
         setCancerTypeId(p.cancer_type_id ?? "");
         setSubtypeId(p.subtype_id ?? "");
-        setTreatmentIntent(p.treatment_intent ?? "");
         setStandardCycles(p.standard_cycles ?? 6);
         setCycleIntervalDays(p.cycle_interval_days ?? p.no_of_days ?? 21);
         setNotes(p.notes ?? (p as any).guideline_source ?? "");
         const dbDays: any[] = p.chemotherapy_regimen_protocol_days ?? [];
         const items: any[] = p.chemotherapy_regimen_protocol_items ?? [];
+        const protocolDilutions: any[] = p.protocol_dilutions ?? [];
+        const protocolDischarge: any[] = p.protocol_discharge_instructions ?? p.chemotherapy_discharge_instructions ?? [];
         const maxAdminDay = items.reduce((m: number, x: any) => Math.max(m, x.administration_day ?? 1), 1);
-        const dayCount = Math.max(1, Math.min(p.no_of_days ?? (dbDays.length || maxAdminDay) ?? 1, 30));
+        const maxDilutionDay = Math.max(
+          1,
+          ...protocolDilutions.map((d: any) => d.administration_day ?? 1),
+          ...items.flatMap((x: any) => (x.chemotherapy_protocol_dilutions ?? []).map((d: any) => d.administration_day ?? x.administration_day ?? 1)),
+        );
+        const maxDischargeDay = Math.max(1, ...protocolDischarge.map((d: any) => d.administration_day ?? 1));
+        const dayCount = Math.max(1, Math.min(
+          Math.max(p.no_of_days ?? 1, dbDays.length, maxAdminDay, maxDilutionDay, maxDischargeDay),
+          30,
+        ));
         const baseDateStr = p.created_at ? format(new Date(p.created_at), "yyyy-MM-dd") : "";
         const loadedDays = Array.from({ length: dayCount }, (_, i) => {
           let d = "";
@@ -364,16 +386,12 @@ export default function CreateProtocol() {
         setDays(loadedDays);
         if (loadedDays[0]?.date) setScheduleDate(loadedDays[0].date);
         loadedItemIdsRef.current = items.filter((x: any) => x.protocol_item_id).map((x: any) => x.protocol_item_id as string);
-        if (items.length) {
+        if (items.length || protocolDilutions.length || protocolDischarge.length) {
           const dayOf = (x: any) => Math.min(x.administration_day ?? 1, dayCount);
-          const isLegacyDilution = (x: any) =>
-            x.drug_role === "SUPPORTIVE" &&
-            !(x.chemotherapy_protocol_dilutions?.length) &&
-            x.dosage != null;
           const premedsM: Record<number, Premed[]> = {};
-          const chemoM: Record<number, ChemoPlan[]> = {};
-          const suppM: Record<number, SupportiveCare[]> = {};
-          const diluM: Record<number, DilutionDetail[]> = {};
+              const chemoM: Record<number, ChemoPlan[]> = {};
+              const suppM: Record<number, SupportiveCare[]> = {};
+            const diluM: Record<number, DilutionDetail[]> = {};
           for (const x of items) {
             const dayIndex = dayOf(x);
             if (x.drug_role === "PREMEDICATION") {
@@ -402,7 +420,8 @@ export default function CreateProtocol() {
               const xs: any[] = x.chemotherapy_protocol_dilutions ?? [];
               if (xs.length) {
                 for (const d of xs) {
-                  (diluM[dayIndex] = diluM[dayIndex] ?? []).push({
+                  const dilutionDay = Math.min(d.administration_day ?? x.administration_day ?? 1, dayCount);
+                  (diluM[dilutionDay] = diluM[dilutionDay] ?? []).push({
                     dilutionId: (d.protocol_dilution_id as string) ?? "",
                     id: (x.protocol_item_id as string) ?? "",
                     medication: d.medicine_id ?? x.medicine_id ?? "",
@@ -444,9 +463,12 @@ export default function CreateProtocol() {
           // protocol_discharge_instructions). Protocols created before that
           // switch still carry them as POSTMEDICATION items - fall back to
           // those so nothing disappears on edit.
-          const dischargeRows: any[] = p.protocol_discharge_instructions ?? [];
-          const postM = dischargeRows.length
-            ? dischargeRows.map((d: any) => ({
+          const dischargeRows: any[] = protocolDischarge;
+          const postM: Record<number, PostTreatment[]> = {};
+          if (dischargeRows.length) {
+            for (const d of dischargeRows) {
+              const dayIndex = Math.min(d.administration_day ?? 1, dayCount);
+              (postM[dayIndex] = postM[dayIndex] ?? []).push({
                 id: (d.discharge_instruction_id as string) ?? "",
                 form: d.drug_from ?? "Tab",
                 medication: d.medicine_id ?? "",
@@ -456,24 +478,29 @@ export default function CreateProtocol() {
                 instructions: d.administration_detail ?? "",
                 duration: d.duration ?? "",
                 remarks: d.comment ?? "",
-              }))
-            : items
-                .filter((x: any) => x.drug_role === "POSTMEDICATION")
-                .map((x: any) => ({
-                  id: (x.protocol_item_id as string) ?? "",
-                  form: "Tab",
-                  medication: x.medicine_id ?? "",
-                  dose: (x.dosage as any) ?? "",
-                  unit: x.dosage_unit ?? "",
-                  frequency: x.frequency ?? "",
-                  instructions: x.administration_detail ?? "",
-                  duration: x.administration_day != null ? "Day " + x.administration_day : "",
-                  remarks: typeof x.remarks === "string" ? x.remarks : "",
-                }));
-          const protoDils: any[] = p.protocol_dilutions ?? [];
+              });
+            }
+          } else {
+            for (const x of items.filter((x: any) => x.drug_role === "POSTMEDICATION")) {
+              const dayIndex = Math.min(x.administration_day ?? 1, dayCount);
+              (postM[dayIndex] = postM[dayIndex] ?? []).push({
+                id: (x.protocol_item_id as string) ?? "",
+                form: "Tab",
+                medication: x.medicine_id ?? "",
+                dose: (x.dosage as any) ?? "",
+                unit: x.dosage_unit ?? "",
+                frequency: x.frequency ?? "",
+                instructions: x.administration_detail ?? "",
+                duration: x.administration_day != null ? "Day " + x.administration_day : "",
+                remarks: typeof x.remarks === "string" ? x.remarks : "",
+              });
+            }
+          }
+          const protoDils: any[] = protocolDilutions;
           if (Object.keys(diluM).length === 0 && protoDils.length) {
             for (const d of protoDils) {
-              (diluM[1] = diluM[1] ?? []).push({
+              const dilutionDay = Math.min(d.administration_day ?? 1, dayCount);
+              (diluM[dilutionDay] = diluM[dilutionDay] ?? []).push({
                 dilutionId: (d.protocol_dilution_id as string) ?? "",
                 id: (d.protocol_item_id as string) ?? "",
                 medication: d.medicine_id ?? "",
@@ -490,7 +517,7 @@ export default function CreateProtocol() {
           setChemoPlansByDay(chemoM);
           setSupportiveByDay(suppM);
           setDilutionByDay(diluM);
-          if (postM.length) setPost(postM);
+          if (Object.keys(postM).length) setPostByDay(postM);
         }
       })
       .catch((e: any) => {
@@ -510,7 +537,7 @@ export default function CreateProtocol() {
       Object.values(chemoPlansByDay).some((r) => r.some((rd) => rd.medication.trim() !== "")) ||
       Object.values(supportiveByDay).some((r) => r.some((rd) => rd.medication.trim() !== "")) ||
       Object.values(dilutionByDay).some((r) => r.some((rd) => rd.medication.trim() !== "")) ||
-      post.some((r) => r.medication.trim() !== ""));
+      Object.values(postByDay).some((r) => r.some((rd) => rd.medication.trim() !== "")));
 
   const handleBack = () => {
     if (isDirty) setShowLeaveConfirm(true);
@@ -536,6 +563,7 @@ export default function CreateProtocol() {
     setChemoPlansByDay((prev) => ({ ...prev, [nextNum]: [emptyChemo()] }));
     setSupportiveByDay((prev) => ({ ...prev, [nextNum]: [emptySupportive()] }));
     setDilutionByDay((prev) => ({ ...prev, [nextNum]: [emptyDilution()] }));
+    setPostByDay((prev) => ({ ...prev, [nextNum]: [emptyPost()] }));
     setActiveDay(nextNum);
   };
   const handleDayDateChange = (dayNumber: number, newDate: string) => {
@@ -554,6 +582,7 @@ export default function CreateProtocol() {
     setChemoPlansByDay((prev) => shift(prev));
     setSupportiveByDay((prev) => shift(prev));
     setDilutionByDay((prev) => shift(prev));
+    setPostByDay((prev) => shift(prev));
     if (activeDay === dayNumber) setActiveDay(filtered[0].dayNumber);
     else if (activeDay > dayNumber) setActiveDay(activeDay - 1);
   };
@@ -639,6 +668,7 @@ export default function CreateProtocol() {
             dilution_volume: row.volume || null,
             dilution_volume_unit: row.volumeUnit || null,
             diluent: row.diluent || null,
+            administration_day: dayNum,
           }],
         });
       }
@@ -651,21 +681,26 @@ export default function CreateProtocol() {
 
   const buildDischargeInstructions = (): DischargeInstructionInput[] => {
     const instructions: DischargeInstructionInput[] = [];
-    post.forEach((row, idx) => {
-      if (!row.medication.trim()) return;
-      instructions.push({
-        discharge_instruction_id: row.id || undefined,
-        medicine_id: row.medication.trim(),
-        drug_sequence: idx + 1,
-        drug_from: row.form || null,
-        frequency: row.frequency || null,
-        duration: row.duration || null,
-        patient_dose: row.dose ? Number(row.dose) : null,
-        patient_dose_unit: row.unit || null,
-        administration_detail: row.instructions || null,
-        comment: row.remarks || null,
-      });
-    });
+    let seq = 1;
+    for (const day of days) {
+      const dayNum = day.dayNumber;
+      for (const row of postByDay[dayNum] ?? []) {
+        if (!row.medication.trim()) continue;
+        instructions.push({
+          discharge_instruction_id: row.id || undefined,
+          medicine_id: row.medication.trim(),
+          drug_sequence: seq++,
+          administration_day: dayNum,
+          drug_from: row.form || null,
+          frequency: row.frequency || null,
+          duration: row.duration || null,
+          patient_dose: row.dose ? Number(row.dose) : null,
+          patient_dose_unit: row.unit || null,
+          administration_detail: row.instructions || null,
+          comment: row.remarks || null,
+        });
+      }
+    }
     return instructions;
   };
 
@@ -696,7 +731,6 @@ export default function CreateProtocol() {
         ...(isEditMode ? { regimen_code: regimenCode.trim() } : {}),
         cancer_type_id: cancerTypeId,
         subtype_id: subtypeId || null,
-        treatment_intent: treatmentIntent || null,
         standard_cycles: standardCycles || null,
         cycle_interval_days: cycleIntervalDays || null,
         no_of_days: days.length,
@@ -765,34 +799,37 @@ export default function CreateProtocol() {
 
   if (loadingProtocol) {
     return (
-      <div className="min-h-screen bg-[#f5f7fa] flex items-center justify-center">
+      <div className="min-h-screen bg-[#f4f6f9] flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-[#12335c]" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f7fa] py-7 px-10 w-full">
-      <div className="max-w-full mx-auto w-full">
+    <div
+      className="min-h-screen bg-[#f4f6f9] w-full"
+      style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}
+    >
+      <div className="max-w-[1400px] mx-auto w-full px-10 pt-7 pb-16">
         {/* Top Header */}
-        <div className="flex justify-between items-start mb-6 w-full">
-          <div className="flex gap-4 items-start">
+        <div className="flex justify-between items-start gap-4 mb-[22px] w-full">
+          <div className="flex gap-3.5 items-start">
             <button
               onClick={handleBack}
-              className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-white border border-transparent hover:border-[#e3e8ee] text-[#5b6b7c] hover:text-[#12335c] transition-colors mt-1"
+              className="w-[38px] h-[38px] shrink-0 flex items-center justify-center rounded-[11px] border border-transparent hover:bg-white hover:border-[#e1e7ee] text-[#5b6b7c] hover:text-[#12335c] transition-colors mt-0.5"
               aria-label="Go back"
             >
-              <ArrowLeft className="w-5 h-5" />
+              <ArrowLeft className="w-[19px] h-[19px]" />
             </button>
             <div>
-              <h1 className="text-2xl font-bold text-[#1b2530] m-0">{pageTitle}</h1>
-              <p className="text-[#5b6b7c] text-sm mt-1">{pageSubtitle}</p>
+              <h1 className="text-[23px] font-extrabold text-[#17212e] m-0 tracking-[-0.01em]">{pageTitle}</h1>
+              <p className="text-[#5b6b7c] text-[13.5px] mt-[5px] max-w-[46ch]">{pageSubtitle}</p>
             </div>
           </div>
           <button
             onClick={handleSave}
             disabled={isSubmitting}
-            className="bg-[#12335c] text-white border-none rounded-xl px-6 py-3 text-sm font-semibold flex items-center gap-2 shadow-sm hover:bg-[#0e2848] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            className="bg-[#12335c] text-white border-none rounded-xl px-[22px] py-3 text-[13.5px] font-semibold flex items-center gap-2 shadow-[0_1px_2px_rgba(18,51,92,0.15)] hover:bg-[#0e2848] transition-colors disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
           >
             {isSubmitting ? (
               <>
@@ -811,43 +848,34 @@ export default function CreateProtocol() {
         </div>
 
         {/* Info Bar - dynamic */}
-        <div className="bg-white border border-[#e3e8ee] rounded-xl px-7 py-4 flex justify-between flex-wrap gap-4 mb-5 w-full">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-[#eef2f6] flex items-center justify-center text-[#12335c] flex-shrink-0">
-              <Pill className="w-4 h-4" />
+        <div className="bg-white border border-[#e1e7ee] rounded-2xl px-[26px] py-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 mb-5 w-full">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-[38px] h-[38px] rounded-[11px] bg-[#eaf0f7] flex items-center justify-center text-[#12335c] shrink-0">
+              <Pill className="w-[17px] h-[17px]" />
             </div>
-            <div>
-              <div className="text-sm font-bold text-[#1b2530] leading-tight truncate max-w-[180px]">{regimenName || "New Protocol"}</div>
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-[#17212e] leading-tight truncate">{regimenName || "New Protocol"}</div>
               <div className="text-xs text-[#8a97a6] mt-0.5">Regimen: {regimenCode || "—"}</div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-[#eef2f6] flex items-center justify-center text-[#12335c] flex-shrink-0">
-              <ClipboardList className="w-4 h-4" />
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-[38px] h-[38px] rounded-[11px] bg-[#eaf0f7] flex items-center justify-center text-[#12335c] shrink-0">
+              <ClipboardList className="w-[17px] h-[17px]" />
             </div>
-            <div>
-              <div className="text-sm font-bold text-[#1b2530] leading-tight">{selectedCancerTypeName}</div>
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-[#17212e] leading-tight truncate">{selectedCancerTypeName}</div>
               <div className="text-xs text-[#8a97a6] mt-0.5">Cancer Type</div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-[#eef2f6] flex items-center justify-center text-[#12335c] flex-shrink-0">
-              <Syringe className="w-4 h-4" />
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-[38px] h-[38px] rounded-[11px] bg-[#eaf0f7] flex items-center justify-center text-[#12335c] shrink-0">
+              <Syringe className="w-[17px] h-[17px]" />
             </div>
-            <div>
-              <div className="text-sm font-bold text-[#1b2530] leading-tight">
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-[#17212e] leading-tight truncate">
                 {standardCycles} cycle{standardCycles !== 1 ? "s" : ""} × {cycleIntervalDays} Days
               </div>
               <div className="text-xs text-[#8a97a6] mt-0.5">Regimen Schedule</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-[#eef2f6] flex items-center justify-center text-[#12335c] flex-shrink-0">
-              <FlaskConical className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-[#1b2530] leading-tight">{treatmentIntent || "—"}</div>
-              <div className="text-xs text-[#8a97a6] mt-0.5">Intent</div>
             </div>
           </div>
         </div>
@@ -856,9 +884,9 @@ export default function CreateProtocol() {
           <div className="flex gap-5 items-start w-full mb-5">
             <div className="flex-1 min-w-0">
               {/* Top form card */}
-            <div className="bg-white border border-[#e3e8ee] rounded-xl mb-5 overflow-hidden w-full">
-              <div className="p-6 w-full">
-                <div className="border-b border-[#e3e8ee] pb-4 mb-5 w-full">
+            <div className={cardCls + " mb-5"}>
+              <div className="px-[26px] py-6 w-full">
+                <div className="border-b border-[#edf1f5] pb-5 mb-[22px] w-full">
                   <div className="flex items-center justify-between mb-2">
                     <label className={labelCls + " mb-0"}>Protocol Days</label>
                     {!disabled && <span className="text-[11px] text-[#8a97a6]">{days.length} day(s) — Day 1 date drives subsequent days</span>}
@@ -921,7 +949,7 @@ export default function CreateProtocol() {
                   <p className="text-[11px] text-[#8a97a6] mt-2">Day 1 empty → new days start empty. If Day 1 has a date, Add Day auto-fills as Day 1 + (n-1) days (tomorrow, etc.). Edit any day’s calendar to override.</p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 w-full">
-                  <div className="lg:col-span-2">
+                  <div className="lg:col-span-1">
                     <label className={labelCls}>
                       Protocol Title (Regimen Name / Original Protocol) <Req />
                     </label>
@@ -955,40 +983,27 @@ export default function CreateProtocol() {
                     <label className={labelCls}>
                       Cancer Type <Req />
                     </label>
-                    <FormDropdown
+                    <FormProtocolDropdown
                       options={cancerTypes.map((c) => ({ label: c.cancer_type, value: c.cancer_type_id }))}
                       value={cancerTypeId}
                       onValueChange={setCancerTypeId}
                       placeholder={loadingCancerTypes ? "Loading..." : "Select cancer type"}
                       disabled={disabled || loadingCancerTypes}
-                      className="h-10"
                     />
                   </div>
                   <div>
                     <label className={labelCls}>Cancer Subtype</label>
-                    <FormDropdown
+                    <FormProtocolDropdown
                       options={subtypes.map((s) => ({ label: s.subtype_name, value: s.subtype_id }))}
                       value={subtypeId}
                       onValueChange={setSubtypeId}
                       placeholder={!cancerTypeId ? "Select cancer type first" : subtypes.length ? "Select subtype" : "No subtypes"}
                       disabled={disabled || !cancerTypeId || subtypes.length === 0}
-                      className="h-10"
-                    />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Treatment Intent</label>
-                    <FormDropdown
-                      options={TREATMENT_INTENT_OPTIONS}
-                      value={treatmentIntent}
-                      onValueChange={setTreatmentIntent}
-                      placeholder="Select intent"
-                      disabled={disabled}
-                      className="h-10"
                     />
                   </div>
                   <div>
                     <label className={labelCls}>Standard Cycles</label>
-                    <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden h-10">
+                    <div className="flex items-center border border-[#dde4ec] rounded-[11px] overflow-hidden h-10 bg-[#f8fafc]">
                       <button
                         type="button"
                         onClick={() => !disabled && setStandardCycles(Math.max(1, standardCycles - 1))}
@@ -1010,7 +1025,7 @@ export default function CreateProtocol() {
                   </div>
                   <div>
                     <label className={labelCls}>Cycle Interval (days)</label>
-                    <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden h-10">
+                    <div className="flex items-center border border-[#dde4ec] rounded-[11px] overflow-hidden h-10 bg-[#f8fafc]">
                       <button
                         type="button"
                         onClick={() => !disabled && setCycleIntervalDays(Math.max(1, cycleIntervalDays - 1))}
@@ -1051,17 +1066,17 @@ export default function CreateProtocol() {
           </div>
 
           {/* Right sidebar */}
-          <div className="w-72 flex-shrink-0">
-            <div className="bg-white border border-[#e3e8ee] rounded-xl overflow-hidden sticky top-5">
-              <div className="bg-[#f2f5f9] px-6 py-5 flex justify-between items-start">
-                <div className="text-base font-extrabold leading-tight text-[#1b2530]">
+          <div className="w-[280px] shrink-0">
+            <div className={cardCls + " sticky top-5"}>
+              <div className="bg-[#eaf0f7] px-6 py-5 flex justify-between items-start">
+                <div className="text-[15px] font-extrabold leading-[1.3] text-[#12335c]">
                   PROTOCOL
                   <br />
                   SUMMARY
                 </div>
-                <ClipboardList className="w-5 h-5 text-[#12335c]" />
+                <ClipboardList className="w-[18px] h-[18px] text-[#12335c] shrink-0" />
               </div>
-              <div className="px-6 py-2 pb-6">
+              <div className="px-6 pt-1 pb-5">
                 <div className="py-4 border-b border-[#e3e8ee]">
                   <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">REGIMEN CODE</div>
                   <div className="text-sm font-bold text-[#1b2530] truncate">{regimenCode || "—"}</div>
@@ -1087,7 +1102,7 @@ export default function CreateProtocol() {
                 <div className="py-4">
                   <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">TOTAL DRUGS</div>
                   <div className="text-sm font-bold text-[#1b2530]">
-                    {[...premeds, ...chemoPlans, ...supportive, ...dilution, ...post, ...days.flatMap((d) => (d.dayNumber === activeDay ? [] : [...(premedsByDay[d.dayNumber] ?? []), ...(chemoPlansByDay[d.dayNumber] ?? []), ...(supportiveByDay[d.dayNumber] ?? []), ...(dilutionByDay[d.dayNumber] ?? [])]))].filter((r: any) => (r.medication || r.item)?.trim()).length} item(s)
+                    {[...premeds, ...chemoPlans, ...supportive, ...dilution, ...post, ...days.flatMap((d) => (d.dayNumber === activeDay ? [] : [...(premedsByDay[d.dayNumber] ?? []), ...(chemoPlansByDay[d.dayNumber] ?? []), ...(supportiveByDay[d.dayNumber] ?? []), ...(dilutionByDay[d.dayNumber] ?? []), ...(postByDay[d.dayNumber] ?? [])]))].filter((r: any) => (r.medication || r.item)?.trim()).length} item(s)
                   </div>
                 </div>
               </div>
@@ -1096,13 +1111,13 @@ export default function CreateProtocol() {
         </div>
 
         {/* Pre-medications */}
-            <div className="bg-white border border-[#e3e8ee] rounded-xl mb-5 overflow-hidden w-full">
+            <div className={cardCls + " mb-5"}>
               <div
-                className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-[#f8f9fa] transition-colors"
+                className="flex items-center justify-between px-6 py-[17px] cursor-pointer hover:bg-[#f8f9fb] transition-colors"
                 onClick={() => toggleSection("premeds")}
               >
-                <div className="flex items-center gap-2.5 text-sm font-bold tracking-wide text-[#1b2530]">
-                  <Pill className="w-4 h-4 text-[#12335c]" /> PRE-MEDICATIONS
+                <div className="flex items-center gap-2.5 text-[13.5px] font-bold text-[#17212e]">
+                  <Pill className="w-4 h-4 text-[#12335c]" /> Pre-medications
                 </div>
                 {sections.premeds ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
               </div>
@@ -1110,14 +1125,13 @@ export default function CreateProtocol() {
                 <>
                   <ProtocolGridTable
                     columns={["#", "MEDICATION / DRUG *", "DOSE", "UNIT", "ADMIN NOTES", "REMARKS", "ACTIONS"]}
-                    template="60px 2fr 1fr 100px 1.5fr 1.5fr 40px"
-                    boxClassName="border border-[#e3e8ee] rounded-lg bg-white"
+                    template="44px 2fr 1fr 100px 1.5fr 1.5fr 40px"
                     addLabel="+ Add Row"
                     onAdd={addPremed}
                     disabled={disabled}
                     rows={premeds.map((row, idx) => [
                       idx + 1,
-                      <FormDropdown
+                      <FormProtocolDropdown
                         key="m"
                         options={premedMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
                         value={row.medication}
@@ -1145,7 +1159,7 @@ export default function CreateProtocol() {
                         placeholder="Enter dose"
                         disabled={disabled}
                       />,
-                      <FormDropdown
+                      <FormProtocolDropdown
                         key="u"
                         options={Array.from(new Set([...fieldOptions.dosage_units, row.unit].filter(Boolean)))}
                         value={row.unit}
@@ -1200,13 +1214,13 @@ export default function CreateProtocol() {
             </div>
 
             {/* Chemotherapy plan */}
-            <div className="bg-white border border-[#e3e8ee] rounded-xl mb-5 overflow-hidden w-full">
+            <div className={cardCls + " mb-5"}>
               <div
-                className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-[#f8f9fa] transition-colors"
+                className="flex items-center justify-between px-6 py-[17px] cursor-pointer hover:bg-[#f8f9fb] transition-colors"
                 onClick={() => toggleSection("chemo")}
               >
-                <div className="flex items-center gap-2.5 text-sm font-bold tracking-wide text-[#1b2530]">
-                  <Syringe className="w-4 h-4 text-[#12335c]" /> CHEMOTHERAPY PLAN
+                <div className="flex items-center gap-2.5 text-[13.5px] font-bold text-[#17212e]">
+                  <Syringe className="w-4 h-4 text-[#12335c]" /> Chemotherapy Plan
                 </div>
                 {sections.chemo ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
               </div>
@@ -1214,13 +1228,13 @@ export default function CreateProtocol() {
                 <>
                   <ProtocolGridTable
                     columns={["#", "MEDICATION *", "DOSE CALC", "DOSE", "UNIT", "PATIENT DOSE", "UNIT", "ADMIN NOTES", "TOXICITY", "REMARKS", "ACTIONS"]}
-                    template="60px 2fr 1.2fr 1.2fr 1fr 1.2fr 1fr 1.6fr 1.6fr 1.6fr 40px"
+                    template="44px 1.8fr 1.1fr 1fr 0.8fr 1fr 0.7fr 1.4fr 1.3fr 1.3fr 40px"
                     addLabel="+ Add Row"
                     onAdd={addChemoPlan}
                     disabled={disabled}
                     rows={chemoPlans.map((row, idx) => [
                       idx + 1,
-                      <FormDropdown
+                      <FormProtocolDropdown
                         key="m"
                         options={chemoMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
                         value={row.medication}
@@ -1235,7 +1249,7 @@ export default function CreateProtocol() {
                         disabled={disabled}
                         className="h-8"
                       />,
-                      <FormDropdown
+                      <FormProtocolDropdown
                         key="dc"
                         options={DOSE_CALC_OPTIONS}
                         value={row.doseCalc}
@@ -1261,7 +1275,7 @@ export default function CreateProtocol() {
                         placeholder="80 mg/m²"
                         disabled={disabled}
                       />,
-                      <FormDropdown
+                      <FormProtocolDropdown
                         key="u"
                         options={Array.from(new Set([...fieldOptions.dosage_units, row.unit].filter(Boolean)))}
                         value={row.unit}
@@ -1355,13 +1369,13 @@ export default function CreateProtocol() {
             </div>
 
             {/* Supportive care */}
-            <div className="bg-white border border-[#e3e8ee] rounded-xl mb-5 overflow-hidden w-full">
+            <div className={cardCls + " mb-5"}>
               <div
-                className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-[#f8f9fa]"
+                className="flex items-center justify-between px-6 py-[17px] cursor-pointer hover:bg-[#f8f9fb] transition-colors"
                 onClick={() => toggleSection("supportive")}
               >
-                <div className="flex items-center gap-2.5 text-sm font-bold tracking-wide text-[#1b2530]">
-                  <ShieldPlus className="w-4 h-4 text-[#2f8f5b]" /> SUPPORTIVE CARE
+                <div className="flex items-center gap-2.5 text-[13.5px] font-bold text-[#17212e]">
+                  <ShieldPlus className="w-4 h-4 text-[#2f8f5b]" /> Supportive Care
                 </div>
                 {sections.supportive ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
               </div>
@@ -1369,13 +1383,13 @@ export default function CreateProtocol() {
                 <>
                   <ProtocolGridTable
                     columns={["#", "SUPPORTIVE MEDICINE *", "ADMIN NOTES", "REMARKS", "ACTIONS"]}
-                    template="60px 2fr 1.5fr 1.5fr 40px"
+                    template="44px 2fr 1.5fr 1.5fr 40px"
                     addLabel="+ Add Row"
                     onAdd={addSupportive}
                     disabled={disabled}
                     rows={supportive.map((row, idx) => [
                       idx + 1,
-                      <FormDropdown
+                      <FormProtocolDropdown
                         key="m"
                         options={supportiveMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
                         value={row.medication}
@@ -1399,7 +1413,7 @@ export default function CreateProtocol() {
                           n[idx].adminNotes = e.target.value;
                           setSupportive(n);
                         }}
-                        className={ptInput}
+                        className={`${ptInput} col-span-2`}
                         placeholder="Enter notes"
                         disabled={disabled}
                       />,
@@ -1431,13 +1445,13 @@ export default function CreateProtocol() {
             </div>
 
             {/* Dilution details */}
-            <div className="bg-white border border-[#e3e8ee] rounded-xl mb-5 overflow-hidden w-full">
+            <div className={cardCls + " mb-5"}>
               <div
-                className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-[#f8f9fa]"
+                className="flex items-center justify-between px-6 py-[17px] cursor-pointer hover:bg-[#f8f9fb] transition-colors"
                 onClick={() => toggleSection("dilution")}
               >
-                <div className="flex items-center gap-2.5 text-sm font-bold tracking-wide text-[#1b2530]">
-                  <FlaskConical className="w-4 h-4 text-[#c9822f]" /> DILUTION DETAILS
+                <div className="flex items-center gap-2.5 text-[13.5px] font-bold text-[#17212e]">
+                  <FlaskConical className="w-4 h-4 text-[#c9822f]" /> Dilution Details
                 </div>
                 {sections.dilution ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
               </div>
@@ -1445,13 +1459,13 @@ export default function CreateProtocol() {
                 <>
                   <ProtocolGridTable
                     columns={["#", "MEDICATION", "FORM", "DOSE", "DOSE UNIT", "DILUTION VOLUME", "VOLUME UNIT", "DILUENT", "ACTIONS"]}
-                    template="60px 2fr 1.1fr 0.9fr 1.2fr 1fr 1.2fr 1.6fr 40px"
+                    template="44px 1.8fr 1.1fr 0.8fr 1.1fr 1fr 1.1fr 1.5fr 40px"
                     addLabel="+ Add Row"
                     onAdd={addDilution}
                     disabled={disabled}
                     rows={dilution.map((row, idx) => [
                       idx + 1,
-                      <FormDropdown
+                      <FormProtocolDropdown
                         key="m"
                         options={dilutionMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
                         value={row.medication}
@@ -1466,7 +1480,7 @@ export default function CreateProtocol() {
                         disabled={disabled}
                         className="h-8"
                       />,
-                      <FormDropdown
+                      <FormProtocolDropdown
                         key="f"
                         options={fieldOptions.dilution_forms}
                         value={row.form}
@@ -1493,7 +1507,7 @@ export default function CreateProtocol() {
                         placeholder="Dose"
                         disabled={disabled}
                       />,
-                      <FormDropdown
+                      <FormProtocolDropdown
                         key="du"
                         options={fieldOptions.dilution_dose_units}
                         value={row.unit}
@@ -1520,7 +1534,7 @@ export default function CreateProtocol() {
                         placeholder="100"
                         disabled={disabled}
                       />,
-                      <FormDropdown
+                      <FormProtocolDropdown
                         key="vu"
                         options={fieldOptions.dilution_volume_units}
                         value={row.volumeUnit}
@@ -1534,7 +1548,7 @@ export default function CreateProtocol() {
                         disabled={disabled}
                         className="h-8"
                       />,
-                      <FormDropdown
+                      <FormProtocolDropdown
                         key="dl"
                         options={fieldOptions.diluents}
                         value={row.diluent}
@@ -1563,13 +1577,13 @@ export default function CreateProtocol() {
             </div>
 
             {/* Post-treatment medications */}
-            <div className="bg-white border border-[#e3e8ee] rounded-xl mb-5 overflow-hidden w-full">
+            <div className={cardCls + " mb-5"}>
               <div
-                className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-[#f8f9fa]"
+                className="flex items-center justify-between px-6 py-[17px] cursor-pointer hover:bg-[#f8f9fb] transition-colors"
                 onClick={() => toggleSection("post")}
               >
-                <div className="flex items-center gap-2.5 text-sm font-bold tracking-wide text-[#c0374a]">
-                  <ClipboardList className="w-4 h-4" /> POST-TREATMENT MEDICATIONS (ON DISCHARGE)
+                <div className="flex items-center gap-2.5 text-[13.5px] font-bold text-[#c0374a]">
+                  <ClipboardList className="w-4 h-4" /> Post-treatment Medications (On Discharge)
                 </div>
                 {sections.post ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
               </div>
@@ -1577,11 +1591,11 @@ export default function CreateProtocol() {
                 <>
                   <ProtocolGridTable
                     columns={["#", "FORM", "MEDICATION", "DOSE", "UNIT", "FREQUENCY", "INSTRUCTIONS", "DURATION", "REMARKS", "ACTIONS"]}
-                    template="60px 1fr 2fr 1.2fr 1fr 1.2fr 1.5fr 1.2fr 1.5fr 40px"
+                    template="44px 0.9fr 1.8fr 1fr 0.8fr 1.1fr 1.4fr 1.1fr 1.4fr 40px"
                     addLabel="+ Add Row"
                     onAdd={addPost}
                     disabled={disabled}
-                    addClassName="text-[#c0374a] hover:bg-[#f5f0f0]"
+                    addClassName="text-[#c0374a] hover:bg-[#fbecef]"
                     rows={post.map((row, idx) => [
                       idx + 1,
                       <input
@@ -1597,7 +1611,7 @@ export default function CreateProtocol() {
                         placeholder="Tab"
                         disabled={disabled}
                       />,
-                      <FormDropdown
+                      <FormProtocolDropdown
                         key="m"
                         options={premedMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
                         value={row.medication}
@@ -1660,25 +1674,23 @@ export default function CreateProtocol() {
                           n[idx].instructions = e.target.value;
                           setPost(n);
                         }}
-                        className={ptInput}
-                        placeholder="After Food"
+                        className={`${ptInput} col-span-2`}
+                        placeholder="Enter notes"
                         disabled={disabled}
                       />,
-                      <div key="du" className="flex items-center gap-1.5">
-                        <input
-                          type="text"
-                          value={row.duration}
-                          onChange={(e) => {
-                            const n = [...post];
-                            n[idx].duration = e.target.value;
-                            setPost(n);
-                          }}
-                          className={ptInput + " w-16"}
-                          placeholder="4"
-                          disabled={disabled}
-                        />
-                        <span className="text-sm text-[#5b6b7c]">days</span>
-                      </div>,
+                      <input
+                        key="r"
+                        type="text"
+                        value={row.remarks}
+                        onChange={(e) => {
+                          const n = [...premeds];
+                          n[idx].remarks = e.target.value;
+                          setPremeds(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Enter remarks"
+                        disabled={disabled}
+                      />,
                       <input
                         key="r"
                         type="text"
@@ -1721,6 +1733,6 @@ export default function CreateProtocol() {
         }}
         onCancel={() => setShowLeaveConfirm(false)}
       />
-      </div>
+    </div>
   );
 }

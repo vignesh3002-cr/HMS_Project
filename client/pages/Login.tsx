@@ -1,9 +1,10 @@
-﻿import { useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { login } from "../api/auth.api";
 import { toast } from "@/hooks/use-toast";
 import ElasticPulse from "@/components/ui/Elasticpulse";
 import { saveToken, saveUser } from "../utils/token";
+import { Logo } from "@/components/hms/Logo";
 import { usePermission } from "@/context/PermissionContext";
 
 export default function Login() {
@@ -179,7 +180,7 @@ export default function Login() {
       toast({
         title: "Login Successful",
         description:
-          "Your account role was not recognized. Opening the main dashboard.",
+          "You are now logged in.",
       });
 
       navigate("/dashboard", {
@@ -212,15 +213,10 @@ export default function Login() {
         {/* Login Panel */}
         <div className="bg-white flex flex-col justify-center w-full md:w-[468px] flex-shrink-0 p-8 md:p-10 relative">
 
-          {/* Logo */}
-          <span className="absolute top-7 left-10 text-[20px] font-extrabold text-clinical-blue tracking-[-0.5px]">
-            HMS
-          </span>
-
           <div className="mb-7">
-            <h1 className="text-[32px] leading-[30px] tracking-[-0.6px] font-extrabold text-clinical-blue mb-2">
-              Welcome Back
-            </h1>
+            <div className="mb-4 -ml-2">
+              <Logo className="h-20 sm:h-[88px] w-auto max-w-[360px]" iconPosition="left" />
+            </div>
 
             <p className="text-sm font-medium leading-5 text-clinical-body">
               Please sign in to your clinical environment.
