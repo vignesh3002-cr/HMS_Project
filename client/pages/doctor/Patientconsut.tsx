@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   useEffect,
   useRef,
   useState,
@@ -393,6 +393,243 @@ const findActiveEncounter = async (
   };
 };
 
+/* ============================================================
+   ONCOLOGY DIAGNOSIS + CHEMOTHERAPY PLAN HELPERS
+   Shared by the Diagnosis (staging-detail persist) and
+   ChemotherapyOrder (plan persist) steps. These resolve foreign
+   keys the backend requires that the UI form fields alone don't
+   capture: the diagnosis_id comes from the ICD catalog (with a
+   malignancy fallback), the staging_detail_id comes from the
+   [diagnosis|staging] steps, and employee/department/branch come
+   from the active encounter + the logged-in session.
+   ============================================================ */
+
+const toIsoDate = (value?: string | null): string | undefined => {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const dmy = trimmed.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (dmy) {
+    return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  }
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date.toISOString().slice(0, 10);
+};
+
+/* Load every diagnosis (ICD catalog) the backend exposes so a
+   diagnosis_id can be matched from an ICD code. The DB has few
+   oncology-friendly codes, so a malignancy regex fallback targets
+   DIS000130 (Z85.9 "Personal History of Malignant Neoplasm"). */
+const loadAllIcdDiagnoses = async (): Promise<
+  { diagnosis_id: string; icd_code: string | null }[]
+> => {
+  const categoriesResponse = await API.get<{
+    success: boolean;
+    data: { categories: { diagnosis_catogory_id: string }[] };
+  }>("/diagnosis/categories");
+  const categories = (
+    categoriesResponse.data.data?.categories ?? []
+  ).filter((category) => Boolean(category.diagnosis_catogory_id));
+  const responses = await Promise.all(
+    categories.map((category) =>
+      API.get<{
+        success: boolean;
+        data: {
+          diagnoses: { diagnosis_id: string; icd_code: string | null }[];
+        };
+      }>(`/diagnosis/categories/${category.diagnosis_catogory_id}/diagnoses`)
+    )
+  );
+  return responses.flatMap((response) => response.data.data?.diagnoses ?? []);
+};
+
+/* Resolve the patient's diagnosis_id from the ICD catalog. Priority:
+   1. The active encounter's diagnosis_id when already recorded.
+   2. Exact ICD code match (from the Diagnosis form's icdCode).
+   3. Malignancy fallback (regex / ICD [CZ]\d prefix). */
+const resolveDiagnosisId = async (
+  patientId: string,
+  icdCodeOverride?: string
+): Promise<string> => {
+  let icdCode = icdCodeOverride?.trim() ?? "";
+  if (!icdCode) {
+    try {
+      const draft = JSON.parse(
+        localStorage.getItem(`hms_diagnosis_form_${patientId}`) ?? ""
+      ) as Partial<FormData> | null;
+      icdCode = draft?.icdCode?.trim() ?? "";
+    } catch {
+      icdCode = "";
+    }
+  }
+
+  try {
+    const diagnoses = await loadAllIcdDiagnoses();
+    if (icdCode) {
+      const exact = diagnoses.find(
+        (d) =>
+          d.icd_code?.trim().toUpperCase() === icdCode.toUpperCase()
+      );
+      if (exact?.diagnosis_id) return exact.diagnosis_id;
+    }
+    const fallback = diagnoses.find(
+      (d) =>
+        /malign|neoplasm|carcinom|tumou?r|leuk|lymphoma|oncol/i.test(
+          d.icd_code ?? ""
+        ) || /^[CZ]\d/i.test(d.icd_code ?? "")
+    );
+    if (fallback?.diagnosis_id) return fallback.diagnosis_id;
+  } catch (error) {
+    console.error("Failed to resolve diagnosis_id from ICD catalog:", error);
+  }
+  return "";
+};
+
+/* Resolve the patient's most recent staging_detail_id (persisted by
+   the Diagnosis step, else the latest on record). */
+const resolveStagingDetailId = async (patientId: string): Promise<string> => {
+  try {
+    const stored = JSON.parse(
+      localStorage.getItem(`hms_staging_detail_id_${patientId}`) ?? ""
+    ) as { staging_detail_id?: string } | null;
+    if (stored?.staging_detail_id) return stored.staging_detail_id;
+  } catch {
+    // Malformed draft - fall through to the server lookup.
+  }
+  try {
+    const response = await API.get<{
+      success: boolean;
+      data: { staging_detail_id: string }[];
+    }>("/oncology/staging-details", {
+      params: { patient_id: patientId, page: 1, limit: 1 },
+    });
+    return response.data.data?.[0]?.staging_detail_id ?? "";
+  } catch (error) {
+    console.error("Failed to resolve staging_detail_id:", error);
+    return "";
+  }
+};
+
+/* Ensure a chemotherapy plan exists for the patient, returning its id.
+   Used by the ChemotherapyOrder Save button and as a safety net before
+   the Summary step creates a prescription. Re-uses an existing plan when
+   one is already on record; otherwise POSTs a new one. */
+const createChemotherapyPlanForPatient = async (
+  patientId: string,
+  startDateValue?: string | null,
+  planItems?: Array<{
+    medicine_id: string;
+    drug_role: string;
+    drug_sequence: number;
+    dosage?: number;
+    dosage_unit?: string;
+    administration_route?: string;
+    remarks?: string;
+  }>,
+  plannedCycles?: number
+): Promise<{ planId: string | null; error?: string }> => {
+  const { encounter, scopeError } = await findActiveEncounter(patientId);
+  if (!encounter) {
+    return {
+      planId: null,
+      error:
+        scopeError ||
+        "No active encounter found. Open this page from a patient consultation to continue.",
+    };
+  }
+
+  const employeeId =
+    getUser()?.employee_id ?? encounter.employee_id ?? "";
+  const departmentId = encounter.department_id ?? "";
+  const branchId =
+    getActiveBranchId() ??
+    getUser()?.branch_id ??
+    encounter.branch_id ??
+    "";
+  const protocolId =
+    localStorage.getItem(`hms_selected_protocol_id_${patientId}`) ?? "";
+
+  const diagnosisId = await resolveDiagnosisId(patientId);
+  const stagingDetailId = await resolveStagingDetailId(patientId);
+  const treatmentStartDate = toIsoDate(
+    startDateValue ??
+      localStorage.getItem(`hms_planned_start_date_${patientId}`)
+  );
+
+  /* Prefer an existing plan for this patient; creation only happens once
+     per diagnosis so repeated Saves don't stack duplicates. */
+  try {
+    const existing = await API.get<{
+      success: boolean;
+      data: { chemotherapy_plan_id: string }[];
+    }>("/chemotherapy/plans", {
+      params: { patient_id: patientId, page: 1, limit: 1 },
+    });
+    const planId = existing.data.data?.[0]?.chemotherapy_plan_id;
+    if (planId) return { planId };
+  } catch (error) {
+    // Missing/incapable plan lookups fall through to creation.
+    console.error("Existing plan lookup failed:", error);
+  }
+
+  if (!stagingDetailId) {
+    return {
+      planId: null,
+      error:
+        "No oncology staging detail found for this patient. Complete the Diagnosis step first.",
+    };
+  }
+  if (!employeeId) {
+    return { planId: null, error: "Consulting doctor could not be identified." };
+  }
+  if (!departmentId) {
+    return {
+      planId: null,
+      error: "The patient's encounter has no department assigned.",
+    };
+  }
+  if (!branchId) {
+    return {
+      planId: null,
+      error: "Please select a branch from the selector in the header.",
+    };
+  }
+
+  try {
+    const response = await API.post<{
+      success: boolean;
+      data: { chemotherapy_plan_id: string };
+    }>("/chemotherapy/plans", {
+      patient_id: patientId,
+      staging_detail_id: stagingDetailId,
+      ...(diagnosisId ? { diagnosis_id: diagnosisId } : {}),
+      employee_id: employeeId,
+      department_id: departmentId,
+      branch_id: branchId,
+      appointment_id: encounter.appointment_id ?? undefined,
+      encounter_no: encounter.encounter_no ?? undefined,
+      ...(protocolId ? { protocol_id: protocolId } : {}),
+      ...(treatmentStartDate
+        ? { treatment_start_date: treatmentStartDate }
+        : {}),
+      confirm_suggested_therapy: true,
+      ...(plannedCycles ? { planned_cycles: plannedCycles } : {}),
+      ...(planItems && planItems.length > 0 ? { plan_items: planItems } : {}),
+    });
+    return { planId: response.data.data?.chemotherapy_plan_id ?? null };
+  } catch (error: any) {
+    console.error("Failed to create chemotherapy plan:", error);
+    return {
+      planId: null,
+      error:
+        error?.response?.data?.message ||
+        "Failed to create the chemotherapy plan.",
+    };
+  }
+};
+
 const Consultation: React.FC = () => {
   /* ============================================================
      STATE
@@ -442,12 +679,11 @@ const Consultation: React.FC = () => {
     () => new Set(["CONSULTATION", "LAB REPORT REVIEW"])
   );
 
-  const markStepCompleted = (stepName: string) => {
-    setCompletedSteps((prev) => {
-      const next = new Set(prev);
-      next.add(stepName);
-      return next;
-    });
+  const markStepCompleted = (stepName: string): Set<string> => {
+    const next = new Set(completedSteps);
+    next.add(stepName);
+    setCompletedSteps(next);
+    return next;
   };
 
   const [orderedTestIds, setOrderedTestIds] = useState<Set<string>>(
@@ -870,8 +1106,7 @@ const Consultation: React.FC = () => {
 
       showToast("Consultation saved");
 
-      markStepCompleted("CONSULTATION");
-      selectStep("LAB REPORT REVIEW");
+      selectStep("LAB REPORT REVIEW", markStepCompleted("CONSULTATION"));
     } catch (error: any) {
       console.error("Failed to save consultation details:", error);
       showToast(
@@ -888,13 +1123,14 @@ const Consultation: React.FC = () => {
      STEP
   ============================================================ */
 
-  const selectStep = (name: string) => {
+  const selectStep = (name: string, completedOverride?: Set<string>) => {
     const currentIndex = STEP_ORDER.indexOf(activeStep);
     const targetIndex = STEP_ORDER.indexOf(name);
+    const checkComplete = completedOverride ?? completedSteps;
 
     if (targetIndex > currentIndex && !DIRECT_ACCESS_STEPS.includes(name)) {
       for (let i = currentIndex; i < targetIndex; i++) {
-        if (!completedSteps.has(STEP_ORDER[i])) {
+        if (!checkComplete.has(STEP_ORDER[i])) {
           showToast(
             "Please select or enter the important field in the previous form."
           );
@@ -1203,11 +1439,15 @@ const Consultation: React.FC = () => {
               {/* PROFILE */}
 
               <button
-                onClick={() =>
+                onClick={() => {
+                  const pid = consultationState?.patientId;
+                  if (pid) {
+                    localStorage.setItem("hms_last_viewed_patient_id", pid);
+                  }
                   navigate("/doctor/patient-details", {
-                    state: { patientId: consultationState?.patientId },
-                  })
-                }
+                    state: { patientId: pid },
+                  });
+                }}
                 className="h-9 w-full rounded-md border border-blue-600 bg-white text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
               >
                 View Full Profile {/* Working */}
@@ -1365,26 +1605,26 @@ const Consultation: React.FC = () => {
                     encounterNo={encounter?.encounter_no}
                     pendingTests={pendingLabTests}
                     onOrdered={handleTestsOrdered}
-                    onNext={() => { markStepCompleted("LAB REPORT REVIEW"); selectStep("DIAGNOSIS"); }}
+                    onNext={() => { selectStep("DIAGNOSIS", markStepCompleted("LAB REPORT REVIEW")); }}
                   />
                 ) : activeStep === "DIAGNOSIS" ? (
                   <Diagnosis
                     embedded
                     patientId={patientDisplayId}
-                    onNext={() => { markStepCompleted("DIAGNOSIS"); selectStep("TREATMENT PLAN"); }}
+                    onNext={() => { selectStep("TREATMENT PLAN", markStepCompleted("DIAGNOSIS")); }}
                   />
                 ) : activeStep === "TREATMENT PLAN" ? (
                   <TreatmentPlan
                     embedded
                     patientId={patientDisplayId}
                     measurements={measurements}
-                    onNext={() => { markStepCompleted("TREATMENT PLAN"); selectStep("CHEMOTHERAPY ORDER"); }}
+                    onNext={() => { selectStep("CHEMOTHERAPY ORDER", markStepCompleted("TREATMENT PLAN")); }}
                   />
                 ) : activeStep === "CHEMOTHERAPY ORDER" ? (
                   <ChemotherapyOrder
                     embedded
                     patientId={patientDisplayId}
-                    onNext={() => { markStepCompleted("CHEMOTHERAPY ORDER"); selectStep("DISCHARGE MEDICATION"); }}
+                    onNext={() => { selectStep("DISCHARGE MEDICATION", markStepCompleted("CHEMOTHERAPY ORDER")); }}
                   />
                 ) : activeStep === "DISCHARGE MEDICATION" ? (
                   <DischargeMedication
@@ -1394,14 +1634,14 @@ const Consultation: React.FC = () => {
                     branchId={consultationState?.branchId}
                     encounterNo={encounter?.encounter_no}
                     measurements={measurements}
-                    onNext={() => { markStepCompleted("DISCHARGE MEDICATION"); selectStep("FOLLOW UP"); }}
+                    onNext={() => { selectStep("FOLLOW UP", markStepCompleted("DISCHARGE MEDICATION")); }}
                   />
                 ) : activeStep === "FOLLOW UP" ? (
                   <FollowUp
                     embedded
                     patientId={patientDisplayId}
                     measurements={measurements}
-                    onNext={() => { markStepCompleted("FOLLOW UP"); selectStep("SUMMARY"); }}
+                    onNext={() => { selectStep("SUMMARY", markStepCompleted("FOLLOW UP")); }}
                   />
 ) : activeStep === "SUMMARY" ? (
                   <Summary
@@ -3033,7 +3273,55 @@ const Diagnosis: React.FC<{
     }
 
     setDiagnosisError("");
-    onNext?.();
+    setSavingDiagnosis(true);
+
+    try {
+      const matchedType = cancerTypes.find(
+        (item) => item.cancer_type === formData.type
+      );
+      const matchedSubtype = subtypes.find(
+        (item) => item.subtype_name === formData.subType
+      );
+
+      const diagnosisId = await resolveDiagnosisId(
+        resolvedPatientId,
+        formData.icdCode
+      );
+
+      const response = await API.post<{
+        success: boolean;
+        data: { staging_detail_id: string };
+      }>("/oncology/staging-details", {
+        patient_id: resolvedPatientId,
+        cancer_type_id: matchedType?.cancer_type_id ?? "",
+        cancer_subtype_id: matchedSubtype?.subtype_id ?? "",
+        ...(diagnosisId ? { diagnosis_id: diagnosisId } : {}),
+        ...(formData.cancerStage
+          ? { clinical_stage: formData.cancerStage }
+          : {}),
+        ...(formData.tStage ? { t_stage: formData.tStage } : {}),
+        ...(formData.nStage ? { n_stage: formData.nStage } : {}),
+        ...(formData.mStage ? { m_stage: formData.mStage } : {}),
+      });
+
+      const stagingDetailId = response.data.data?.staging_detail_id ?? "";
+      if (stagingDetailId) {
+        localStorage.setItem(
+          `hms_staging_detail_id_${resolvedPatientId}`,
+          JSON.stringify({ staging_detail_id: stagingDetailId })
+        );
+      }
+
+      onNext?.();
+    } catch (error: any) {
+      console.error("Failed to save oncology staging details:", error);
+      setDiagnosisError(
+        error?.response?.data?.message ||
+          "Failed to save the oncology diagnosis. Please try again."
+      );
+    } finally {
+      setSavingDiagnosis(false);
+    }
   };
 
   const handleBack = () => {
@@ -3640,6 +3928,7 @@ const DischargeMedication: React.FC<{
   onNext,
 }) => {
   const resolvedPatientId = patientId || "";
+  const navigate = useNavigate();
 
   const [medications, setMedications] = useState<DischargeMedicationItem[]>(
     []
@@ -3649,6 +3938,7 @@ const DischargeMedication: React.FC<{
   const [savingMeds, setSavingMeds] = useState(false);
   const [medsError, setMedsError] = useState("");
   const [medsLoading, setMedsLoading] = useState(false);
+  const [medsProtocolId, setMedsProtocolId] = useState("");
 
   /* ============================================================
      LOAD DISCHARGE MEDICINES
@@ -3662,6 +3952,7 @@ const DischargeMedication: React.FC<{
     if (!resolvedPatientId) return;
 
     let cancelled = false;
+    setMedsProtocolId("");
 
     const mapRecord = (
       item: DischargeMedicineRecord,
@@ -3703,6 +3994,29 @@ const DischargeMedication: React.FC<{
         // Malformed draft - continue with the plan lookup.
       }
 
+      // Prefer the branch-independent latest-plan lookup (returns data:null
+      // cleanly instead of a branch-scope 403), then fall back to the
+      // scoped /plans listing.
+      try {
+        const latest = await API.get<{
+          success: boolean;
+          data: {
+            chemotherapy_regimen_protocol?: { protocol_id?: string } | null;
+          } | null;
+        }>("/chemotherapy/plans/latest-for-patient", {
+          params: { patient_id: resolvedPatientId },
+        });
+        const plan = latest.data.data;
+        if (plan?.chemotherapy_regimen_protocol?.protocol_id) {
+          return plan.chemotherapy_regimen_protocol.protocol_id;
+        }
+      } catch (error: any) {
+        console.warn(
+          "Latest plan fallback failed:",
+          error?.response?.data?.message ?? error?.message
+        );
+      }
+
       const response = await API.get<{
         success: boolean;
         data: {
@@ -3723,6 +4037,7 @@ const DischargeMedication: React.FC<{
 
     resolveProtocolId()
       .then(async (protocolId) => {
+        setMedsProtocolId(protocolId);
         if (!protocolId) return [];
 
         const response = await API.get<{
@@ -3786,6 +4101,98 @@ const DischargeMedication: React.FC<{
     try {
       setSavingMeds(true);
       setMedsError("");
+
+      const chemoOrderDraftKey = `hms_chemo_order_${resolvedPatientId}`;
+      const draft = (() => {
+        try {
+          const raw = localStorage.getItem(chemoOrderDraftKey);
+          return raw
+            ? (JSON.parse(raw) as {
+                cycleDay?: string;
+                startDate?: string;
+                drugs?: Drug[];
+                premedicationDrugs?: Drug[];
+                supportiveDrugs?: Drug[];
+              })
+            : null;
+        } catch (error) {
+          console.error("Failed to read chemotherapy order draft:", error);
+          return null;
+        }
+      })();
+
+      const planItems: Array<{
+        medicine_id: string;
+        drug_role: string;
+        drug_sequence: number;
+        dosage?: number;
+        dosage_unit?: string;
+        administration_route?: string;
+        remarks?: string;
+      }> = [];
+
+      (draft?.drugs ?? []).forEach((drug, index) => {
+        if (drug.medicineId) {
+          planItems.push({
+            medicine_id: drug.medicineId,
+            drug_role: "PRIMARY",
+            drug_sequence: index + 1,
+            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
+            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
+            administration_route: "IV",
+          });
+        }
+      });
+
+      (draft?.premedicationDrugs ?? []).forEach((drug, index) => {
+        if (drug.medicineId) {
+          planItems.push({
+            medicine_id: drug.medicineId,
+            drug_role: "PREMEDICATION",
+            drug_sequence: 90 + index,
+            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
+            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
+            administration_route: "IV",
+          });
+        }
+      });
+
+      (draft?.supportiveDrugs ?? []).forEach((drug, index) => {
+        if (drug.medicineId) {
+          planItems.push({
+            medicine_id: drug.medicineId,
+            drug_role: "SUPPORTIVE",
+            drug_sequence: 100 + index,
+            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
+            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
+            administration_route: "IV",
+          });
+        }
+      });
+
+      const planStartDate =
+        toIsoDate(draft?.startDate) ||
+        toIsoDate(
+          localStorage.getItem(`hms_planned_start_date_${resolvedPatientId}`)
+        ) ||
+        toIsoDate(new Date().toISOString());
+
+      const { planId, error } = await createChemotherapyPlanForPatient(
+        resolvedPatientId,
+        planStartDate,
+        planItems.length > 0 ? planItems : undefined,
+        undefined
+      );
+      if (error) {
+        setMedsError(error);
+        return;
+      }
+      if (planId) {
+        localStorage.setItem(
+          `hms_planned_start_date_${resolvedPatientId}`,
+          planStartDate ?? ""
+        );
+      }
 
       const targetEncounterNo = await resolveEncounterNo();
 
@@ -3852,7 +4259,10 @@ const DischargeMedication: React.FC<{
   };
 
   const handleViewProfile = () => {
-    console.log("View Full Profile");
+    if (!resolvedPatientId) return;
+    navigate("/doctor/patient-details", {
+      state: { patientId: resolvedPatientId },
+    });
   };
 
 if (embedded) {
@@ -3906,7 +4316,9 @@ if (embedded) {
                     colSpan={5}
                     className="px-8 py-8 text-center text-sm text-gray-500"
                   >
-                    No discharge medicines found for this patient's protocol.
+                    {medsProtocolId
+                      ? "No discharge medicines recorded on this patient's protocol yet."
+                      : "No treatment protocol selected yet. Select a protocol in the Treatment Plan step to load its discharge medicines."}
                   </td>
                 </tr>
               )}
@@ -4185,7 +4597,9 @@ if (embedded) {
                           colSpan={5}
                           className="px-8 py-8 text-center text-sm text-gray-500"
                         >
-                          No discharge medicines found for this patient's protocol.
+                          {medsProtocolId
+                            ? "No discharge medicines recorded on this patient's protocol yet."
+                            : "No treatment protocol selected yet. Select a protocol in the Treatment Plan step to load its discharge medicines."}
                         </td>
                       </tr>
                     )}
@@ -4393,7 +4807,6 @@ const ChemotherapyOrder: React.FC<{
   const planIdRef = useRef<string>("");
   const planItemsRef = useRef<ChemotherapyPlanItem[]>([]);
   const selectedProtocolIdRef = useRef<string>("");
-  const [savingOrder, setSavingOrder] = useState(false);
 
   /* Administration instructions derived from the selected regimen
      protocol items (route, infusion, frequency, timing, remarks,
@@ -4833,9 +5246,7 @@ const ChemotherapyOrder: React.FC<{
     }
   };
 
-  const handleSave = async () => {
-    if (savingOrder) return;
-
+  const handleNext = () => {
     if (!resolvedPatientId) {
       setPlanError(
         "Patient is not selected. Open this page from a patient consultation to continue."
@@ -5447,22 +5858,6 @@ const ChemotherapyOrder: React.FC<{
     </svg>
   );
 
-  const SaveIcon = () => (
-    <svg
-      className="-ml-1 mr-2 h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-
   const EditIcon = () => (
     <svg
       className="h-6 w-6"
@@ -5619,16 +6014,14 @@ const ChemotherapyOrder: React.FC<{
               })}
             </nav>
 
-            {/* Save */}
+            {/* Next */}
             <div className="pb-3">
               <button
                 type="button"
-                onClick={handleSave}
-                disabled={savingOrder}
+                onClick={handleNext}
                 className="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <SaveIcon />
-                {savingOrder ? "Saving" : "Save"}
+                Next
               </button>
             </div>
           </div>
@@ -7176,21 +7569,10 @@ const TreatmentPlan: React.FC<{
   onNext?: () => void;
 }> = ({ embedded = false, patientId, measurements, onNext }) => {
   const location = useLocation();
-  const navigate = useNavigate();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
-
-  const handleBack = () => {
-    window.history.back();
-  };
-
-  const handleViewProfile = () => {
-    navigate("/doctor/patient-details", {
-      state: { patientId: resolvedPatientId },
-    });
-  };
 
   const [treatmentIntent, setTreatmentIntent] =
     useState("");
@@ -8325,6 +8707,7 @@ const Summary: React.FC<{
   measurements = { height: "", weight: "", bsa: "", bmi: "", bp: "", pulse: "", temp: "", spo2: "" },
 }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
@@ -8353,6 +8736,31 @@ const Summary: React.FC<{
   >([]);
   const [dischargeLoading, setDischargeLoading] = useState(false);
   const [dischargeError, setDischargeError] = useState("");
+  const [dischargeProtocolId, setDischargeProtocolId] = useState("");
+  const [patientName, setPatientName] = useState("");
+
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    let cancelled = false;
+    patientApi
+      .getById(resolvedPatientId)
+      .then((response) => {
+        if (cancelled) return;
+        const p = response.data.data;
+        const name = [
+          p?.patient_first_name,
+          p?.patient_middle_name,
+          p?.patient_last_name,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        setPatientName(name);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId]);
 
   useEffect(() => {
     if (!resolvedPatientId) return;
@@ -8414,6 +8822,26 @@ const Summary: React.FC<{
         // Malformed draft - continue with the plan lookup.
       }
 
+      try {
+        const latest = await API.get<{
+          success: boolean;
+          data: {
+            chemotherapy_regimen_protocol?: { protocol_id?: string } | null;
+          } | null;
+        }>("/chemotherapy/plans/latest-for-patient", {
+          params: { patient_id: resolvedPatientId },
+        });
+        const plan = latest.data.data;
+        if (plan?.chemotherapy_regimen_protocol?.protocol_id) {
+          return plan.chemotherapy_regimen_protocol.protocol_id;
+        }
+      } catch (error: any) {
+        console.warn(
+          "Latest plan fallback failed:",
+          error?.response?.data?.message ?? error?.message
+        );
+      }
+
       const response = await API.get<{
         success: boolean;
         data: {
@@ -8434,9 +8862,11 @@ const Summary: React.FC<{
 
     setDischargeLoading(true);
     setDischargeError("");
+    setDischargeProtocolId("");
 
     resolveProtocolId()
       .then(async (protocolId) => {
+        setDischargeProtocolId(protocolId);
         if (!protocolId) return [];
 
         const response = await API.get<{
@@ -8579,7 +9009,7 @@ const Summary: React.FC<{
     doc.setFontSize(9);
     doc.setTextColor(100, 116, 139);
     const infoLine = [
-      `Patient: ${resolvedPatientId}`,
+      `Patient: ${patientName || resolvedPatientId}`,
       cancerType && `Cancer Type: ${cancerType}`,
       stage && `Stage: ${stage}`,
       context && `Context: ${context}`,
@@ -9124,7 +9554,9 @@ const Summary: React.FC<{
             )}
             {!dischargeLoading && !dischargeError && dischargeMedications.length === 0 && (
               <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
-                No discharge medicines found for this patient's protocol.
+                {dischargeProtocolId
+                  ? "No discharge medicines recorded on this patient's protocol yet."
+                  : "No treatment protocol selected yet. Select a protocol in the Treatment Plan step to load its discharge medicines."}
               </div>
             )}
 
@@ -9333,6 +9765,12 @@ const Summary: React.FC<{
         <div className="px-6 pb-6">
           <button
             type="button"
+            onClick={() => {
+              if (!resolvedPatientId) return;
+              navigate("/doctor/patient-details", {
+                state: { patientId: resolvedPatientId },
+              });
+            }}
             className="w-full rounded-md border border-blue-600 px-4 py-2.5 font-medium text-blue-600 transition-colors hover:bg-blue-50"
           >
             View Full Profile

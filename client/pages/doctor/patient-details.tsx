@@ -2244,7 +2244,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 <span>Central Line Available</span>
 </div>
 </div>
-<a className="text-[#1d4ed8] font-semibold hover:underline" href="#">View Full Alerts (2)</a>
+
 </div>
 {/* END: Alerts Banner */}
 {/* BEGIN: Branch scope hint */}
