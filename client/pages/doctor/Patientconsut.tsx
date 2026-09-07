@@ -5226,6 +5226,28 @@ const ChemotherapyOrder: React.FC<{
         .filter((item) => item.drug_role === "SUPPORTIVE")
         .map(toDrugFromItem)
     );
+    setAdminInstructions(
+      items.map((item, index) => ({
+        id: index,
+        medicineName:
+          item.medicine_master?.medicine_name ||
+          item.medicine_master?.generic_name ||
+          "",
+        route: item.administration_route || "",
+        infusion: [
+          item.infusion_type,
+          item.infusion_duration_minutes != null
+            ? `${item.infusion_duration_minutes} min`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        frequency: item.frequency || "",
+        timing: item.timing_relative_to_primary || "",
+        remarks: item.remarks || "",
+        administrationDetail: item.administration_detail || "",
+      }))
+    );
   };
 
   const orderDraftKey = `hms_chemo_order_${resolvedPatientId}`;
@@ -5455,28 +5477,6 @@ const ChemotherapyOrder: React.FC<{
         protocolRef.current = protocol;
         protocolDaysRef.current = protocol.chemotherapy_regimen_protocol_days ?? [];
         applyCycleDayDrugs(cycleDayRef.current, protocolDaysRef.current);
-        setAdminInstructions(
-          items.map((item, index) => ({
-            id: index,
-            medicineName:
-              item.medicine_master?.medicine_name ||
-              item.medicine_master?.generic_name ||
-              "",
-            route: item.administration_route || "",
-            infusion: [
-              item.infusion_type,
-              item.infusion_duration_minutes != null
-                ? `${item.infusion_duration_minutes} min`
-                : "",
-            ]
-              .filter(Boolean)
-              .join(" · "),
-            frequency: item.frequency || "",
-            timing: item.timing_relative_to_primary || "",
-            remarks: item.remarks || "",
-            administrationDetail: item.administration_detail || "",
-          }))
-        );
         applyNextCycle(protocol, latestCycleRef.current, savedStartDate);
       } catch (error) {
         console.error("Failed to load regimen protocol:", error);
