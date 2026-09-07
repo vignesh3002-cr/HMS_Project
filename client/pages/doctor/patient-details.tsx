@@ -2852,15 +2852,29 @@ const HistoryDashboard: React.FC<{
       prescription_id: p.prescription_id,
       prescription_date: p.prescription_date,
       advice: p.advice,
+      visit_type: p.visit_type,
+      chief_complaint: p.chief_complaint,
+      clinical_notes: p.clinical_notes,
+      followup_date: p.followup_date,
+      prescription_status: p.prescription_status,
+      branch_name: p.branch?.branch_name,
+      department_name: p.department_master?.department_name,
+      patient_vitals: p.patient_vitals || null,
+      patient_allergies: p.patient_allergies || null,
+      patient_symptoms: p.patient_symptoms || null,
       patient_history: {
         patient_first_name: p.patient_history?.patient_bio_data?.patient_first_name || '',
         patient_last_name: p.patient_history?.patient_bio_data?.patient_last_name || '',
         patient_id: p.patient_history?.patient_bio_data?.patient_id || '',
         patient_display_id: p.patient_history?.patient_bio_data?.patient_id || '',
+        patient_mobile: p.patient_history?.patient_bio_data?.patient_primary_mobile || '',
+        visit_date: p.patient_history?.visit_date || '',
+        patient_dob: p.patient_history?.patient_bio_data?.patient_dob || p.patient_history?.patient_bio_data?.date_of_birth || '',
       },
       employees: {
         first_name: p.employees?.first_name || '',
         last_name: p.employees?.last_name || '',
+        specialization: p.employees?.specialization || '',
       },
       diagnosis: {
         diagnosis_name: p.diagnosis?.diagnosis_name || '',
@@ -2879,10 +2893,55 @@ const HistoryDashboard: React.FC<{
     };
   };
 
-  const openPrescriptionPdf = (p: any, index: number) => {
+  const openPrescriptionPdf = async (p: any, index: number) => {
     try {
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+      const patientId = p.patient_history?.patient_bio_data?.patient_id;
+      const prescriptionDate = p.prescription_date;
+      let vitals = null;
+      let allergies = null;
+      let symptoms = null;
+      if (patientId) {
+        try {
+          // Fetch latest encounter for patient and pick one matching prescription date
+          const encRes = await API.get('/encounters/latest', { params: { patientId, limit: 10 } });
+          const encounters = encRes.data?.data?.encounters || encRes.data?.encounters || encRes.data || [];
+          const targetDate = prescriptionDate ? new Date(prescriptionDate).toISOString().slice(0,10) : null;
+          const enc = encounters.find((e:any) => {
+            const eDate = e.encounter_ts ? new Date(e.encounter_ts).toISOString().slice(0,10) : null;
+            return !targetDate || eDate === targetDate;
+          }) || encounters[0];
+          if (enc) {
+            vitals = {
+              bp: enc.systolic_bp && enc.diastolic_bp ? `${enc.systolic_bp}/${enc.diastolic_bp}` : enc.bp || '',
+              pulse: enc.pulse,
+              temperature: enc.temperature,
+              weight: enc.weight,
+              height: enc.height,
+              spo2: enc.spo2,
+            };
+            // Fetch allergies
+            try {
+              const allergyRes = await API.get(`/clinical-details/patients/${patientId}/allergies`);
+              allergies = allergyRes.data?.data || [];
+            } catch {}
+            // Fetch encounter symptoms if encounterNo exists
+            if (enc.encounter_no) {
+              try {
+                const symRes = await API.get(`/clinical-details/encounters/${enc.encounter_no}`);
+                const complete = symRes.data?.data || {};
+                symptoms = complete.symptoms || symRes.data?.data?.symptoms || [];
+              } catch {}
+            }
+          }
+        } catch (e) {
+          console.warn('Vitals fetch failed', e);
+        }
+      }
       const data = buildPrescriptionData(p);
+      data.patient_vitals = vitals;
+      data.patient_allergies = allergies;
+      data.patient_symptoms = symptoms;
       const { url } = generatePrescriptionPdf(data as any);
       setSelectedPrescription(p);
       setPrescriptionIndex(index);
@@ -3338,34 +3397,33 @@ const HistoryDashboard: React.FC<{
                 No prescriptions found for this patient yet.
               </div>
             ) : (
-              <div className="space-y-3">
+                  <div className="space-y-3">
                 {selectedPrescription && pdfUrl && (
                   <>
-                    <div className="rounded-lg border border-gray-200 bg-white p-3">
-                      <div className="flex items-start justify-between">
-                          <div className="flex items-start gap-3">
-                          <div className="w-10 h-10 bg-red-50 rounded-lg flex items-center justify-center border border-red-100">
-                            <span className="text-sm font-bold text-red-600">PDF</span>
-                          </div>
-                          <div>
-                            <div className="text-xs font-semibold text-gray-900">Prescription-{selectedPrescription.prescription_id}.pdf</div>
-                            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">
-                              {selectedPrescription.prescription_date ? new Date(selectedPrescription.prescription_date).toLocaleDateString() : ''} • {`${selectedPrescription.employees?.first_name || ''} ${selectedPrescription.employees?.last_name || ''}`.trim() || '—'} • {selectedPrescription.prescription_status || '—'}
+                    <div className="rounded-lg border border-gray-200 bg-white p-4">
+                      <div className="flex items-start justify-between mb-2">
+                            <div>
+                              <div className="text-base font-bold text-red-800">{selectedPrescription.diagnosis?.diagnosis_name || '—'}</div>
+                              {selectedPrescription.chief_complaint && (
+                                <div className="text-xs text-red-700 mt-1">{selectedPrescription.chief_complaint}</div>
+                              )}
+                            </div>
+                            <div className="text-xs text-red-600">
+                              {selectedPrescription.prescription_date ? new Date(selectedPrescription.prescription_date).toLocaleDateString() : '—'}
                             </div>
                           </div>
-                        </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center justify-end gap-2">
                           <a
                             href={pdfUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-[10px] px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+                            className="text-xs px-3 py-1.5 rounded bg-red-600 text-white hover:bg-red-700"
                           >
                             View
                           </a>
                           <button
                             type="button"
-                            className="text-[10px] px-2 py-1 rounded border border-gray-300 hover:bg-gray-50"
+                            className="text-xs px-3 py-1.5 rounded border border-red-300 text-red-700 hover:bg-red-50"
                             onClick={() => {
                               try {
                                 const data = buildPrescriptionData(selectedPrescription);
@@ -3384,7 +3442,6 @@ const HistoryDashboard: React.FC<{
                           </button>
                         </div>
                       </div>
-                    </div>
                     <div className="flex items-center justify-center gap-3">
                       <button
                         type="button"

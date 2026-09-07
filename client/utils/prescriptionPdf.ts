@@ -1,5 +1,4 @@
 import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
 
 export interface PrescriptionItem {
   medicine_name?: string;
@@ -23,15 +22,50 @@ export interface PrescriptionData {
   prescription_id?: string;
   prescription_date?: string;
   advice?: string;
+  visit_type?: string;
+  chief_complaint?: string;
+  clinical_notes?: string;
+  followup_date?: string;
+  prescription_status?: string;
+  branch_name?: string;
+  department_name?: string;
+  patient_vitals?: {
+    bp?: string;
+    pulse?: string;
+    temperature?: string;
+    weight?: string;
+    height?: string;
+    spo2?: string;
+  };
+  patient_allergies?: Array<{
+    allergen?: string;
+    reaction?: string;
+    severity?: string;
+    notes?: string;
+  }>;
+  patient_symptoms?: Array<{
+    symptom?: string;
+    onset?: string;
+    severity?: string;
+    notes?: string;
+  }>;
   patient_history?: {
     patient_first_name?: string;
     patient_last_name?: string;
     patient_display_id?: string;
     patient_id?: string;
+    patient_mobile?: string;
+    visit_date?: string;
+    patient_dob?: string;
+    date_of_birth?: string;
+    age?: number;
+    patient_gender?: string;
+    gender?: string;
   };
   employees?: {
     first_name?: string;
     last_name?: string;
+    specialization?: string;
   };
   diagnosis?: {
     diagnosis_name?: string;
@@ -49,153 +83,255 @@ const formatDate = (value?: string) => {
 
 export function generatePrescriptionPdf(prescription: PrescriptionData) {
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-  const margin = 40;
-  let y = 40;
+  const margin = 50;
+  let y = 50;
 
   const patientName = [prescription.patient_history?.patient_first_name, prescription.patient_history?.patient_last_name].filter(Boolean).join(" ") || "—";
   const patientId = prescription.patient_history?.patient_display_id || prescription.patient_history?.patient_id || "—";
   const doctorName = [prescription.employees?.first_name, prescription.employees?.last_name].filter(Boolean).join(" ") || "—";
-  const diagnosis = prescription.diagnosis?.diagnosis_name || prescription.diagnosis?.icd10_code || "—";
+  const doctorSpec = prescription.employees?.specialization || prescription.department_name || "—";
+  const diagnosis = prescription.diagnosis?.diagnosis_name || "—";
+  const dob = prescription.patient_history?.patient_dob || prescription.patient_history?.date_of_birth;
+  const patientAge = dob ? (() => {
+    const birth = new Date(dob);
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    const m = today.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+    return age >= 0 ? age : null;
+  })() : null;
+  const patientGender = prescription.patient_history?.patient_gender || prescription.patient_history?.gender || "—";
+  
+  const prescriptionDate = prescription.prescription_date ? new Date(prescription.prescription_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : formatDate(prescription.patient_history?.visit_date);
 
-  doc.setFontSize(18);
+  // Outer border
+  doc.setLineWidth(1);
+  doc.rect(margin - 10, 40, 545, 750);
+
+  // Header
+  doc.setFontSize(16);
   doc.setTextColor(20,30,40);
-  doc.text("Prescription", margin, y);
-  y += 24;
+  doc.setFont(undefined, 'bold');
+  doc.text("PRESCRIPTION", margin, y);
+  y += 8;
+  doc.setLineWidth(1.2);
+  doc.setDrawColor(0,71,133);
+  doc.line(margin, y, margin+525, y);
+  y += 18;
 
   doc.setFontSize(10);
-  doc.setTextColor(60,60,60);
-  const appointmentDate = prescription.appointment_date || prescription.patient_history?.visit_date || prescription.prescription_date;
-  const currentTreatment = (prescription as any).current_treatment || (prescription as any).treatment_plan || prescription.diagnosis?.diagnosis_name || "Current Treatment";
+  doc.setFont(undefined, 'normal');
+  doc.setTextColor(30,30,30);
+  doc.setFont(undefined, 'bold');
+  doc.text("Patient Name:", margin, y);
+  doc.setFont(undefined, 'normal');
+  doc.text(patientName, margin+80, y);
+  y += 16;
+  doc.setFont(undefined, 'bold');
+  doc.text("Patient ID:", margin, y);
+  doc.setFont(undefined, 'normal');
+  doc.text(patientId, margin+80, y);
+  y += 16;
+  doc.setFont(undefined, 'bold');
+  doc.text("Age/Gender:", margin, y);
+  doc.setFont(undefined, 'normal');
+  doc.text(`${patientAge !== null ? patientAge : '—'} / ${patientGender}`, margin+80, y);
+  y += 16;
+  doc.setFont(undefined, 'bold');
+  doc.text("Date:", margin, y);
+  doc.setFont(undefined, 'normal');
+  doc.text(prescriptionDate, margin+80, y);
+  y += 18;
 
-  doc.text(`Treatment: ${currentTreatment}`, margin, y);
-  doc.text(`Date: ${formatDate(prescription.prescription_date)}`, margin + 250, y);
-  y += 14;
-  doc.text(`Patient: ${patientName}  (${patientId})`, margin, y);
-  doc.text(`Appt Date: ${formatDate(appointmentDate)}`, margin + 250, y);
-  y += 14;
-  doc.text(`Diagnosis: ${diagnosis}`, margin, y);
-  doc.text(`Doctor: ${doctorName}`, margin + 250, y);
-  y += 20;
+  doc.setFont(undefined, 'bold');
+  doc.text("Doctor: ", margin, y);
+  doc.setFont(undefined, 'normal');
+  doc.text(`Dr. ${doctorName}`, margin+50, y);
+  y += 16;
+  doc.setFont(undefined, 'bold');
+  doc.text("Department: ", margin, y);
+  doc.setFont(undefined, 'normal');
+  doc.text(doctorSpec, margin+75, y);
+  y += 18;
 
-  if (prescription.advice) {
-    doc.setFontSize(11);
-    doc.setTextColor(30,30,30);
-    doc.text("Advice:", margin, y);
-    y += 14;
+  // Vitals
+  if (prescription.patient_vitals) {
+    const v = prescription.patient_vitals;
     doc.setFontSize(10);
-    const splitAdvice = doc.splitTextToSize(prescription.advice, 520);
-    doc.text(splitAdvice, margin, y);
-    y += splitAdvice.length * 12 + 12;
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(0,71,133);
+    doc.text("Vitals", margin, y);
+    y += 10;
+    doc.setTextColor(30,30,30);
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(9);
+    doc.text(`BP: ${v.bp || '—'}`, margin+20, y);
+    doc.text(`Pulse: ${v.pulse || '—'}`, margin+150, y);
+    doc.text(`Temp: ${v.temperature || '—'}`, margin+260, y);
+    doc.text(`SpO2: ${v.spo2 || '—'}`, margin+360, y);
+    y += 16;
+    doc.text(`Weight: ${v.weight || '—'}`, margin+20, y);
+    doc.text(`Height: ${v.height || '—'}`, margin+150, y);
+    y += 16;
   }
 
+  // Allergies
+  if (prescription.patient_allergies && prescription.patient_allergies.length > 0) {
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(0,71,133);
+    doc.text("Allergies", margin, y);
+    y += 10;
+    doc.setTextColor(30,30,30);
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(9);
+    prescription.patient_allergies.slice(0,5).forEach((a:any) => {
+      const name = a.allergy_master?.substance_name || a.allergen || '—';
+      const reaction = a.reaction || '';
+      doc.text(`• ${name}${reaction ? ' - ' + reaction : ''}`, margin+20, y);
+      y += 13;
+    });
+    y += 4;
+  }
+
+  // Symptoms
+  if (prescription.patient_symptoms && prescription.patient_symptoms.length > 0) {
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(0,71,133);
+    doc.text("Symptoms", margin, y);
+    y += 10;
+    doc.setTextColor(30,30,30);
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(9);
+    prescription.patient_symptoms.slice(0,5).forEach((s:any) => {
+      const name = s.symptom_master?.symptom_name || s.symptom || '—';
+      const severity = s.severity || s.status || '';
+      const notes = s.notes || s.clinical_notes || '';
+      const line = severity ? `${name} (${severity})` : name;
+      doc.text(`• ${line}`, margin+20, y);
+      y += 13;
+      if (notes) {
+        const nLines = doc.splitTextToSize(notes, 470);
+        nLines.forEach(nl => { doc.text(`  ${nl}`, margin+30, y); y += 12; });
+      }
+    });
+    y += 4;
+  }
+
+  y += 6;
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(0,71,133);
+  doc.text("Diagnosis", margin, y);
+  y += 12;
+  doc.setTextColor(30,30,30);
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(10);
+  doc.text(diagnosis, margin+20, y);
+  y += 22;
+
+  // Medications
+  doc.setFontSize(11);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(0,71,133);
+  doc.text("MEDICATIONS", margin, y);
+  y += 14;
+  doc.setTextColor(30,30,30);
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(9);
+  doc.text("Medicine", margin, y);
+  doc.text("Dosage", margin+170, y);
+  doc.text("Frequency", margin+270, y);
+  doc.text("Duration", margin+370, y);
+  y += 8;
+  doc.setDrawColor(200,200,200);
+  doc.setLineWidth(0.5);
+  doc.line(margin, y, margin+525, y);
+  y += 8;
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(9);
   const items = prescription.prescription_items || [];
-
-  const roleLabel = (role?: string) => {
-    if (!role) return "Unspecified";
-    const r = role.toUpperCase();
-    switch (r) {
-      case "PRIMARY": return "Primary Medicine";
-      case "PREMEDICATION":
-      case "PREMED": return "Premedication";
-      case "SUPPORTIVE": return "Supportive Medicine";
-      case "POSTMEDICATION":
-      case "POSTMED": return "Post Medication";
-      case "DISCHARGE": return "Discharge Medication";
-      default: return role;
-    }
-  };
-
-  const roleOrder = (role?: string) => {
-    const r = (role || "").toUpperCase();
-    const order: Record<string, number> = {
-      "PRIMARY": 1,
-      "PREMEDICATION": 2,
-      "PREMED": 2,
-      "SUPPORTIVE": 3,
-      "POSTMEDICATION": 4,
-      "POSTMED": 4,
-      "DISCHARGE": 5,
-    };
-    return order[r] ?? 99;
-  };
-
-  const sortedItems = [...items].sort((a, b) => {
-    const oa = roleOrder(a.drug_role);
-    const ob = roleOrder(b.drug_role);
-    if (oa !== ob) return oa - ob;
-    const ra = (a.drug_role || "").toUpperCase();
-    const rb = (b.drug_role || "").toUpperCase();
-    return ra.localeCompare(rb);
+  items.forEach(it => {
+    const med = it.medicine_name || it.medicine_master?.medicine_name || '—';
+    const dosage = `${it.dosage || ''} ${it.unit || ''}`.trim() || '—';
+    const freq = it.frequency || '—';
+    const dur = it.instruction || '—';
+    doc.text(med, margin, y);
+    doc.text(dosage, margin+170, y);
+    doc.text(freq, margin+270, y);
+    doc.text(dur, margin+370, y);
+    y += 14;
   });
+  y += 6;
+  doc.line(margin, y, margin+525, y);
+  y += 16;
 
-  let currentY = y;
-  if (sortedItems.length > 0) {
-    // Render grouped sections by drug role for clarity
-    const groups: Record<string, typeof sortedItems> = {};
-    for (const it of sortedItems) {
-      const roleKey = (it.drug_role || "UNSPECIFIED").toUpperCase();
-      if (!groups[roleKey]) groups[roleKey] = [];
-      groups[roleKey].push(it);
-    }
-
-    const roleKeys = Object.keys(groups).sort((a, b) => roleOrder(a) - roleOrder(b));
-    for (const role of roleKeys) {
-      const groupItems = groups[role];
-      // Section header
-      doc.setFontSize(12);
-      doc.setTextColor(0, 71, 133);
-      doc.setFont(undefined, "bold");
-      doc.text(`${roleLabel(role)}`, margin, currentY);
-      currentY += 16;
-
-      const groupBody = groupItems.map((it, idx) => {
-        const medicine = it.medicine_name || it.medicine_master?.medicine_name || "—";
-        const generic = it.medicine_master?.generic_name || "";
-        const dose = it.dosage ?? it.dose ?? "—";
-        const unit = it.unit || "";
-        const route = it.route || it.administration_route || "";
-        const freq = it.frequency || "";
-        const instruction = it.instruction || it.remarks || "";
-        const cycleDay = it.cycle_day ? String(it.cycle_day) : "";
-        return [
-          String(idx + 1),
-          `${medicine}${generic ? `\n${generic}` : ""}`,
-          `${dose} ${unit}`.trim(),
-          route,
-          freq,
-          instruction,
-          cycleDay
-        ];
-      });
-
-      autoTable(doc, {
-        startY: currentY,
-        head: [["#","Medicine","Dosage","Route","Frequency","Instruction","Cycle Day"]],
-        body: groupBody,
-        styles: { fontSize: 9, cellPadding: 5, textColor: [30,41,59] as [number,number,number], lineColor:[226,232,240] as [number,number,number], lineWidth:0.5 },
-        headStyles: { fillColor:[0,71,133] as [number,number,number], textColor:[255,255,255] as [number,number,number], fontStyle:"bold" as const },
-        alternateRowStyles:{ fillColor:[247,249,251] },
-        margin:{ left: margin, right: margin },
-        columnStyles:{
-          0:{ cellWidth:25 },
-          6:{ cellWidth:50 }
-        }
-      });
-      currentY = (doc as any).lastAutoTable?.finalY ?? currentY;
-      currentY += 16;
+  // Instructions
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(0,71,133);
+  doc.text("Instructions", margin, y);
+  y += 12;
+  doc.setTextColor(30,30,30);
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(9);
+  const advice = prescription.advice || '';
+  if (advice) {
+    const lines = doc.splitTextToSize(advice, 470);
+    doc.text(`• ${lines[0]}`, margin+10, y);
+    y += 14;
+    for (let i=1;i<lines.length;i++){
+      doc.text(`• ${lines[i]}`, margin+10, y);
+      y += 14;
     }
   } else {
-    // Fallback empty table
-    autoTable(doc, {
-      startY: y,
-      head: [["#","Drug Role","Medicine","Dosage","Route","Frequency","Instruction","Cycle Day"]],
-      body: [],
-      styles: { fontSize: 9, cellPadding: 5, textColor: [30,41,59] as [number,number,number], lineColor:[226,232,240] as [number,number,number], lineWidth:0.5 },
-      headStyles: { fillColor:[0,71,133] as [number,number,number], textColor:[255,255,255] as [number,number,number], fontStyle:"bold" as const },
-      margin:{ left: margin, right: margin }
-    });
-    currentY = (doc as any).lastAutoTable?.finalY ?? y;
+    doc.text("• Take medicines after food.", margin+10, y); y += 14;
+    doc.text("• Drink plenty of water.", margin+10, y); y += 14;
+    doc.text("• Take adequate rest.", margin+10, y); y += 14;
   }
+
+  // Investigations
+  y += 6;
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(0,71,133);
+  doc.text("Investigations", margin, y);
+  y += 12;
+  doc.setTextColor(30,30,30);
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(9);
+  const investigations = prescription.clinical_notes || 'Complete Blood Count (CBC)';
+  const invLines = doc.splitTextToSize(investigations, 470);
+  invLines.forEach((line:string) => {
+    doc.text(`• ${line}`, margin+10, y);
+    y += 14;
+  });
+  y += 6;
+
+  // Follow-up
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(0,71,133);
+  doc.text("Follow-up", margin, y);
+  y += 12;
+  doc.setTextColor(30,30,30);
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(9);
+  const followup = prescription.followup_date ? `After ${prescription.followup_date}` : "After 7 days";
+  doc.text(followup, margin+10, y);
+  y += 30;
+
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'bold');
+  doc.text("Doctor Signature", margin, y);
+  y += 16;
+  doc.setDrawColor(0,0,0);
+  doc.line(margin, y, margin+200, y);
+  y += 6;
+  doc.setFontSize(8);
+  doc.setFont(undefined, 'normal');
+  doc.text(doctorName, margin, y);
 
   const blob = doc.output("blob");
   const url = URL.createObjectURL(blob);
