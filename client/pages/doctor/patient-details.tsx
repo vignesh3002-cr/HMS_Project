@@ -278,14 +278,7 @@ const MedicationPortal: React.FC<{
             <button onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-slate-500 lg:hidden">
               <i className="fa-solid fa-bars" />
             </button>
-            <button
-              type="button"
-              onClick={goNextTab}
-              className="flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-100"
-            >
-              Next
-              <i className="fa-solid fa-arrow-right text-xs" />
-            </button>
+          
            
           </div>
           <div className="flex items-center gap-5">
@@ -1433,12 +1426,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
       )
         .then((results) => {
           if (cancelled) return;
-          const items = results.filter(Boolean) as LabOrderItemRecord[];
-          if (items.length > 0) {
-            setLabItems(items);
-            return;
-          }
-          fetchAllAndFilter();
+          fetchAllAndFilter(results.filter(Boolean) as LabOrderItemRecord[]);
         })
         .catch(() => { fetchAllAndFilter(); })
         .finally(() => { if (!cancelled) setLabItemsLoading(false); });
@@ -1446,7 +1434,10 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
       fetchAllAndFilter();
     }
 
-    function fetchAllAndFilter() {
+    /* Lab Validation shows ALL reports for this patient regardless of
+       ordered date (past, present, future). The freshly ordered items
+       from this visit are merged in on top so nothing is hidden. */
+    function fetchAllAndFilter(preferred: LabOrderItemRecord[] = []) {
       labOrderItemApi
         .getAll()
         .then((response) => {
@@ -1455,7 +1446,16 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
           const forPatient = allItems.filter(
             (item) => item.lab_order?.patient_history?.patient_id === pid
           );
-          setLabItems(forPatient);
+          const merged = [
+            ...preferred,
+            ...forPatient.filter(
+              (item) =>
+                !preferred.some(
+                  (p) => p.lab_order_item_id === item.lab_order_item_id
+                )
+            ),
+          ];
+          setLabItems(merged);
         })
         .catch((error: any) => {
           if (!cancelled) {
@@ -3883,7 +3883,6 @@ function DischargeDetailsPortal({
 }) {
   const [showHistory, setShowHistory] = useState(false);
   const [showNotesDocs, setShowNotesDocs] = useState(false);
-  const [showOrderSummary, setShowOrderSummary] = useState(false);
   const [planPreview, setPlanPreview] = useState<ChemoPlanPreview | null>(null);
   const [stagingDetail, setStagingDetail] =
     useState<StagingDetailRecord | null>(null);
@@ -4460,9 +4459,9 @@ function DischargeDetailsPortal({
 <div className="border-b border-[#e2e8f0] mb-6">
 <nav className="flex space-x-8">
 {tabs.map((tab) => {
-const isActive = showNotesDocs ? tab === "Notes & Documents" : showHistory ? tab === "History" : showOrderSummary ? tab === "Order Summary" : tab === "Discharge";
+const isActive = showNotesDocs ? tab === "Notes & Documents" : showHistory ? tab === "History" : tab === "Discharge";
 return (
-<button key={tab} type="button" onClick={() => { if (tab === "History") { setShowHistory(true); setShowNotesDocs(false); setShowOrderSummary(false); return; } if (tab === "Notes & Documents") { setShowNotesDocs(true); setShowHistory(false); setShowOrderSummary(false); return; } if (tab === "Order Summary") { setShowHistory(false); setShowNotesDocs(false); setShowOrderSummary(true); return; } setShowHistory(false); setShowNotesDocs(false); setShowOrderSummary(false); if (tab !== "Discharge") { onBack?.(); } }} className={`px-1 py-3 border-b-2 text-sm font-medium transition-colors ${isActive ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
+<button key={tab} type="button" onClick={() => { if (tab === "History") { setShowHistory(true); setShowNotesDocs(false); return; } if (tab === "Notes & Documents") { setShowNotesDocs(true); setShowHistory(false); return; } if (tab === "Order Summary") { onBack?.(); return; } setShowHistory(false); setShowNotesDocs(false); if (tab !== "Discharge") { onBack?.(); } }} className={`px-1 py-3 border-b-2 text-sm font-medium transition-colors ${isActive ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
 {tab}
 </button>
 );
@@ -4488,54 +4487,6 @@ return (
             <HistoryDashboard embedded patientId={patientId} />
           ) : showNotesDocs ? (
             <PatientNotesDocuments embedded patientId={patientId} />
-          ) : showOrderSummary ? (
-          /* =================================================
-              ORDER SUMMARY - ALL recent details of the selected
-              patient fetched from the backend
-          ================================================== */
-          <div className="space-y-6">
-            {planPreviewLoading && (
-              <div className="flex items-center rounded-[12px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
-                <i className="fa-solid fa-circle-notch fa-spin mr-2"></i> Loading recent details…
-              </div>
-            )}
-            {!planPreviewLoading && planPreviewError && (
-              <div className="flex items-center rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                <i className="fa-solid fa-triangle-exclamation mr-2"></i> {planPreviewError}
-              </div>
-            )}
-            {!planPreviewLoading && (planPreview || stagingDetail) && (
-              <>
-                <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                  <SectionHeader icon="fa-solid fa-file-medical" title={`Diagnosis & Staging — ${orderSummaryDiagnosis || "—"}`} badge={stagingDetail?.clinical_stage || planPreview?.clinical_stage || "—"} />
-                  {diagnosisEntries.length > 0 ? renderEntryGrid(diagnosisEntries) : (
-                    <p className="px-6 py-6 text-sm text-slate-400">No diagnosis fields saved yet.</p>
-                  )}
-                </section>
-
-                {derivedEntries.length > 0 && (
-                  <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                    <SectionHeader icon="fa-solid fa-wand-magic-sparkles" title="Auto-Derived Classification" badge="Derived Fields" badgeClass="bg-purple-100 text-purple-700" />
-                    {renderEntryGrid(derivedEntries)}
-                  </section>
-                )}
-
-                {ihc && ihcEntries.length > 0 && (
-                  <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                    <SectionHeader icon="fa-solid fa-microscope" title={`IHC Results${ihc.ihc_id ? ` — ${ihc.ihc_id}` : ""}`} badge={`${ihcEntries.length} Values`} badgeClass="bg-cyan-100 text-cyan-700" />
-                    {renderEntryGrid(ihcEntries)}
-                  </section>
-                )}
-
-                {mol && molecularEntries.length > 0 && (
-                  <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                    <SectionHeader icon="fa-solid fa-dna" title={`Molecular Results${mol.mol_id ? ` — ${mol.mol_id}` : ""}`} badge={`${molecularEntries.length} Values`} badgeClass="bg-emerald-100 text-emerald-700" />
-                    {renderEntryGrid(molecularEntries)}
-                  </section>
-                )}
-              </>
-            )}
-          </div>
           ) : (
           <div className="grid gap-6 xl:grid-cols-3">
             {/* ===================================================

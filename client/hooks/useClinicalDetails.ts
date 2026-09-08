@@ -4,6 +4,7 @@ import {
   getApiErrorMessage,
   type AllergyOption,
   type ComorbidityOption,
+  type DiagnosisCategory,
   type EncounterClinicalDetails,
   type PerformanceStatusOption,
   type SymptomOption,
@@ -44,6 +45,7 @@ interface UseClinicalDetailsResult {
   symptomOptions: SymptomOption[];
   allergyOptions: AllergyOption[];
   comorbidityOptions: ComorbidityOption[];
+  comorbidityCategories: DiagnosisCategory[];
 
   saved: EncounterClinicalDetails | null;
 
@@ -53,6 +55,15 @@ interface UseClinicalDetailsResult {
   saveClinicalDetails: (
     draft: ClinicalDetailsDraft,
   ) => Promise<EncounterClinicalDetails | null>;
+
+  createSymptom: (name: string) => Promise<SymptomOption | null>;
+  createAllergy: (substanceName: string) => Promise<AllergyOption | null>;
+  createComorbidity: (payload: {
+    diagnosisName: string;
+    diagnosisCatogoryId?: string;
+    diagnosisCategory?: string;
+    icdCode?: string;
+  }) => Promise<ComorbidityOption | null>;
 }
 
 const EMPTY_SAVED: EncounterClinicalDetails = {
@@ -74,6 +85,9 @@ export function useClinicalDetails({
   const [allergyOptions, setAllergyOptions] = useState<AllergyOption[]>([]);
   const [comorbidityOptions, setComorbidityOptions] = useState<
     ComorbidityOption[]
+  >([]);
+  const [comorbidityCategories, setComorbidityCategories] = useState<
+    DiagnosisCategory[]
   >([]);
 
   const [saved, setSaved] = useState<EncounterClinicalDetails | null>(null);
@@ -101,6 +115,7 @@ export function useClinicalDetails({
       setSymptomOptions([]);
       setAllergyOptions([]);
       setComorbidityOptions([]);
+      setComorbidityCategories([]);
       setError(null);
       setLoading(false);
       return;
@@ -128,6 +143,7 @@ export function useClinicalDetails({
         if (cancelled) return;
 
         const categories = categoryRes.data.data?.categories ?? [];
+        setComorbidityCategories(categories);
 
         // Skip categories with no id - fetching them would hit the broken
         // "/diagnosis/categories//diagnoses" endpoint (404).
@@ -363,6 +379,89 @@ export function useClinicalDetails({
     [patientId, encounterNo, saved],
   );
 
+  /* ============================================================
+     CUSTOM "OTHERS" CREATION
+     Creates a new master/reference record from free-text input and
+     appends it to the local option list so it is immediately usable
+     (selectable / addable) without a page reload.
+  ============================================================ */
+  const createSymptom = useCallback(
+    async (name: string): Promise<SymptomOption | null> => {
+      try {
+        const response = await clinicalDetailsApi.createCustomSymptom({ name });
+        const created = response.data.data;
+        if (created) {
+          setSymptomOptions((previous) =>
+            previous.some((option) => option.id === created.id)
+              ? previous
+              : [...previous, created],
+          );
+        }
+        return created ?? null;
+      } catch (err) {
+        const message = getApiErrorMessage(err);
+        setError(message);
+        throw new Error(message);
+      }
+    },
+    [],
+  );
+
+  const createAllergy = useCallback(
+    async (substanceName: string): Promise<AllergyOption | null> => {
+      try {
+        const response = await clinicalDetailsApi.createCustomAllergy({
+          substanceName,
+        });
+        const created = response.data.data;
+        if (created) {
+          setAllergyOptions((previous) =>
+            previous.some((option) => option.id === created.id)
+              ? previous
+              : [...previous, created],
+          );
+        }
+        return created ?? null;
+      } catch (err) {
+        const message = getApiErrorMessage(err);
+        setError(message);
+        throw new Error(message);
+      }
+    },
+    [],
+  );
+
+  const createComorbidity = useCallback(
+    async (payload: {
+      diagnosisName: string;
+      diagnosisCatogoryId?: string;
+      diagnosisCategory?: string;
+      icdCode?: string;
+    }): Promise<ComorbidityOption | null> => {
+      try {
+        const response = await clinicalDetailsApi.createCustomComorbidity(
+          payload,
+        );
+        const created = response.data.data;
+        if (created) {
+          setComorbidityOptions((previous) =>
+            previous.some(
+              (option) => option.diagnosis_id === created.diagnosis_id,
+            )
+              ? previous
+              : [...previous, created],
+          );
+        }
+        return created ?? null;
+      } catch (err) {
+        const message = getApiErrorMessage(err);
+        setError(message);
+        throw new Error(message);
+      }
+    },
+    [],
+  );
+
   return {
     loading,
     error,
@@ -371,10 +470,14 @@ export function useClinicalDetails({
     symptomOptions,
     allergyOptions,
     comorbidityOptions,
+    comorbidityCategories,
     saved,
     saving,
     saveError,
     saveSuccess,
     saveClinicalDetails,
+    createSymptom,
+    createAllergy,
+    createComorbidity,
   };
 }

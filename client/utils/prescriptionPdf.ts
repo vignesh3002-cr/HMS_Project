@@ -106,7 +106,7 @@ export function generatePrescriptionPdf(prescription: PrescriptionData) {
 
   // Outer border
   doc.setLineWidth(1);
-  doc.rect(margin - 10, 40, 545, 750);
+  doc.rect(margin - 10, 40, 545, 800);
 
   // Header
   doc.setFontSize(16);
@@ -231,41 +231,120 @@ export function generatePrescriptionPdf(prescription: PrescriptionData) {
   doc.text(diagnosis, margin+20, y);
   y += 22;
 
-  // Medications
+  // Medications grouped by drug_role
+  const items = prescription.prescription_items || [];
+  const roleOrder = ['PRIMARY', 'PREMEDICATION', 'SUPPORTIVE'];
+  const grouped: Record<string, any[]> = {};
+  roleOrder.forEach(r => grouped[r] = []);
+  grouped['OTHER'] = [];
+  items.forEach(it => {
+    const role = (it.drug_role || '').toString().toUpperCase().trim() || 'OTHER';
+    if (roleOrder.includes(role)) grouped[role].push(it);
+    else grouped['OTHER'].push(it);
+  });
+
+  const medLineHeight = 13;
+  const colWidths = {
+    medicine: 150,
+    dosage: 80,
+    frequency: 90,
+    instruction: 180
+  };
+  const colX = {
+    medicine: margin,
+    dosage: margin + 160,
+    frequency: margin + 250,
+    instruction: margin + 350
+  };
+  const maxContentWidth = margin + 525;
+
+  const printWrappedCell = (text: string, x: number, startY: number, maxWidth: number) => {
+    const lines = doc.splitTextToSize(text || '—', maxWidth);
+    lines.forEach((line: string, i: number) => {
+      doc.text(line, x, startY + i * medLineHeight);
+    });
+    return lines.length;
+  };
+
   doc.setFontSize(11);
   doc.setFont(undefined, 'bold');
   doc.setTextColor(0,71,133);
   doc.text("MEDICATIONS", margin, y);
-  y += 14;
+  y += 18;
+
+  doc.setFontSize(9);
   doc.setTextColor(30,30,30);
-  doc.setFont(undefined, 'bold');
-  doc.setFontSize(9);
-  doc.text("Medicine", margin, y);
-  doc.text("Dosage", margin+170, y);
-  doc.text("Frequency", margin+270, y);
-  doc.text("Duration", margin+370, y);
-  y += 8;
-  doc.setDrawColor(200,200,200);
-  doc.setLineWidth(0.5);
-  doc.line(margin, y, margin+525, y);
-  y += 8;
-  doc.setFont(undefined, 'normal');
-  doc.setFontSize(9);
-  const items = prescription.prescription_items || [];
-  items.forEach(it => {
-    const med = it.medicine_name || it.medicine_master?.medicine_name || '—';
-    const dosage = `${it.dosage || ''} ${it.unit || ''}`.trim() || '—';
-    const freq = it.frequency || '—';
-    const dur = it.instruction || '—';
-    doc.text(med, margin, y);
-    doc.text(dosage, margin+170, y);
-    doc.text(freq, margin+270, y);
-    doc.text(dur, margin+370, y);
+  const allRoles = [...roleOrder, 'OTHER'].filter(r => grouped[r].length > 0);
+
+  allRoles.forEach((role, roleIdx) => {
+    if (roleIdx > 0) y += 16;
+
+    // Role banner with breathing room
+    const bannerHeight = 20;
+    doc.setFillColor(230, 242, 255);
+    doc.rect(margin, y, 525, bannerHeight, 'F');
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(0,71,133);
+    doc.setFontSize(10);
+    doc.text(`${role} MEDICATIONS`, margin + 6, y + 13);
+    y += bannerHeight + 8;
+
+    // Table header with light background
+    const headerHeight = 18;
+    doc.setFillColor(245, 247, 250);
+    doc.rect(margin, y, 525, headerHeight, 'F');
+    doc.setTextColor(40,40,40);
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(9);
+    doc.text("Medicine", colX.medicine, y + 12);
+    doc.text("Dosage", colX.dosage, y + 12);
+    doc.text("Frequency", colX.frequency, y + 12);
+    doc.text("Instruction", colX.instruction, y + 12);
+    y += headerHeight + 4;
+    doc.setDrawColor(210,210,210);
+    doc.setLineWidth(0.5);
+    doc.line(margin, y, maxContentWidth, y);
+    y += 6;
+
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(30,30,30);
+
+    grouped[role].forEach(it => {
+      const med = it.medicine_name || it.medicine_master?.medicine_name || '—';
+      const dosage = `${it.dosage || ''} ${it.unit || ''}`.trim() || '—';
+      const freq = it.frequency || '—';
+      const instr = it.instruction || '—';
+
+      const medLines = printWrappedCell(med, colX.medicine, y, colWidths.medicine);
+      const dosLines = printWrappedCell(dosage, colX.dosage, y, colWidths.dosage);
+      const freqLines = printWrappedCell(freq, colX.frequency, y, colWidths.frequency);
+      const instrLines = printWrappedCell(instr, colX.instruction, y, colWidths.instruction);
+
+      const rowHeight = Math.max(medLines, dosLines, freqLines, instrLines) * medLineHeight + 8;
+      // row separator below content
+      doc.setDrawColor(235,235,235);
+      doc.line(margin, y + rowHeight - 6, maxContentWidth, y + rowHeight - 6);
+      y += rowHeight;
+
+      // simple page overflow guard
+      if (y > 790) {
+        doc.addPage();
+        doc.setLineWidth(1);
+        doc.rect(margin - 10, 40, 545, 800);
+        y = 60;
+      }
+    });
+
+    y += 8;
+    doc.setDrawColor(180,180,180);
+    doc.setLineWidth(0.8);
+    doc.line(margin, y, maxContentWidth, y);
     y += 14;
   });
+
+  doc.setTextColor(30,30,30);
   y += 6;
-  doc.line(margin, y, margin+525, y);
-  y += 16;
 
   // Instructions
   doc.setFontSize(10);
