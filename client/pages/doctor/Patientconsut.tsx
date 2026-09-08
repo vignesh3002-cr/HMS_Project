@@ -1,4 +1,4 @@
-import React, {
+﻿import React, {
   useEffect,
   useRef,
   useState,
@@ -3079,10 +3079,11 @@ const Diagnosis: React.FC<{
 
   const [cancerTypes, setCancerTypes] = useState<CancerTypeItem[]>([]);
   const [subtypes, setSubtypes] = useState<CancerSubtypeItem[]>([]);
+  const [diagnosisCatalogReady, setDiagnosisCatalogReady] = useState(false);
 
-  /* Sync the diagnosis selection (cancer_type_id + subtype_id) to
-     localStorage so downstream steps (Treatment Plan) can read the
-     IDs to query regimen protocols from the backend. */
+  /* Sync the diagnosis selection (cancer_type_id + subtype_id +
+     diagnosis_id) to localStorage so downstream steps (Treatment Plan)
+     can read the IDs to query regimen protocols from the backend. */
   useEffect(() => {
     if (!formData.type || !formData.subType) return;
 
@@ -3094,6 +3095,18 @@ const Diagnosis: React.FC<{
     );
 
     if (matchedType && matchedSubtype) {
+      /* Resolve diagnosis_id by matching the subtype's ICD-10 code
+         against the loaded diagnosis catalog. */
+      let diagnosisId = "";
+      const subtypeIcd = matchedSubtype.icd10_subtype?.trim();
+      if (subtypeIcd && diagnosisCatalogRef.current.length > 0) {
+        const match = diagnosisCatalogRef.current.find(
+          (entry) =>
+            entry.icd_code?.toUpperCase() === subtypeIcd.toUpperCase()
+        );
+        if (match) diagnosisId = match.diagnosis_id;
+      }
+
       localStorage.setItem(
         "hms_diagnosis_selection",
         JSON.stringify({
@@ -3101,10 +3114,11 @@ const Diagnosis: React.FC<{
           subtype_id: matchedSubtype.subtype_id,
           cancer_type: matchedType.cancer_type,
           subtype_name: matchedSubtype.subtype_name,
+          diagnosis_id: diagnosisId,
         })
       );
     }
-  }, [formData.type, formData.subType, cancerTypes, subtypes]);
+  }, [formData.type, formData.subType, cancerTypes, subtypes, diagnosisCatalogReady]);
 
   const [stageLabels, setStageLabels] = useState<string[]>([]);
   const [tnmStages, setTnmStages] = useState<string[]>([]);
@@ -3365,6 +3379,7 @@ const Diagnosis: React.FC<{
       .then((diagnoses) => {
         if (cancelled) return;
         diagnosisCatalogRef.current = diagnoses;
+        setDiagnosisCatalogReady(true);
       })
       .catch((error) => {
         console.error("Failed to load diagnosis catalog:", error);
@@ -4967,6 +4982,57 @@ const ChemotherapyOrder: React.FC<{
   );
   const [supportiveDrugs, setSupportiveDrugs] = useState<Drug[]>([]);
 
+  const [currentCycleNumber, setCurrentCycleNumber] = useState<number | null>(null);
+
+  useEffect(() => {
+    const match = cycleDay.match(/Cycle\s+(\d+)/i);
+    if (match) {
+      const cycleNum = Number(match[1]);
+      setCurrentCycleNumber(cycleNum);
+    } else {
+      setCurrentCycleNumber(null);
+    }
+  }, [cycleDay]);
+
+  useEffect(() => {
+    if (!protocolRef.current) return;
+    const protocol = protocolRef.current;
+    const items = protocol.chemotherapy_regimen_protocol_items ?? [];
+    const toDrug = (item: RegimenProtocolDetail["chemotherapy_regimen_protocol_items"][number], index: number): Drug => ({
+      id: index,
+      name:
+        item.medicine_master?.medicine_name ||
+        item.medicine_master?.generic_name ||
+        "",
+      form:
+        item.medicine_master?.dosage_form ||
+        item.administration_route ||
+        "",
+      dose: item.dosage != null ? String(item.dosage) : "",
+      unit:
+        item.dosage_unit ||
+        item.medicine_master?.unit ||
+        "",
+      volume: "",
+    });
+
+    const filteredItems = items.filter((item) => {
+      if (currentCycleNumber === null) return true;
+      return item.cycle_day === currentCycleNumber;
+    });
+
+    setDrugs(
+      filteredItems
+        .filter((item) => item.drug_role === "PRIMARY")
+        .map(toDrug)
+    );
+    setPremedicationDrugs(
+      filteredItems
+        .filter((item) => item.drug_role === "PREMEDICATION")
+        .map(toDrug)
+    );
+  }, [currentCycleNumber]);
+
   const userTouched = useRef({
     cycleDay: false,
     startDate: false,
@@ -5038,7 +5104,7 @@ const ChemotherapyOrder: React.FC<{
     const interval =
       protocol.cycle_interval_days && protocol.cycle_interval_days > 0
         ? protocol.cycle_interval_days
-        : 21;
+        : null;
     const maxCycles =
       protocol.standard_cycles && protocol.standard_cycles > 0
         ? protocol.standard_cycles
@@ -8193,7 +8259,9 @@ const TreatmentPlan: React.FC<{
   patientId?: string;
   measurements?: MeasurementValues;
   onNext?: () => void;
-}> = ({ embedded = false, patientId, measurements, onNext }) => {
+  appointmentId?: string;
+  encounterNo?: string;
+}> = ({ embedded = false, patientId, measurements, onNext, appointmentId, encounterNo }) => {
   const location = useLocation();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""

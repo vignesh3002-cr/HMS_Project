@@ -84,11 +84,15 @@ export function ClinicalDetailsSection({
     symptomOptions,
     allergyOptions,
     comorbidityOptions,
+    comorbidityCategories,
     saved,
     saving,
     saveError,
     saveSuccess,
     saveClinicalDetails,
+    createSymptom,
+    createAllergy,
+    createComorbidity,
   } = useClinicalDetails({ patientId, encounterNo });
 
   const [ecogId, setEcogId] = useState("");
@@ -101,6 +105,22 @@ export function ClinicalDetailsSection({
   const [comorbiditySelections, setComorbiditySelections] = useState<
     ComorbiditySelection[]
   >([]);
+
+  /* "Others" free-text capture state for Symptoms / Allergies / Comorbidities */
+  const [otherSymptom, setOtherSymptom] = useState(false);
+  const [otherSymptomName, setOtherSymptomName] = useState("");
+  const [otherSymptomBusy, setOtherSymptomBusy] = useState(false);
+
+  const [otherAllergy, setOtherAllergy] = useState(false);
+  const [otherAllergyName, setOtherAllergyName] = useState("");
+  const [otherAllergyBusy, setOtherAllergyBusy] = useState(false);
+
+  const [otherComorbidity, setOtherComorbidity] = useState(false);
+  const [otherComorbidityName, setOtherComorbidityName] = useState("");
+  const [otherComorbidityCategory, setOtherComorbidityCategory] = useState(
+    "",
+  );
+  const [otherComorbidityBusy, setOtherComorbidityBusy] = useState(false);
 
   const disabled = loading || saving || !encounterNo || !patientId;
 
@@ -298,6 +318,114 @@ export function ClinicalDetailsSection({
   };
 
   /* ============================================================
+     "Others" custom-create handlers
+     Create a new master/reference record from free text and
+     immediately add it to the current selection.
+  ============================================================ */
+  const handleCreateSymptom = async () => {
+    const name = otherSymptomName.trim();
+    if (!name || otherSymptomBusy || disabled) return;
+    setOtherSymptomBusy(true);
+    try {
+      const created = await createSymptom(name);
+      if (created) {
+        setSymptomSelections((previous) =>
+          previous.some(
+            (selection) => selection.symptomId === String(created.id),
+          )
+            ? previous
+            : [
+                ...previous,
+                {
+                  symptomId: String(created.id),
+                  symptomName: created.name,
+                  severity: "",
+                  durationDays: "",
+                  clinicalNotes: "",
+                },
+              ],
+        );
+        setOtherSymptomName("");
+        setOtherSymptom(false);
+      }
+    } catch {
+      // Error surfaced via hook's error state / toast below.
+    } finally {
+      setOtherSymptomBusy(false);
+    }
+  };
+
+  const handleCreateAllergy = async () => {
+    const substanceName = otherAllergyName.trim();
+    if (!substanceName || otherAllergyBusy || disabled) return;
+    setOtherAllergyBusy(true);
+    try {
+      const created = await createAllergy(substanceName);
+      if (created) {
+        setAllergySelections((previous) =>
+          previous.some(
+            (selection) => selection.allergyId === String(created.id),
+          )
+            ? previous
+            : [
+                ...previous,
+                {
+                  allergyId: String(created.id),
+                  substanceName: created.substance_name,
+                  severity: "",
+                  reaction: "",
+                },
+              ],
+        );
+        setOtherAllergyName("");
+        setOtherAllergy(false);
+      }
+    } catch {
+      // Error surfaced via hook's error state / toast below.
+    } finally {
+      setOtherAllergyBusy(false);
+    }
+  };
+
+  const handleCreateComorbidity = async () => {
+    const diagnosisName = otherComorbidityName.trim();
+    if (!diagnosisName || otherComorbidityBusy || disabled) return;
+    setOtherComorbidityBusy(true);
+    try {
+      const category = comorbidityCategories.find(
+        (item) => item.diagnosis_catogory_id === otherComorbidityCategory,
+      );
+      const created = await createComorbidity({
+        diagnosisName,
+        diagnosisCatogoryId: category?.diagnosis_catogory_id || undefined,
+        diagnosisCategory: category?.diagnosis_category || undefined,
+      });
+      if (created) {
+        setComorbiditySelections((previous) =>
+          previous.some(
+            (selection) => selection.diagnosisId === created.diagnosis_id,
+          )
+            ? previous
+            : [
+                ...previous,
+                {
+                  diagnosisId: created.diagnosis_id,
+                  diagnosisName: created.diagnosis_name,
+                },
+              ],
+        );
+        setOtherComorbidityName("");
+        setOtherComorbidityCategory("");
+        setOtherComorbidity(false);
+      }
+    } catch {
+      // Error surfaced via hook's error state / toast below.
+    } finally {
+      setOtherComorbidityBusy(false);
+    }
+  };
+
+  /* ============================================================
      Save: controlled operation sending the current local state to
      the backend (ordered diff-based sync inside the hook).
   ============================================================ */
@@ -437,8 +565,14 @@ export function ClinicalDetailsSection({
 
           <select
             value=""
-            onChange={(event) => addSymptom(event.target.value)}
-            disabled={disabled || availableSymptoms.length === 0}
+            onChange={(event) => {
+              if (event.target.value === "__OTHER__") {
+                setOtherSymptom(true);
+              } else {
+                addSymptom(event.target.value);
+              }
+            }}
+            disabled={disabled}
             className="h-[26px] w-full appearance-none rounded border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-500 outline-none sm:w-40 disabled:cursor-not-allowed disabled:bg-slate-50"
           >
             <option value="">
@@ -451,8 +585,39 @@ export function ClinicalDetailsSection({
                 {option.name}
               </option>
             ))}
+            <option value="__OTHER__">Others...</option>
           </select>
         </div>
+
+        {/* "Others" free-text input for Symptoms */}
+        {otherSymptom && (
+          <div className="flex w-full items-center gap-2">
+            <input
+              type="text"
+              value={otherSymptomName}
+              onChange={(event) => setOtherSymptomName(event.target.value)}
+              disabled={disabled}
+              placeholder="Enter new symptom"
+              className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-600 outline-none disabled:bg-slate-50"
+            />
+            <button
+              type="button"
+              onClick={handleCreateSymptom}
+              disabled={disabled || otherSymptomBusy || !otherSymptomName.trim()}
+              className="h-7 shrink-0 rounded-md border border-blue-600 bg-white px-3 text-xs font-semibold leading-4 text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {otherSymptomBusy ? "Adding..." : "Add"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setOtherSymptom(false)}
+              disabled={disabled}
+              className="h-7 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
 
         {/* Symptom-specific fields (severity / duration / notes) */}
         {symptomSelections.length > 0 && (
@@ -574,8 +739,14 @@ export function ClinicalDetailsSection({
 
           <select
             value=""
-            onChange={(event) => addAllergy(event.target.value)}
-            disabled={disabled || availableAllergies.length === 0}
+            onChange={(event) => {
+              if (event.target.value === "__OTHER__") {
+                setOtherAllergy(true);
+              } else {
+                addAllergy(event.target.value);
+              }
+            }}
+            disabled={disabled}
             className="h-[26px] w-full appearance-none rounded border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-500 outline-none sm:w-40 disabled:cursor-not-allowed disabled:bg-slate-50"
           >
             <option value="">
@@ -588,8 +759,39 @@ export function ClinicalDetailsSection({
                 {option.substance_name}
               </option>
             ))}
+            <option value="__OTHER__">Others...</option>
           </select>
         </div>
+
+        {/* "Others" free-text input for Allergies */}
+        {otherAllergy && (
+          <div className="flex w-full items-center gap-2">
+            <input
+              type="text"
+              value={otherAllergyName}
+              onChange={(event) => setOtherAllergyName(event.target.value)}
+              disabled={disabled}
+              placeholder="Enter new allergy substance"
+              className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-600 outline-none disabled:bg-slate-50"
+            />
+            <button
+              type="button"
+              onClick={handleCreateAllergy}
+              disabled={disabled || otherAllergyBusy || !otherAllergyName.trim()}
+              className="h-7 shrink-0 rounded-md border border-blue-600 bg-white px-3 text-xs font-semibold leading-4 text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {otherAllergyBusy ? "Adding..." : "Add"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setOtherAllergy(false)}
+              disabled={disabled}
+              className="h-7 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ======================================================
@@ -623,8 +825,14 @@ export function ClinicalDetailsSection({
 
           <select
             value=""
-            onChange={(event) => addComorbidity(event.target.value)}
-            disabled={disabled || availableComorbidities.length === 0}
+            onChange={(event) => {
+              if (event.target.value === "__OTHER__") {
+                setOtherComorbidity(true);
+              } else {
+                addComorbidity(event.target.value);
+              }
+            }}
+            disabled={disabled}
             className="h-[26px] w-full appearance-none rounded border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-500 outline-none sm:w-40 disabled:cursor-not-allowed disabled:bg-slate-50"
           >
             <option value="">
@@ -637,8 +845,65 @@ export function ClinicalDetailsSection({
                 {option.diagnosis_name}
               </option>
             ))}
+            <option value="__OTHER__">Others...</option>
           </select>
         </div>
+
+        {/* "Others" free-text input for Comorbidities */}
+        {otherComorbidity && (
+          <div className="flex w-full flex-col gap-2">
+            <div className="flex w-full items-center gap-2">
+              <input
+                type="text"
+                value={otherComorbidityName}
+                onChange={(event) => setOtherComorbidityName(event.target.value)}
+                disabled={disabled}
+                placeholder="Enter new comorbidity / diagnosis"
+                className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-600 outline-none disabled:bg-slate-50"
+              />
+              <select
+                value={otherComorbidityCategory}
+                onChange={(event) =>
+                  setOtherComorbidityCategory(event.target.value)
+                }
+                disabled={disabled}
+                className="h-7 w-40 shrink-0 appearance-none rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-600 outline-none disabled:bg-slate-50"
+              >
+                <option value="">Select category</option>
+                {comorbidityCategories.map((category) => (
+                  <option
+                    key={category.diagnosis_catogory_id}
+                    value={category.diagnosis_catogory_id}
+                  >
+                    {category.diagnosis_category}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex w-full items-center gap-2">
+              <button
+                type="button"
+                onClick={handleCreateComorbidity}
+                disabled={
+                  disabled ||
+                  otherComorbidityBusy ||
+                  !otherComorbidityName.trim()
+                }
+                className="h-7 shrink-0 rounded-md border border-blue-600 bg-white px-3 text-xs font-semibold leading-4 text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {otherComorbidityBusy ? "Adding..." : "Add"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setOtherComorbidity(false)}
+                disabled={disabled}
+                className="h-7 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* SAVE */}

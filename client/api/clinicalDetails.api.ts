@@ -185,6 +185,21 @@ export interface UpdatePatientComorbidityPayload {
   clinicalNotes?: string;
 }
 
+export interface CreateCustomSymptomPayload {
+  name: string;
+}
+
+export interface CreateCustomAllergyPayload {
+  substanceName: string;
+}
+
+export interface CreateCustomComorbidityPayload {
+  diagnosisName: string;
+  diagnosisCatogoryId?: string;
+  diagnosisCategory?: string;
+  icdCode?: string;
+}
+
 /* ============================================================
    GENERIC RESPONSE SHAPES
 ============================================================ */
@@ -335,6 +350,26 @@ export const clinicalDetailsApi = {
   removePatientComorbidity: (patientId: string, recordId: number) =>
     API.delete<ApiResponse<unknown>>(
       `/clinical-details/patients/${patientId}/comorbidities/${recordId}`,
+    ),
+
+  // ---------------- Custom "Others" master creation ----------------
+
+  createCustomSymptom: (data: CreateCustomSymptomPayload) =>
+    API.post<ApiResponse<SymptomOption>>(
+      "/clinical-details/master/symptoms/custom",
+      data,
+    ),
+
+  createCustomAllergy: (data: CreateCustomAllergyPayload) =>
+    API.post<ApiResponse<AllergyOption>>(
+      "/clinical-details/master/allergies/custom",
+      data,
+    ),
+
+  createCustomComorbidity: (data: CreateCustomComorbidityPayload) =>
+    API.post<ApiResponse<ComorbidityOption>>(
+      "/clinical-details/master/comorbidities/custom",
+      data,
     ),
 };
 
