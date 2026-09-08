@@ -669,7 +669,10 @@ const createChemotherapyPlanForPatient = async (
   );
 
   /* Prefer an existing plan for this patient; creation only happens once
-     per diagnosis so repeated Saves don't stack duplicates. */
+     per diagnosis so repeated Saves don't stack duplicates.
+     When planItems are provided, sync them to the existing plan (delete
+     old items then add new ones) so chemo / premedication / supportive
+     drugs are persisted even when the plan already exists. */
   try {
     const existing = await API.get<{
       success: boolean;
@@ -677,8 +680,39 @@ const createChemotherapyPlanForPatient = async (
     }>("/chemotherapy/plans", {
       params: { patient_id: patientId, page: 1, limit: 1 },
     });
-    const planId = existing.data.data?.[0]?.chemotherapy_plan_id;
-    if (planId) return { planId };
+    const existingPlanId = existing.data.data?.[0]?.chemotherapy_plan_id;
+    if (existingPlanId) {
+      if (planItems && planItems.length > 0) {
+        try {
+          /* Fetch current items so we can remove stale ones. */
+          const planDetail = await API.get<{
+            success: boolean;
+            data: {
+              chemotherapy_plan_items: { chemotherapy_plan_item_id: string }[];
+            };
+          }>(`/chemotherapy/plans/${existingPlanId}`);
+          const currentItems =
+            planDetail.data.data?.chemotherapy_plan_items ?? [];
+          for (const ci of currentItems) {
+            await API.delete(
+              `/chemotherapy/plans/${existingPlanId}/items/${ci.chemotherapy_plan_item_id}`
+            );
+          }
+          for (const pi of planItems) {
+            await API.post(
+              `/chemotherapy/plans/${existingPlanId}/items`,
+              pi
+            );
+          }
+        } catch (syncErr: any) {
+          console.error(
+            "Failed to sync plan items to existing plan:",
+            syncErr?.response?.data?.message ?? syncErr?.message
+          );
+        }
+      }
+      return { planId: existingPlanId };
+    }
   } catch (error) {
     // Missing/incapable plan lookups fall through to creation.
     console.error("Existing plan lookup failed:", error);
@@ -2184,25 +2218,29 @@ const Consultation: React.FC = () => {
 
                     <button
                       onClick={proceedNext}
-                      className="flex h-9 w-[213px] items-center justify-center gap-2 rounded-lg border-0 bg-blue-700 px-[25px] py-[9px] text-sm font-bold leading-5 text-white"
+                      disabled={proceeding}
+                      className="flex h-9 w-[213px] items-center justify-center gap-2 rounded-lg border-0 bg-blue-700 px-[25px] py-[9px] text-sm font-bold leading-5 text-white disabled:cursor-not-allowed disabled:opacity-60"
                     >
-
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="white"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="h-4 w-4"
-                      >
-                        <path d="m9 18 6-6-6-6" />
-                      </svg>
-
-                      <span>
-                        Proceed to Next
-                      </span>
-
+                      {proceeding ? (
+                        "Loading..."
+                      ) : (
+                        <>
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="white"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="h-4 w-4"
+                          >
+                            <path d="m9 18 6-6-6-6" />
+                          </svg>
+                          <span>
+                            Proceed to Next
+                          </span>
+                        </>
+                      )}
                     </button>
 
                   </div>
@@ -3829,10 +3867,11 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
         <div className="mt-12 flex justify-end">
           <button
             type="submit"
-            className="inline-flex items-center justify-center rounded-md border border-transparent bg-[#1d4ed8] px-6 py-3 text-base font-medium text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            disabled={savingDiagnosis}
+            className="inline-flex items-center justify-center rounded-md border border-transparent bg-[#1d4ed8] px-6 py-3 text-base font-medium text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <DoubleArrowIcon />
-            <span className="ml-2">Next</span>
+            <span className="ml-2">{savingDiagnosis ? "Saving..." : "Next"}</span>
           </button>
         </div>
       </form>
@@ -4966,6 +5005,7 @@ const ChemotherapyOrder: React.FC<{
     id: number;
   } | null>(null);
   const [editDraft, setEditDraft] = useState<Drug | null>(null);
+  const [savingPlan, setSavingPlan] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState("");
   const latestCycleRef = useRef<
@@ -5442,7 +5482,9 @@ const ChemotherapyOrder: React.FC<{
     }
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
+    if (savingPlan) return;
+
     if (!resolvedPatientId) {
       setPlanError(
         "Patient is not selected. Open this page from a patient consultation to continue."
@@ -5460,7 +5502,88 @@ const ChemotherapyOrder: React.FC<{
     }
 
     setPlanError("");
-    onNext?.();
+    setSavingPlan(true);
+
+    try {
+      const planItems: Array<{
+        medicine_id: string;
+        drug_role: string;
+        drug_sequence: number;
+        dosage?: number;
+        dosage_unit?: string;
+        administration_route?: string;
+        remarks?: string;
+      }> = [];
+
+      drugs.forEach((drug, index) => {
+        if (drug.medicineId) {
+          planItems.push({
+            medicine_id: drug.medicineId,
+            drug_role: "PRIMARY",
+            drug_sequence: index + 1,
+            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
+            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
+            administration_route: "IV",
+          });
+        }
+      });
+
+      premedicationDrugs.forEach((drug, index) => {
+        if (drug.medicineId) {
+          planItems.push({
+            medicine_id: drug.medicineId,
+            drug_role: "PREMEDICATION",
+            drug_sequence: 90 + index,
+            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
+            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
+            administration_route: "IV",
+          });
+        }
+      });
+
+      supportiveDrugs.forEach((drug, index) => {
+        if (drug.medicineId) {
+          planItems.push({
+            medicine_id: drug.medicineId,
+            drug_role: "SUPPORTIVE",
+            drug_sequence: 100 + index,
+            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
+            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
+            administration_route: "IV",
+          });
+        }
+      });
+
+      const planStartDate =
+        toIsoDate(startDate) ||
+        toIsoDate(
+          localStorage.getItem(`hms_planned_start_date_${resolvedPatientId}`)
+        ) ||
+        toIsoDate(new Date().toISOString());
+
+      const { error } = await createChemotherapyPlanForPatient(
+        resolvedPatientId,
+        planStartDate,
+        planItems.length > 0 ? planItems : undefined,
+        undefined
+      );
+
+      if (error) {
+        setPlanError(error);
+        return;
+      }
+
+      onNext?.();
+    } catch (err: any) {
+      console.error("Failed to save chemotherapy order:", err);
+      setPlanError(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Failed to save chemotherapy order. Please try again."
+      );
+    } finally {
+      setSavingPlan(false);
+    }
   };
 
   const formatDateDMY = (value?: string | null) => {
@@ -6298,13 +6421,17 @@ const ChemotherapyOrder: React.FC<{
             </nav>
 
             {/* Next */}
-            <div className="pb-3">
+            <div className="flex flex-col items-end gap-2 pb-3">
+              {planError && (
+                <div className="text-sm font-medium text-red-600">{planError}</div>
+              )}
               <button
                 type="button"
                 onClick={handleNext}
+                disabled={savingPlan}
                 className="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Next
+                {savingPlan ? "Saving..." : "Next"}
               </button>
             </div>
           </div>
@@ -7279,7 +7406,43 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
     }
 
     setFollowUpError("");
-    onNext?.();
+    setSubmittingFollowUp(true);
+
+    try {
+      const { encounter } = await findActiveEncounter(resolvedPatientId);
+
+      if (encounter?.encounter_no) {
+        const followUpLines: string[] = [];
+        if (nextVisitDate.trim()) followUpLines.push(`Next Visit: ${nextVisitDate}`);
+        if (nextCycle) followUpLines.push(`Next Cycle: ${nextCycle}`);
+        if (plan.trim()) followUpLines.push(`Plan: ${plan}`);
+        if (notes.trim()) followUpLines.push(`Notes: ${notes}`);
+
+        const payload: { advice?: string } = {};
+        const existingAdvice = encounter.advice ?? "";
+        const cleanedAdvice = existingAdvice
+          .replace(/\n*\[Follow Up\][\s\S]*$/, "")
+          .trimEnd();
+        const parts = [cleanedAdvice];
+        if (followUpLines.length > 0) {
+          parts.push("[Follow Up]", ...followUpLines);
+        }
+        payload.advice = parts.filter(Boolean).join("\n\n").trim();
+
+        await encounterApi.update(encounter.encounter_no, payload);
+      }
+
+      onNext?.();
+    } catch (err: any) {
+      console.error("Failed to save follow-up:", err);
+      setFollowUpError(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Failed to save follow-up details. Please try again."
+      );
+    } finally {
+      setSubmittingFollowUp(false);
+    }
   };
 
   const handleViewProfile = () => {
@@ -8156,6 +8319,8 @@ const TreatmentPlan: React.FC<{
   }, []);
 
   const handleNext = async () => {
+    if (saving) return;
+
     if (!resolvedPatientId) {
       setSaveError(
         "Patient is not selected. Open this page from a patient consultation to continue."
@@ -8179,7 +8344,36 @@ const TreatmentPlan: React.FC<{
     }
 
     setSaveError("");
-    onNext?.();
+    setSaving(true);
+
+    try {
+      const planStartDate =
+        toIsoDate(plannedStartDate) ||
+        toIsoDate(new Date().toISOString());
+
+      const { error } = await createChemotherapyPlanForPatient(
+        resolvedPatientId,
+        planStartDate,
+        undefined,
+        undefined
+      );
+
+      if (error) {
+        setSaveError(error);
+        return;
+      }
+
+      onNext?.();
+    } catch (err: any) {
+      console.error("Failed to save treatment plan:", err);
+      setSaveError(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Failed to save treatment plan. Please try again."
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   /* =========================================================
