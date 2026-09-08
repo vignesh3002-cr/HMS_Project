@@ -7438,6 +7438,19 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
       });
   }, [resolvedPatientId]);
 
+  /* Keep the stored next cycle in sync with this selection so the Summary
+     step (which reads localStorage on mount) shows the same value -
+     including "Treatment ends" instead of the stale cycle label. */
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    if (displayedValue.trim()) {
+      localStorage.setItem(
+        `hms_next_cycle_${resolvedPatientId}`,
+        displayedValue
+      );
+    }
+  }, [displayedValue, resolvedPatientId]);
+
   const handleBack = () => {
     window.history.back();
   };
