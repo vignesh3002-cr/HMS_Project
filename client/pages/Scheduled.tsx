@@ -1,6 +1,8 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { format } from "date-fns";
+import { parseDate, calculateYearsSince } from "@/utils/parseDate";
+import { formatLicenseNo, formatMobile } from "@/utils/formatters";
 import {
   User, IdCard, Phone, Mail, MapPin, Cake, Droplet,
   VenusAndMars, Briefcase, X, Loader2, Star, CalendarOff,
@@ -188,8 +190,8 @@ export default function DoctorProfile() {
     toast({ description: message, ...(variant === "destructive" ? { variant } : {}) });
   };
 
-  const [activeTab, setActiveTab] = useState(() =>
-    location.pathname.includes("/doctor/day-view") ? "day" : "week",
+  const [activeTab, setActiveTab] = useState<"day" | "week">(() =>
+    location.pathname.includes("/doctor/week-view") || location.search.includes("view=week") ? "week" : "day",
   );
   const slotModalRef = useRef<ScheduleSlotModalHandle>(null);
   const [fromDate, setFromDate] = useState<Date | null>(null);
@@ -308,12 +310,16 @@ export default function DoctorProfile() {
   );
   const doctorIsAvailable = doctorEmployee?.emp_status === true || doctorDetail?.user?.user_status === 0;
   const doctorPhoto = doctorEmployee?.employee_photo_URL || "";
-  const doctorLicenseNo = doctorDetail?.doctorProfile?.license_no || doctorEmployee?.license_no || "—";
-  const doctorPhone = doctorEmployee?.mobile_no || "—";
+  const doctorLicenseNo = formatLicenseNo(doctorDetail?.doctorProfile?.license_no || doctorEmployee?.license_no || "—");
+  const doctorPhone = formatMobile(doctorEmployee?.mobile_no || "—");
   const doctorEmail = doctorEmployee?.email || "—";
   const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanent_address || "—";
   const doctorBloodGroup = doctorEmployee?.blood_group || "—";
-  const doctorExperience = doctorEmployee?.employee_no_experence != null ? `${doctorEmployee.employee_no_experence}+ yrs` : "—";
+  const priorExperience = doctorEmployee?.employee_no_experence != null ? Number(doctorEmployee.employee_no_experence) || 0 : 0;
+  const joiningDate = doctorEmployee?.joining_date ? parseDate(doctorEmployee.joining_date) : null;
+  const yearsSinceJoining = calculateYearsSince(joiningDate);
+  const totalExperience = priorExperience + yearsSinceJoining;
+  const doctorExperience = totalExperience > 0 ? `${totalExperience}+ yrs` : "—";
   const doctorDOB = (doctorEmployee as any)?.dob
     ? format(new Date((doctorEmployee as any).dob), "dd MMM yyyy")
     : "—";
@@ -330,10 +336,12 @@ export default function DoctorProfile() {
     WEEK_DAYS.forEach(([day]) => {
       map[day.toUpperCase()] = [];
     });
-    doctorSchedules.forEach((s) => {
-      const key = (s.day_of_week || "").toUpperCase();
-      if (!(key in map)) return;
-      map[key].push({
+    doctorSchedules
+      .filter((s) => s.is_active !== false)
+      .forEach((s) => {
+        const key = (s.day_of_week || "").toUpperCase();
+        if (!(key in map)) return;
+        map[key].push({
         time: `${formatScheduleTime(s.start_time)} - ${formatScheduleTime(s.end_time)}`,
         branch: s.branch?.branch_name || "",
         branchId: s.branch_id,
@@ -402,7 +410,9 @@ export default function DoctorProfile() {
 
     const perDay: WeekBlock[][] = WEEK_DAYS.map((_, dayIdx) => {
       const iso = weekDateToISO(weekDates[dayIdx]);
-      const dayChanges = weekChanges.filter((c) => normalizeChangeDate(c.change_date) === iso);
+      const dayChanges = weekChanges.filter(
+        (c) => normalizeChangeDate(c.change_date) === iso && c.is_active !== false,
+      );
 
       const cancelChange = dayChanges.find((c) => c.mode === "CANCEL");
       if (cancelChange) {
@@ -526,6 +536,7 @@ export default function DoctorProfile() {
     changeId,
     transferReason,
     bypassPending,
+    consultationMinutes,
   }: {
     day: string;
     date: string;
@@ -536,6 +547,7 @@ export default function DoctorProfile() {
     changeId?: string | number | null;
     transferReason?: string;
     bypassPending?: boolean;
+    consultationMinutes?: number | null;
   }): Promise<boolean> => {
     if (!date) {
       showAlert("Date is required.", "destructive");
@@ -633,6 +645,8 @@ export default function DoctorProfile() {
           end_time: changeMode === "CANCEL" ? undefined : endTime,
           reason: transferReason?.trim(),
           change_id: changeId != null ? Number(changeId) : undefined,
+          consultation_minutes:
+            consultationMinutes != null ? Number(consultationMinutes) : undefined,
         },
       }, bypassPending);
 
@@ -678,6 +692,8 @@ export default function DoctorProfile() {
         changeMode: payload.changeMode,
         transferReason: payload.transferReason,
         bypassPending: payload.bypassPending,
+        consultationMinutes:
+          payload.consultationMinutes != null ? Number(payload.consultationMinutes) : null,
       });
     }
 
@@ -743,6 +759,8 @@ export default function DoctorProfile() {
         changeId: payload.changeId,
         transferReason: payload.transferReason,
         bypassPending: payload.bypassPending,
+        consultationMinutes:
+          payload.consultationMinutes != null ? Number(payload.consultationMinutes) : null,
       });
     }
 
@@ -779,10 +797,14 @@ export default function DoctorProfile() {
         await refetchWeekChanges();
         showAlert("Schedule slot removed.");
       } else if (payload.scheduleId != null) {
-        const slot = doctorSchedules.find(
-          (s) => String(s.schedule_id) === String(payload.scheduleId),
-        );
+        const slot = doctorSchedules
+          .filter((s) => s.is_active !== false)
+          .find((s) => String(s.schedule_id) === String(payload.scheduleId));
         const slotBranchId = slot?.branch_id;
+        if (!slot) {
+          showAlert("This schedule slot is already inactive.", "destructive");
+          return;
+        }
         if (!slotBranchId) {
           showAlert("Unable to resolve the branch for this schedule slot.", "destructive");
           return;
@@ -828,16 +850,29 @@ export default function DoctorProfile() {
     if (activeTab === "week" && weekDateToISO(weekDates[colIndex]) < todayIso) return;
     const cell = (activeTab === "week" ? weekSchedule : schedule)[rowIndex]?.[colIndex] as any[] | undefined;
     if (!cell) return;
-    slotModalRef.current?.openCancelSlot(
-      WEEK_DAYS[colIndex][0],
-      rowIndex,
-      colIndex,
-      cell[0],
-      cell[2],
-      cell[3] ?? null,
-      cell[7] ?? null,
-      cell[8],
-    );
+    if (activeTab === "week") {
+      slotModalRef.current?.openCancelSlot(
+        WEEK_DAYS[colIndex][0],
+        rowIndex,
+        colIndex,
+        cell[0],
+        cell[2],
+        cell[3] ?? null,
+        cell[7] ?? null,
+        cell[8],
+      );
+    } else {
+      slotModalRef.current?.openCancelSlot(
+        WEEK_DAYS[colIndex][0],
+        rowIndex,
+        colIndex,
+        cell[0],
+        cell[2],
+        cell[3] ?? null,
+        null,
+        null,
+      );
+    }
   };
 
   const showDelete = canManageSchedule && (activeTab !== "week" || weekDates.some((date) => weekDateToISO(date) >= todayIso));
@@ -1495,7 +1530,7 @@ export default function DoctorProfile() {
                                       : "border-l-[#A8720F] bg-[#FCF3E4] text-[#A8720F] hover:bg-[#FAEBD3]"
                                   }`}
                                 >
-                                  {showDelete && (
+                                  {showDelete && !(activeTab === "week" && type === "template") && (
                                     <button
                                       type="button"
                                       title={activeTab === "week" && changeId != null ? "Remove this date change" : "Delete slot"}
@@ -1913,7 +1948,7 @@ export default function DoctorProfile() {
         onUpdateSlot={handleUpdateSlot}
         onCancelSlot={handleCancelSlot}
         isSubmitting={savingSlot}
-        showBypassOption={viewerIsAdmin}
+        showBypassOption={false}
       />
     </div>
   );

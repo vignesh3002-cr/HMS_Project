@@ -12,6 +12,7 @@ export interface ScheduleChangeRecord {
   end_time: string | null;
   reason: string | null;
   is_active: boolean;
+  consultation_minutes?: number | null;
   created_by: string | null;
   created_at: string;
   updated_at: string | null;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import {
   ArrowLeft,
@@ -16,45 +16,131 @@ import {
   Calendar,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { FormDropdown } from "@/components/ui/form-dropdown";
+import { FormProtocolDropdown } from "@/components/ui/form-protocol-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
-import { chemotherapyApi } from "@/api/chemotherapy.api";
+import { chemotherapyApi, MedicineOption, RegimenProtocolDilutionInput, DischargeInstructionInput } from "@/api/chemotherapy.api";
 import { format, addDays, parseISO, isValid } from "date-fns";
 
-// Shared styling tokens - matches PatientRegistrationForm / Addemployee conventions
+// Styling tokens - merged from the mFOLFOX6 "Protocol Builder" mockup:
+// soft grey canvas, white cards with hairline borders, muted uppercase grid
+// headers, borderless cell inputs that reveal a border on hover/focus.
+const cardCls = "bg-white border border-[#e1e7ee] rounded-2xl overflow-hidden w-full";
 const inputCls =
-  "w-full h-10 px-4 bg-white border border-gray-200 rounded-xl text-[13.5px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-[3px] focus:ring-blue-500/15 focus:border-blue-500 transition-all duration-200 disabled:bg-gray-50 disabled:text-gray-400";
-const labelCls = "block text-[12.5px] font-semibold text-gray-700 mb-1.5";
-const Req = () => <span className="text-red-600 ml-0.5">*</span>;
+  "w-full h-10 px-3.5 bg-[#f8fafc] border border-[#dde4ec] rounded-[11px] text-[13.5px] text-[#17212e] placeholder:text-[#a7b2bf] outline-none transition-all duration-150 hover:border-[#c7d2dd] hover:bg-[#f5f8fb] focus:border-[#12335c] focus:bg-white focus:ring-[3px] focus:ring-[#12335c]/15 disabled:bg-[#f1f3f5] disabled:text-[#9aa5b1] disabled:cursor-not-allowed";
+const labelCls = "block text-[12.5px] font-semibold text-[#5b6b7c] mb-[7px]";
+const Req = () => <span className="text-[#c0374a] ml-0.5">*</span>;
+
+const ptGridWrap = "overflow-x-auto w-full px-5 pt-4";
+const ptGridBox = "min-w-[900px] border border-[#edf1f5] rounded-xl bg-white";
+const ptGridHead =
+  "grid items-center gap-2.5 px-4 py-3 bg-[#f7f9fb] border-b border-[#edf1f5] text-[10.5px] font-bold uppercase tracking-[0.05em] text-[#8a97a6]";
+const ptGridRow =
+  "grid items-center gap-2.5 px-4 py-3 border-b border-[#edf1f5] last:border-0 hover:bg-[#f8f9fb] transition-colors";
+const ptInput =
+  "w-full h-[34px] px-2.5 bg-transparent border border-transparent rounded-lg text-[12.5px] text-[#17212e] placeholder:text-[#aeb8c3] transition-all duration-150 hover:border-[#dde4ec] hover:bg-[#f8fafc] focus:border-[#12335c] focus:bg-white focus:ring-[3px] focus:ring-[#12335c]/15 focus:outline-none disabled:bg-transparent disabled:text-[#5b6b7c] disabled:cursor-not-allowed";
+
+function ProtocolGridTable({
+  columns,
+  template,
+  rows,
+  addLabel,
+  onAdd,
+  disabled,
+  addClassName = "text-[#12335c] hover:bg-[#eaf0f7]",
+  boxClassName = ptGridBox,
+}: {
+  columns: string[];
+  template: string;
+  rows: React.ReactNode[][];
+  addLabel: string;
+  onAdd: () => void;
+  disabled?: boolean;
+  addClassName?: string;
+  boxClassName?: string;
+}) {
+  return (
+    <>
+      <div className={ptGridWrap}>
+        <div className={boxClassName}>
+          <div className={ptGridHead} style={{ gridTemplateColumns: template }}>
+            {columns.map((c, i) => (
+              <div key={i} className={i === 0 ? "text-center" : ""}>
+                {c}
+              </div>
+            ))}
+          </div>
+          {rows.map((cells, ri) => (
+            <div key={ri} className={ptGridRow} style={{ gridTemplateColumns: template }}>
+              {cells.map((cell, ci) => (
+                <div key={ci} className={ci === 0 ? "text-center font-semibold text-[#8a97a6]" : ""}>
+                  {cell}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div
+        className={`text-center py-[13px] bg-[#fafbfc] font-bold text-[13px] cursor-pointer border-t border-[#edf1f5] transition-colors ${addClassName}`}
+        onClick={() => !disabled && onAdd()}
+      >
+        {addLabel}
+      </div>
+    </>
+  );
+}
+
+interface DilutionDetail {
+  dilutionId: string;
+  id: string;
+  medication: string;
+  form: string;
+  dose: string;
+  unit: string;
+  volume: string;
+  volumeUnit: string;
+  diluent: string;
+}
+
+const isLegacyDilution = (item: any) =>
+  item.drug_role === "SUPPORTIVE" &&
+  (item.dosage != null || item.dosage_unit != null) &&
+  !item.administration_detail &&
+  !item.remarks;
 
 interface Premed {
+  id: string;
   medication: string;
+  dose: string;
+  unit: string;
   adminNotes: string;
   remarks: string;
+  dilutions?: DilutionDetail[];
 }
 interface ChemoPlan {
+  id: string;
   medication: string;
   doseCalc: string;
   dose: string;
-  route: string;
-  frequency: string;
+  unit: string;
+  patientDose: string;
+  patientUnit: string;
   adminNotes: string;
   toxicity: string;
   remarks: string;
+  dilutions?: DilutionDetail[];
 }
 interface SupportiveCare {
-  item: string;
-  instructions: string;
-}
-interface DilutionDetail {
+  id: string;
   medication: string;
-  volume: string;
-  diluent: string;
+  adminNotes: string;
+  remarks: string;
+  dilutions?: DilutionDetail[];
 }
 interface PostTreatment {
+  id: string;
   form: string;
   medication: string;
-  strength: string;
   dose: string;
   unit: string;
   frequency: string;
@@ -63,7 +149,9 @@ interface PostTreatment {
   remarks: string;
 }
 
-const TREATMENT_INTENT_OPTIONS = ["curative", "palliative", "adjuvant", "neoadjuvant", "maintenance"];
+
+
+const DOSE_CALC_OPTIONS = ["BSA", "IBW", "BMI", "AUC 1.5", "AUC 2", "AUC 5", "KG", "Fixed Dose"];
 
 export default function CreateProtocol() {
   const navigate = useNavigate();
@@ -81,16 +169,61 @@ export default function CreateProtocol() {
   const [regimenName, setRegimenName] = useState("");
   const [cancerTypeId, setCancerTypeId] = useState("");
   const [subtypeId, setSubtypeId] = useState("");
-  const [treatmentIntent, setTreatmentIntent] = useState("");
+  
   const [standardCycles, setStandardCycles] = useState<number>(6);
   const [cycleIntervalDays, setCycleIntervalDays] = useState<number>(21);
   const [scheduleDate, setScheduleDate] = useState("");
   const [notes, setNotes] = useState("");
-  const [days, setDays] = useState<Array<{ dayNumber: number; date: string }>>([{ dayNumber: 1, date: "" }]);
+  const [days, setDays] = useState<Array<{ dayNumber: number; date: string; protocolDayId?: string }>>([{ dayNumber: 1, date: "" }]);
   const [activeDay, setActiveDay] = useState(1);
+
+  const emptyPremed = (): Premed => ({ id: "", medication: "", dose: "", unit: "", adminNotes: "", remarks: "", dilutions: [] });
+    const emptyChemo = (): ChemoPlan => ({ id: "", medication: "", doseCalc: "", dose: "", unit: "", patientDose: "", patientUnit: "", adminNotes: "", toxicity: "", remarks: "", dilutions: [] });
+    const emptySupportive = (): SupportiveCare => ({ id: "", medication: "", adminNotes: "", remarks: "", dilutions: [] });
+    const emptyDilution = (): DilutionDetail => ({ dilutionId: "", id: "", medication: "", form: "", dose: "", unit: "", volume: "", volumeUnit: "", diluent: "" });
+    const emptyPost = (): PostTreatment => ({ id: "", form: "", medication: "", dose: "", unit: "", frequency: "", instructions: "", duration: "", remarks: "" });
+
+    // Per-day maps for protocol items (each day owns its own rows; preserves
+    // administration_day per item so repeated edits never re-stamp items onto
+    // a single active day).
+    const [premedsByDay, setPremedsByDay] = useState<Record<number, Premed[]>>({ 1: [emptyPremed()] });
+    const [chemoPlansByDay, setChemoPlansByDay] = useState<Record<number, ChemoPlan[]>>({ 1: [emptyChemo()] });
+    const [supportiveByDay, setSupportiveByDay] = useState<Record<number, SupportiveCare[]>>({ 1: [emptySupportive()] });
+    const [dilutionByDay, setDilutionByDay] = useState<Record<number, DilutionDetail[]>>({ 1: [emptyDilution()] });
+    const [postByDay, setPostByDay] = useState<Record<number, PostTreatment[]>>({ 1: [emptyPost()] });
+
+  // Active-day views + setters - the existing table JSX and row handlers keep
+  // operating on `premeds`/`chemoPlans`/`supportive`/`dilution`, which now
+  // resolve to the currently-selected day's rows.
+  const premeds = premedsByDay[activeDay] ?? [];
+  const setPremeds = (list: Premed[]) => setPremedsByDay((prev) => ({ ...prev, [activeDay]: list }));
+  const chemoPlans = chemoPlansByDay[activeDay] ?? [];
+  const setChemoPlans = (list: ChemoPlan[]) => setChemoPlansByDay((prev) => ({ ...prev, [activeDay]: list }));
+  const supportive = supportiveByDay[activeDay] ?? [];
+    const setSupportive = (list: SupportiveCare[]) => setSupportiveByDay((prev) => ({ ...prev, [activeDay]: list }));
+    const dilution = dilutionByDay[activeDay] ?? [];
+    const setDilution = (list: DilutionDetail[]) => setDilutionByDay((prev) => ({ ...prev, [activeDay]: list }));
+    const post = postByDay[activeDay] ?? [];
+    const setPost = (list: PostTreatment[]) => setPostByDay((prev) => ({ ...prev, [activeDay]: list }));
 
   const [cancerTypes, setCancerTypes] = useState<Array<{ cancer_type_id: string; cancer_type: string }>>([]);
   const [subtypes, setSubtypes] = useState<Array<{ subtype_id: string; subtype_name: string }>>([]);
+  const [premedMeds, setPremedMeds] = useState<MedicineOption[]>([]);
+  const [chemoMeds, setChemoMeds] = useState<MedicineOption[]>([]);
+  const [supportiveMeds, setSupportiveMeds] = useState<MedicineOption[]>([]);
+  const [dilutionMeds, setDilutionMeds] = useState<MedicineOption[]>([]);
+  const [loadingPremedMeds, setLoadingPremedMeds] = useState(false);
+  const [loadingChemoMeds, setLoadingChemoMeds] = useState(false);
+  const [loadingSupportiveMeds, setLoadingSupportiveMeds] = useState(false);
+  const [loadingDilutionMeds, setLoadingDilutionMeds] = useState(false);
+  const [fieldOptions, setFieldOptions] = useState<{
+    dosage_units: string[];
+    dilution_forms: string[];
+    dilution_dose_units: string[];
+    dilution_volume_units: string[];
+    diluents: string[];
+  }>({ dosage_units: [], dilution_forms: [], dilution_dose_units: [], dilution_volume_units: [], diluents: [] });
+  const loadedItemIdsRef = useRef<string[]>([]);
   const [loadingCancerTypes, setLoadingCancerTypes] = useState(false);
   const [loadingProtocol, setLoadingProtocol] = useState(false);
 
@@ -108,22 +241,6 @@ export default function CreateProtocol() {
     setSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
 
-  const [premeds, setPremeds] = useState<Premed[]>([
-    { medication: "", adminNotes: "", remarks: "" },
-  ]);
-  const [chemoPlans, setChemoPlans] = useState<ChemoPlan[]>([
-    { medication: "", doseCalc: "", dose: "", route: "IV", frequency: "", adminNotes: "", toxicity: "", remarks: "" },
-  ]);
-  const [supportive, setSupportive] = useState<SupportiveCare[]>([
-    { item: "", instructions: "" },
-  ]);
-  const [dilution, setDilution] = useState<DilutionDetail[]>([
-    { medication: "", volume: "", diluent: "0.9% NaCl" },
-  ]);
-  const [post, setPost] = useState<PostTreatment[]>([
-    { form: "Tab", medication: "", strength: "", dose: "", unit: "mg", frequency: "", instructions: "", duration: "", remarks: "" },
-  ]);
-
   // Fetch cancer types on mount
   useEffect(() => {
     setLoadingCancerTypes(true);
@@ -136,6 +253,70 @@ export default function CreateProtocol() {
       })
       .catch(() => {})
       .finally(() => setLoadingCancerTypes(false));
+  }, []);
+
+  // Fetch medicines once on mount. PREMEDICATION and PRIMARY (chemo plan)
+  // dropdowns use ALL active medicines; SUPPORTIVE uses only medicines that
+  // appear as SUPPORTIVE drugs in existing protocols; DILUTION uses only
+  // medicines referenced in the dilution table.
+  useEffect(() => {
+    setLoadingPremedMeds(true);
+    setLoadingChemoMeds(true);
+    chemotherapyApi
+      .listMedicines()
+      .then((res) => {
+        const data = (res.data as any)?.data ?? res.data;
+        const list: MedicineOption[] = Array.isArray(data) ? data : [];
+        setPremedMeds(list);
+        setChemoMeds(list);
+      })
+      .catch(() => {
+        setPremedMeds([]);
+        setChemoMeds([]);
+      })
+      .finally(() => {
+        setLoadingPremedMeds(false);
+        setLoadingChemoMeds(false);
+      });
+
+    setLoadingSupportiveMeds(true);
+    chemotherapyApi
+      .listMedicinesByRole("SUPPORTIVE")
+      .then((res) => {
+        const data = (res.data as any)?.data ?? res.data;
+        setSupportiveMeds(Array.isArray(data) ? data : []);
+      })
+      .catch(() => setSupportiveMeds([]))
+      .finally(() => setLoadingSupportiveMeds(false));
+
+    setLoadingDilutionMeds(true);
+    chemotherapyApi
+      .listDilutionMedicines()
+      .then((res) => {
+        const data = (res.data as any)?.data ?? res.data;
+        setDilutionMeds(Array.isArray(data) ? data : []);
+      })
+      .catch(() => setDilutionMeds([]))
+      .finally(() => setLoadingDilutionMeds(false));
+
+  }, []);
+
+  // Fetch distinct option values (FORM / DOSE UNIT / VOLUME UNIT / dosage
+  // unit) from the backend for the protocol-builder dropdowns.
+  useEffect(() => {
+    chemotherapyApi
+      .getProtocolFieldOptions()
+      .then((res) => {
+        const data = (res.data as any)?.data;
+        setFieldOptions({
+          dosage_units: Array.isArray(data?.dosage_units) ? data.dosage_units : [],
+          dilution_forms: Array.isArray(data?.dilution_forms) ? data.dilution_forms : [],
+          dilution_dose_units: Array.isArray(data?.dilution_dose_units) ? data.dilution_dose_units : [],
+          dilution_volume_units: Array.isArray(data?.dilution_volume_units) ? data.dilution_volume_units : [],
+          diluents: Array.isArray(data?.diluents) ? data.diluents : [],
+        });
+      })
+      .catch(() => setFieldOptions({ dosage_units: [], dilution_forms: [], dilution_dose_units: [], dilution_volume_units: [], diluents: [] }));
   }, []);
 
   // Fetch subtypes when cancer type changes - don't clear subtypeId during edit/view initial load
@@ -173,60 +354,170 @@ export default function CreateProtocol() {
         setRegimenName(p.regimen_name ?? (p as any).original_protocol ?? "");
         setCancerTypeId(p.cancer_type_id ?? "");
         setSubtypeId(p.subtype_id ?? "");
-        setTreatmentIntent(p.treatment_intent ?? "");
         setStandardCycles(p.standard_cycles ?? 6);
         setCycleIntervalDays(p.cycle_interval_days ?? p.no_of_days ?? 21);
         setNotes(p.notes ?? (p as any).guideline_source ?? "");
-        const dayCount = p.no_of_days ?? p.chemotherapy_regimen_protocol_days?.length ?? 1;
+        const dbDays: any[] = p.chemotherapy_regimen_protocol_days ?? [];
+        const items: any[] = p.chemotherapy_regimen_protocol_items ?? [];
+        const protocolDilutions: any[] = p.protocol_dilutions ?? [];
+        const protocolDischarge: any[] = p.protocol_discharge_instructions ?? p.chemotherapy_discharge_instructions ?? [];
+        const maxAdminDay = items.reduce((m: number, x: any) => Math.max(m, x.administration_day ?? 1), 1);
+        const maxDilutionDay = Math.max(
+          1,
+          ...protocolDilutions.map((d: any) => d.administration_day ?? 1),
+          ...items.flatMap((x: any) => (x.chemotherapy_protocol_dilutions ?? []).map((d: any) => d.administration_day ?? x.administration_day ?? 1)),
+        );
+        const maxDischargeDay = Math.max(1, ...protocolDischarge.map((d: any) => d.administration_day ?? 1));
+        const dayCount = Math.max(1, Math.min(
+          Math.max(p.no_of_days ?? 1, dbDays.length, maxAdminDay, maxDilutionDay, maxDischargeDay),
+          30,
+        ));
         const baseDateStr = p.created_at ? format(new Date(p.created_at), "yyyy-MM-dd") : "";
-        const loadedDays = Array.from({ length: Math.max(1, Math.min(dayCount, 30)) }, (_, i) => {
+        const loadedDays = Array.from({ length: dayCount }, (_, i) => {
           let d = "";
           if (baseDateStr) {
             try {
               d = format(addDays(parseISO(baseDateStr), i), "yyyy-MM-dd");
             } catch {}
           }
-          return { dayNumber: i + 1, date: d };
+          const dbDay = dbDays.find((x: any) => x.day_number === i + 1);
+          return { dayNumber: i + 1, date: d, protocolDayId: dbDay?.protocol_day_id ?? "" };
         });
         setDays(loadedDays);
         if (loadedDays[0]?.date) setScheduleDate(loadedDays[0].date);
-        const items: any[] = p.chemotherapy_regimen_protocol_items ?? [];
-        if (items.length) {
-          const pre = items
-            .filter((x: any) => x.drug_role === "PREMEDICATION")
-            .map((x: any) => ({ medication: x.medicine_id ?? x.medicine_master?.medicine_name ?? "", adminNotes: x.remarks ?? "", remarks: "" }));
-          const chemo = items
-            .filter((x: any) => x.drug_role === "PRIMARY")
-            .map((x: any) => ({
-              medication: x.medicine_id ?? "",
-              doseCalc: (x as any).dose_calculation_method ?? "",
-              dose: (x.dosage as any) ?? "",
-              route: x.administration_route ?? "IV",
-              frequency: x.frequency ?? "",
-              adminNotes: "",
-              toxicity: "",
-              remarks: x.remarks ?? "",
-            }));
-          const supp = items
-            .filter((x: any) => x.drug_role === "SUPPORTIVE")
-            .map((x: any) => ({ item: x.medicine_id ?? "", instructions: x.remarks ?? "" }));
-          const postM = items
-            .filter((x: any) => x.drug_role === "POSTMEDICATION")
-            .map((x: any) => ({
-              form: "Tab",
-              medication: x.medicine_id ?? "",
-              strength: (x.dosage as any) ?? "",
-              dose: (x.dosage as any) ?? "",
-              unit: x.dosage_unit ?? "mg",
-              frequency: x.frequency ?? "",
-              instructions: x.remarks ?? "",
-              duration: "",
-              remarks: "",
-            }));
-          if (pre.length) setPremeds(pre);
-          if (chemo.length) setChemoPlans(chemo);
-          if (supp.length) setSupportive(supp);
-          if (postM.length) setPost(postM);
+        loadedItemIdsRef.current = items.filter((x: any) => x.protocol_item_id).map((x: any) => x.protocol_item_id as string);
+        if (items.length || protocolDilutions.length || protocolDischarge.length) {
+          const dayOf = (x: any) => Math.min(x.administration_day ?? 1, dayCount);
+          const premedsM: Record<number, Premed[]> = {};
+              const chemoM: Record<number, ChemoPlan[]> = {};
+              const suppM: Record<number, SupportiveCare[]> = {};
+            const diluM: Record<number, DilutionDetail[]> = {};
+          for (const x of items) {
+            const dayIndex = dayOf(x);
+            if (x.drug_role === "PREMEDICATION") {
+              (premedsM[dayIndex] = premedsM[dayIndex] ?? []).push({
+                id: (x.protocol_item_id as string) ?? "",
+                medication: x.medicine_id ?? x.medicine_master?.medicine_name ?? "",
+                dose: (x.patient_dose as any) ?? "",
+                unit: x.patient_dose_unit ?? "",
+                adminNotes: x.administration_detail ?? "",
+                remarks: x.remarks ?? "",
+              });
+            } else if (x.drug_role === "PRIMARY") {
+              (chemoM[dayIndex] = chemoM[dayIndex] ?? []).push({
+                id: (x.protocol_item_id as string) ?? "",
+                medication: x.medicine_id ?? "",
+                doseCalc: (x as any).dose_calculation_method ?? "",
+                dose: (x.dosage as any) ?? "",
+                unit: x.dosage_unit ?? "",
+                patientDose: (x.patient_dose as any) ?? "",
+                patientUnit: x.patient_dose_unit ?? "",
+                adminNotes: x.administration_detail ?? "",
+                toxicity: x.previous_toxicity ?? "",
+                remarks: x.remarks ?? "",
+              });
+            } else if (x.drug_role === "SUPPORTIVE") {
+              const xs: any[] = x.chemotherapy_protocol_dilutions ?? [];
+              if (xs.length) {
+                for (const d of xs) {
+                  const dilutionDay = Math.min(d.administration_day ?? x.administration_day ?? 1, dayCount);
+                  (diluM[dilutionDay] = diluM[dilutionDay] ?? []).push({
+                    dilutionId: (d.protocol_dilution_id as string) ?? "",
+                    id: (x.protocol_item_id as string) ?? "",
+                    medication: d.medicine_id ?? x.medicine_id ?? "",
+                    form: d.form ?? "",
+                    dose: d.dose != null ? String(d.dose) : "",
+                    unit: d.dose_unit ?? "",
+                    volume: d.dilution_volume != null ? String(d.dilution_volume) : "",
+                    volumeUnit: d.dilution_volume_unit ?? "",
+                    diluent: d.diluent ?? "",
+                  });
+                }
+              } else if (isLegacyDilution(x)) {
+                const diluent =
+                  (x.administration_detail ?? "").trim() ||
+                  (typeof x.remarks === "string" ? x.remarks.replace(/^Diluent:\s*/i, "").trim() : "");
+                (diluM[dayIndex] = diluM[dayIndex] ?? []).push({
+                  dilutionId: "",
+                  id: (x.protocol_item_id as string) ?? "",
+                  medication: x.medicine_id ?? "",
+                  form: "",
+                  dose: x.dosage != null ? String(x.dosage) : "",
+                  unit: x.dosage_unit ?? "",
+                  volume: "",
+                  volumeUnit: "",
+                  diluent,
+                });
+              } else {
+                (suppM[dayIndex] = suppM[dayIndex] ?? []).push({
+                  id: (x.protocol_item_id as string) ?? "",
+                  medication: x.medicine_id ?? "",
+                  adminNotes: x.administration_detail ?? "",
+                  remarks: x.remarks ?? "",
+                });
+              }
+            }
+          }
+          // POST-TREATMENT (ON DISCHARGE) medications are persisted in the
+          // chemotherapy_discharge_instructions table (surfaced as
+          // protocol_discharge_instructions). Protocols created before that
+          // switch still carry them as POSTMEDICATION items - fall back to
+          // those so nothing disappears on edit.
+          const dischargeRows: any[] = protocolDischarge;
+          const postM: Record<number, PostTreatment[]> = {};
+          if (dischargeRows.length) {
+            for (const d of dischargeRows) {
+              const dayIndex = Math.min(d.administration_day ?? 1, dayCount);
+              (postM[dayIndex] = postM[dayIndex] ?? []).push({
+                id: (d.discharge_instruction_id as string) ?? "",
+                form: d.drug_from ?? "Tab",
+                medication: d.medicine_id ?? "",
+                dose: d.patient_dose != null ? String(d.patient_dose) : "",
+                unit: d.patient_dose_unit ?? "",
+                frequency: d.frequency ?? "",
+                instructions: d.administration_detail ?? "",
+                duration: d.duration ?? "",
+                remarks: d.comment ?? "",
+              });
+            }
+          } else {
+            for (const x of items.filter((x: any) => x.drug_role === "POSTMEDICATION")) {
+              const dayIndex = Math.min(x.administration_day ?? 1, dayCount);
+              (postM[dayIndex] = postM[dayIndex] ?? []).push({
+                id: (x.protocol_item_id as string) ?? "",
+                form: "Tab",
+                medication: x.medicine_id ?? "",
+                dose: (x.dosage as any) ?? "",
+                unit: x.dosage_unit ?? "",
+                frequency: x.frequency ?? "",
+                instructions: x.administration_detail ?? "",
+                duration: x.administration_day != null ? "Day " + x.administration_day : "",
+                remarks: typeof x.remarks === "string" ? x.remarks : "",
+              });
+            }
+          }
+          const protoDils: any[] = protocolDilutions;
+          if (Object.keys(diluM).length === 0 && protoDils.length) {
+            for (const d of protoDils) {
+              const dilutionDay = Math.min(d.administration_day ?? 1, dayCount);
+              (diluM[dilutionDay] = diluM[dilutionDay] ?? []).push({
+                dilutionId: (d.protocol_dilution_id as string) ?? "",
+                id: (d.protocol_item_id as string) ?? "",
+                medication: d.medicine_id ?? "",
+                form: d.form ?? "",
+                dose: d.dose != null ? String(d.dose) : "",
+                unit: d.dose_unit ?? "",
+                volume: d.dilution_volume != null ? String(d.dilution_volume) : "",
+                volumeUnit: d.dilution_volume_unit ?? "",
+                diluent: d.diluent ?? "",
+              });
+            }
+          }
+          setPremedsByDay(premedsM);
+          setChemoPlansByDay(chemoM);
+          setSupportiveByDay(suppM);
+          setDilutionByDay(diluM);
+          if (Object.keys(postM).length) setPostByDay(postM);
         }
       })
       .catch((e: any) => {
@@ -242,11 +533,11 @@ export default function CreateProtocol() {
       cancerTypeId !== "" ||
       notes.trim() !== "" ||
       days.some((d) => d.date !== "") ||
-      premeds.some((r) => r.medication.trim() !== "") ||
-      chemoPlans.some((r) => r.medication.trim() !== "") ||
-      supportive.some((r) => r.item.trim() !== "") ||
-      dilution.some((r) => r.medication.trim() !== "") ||
-      post.some((r) => r.medication.trim() !== ""));
+      Object.values(premedsByDay).some((r) => r.some((rd) => rd.medication.trim() !== "")) ||
+      Object.values(chemoPlansByDay).some((r) => r.some((rd) => rd.medication.trim() !== "")) ||
+      Object.values(supportiveByDay).some((r) => r.some((rd) => rd.medication.trim() !== "")) ||
+      Object.values(dilutionByDay).some((r) => r.some((rd) => rd.medication.trim() !== "")) ||
+      Object.values(postByDay).some((r) => r.some((rd) => rd.medication.trim() !== "")));
 
   const handleBack = () => {
     if (isDirty) setShowLeaveConfirm(true);
@@ -268,6 +559,11 @@ export default function CreateProtocol() {
       } catch {}
     }
     setDays([...days, { dayNumber: nextNum, date: nextDate }]);
+    setPremedsByDay((prev) => ({ ...prev, [nextNum]: [emptyPremed()] }));
+    setChemoPlansByDay((prev) => ({ ...prev, [nextNum]: [emptyChemo()] }));
+    setSupportiveByDay((prev) => ({ ...prev, [nextNum]: [emptySupportive()] }));
+    setDilutionByDay((prev) => ({ ...prev, [nextNum]: [emptyDilution()] }));
+    setPostByDay((prev) => ({ ...prev, [nextNum]: [emptyPost()] }));
     setActiveDay(nextNum);
   };
   const handleDayDateChange = (dayNumber: number, newDate: string) => {
@@ -279,52 +575,138 @@ export default function CreateProtocol() {
     if (disabled || days.length === 1) return;
     const filtered = days.filter((d) => d.dayNumber !== dayNumber).map((d, i) => ({ ...d, dayNumber: i + 1 }));
     setDays(filtered);
+    const oldNumbers = filtered.map((d) => d.dayNumber);
+    const shift = <T,>(map: Record<number, T[]>): Record<number, T[]> =>
+      Object.fromEntries(oldNumbers.map((old, i) => [i + 1, map[old] ?? []]));
+    setPremedsByDay((prev) => shift(prev));
+    setChemoPlansByDay((prev) => shift(prev));
+    setSupportiveByDay((prev) => shift(prev));
+    setDilutionByDay((prev) => shift(prev));
+    setPostByDay((prev) => shift(prev));
     if (activeDay === dayNumber) setActiveDay(filtered[0].dayNumber);
+    else if (activeDay > dayNumber) setActiveDay(activeDay - 1);
   };
 
   const buildItems = () => {
     const items: Array<{
+      protocol_item_id?: string;
       medicine_id: string;
       drug_role: string;
+      drug_type?: string | null;
       drug_sequence: number;
       dosage?: string | null;
       dosage_unit?: string | null;
-      administration_route?: string | null;
+      dose_calculation_method?: string | null;
       frequency?: string | null;
       remarks?: string | null;
+      patient_dose?: string | null;
+      patient_dose_unit?: string | null;
+      administration_detail?: string | null;
+      previous_toxicity?: string | null;
       administration_day?: number | null;
+      dilutions?: RegimenProtocolDilutionInput[];
     }> = [];
     let seq = 1;
-    for (const row of premeds) {
-      if (!row.medication.trim()) continue;
-      items.push({ medicine_id: row.medication.trim(), drug_role: "PREMEDICATION", drug_sequence: seq++, remarks: [row.adminNotes, row.remarks].filter(Boolean).join(" | ") || null, administration_day: activeDay });
+    for (const day of days) {
+      const dayNum = day.dayNumber;
+      for (const row of premedsByDay[dayNum] ?? []) {
+        if (!row.medication.trim()) continue;
+        items.push({
+          protocol_item_id: row.id || undefined,
+          medicine_id: row.medication.trim(),
+          drug_role: "PREMEDICATION",
+          drug_type: "PREMEDICATION",
+          drug_sequence: seq++,
+          patient_dose: row.dose || null,
+          patient_dose_unit: row.unit || null,
+          administration_detail: row.adminNotes || null,
+          remarks: row.remarks || null,
+          administration_day: dayNum,
+        });
+      }
+      for (const row of chemoPlansByDay[dayNum] ?? []) {
+        if (!row.medication.trim()) continue;
+        items.push({
+          protocol_item_id: row.id || undefined,
+          medicine_id: row.medication.trim(),
+          drug_role: "PRIMARY",
+          drug_type: "PRIMARY",
+          drug_sequence: seq++,
+          dosage: row.dose || null,
+          dosage_unit: row.unit || null,
+          patient_dose: row.patientDose || null,
+          patient_dose_unit: row.patientUnit || null,
+          dose_calculation_method: row.doseCalc || null,
+          previous_toxicity: row.toxicity || null,
+          administration_detail: row.adminNotes || null,
+          remarks: row.remarks || null,
+          administration_day: dayNum,
+        });
+      }
+      for (const row of supportiveByDay[dayNum] ?? []) {
+        if (!row.medication.trim()) continue;
+        items.push({ protocol_item_id: row.id || undefined, medicine_id: row.medication.trim(), drug_role: "SUPPORTIVE", drug_type: "SUPPORTIVE", drug_sequence: seq++, administration_detail: row.adminNotes || null, remarks: row.remarks || null, administration_day: dayNum });
+      }
+      for (const row of dilutionByDay[dayNum] ?? []) {
+        if (!row.medication.trim()) continue;
+        items.push({
+          protocol_item_id: row.id || undefined,
+          medicine_id: row.medication.trim(),
+          drug_role: "SUPPORTIVE",
+          drug_sequence: seq++,
+          dosage: null,
+          dosage_unit: null,
+          administration_detail: null,
+          remarks: null,
+          administration_day: dayNum,
+          dilutions: [{
+            protocol_dilution_id: row.dilutionId || undefined,
+            medicine_id: row.medication.trim(),
+            form: row.form || null,
+            dose: row.dose || null,
+            dose_unit: row.unit || null,
+            dilution_volume: row.volume || null,
+            dilution_volume_unit: row.volumeUnit || null,
+            diluent: row.diluent || null,
+            administration_day: dayNum,
+          }],
+        });
+      }
     }
-    for (const row of chemoPlans) {
-      if (!row.medication.trim()) continue;
-      items.push({ medicine_id: row.medication.trim(), drug_role: "PRIMARY", drug_sequence: seq++, dosage: row.dose || null, dosage_unit: "mg/m²", administration_route: row.route || null, frequency: row.frequency || null, remarks: [row.adminNotes, row.toxicity, row.remarks, row.doseCalc].filter(Boolean).join(" | ") || null, administration_day: activeDay });
-    }
-    for (const row of supportive) {
-      if (!row.item.trim()) continue;
-      items.push({ medicine_id: row.item.trim(), drug_role: "SUPPORTIVE", drug_sequence: seq++, remarks: row.instructions || null, administration_day: activeDay });
-    }
-    for (const row of dilution) {
-      if (!row.medication.trim()) continue;
-      items.push({ medicine_id: row.medication.trim(), drug_role: "SUPPORTIVE", drug_sequence: seq++, dosage: row.volume || null, dosage_unit: "ml", remarks: row.diluent ? `Diluent: ${row.diluent}` : null, administration_day: activeDay });
-    }
-    for (const row of post) {
-      if (!row.medication.trim()) continue;
-      items.push({ medicine_id: row.medication.trim(), drug_role: "POSTMEDICATION", drug_sequence: seq++, dosage: row.dose || row.strength || null, dosage_unit: row.unit || null, frequency: row.frequency || null, remarks: [row.instructions, row.duration ? `${row.duration} days` : "", row.remarks, row.form].filter(Boolean).join(" | ") || null, administration_day: activeDay });
-    }
+    // NOTE: POST-TREATMENT (ON DISCHARGE) medications are NOT protocol items;
+    // they are persisted separately as chemotherapy_discharge_instructions
+    // (see buildDischargeInstructions below).
     return items;
+  };
+
+  const buildDischargeInstructions = (): DischargeInstructionInput[] => {
+    const instructions: DischargeInstructionInput[] = [];
+    let seq = 1;
+    for (const day of days) {
+      const dayNum = day.dayNumber;
+      for (const row of postByDay[dayNum] ?? []) {
+        if (!row.medication.trim()) continue;
+        instructions.push({
+          discharge_instruction_id: row.id || undefined,
+          medicine_id: row.medication.trim(),
+          drug_sequence: seq++,
+          administration_day: dayNum,
+          drug_from: row.form || null,
+          frequency: row.frequency || null,
+          duration: row.duration || null,
+          patient_dose: row.dose ? Number(row.dose) : null,
+          patient_dose_unit: row.unit || null,
+          administration_detail: row.instructions || null,
+          comment: row.remarks || null,
+        });
+      }
+    }
+    return instructions;
   };
 
   const handleSave = async () => {
     if (isViewMode) {
       navigate("/protocol");
-      return;
-    }
-    if (!regimenCode.trim()) {
-      toast({ title: "Missing required field", description: "Regime Name (Regimen Code) is required.", variant: "destructive" });
       return;
     }
     if (!regimenName.trim()) {
@@ -340,24 +722,48 @@ export default function CreateProtocol() {
       toast({ title: "Missing drugs", description: "Add at least one drug with Medication filled.", variant: "destructive" });
       return;
     }
+    const dischargeInstructions = buildDischargeInstructions();
     setIsSubmitting(true);
     try {
       const payload: any = {
-        regimen_code: regimenCode.trim(),
         regimen_name: regimenName.trim(),
         original_protocol: regimenName.trim(),
+        ...(isEditMode ? { regimen_code: regimenCode.trim() } : {}),
         cancer_type_id: cancerTypeId,
         subtype_id: subtypeId || null,
-        treatment_intent: treatmentIntent || null,
         standard_cycles: standardCycles || null,
         cycle_interval_days: cycleIntervalDays || null,
         no_of_days: days.length,
+        days: days.map((d) => ({ protocol_day_id: d.protocolDayId || undefined, day_number: d.dayNumber })),
         notes: notes || null,
         items,
+        discharge_instructions: dischargeInstructions,
       };
       let res: any;
-      if (isEditMode && protocolId) res = await chemotherapyApi.updateRegimenProtocol(protocolId, payload);
-      else res = await chemotherapyApi.createRegimenProtocol(payload);
+      if (isEditMode && protocolId) {
+        const headerPayload: any = { ...payload };
+        delete headerPayload.items;
+        res = await chemotherapyApi.updateRegimenProtocol(protocolId, headerPayload);
+
+        const keptIds = new Set<string>();
+        for (const it of items as any[]) {
+          const itemPayload: any = { ...it };
+          const protocol_item_id: string | undefined = itemPayload.protocol_item_id;
+          delete itemPayload.protocol_item_id;
+          if (protocol_item_id) {
+            keptIds.add(protocol_item_id);
+            await chemotherapyApi.updateRegimenProtocolItem(protocolId, protocol_item_id, itemPayload);
+          } else {
+            await chemotherapyApi.addRegimenProtocolItem(protocolId, itemPayload);
+          }
+        }
+        const removedIds = loadedItemIdsRef.current.filter((id) => !keptIds.has(id));
+        for (const id of removedIds) {
+          await chemotherapyApi.removeRegimenProtocolItem(protocolId, id);
+        }
+      } else {
+        res = await chemotherapyApi.createRegimenProtocol(payload);
+      }
       if ((res.data as any)?.success === false) throw new Error((res.data as any)?.message);
       toast({ title: isEditMode ? "Protocol updated" : "Protocol created", description: `${regimenName} has been ${isEditMode ? "updated" : "saved"} successfully.` });
       navigate("/protocol");
@@ -369,17 +775,17 @@ export default function CreateProtocol() {
     }
   };
 
-  const addPremed = () => setPremeds([...premeds, { medication: "", adminNotes: "", remarks: "" }]);
+  const addPremed = () => setPremeds([...premeds, { id: "", medication: "", dose: "", unit: "", adminNotes: "", remarks: "" }]);
   const removePremed = (idx: number) => setPremeds(premeds.filter((_, i) => i !== idx));
   const addChemoPlan = () =>
-    setChemoPlans([...chemoPlans, { medication: "", doseCalc: "", dose: "", route: "IV", frequency: "", adminNotes: "", toxicity: "", remarks: "" }]);
+    setChemoPlans([...chemoPlans, { id: "", medication: "", doseCalc: "", dose: "", unit: "", patientDose: "", patientUnit: "", adminNotes: "", toxicity: "", remarks: "" }]);
   const removeChemoPlan = (idx: number) => setChemoPlans(chemoPlans.filter((_, i) => i !== idx));
-  const addSupportive = () => setSupportive([...supportive, { item: "", instructions: "" }]);
+  const addSupportive = () => setSupportive([...supportive, { id: "", medication: "", adminNotes: "", remarks: "" }]);
   const removeSupportive = (idx: number) => setSupportive(supportive.filter((_, i) => i !== idx));
-  const addDilution = () => setDilution([...dilution, { medication: "", volume: "", diluent: "0.9% NaCl" }]);
+  const addDilution = () => setDilution([...dilution, { dilutionId: "", id: "", medication: "", form: "", dose: "", unit: "", volume: "", volumeUnit: "", diluent: "" }]);
   const removeDilution = (idx: number) => setDilution(dilution.filter((_, i) => i !== idx));
-  const addPost = () =>
-    setPost([...post, { form: "Tab", medication: "", strength: "", dose: "", unit: "mg", frequency: "", instructions: "", duration: "", remarks: "" }]);
+  const addPost = () => 
+    setPost([...post, { id: "", form: "", medication: "", dose: "", unit: "", frequency: "", instructions: "", duration: "", remarks: "" }]);
   const removePost = (idx: number) => setPost(post.filter((_, i) => i !== idx));
 
   const selectedCancerTypeName = cancerTypes.find((c) => c.cancer_type_id === cancerTypeId)?.cancer_type || "—";
@@ -393,34 +799,37 @@ export default function CreateProtocol() {
 
   if (loadingProtocol) {
     return (
-      <div className="min-h-screen bg-[#f5f7fa] flex items-center justify-center">
+      <div className="min-h-screen bg-[#f4f6f9] flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-[#12335c]" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f7fa] py-7 px-10 w-full">
-      <div className="max-w-full mx-auto w-full">
+    <div
+      className="min-h-screen bg-[#f4f6f9] w-full"
+      style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}
+    >
+      <div className="max-w-[1400px] mx-auto w-full px-10 pt-7 pb-16">
         {/* Top Header */}
-        <div className="flex justify-between items-start mb-6 w-full">
-          <div className="flex gap-4 items-start">
+        <div className="flex justify-between items-start gap-4 mb-[22px] w-full">
+          <div className="flex gap-3.5 items-start">
             <button
               onClick={handleBack}
-              className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-white border border-transparent hover:border-[#e3e8ee] text-[#5b6b7c] hover:text-[#12335c] transition-colors mt-1"
+              className="w-[38px] h-[38px] shrink-0 flex items-center justify-center rounded-[11px] border border-transparent hover:bg-white hover:border-[#e1e7ee] text-[#5b6b7c] hover:text-[#12335c] transition-colors mt-0.5"
               aria-label="Go back"
             >
-              <ArrowLeft className="w-5 h-5" />
+              <ArrowLeft className="w-[19px] h-[19px]" />
             </button>
             <div>
-              <h1 className="text-2xl font-bold text-[#1b2530] m-0">{pageTitle}</h1>
-              <p className="text-[#5b6b7c] text-sm mt-1">{pageSubtitle}</p>
+              <h1 className="text-[23px] font-extrabold text-[#17212e] m-0 tracking-[-0.01em]">{pageTitle}</h1>
+              <p className="text-[#5b6b7c] text-[13.5px] mt-[5px] max-w-[46ch]">{pageSubtitle}</p>
             </div>
           </div>
           <button
             onClick={handleSave}
             disabled={isSubmitting}
-            className="bg-[#12335c] text-white border-none rounded-xl px-6 py-3 text-sm font-semibold flex items-center gap-2 shadow-sm hover:bg-[#0e2848] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            className="bg-[#12335c] text-white border-none rounded-xl px-[22px] py-3 text-[13.5px] font-semibold flex items-center gap-2 shadow-[0_1px_2px_rgba(18,51,92,0.15)] hover:bg-[#0e2848] transition-colors disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
           >
             {isSubmitting ? (
               <>
@@ -439,100 +848,108 @@ export default function CreateProtocol() {
         </div>
 
         {/* Info Bar - dynamic */}
-        <div className="bg-white border border-[#e3e8ee] rounded-xl px-7 py-4 flex justify-between flex-wrap gap-4 mb-5 w-full">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-[#eef2f6] flex items-center justify-center text-[#12335c] flex-shrink-0">
-              <Pill className="w-4 h-4" />
+        <div className="bg-white border border-[#e1e7ee] rounded-2xl px-[26px] py-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 mb-5 w-full">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-[38px] h-[38px] rounded-[11px] bg-[#eaf0f7] flex items-center justify-center text-[#12335c] shrink-0">
+              <Pill className="w-[17px] h-[17px]" />
             </div>
-            <div>
-              <div className="text-sm font-bold text-[#1b2530] leading-tight truncate max-w-[180px]">{regimenName || "New Protocol"}</div>
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-[#17212e] leading-tight truncate">{regimenName || "New Protocol"}</div>
               <div className="text-xs text-[#8a97a6] mt-0.5">Regimen: {regimenCode || "—"}</div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-[#eef2f6] flex items-center justify-center text-[#12335c] flex-shrink-0">
-              <ClipboardList className="w-4 h-4" />
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-[38px] h-[38px] rounded-[11px] bg-[#eaf0f7] flex items-center justify-center text-[#12335c] shrink-0">
+              <ClipboardList className="w-[17px] h-[17px]" />
             </div>
-            <div>
-              <div className="text-sm font-bold text-[#1b2530] leading-tight">{selectedCancerTypeName}</div>
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-[#17212e] leading-tight truncate">{selectedCancerTypeName}</div>
               <div className="text-xs text-[#8a97a6] mt-0.5">Cancer Type</div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-[#eef2f6] flex items-center justify-center text-[#12335c] flex-shrink-0">
-              <Syringe className="w-4 h-4" />
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-[38px] h-[38px] rounded-[11px] bg-[#eaf0f7] flex items-center justify-center text-[#12335c] shrink-0">
+              <Syringe className="w-[17px] h-[17px]" />
             </div>
-            <div>
-              <div className="text-sm font-bold text-[#1b2530] leading-tight">
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-[#17212e] leading-tight truncate">
                 {standardCycles} cycle{standardCycles !== 1 ? "s" : ""} × {cycleIntervalDays} Days
               </div>
               <div className="text-xs text-[#8a97a6] mt-0.5">Regimen Schedule</div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-[#eef2f6] flex items-center justify-center text-[#12335c] flex-shrink-0">
-              <FlaskConical className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-[#1b2530] leading-tight">{treatmentIntent || "—"}</div>
-              <div className="text-xs text-[#8a97a6] mt-0.5">Intent</div>
-            </div>
-          </div>
         </div>
 
-        <div className="flex gap-5 items-start w-full">
-          <div className="flex-1 min-w-0 w-full">
-            {/* Top form card */}
-            <div className="bg-white border border-[#e3e8ee] rounded-xl mb-5 overflow-hidden w-full">
-              <div className="p-6 w-full">
-                <div className="border-b border-[#e3e8ee] pb-4 mb-5 w-full">
+        <div className="w-full">
+          <div className="flex gap-5 items-start w-full mb-5">
+            <div className="flex-1 min-w-0">
+              {/* Top form card */}
+            <div className={cardCls + " mb-5"}>
+              <div className="px-[26px] py-6 w-full">
+                <div className="border-b border-[#edf1f5] pb-5 mb-[22px] w-full">
                   <div className="flex items-center justify-between mb-2">
                     <label className={labelCls + " mb-0"}>Protocol Days</label>
                     {!disabled && <span className="text-[11px] text-[#8a97a6]">{days.length} day(s) — Day 1 date drives subsequent days</span>}
                   </div>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    {days.map((d) => (
-                      <div key={d.dayNumber} className="relative flex flex-col items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setActiveDay(d.dayNumber)}
-                          className={`px-5 py-3 rounded-lg font-bold text-sm text-center leading-tight border transition-colors ${d.dayNumber === activeDay ? "border-[#12335c] bg-[#12335c] text-white" : "border-[#e3e8ee] text-[#5b6b7c] bg-white hover:border-[#12335c]"}`}
-                        >
-                          Day<br />
-                          {d.dayNumber}
-                        </button>
-                        <div className="flex items-center gap-1">
+                  <div className="flex items-stretch gap-3 flex-wrap">
+                    {days.map((d) => {
+                      const isActive = d.dayNumber === activeDay;
+                      const hasDate = d.date && isValid(parseISO(d.date));
+                      return (
+                        <div key={d.dayNumber} className="relative group flex flex-col">
+                          {days.length > 1 && !disabled && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveDay(d.dayNumber)}
+                              title={`Remove Day ${d.dayNumber}`}
+                              aria-label={`Remove Day ${d.dayNumber}`}
+                              className="absolute -top-2 -right-2 z-10 w-5 h-5 rounded-full bg-white border border-[#e3e8ee] shadow-sm flex items-center justify-center text-[#c0374a] text-[13px] leading-none opacity-0 group-hover:opacity-100 hover:bg-[#c0374a] hover:border-[#c0374a] hover:text-white hover:scale-110 transition-all duration-150"
+                            >
+                              ×
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setActiveDay(d.dayNumber)}
+                            className={`w-[118px] flex flex-col items-center px-3 pt-2.5 pb-2 rounded-xl border transition-all duration-200 ${isActive ? "border-[#12335c] bg-gradient-to-b from-[#1c4a80] to-[#12335c] shadow-md shadow-[#12335c]/25" : "border-[#e3e8ee] bg-white hover:border-[#9db4cc] hover:shadow-sm hover:-translate-y-0.5"}`}
+                          >
+                            <span className={`text-[9px] font-bold uppercase tracking-[0.18em] leading-none ${isActive ? "text-blue-100/80" : "text-[#8a97a6]"}`}>
+                              Day
+                            </span>
+                            <span className={`mt-1 text-[20px] font-extrabold leading-none ${isActive ? "text-white" : "text-[#1b2530]"}`}>
+                              {d.dayNumber}
+                            </span>
+                            <span className={`mt-1.5 text-[10px] font-semibold leading-none ${hasDate ? (isActive ? "text-blue-100" : "text-[#5b6b7c]") : "text-[#b6c0cb] italic font-normal"}`}>
+                              {hasDate ? format(parseISO(d.date), "dd MMM yyyy") : "no date"}
+                            </span>
+                          </button>
                           <input
                             type="date"
                             value={d.date}
                             onChange={(e) => handleDayDateChange(d.dayNumber, e.target.value)}
-                            className="w-[132px] h-7 px-2 text-[11px] border border-[#e3e8ee] rounded-md focus:outline-none focus:border-[#12335c] disabled:bg-gray-50"
                             disabled={disabled}
                             title={`Day ${d.dayNumber} date`}
+                            className={`w-[118px] h-7 mt-1.5 px-1.5 text-[11px] rounded-lg border text-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[#12335c]/15 focus:border-[#12335c] ${isActive ? "border-[#12335c]/50 bg-[#f2f6fb] text-[#12335c] font-semibold" : "border-[#e3e8ee] bg-white text-[#5b6b7c] hover:border-[#9db4cc]"} disabled:bg-gray-50 disabled:text-gray-400`}
                           />
-                          {days.length > 1 && !disabled && (
-                            <button type="button" onClick={() => handleRemoveDay(d.dayNumber)} className="w-7 h-7 rounded-md border border-[#e3e8ee] bg-white text-[#c0374a] hover:bg-red-50 text-xs">
-                              ×
-                            </button>
-                          )}
                         </div>
-                        {d.date && isValid(parseISO(d.date)) && <span className="text-[10px] text-[#8a97a6]">{format(parseISO(d.date), "dd MMM")}</span>}
-                      </div>
-                    ))}
+                      );
+                    })}
                     {!disabled && (
                       <button
                         type="button"
                         onClick={handleAddDay}
-                        className="px-4 py-3 rounded-lg font-bold text-sm border border-dashed border-[#12335c] text-[#12335c] bg-[#f8fafc] hover:bg-[#eef2f6] transition-colors flex items-center gap-1.5"
+                        className="w-[118px] rounded-xl border border-dashed border-[#9db4cc] text-[#12335c] bg-[#f8fafc] hover:bg-[#eef2f6] hover:border-[#12335c] transition-all duration-200 flex flex-col items-center justify-center gap-1"
                       >
-                        <Calendar className="w-4 h-4" /> + Add Day
+                        <Calendar className="w-4 h-4" />
+                        <span className="text-xs font-bold">Add Day</span>
+                        <span className="text-[10px] text-[#8a97a6] leading-none">auto-fills date</span>
                       </button>
                     )}
                   </div>
                   <p className="text-[11px] text-[#8a97a6] mt-2">Day 1 empty → new days start empty. If Day 1 has a date, Add Day auto-fills as Day 1 + (n-1) days (tomorrow, etc.). Edit any day’s calendar to override.</p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 w-full">
-                  <div className="lg:col-span-2">
+                  <div className="lg:col-span-1">
                     <label className={labelCls}>
                       Protocol Title (Regimen Name / Original Protocol) <Req />
                     </label>
@@ -546,58 +963,47 @@ export default function CreateProtocol() {
                     />
                     <p className="text-[11px] text-[#8a97a6] mt-1">DB: regimen_name / original_protocol</p>
                   </div>
-                  <div>
-                    <label className={labelCls}>
-                      Regime Name (Regimen Code) <Req />
-                    </label>
-                    <input
-                      type="text"
-                      value={regimenCode}
-                      onChange={(e) => setRegimenCode(e.target.value)}
-                      className={inputCls}
-                      placeholder="e.g. CARBO-AUC5"
-                      disabled={disabled || isEditMode}
-                    />
-                    <p className="text-[11px] text-[#8a97a6] mt-1">DB: regimen_code</p>
-                  </div>
+                  {(isEditMode || isViewMode) && (
+                    <div>
+                      <label className={labelCls}>
+                        Regime Name (Regimen Code)
+                      </label>
+                      <input
+                        type="text"
+                        value={regimenCode}
+                        onChange={(e) => setRegimenCode(e.target.value)}
+                        className={inputCls}
+                        placeholder="e.g. CARBO-AUC5"
+                        disabled={disabled || isEditMode}
+                      />
+                      <p className="text-[11px] text-[#8a97a6] mt-1">DB: regimen_code / auto = protocol_id</p>
+                    </div>
+                  )}
                   <div>
                     <label className={labelCls}>
                       Cancer Type <Req />
                     </label>
-                    <FormDropdown
+                    <FormProtocolDropdown
                       options={cancerTypes.map((c) => ({ label: c.cancer_type, value: c.cancer_type_id }))}
                       value={cancerTypeId}
                       onValueChange={setCancerTypeId}
                       placeholder={loadingCancerTypes ? "Loading..." : "Select cancer type"}
                       disabled={disabled || loadingCancerTypes}
-                      className="h-10"
                     />
                   </div>
                   <div>
                     <label className={labelCls}>Cancer Subtype</label>
-                    <FormDropdown
+                    <FormProtocolDropdown
                       options={subtypes.map((s) => ({ label: s.subtype_name, value: s.subtype_id }))}
                       value={subtypeId}
                       onValueChange={setSubtypeId}
                       placeholder={!cancerTypeId ? "Select cancer type first" : subtypes.length ? "Select subtype" : "No subtypes"}
                       disabled={disabled || !cancerTypeId || subtypes.length === 0}
-                      className="h-10"
-                    />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Treatment Intent</label>
-                    <FormDropdown
-                      options={TREATMENT_INTENT_OPTIONS}
-                      value={treatmentIntent}
-                      onValueChange={setTreatmentIntent}
-                      placeholder="Select intent"
-                      disabled={disabled}
-                      className="h-10"
                     />
                   </div>
                   <div>
                     <label className={labelCls}>Standard Cycles</label>
-                    <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden h-10">
+                    <div className="flex items-center border border-[#dde4ec] rounded-[11px] overflow-hidden h-10 bg-[#f8fafc]">
                       <button
                         type="button"
                         onClick={() => !disabled && setStandardCycles(Math.max(1, standardCycles - 1))}
@@ -619,7 +1025,7 @@ export default function CreateProtocol() {
                   </div>
                   <div>
                     <label className={labelCls}>Cycle Interval (days)</label>
-                    <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden h-10">
+                    <div className="flex items-center border border-[#dde4ec] rounded-[11px] overflow-hidden h-10 bg-[#f8fafc]">
                       <button
                         type="button"
                         onClick={() => !disabled && setCycleIntervalDays(Math.max(1, cycleIntervalDays - 1))}
@@ -657,600 +1063,20 @@ export default function CreateProtocol() {
                 </div>
               </div>
             </div>
-
-            {/* Pre-medications */}
-            <div className="bg-white border border-[#e3e8ee] rounded-xl mb-5 overflow-hidden w-full">
-              <div
-                className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-[#f8f9fa] transition-colors"
-                onClick={() => toggleSection("premeds")}
-              >
-                <div className="flex items-center gap-2.5 text-sm font-bold tracking-wide text-[#1b2530]">
-                  <Pill className="w-4 h-4 text-[#12335c]" /> PRE-MEDICATIONS
-                </div>
-                {sections.premeds ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
-              </div>
-              {sections.premeds && (
-                <>
-                  <div className="overflow-x-auto w-full">
-                    <table className="w-full border-collapse">
-                      <thead>
-                        <tr className="bg-[#f7f9fb]">
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">#</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">
-                            MEDICATION / DRUG <Req />
-                          </th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">ADMINISTRATION NOTES</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">REMARKS</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">ACTIONS</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {premeds.map((row, idx) => (
-                          <tr key={idx}>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm text-[#8a97a6] w-[30px]">{idx + 1}</td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.medication}
-                                onChange={(e) => {
-                                  const n = [...premeds];
-                                  n[idx].medication = e.target.value;
-                                  setPremeds(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c] transition-colors"
-                                placeholder="Medicine ID / name"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.adminNotes}
-                                onChange={(e) => {
-                                  const n = [...premeds];
-                                  n[idx].adminNotes = e.target.value;
-                                  setPremeds(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c] transition-colors"
-                                placeholder="Enter notes"
-                               disabled={disabled} />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.remarks}
-                                onChange={(e) => {
-                                  const n = [...premeds];
-                                  n[idx].remarks = e.target.value;
-                                  setPremeds(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c] transition-colors"
-                                placeholder="Enter remarks"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <button onClick={() => !disabled && removePremed(idx)} disabled={disabled} className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6b7280] hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div
-                    className="text-center py-3.5 bg-[#fafbfc] text-[#12335c] font-bold text-sm cursor-pointer border-t border-[#e3e8ee] hover:bg-[#f0f2f5] transition-colors"
-                    onClick={() => !disabled && addPremed()}
-                  >
-                    + Add Row
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Chemotherapy plan */}
-            <div className="bg-white border border-[#e3e8ee] rounded-xl mb-5 overflow-hidden w-full">
-              <div
-                className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-[#f8f9fa] transition-colors"
-                onClick={() => toggleSection("chemo")}
-              >
-                <div className="flex items-center gap-2.5 text-sm font-bold tracking-wide text-[#1b2530]">
-                  <Syringe className="w-4 h-4 text-[#12335c]" /> CHEMOTHERAPY PLAN
-                </div>
-                {sections.chemo ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
-              </div>
-              {sections.chemo && (
-                <>
-                  <div className="overflow-x-auto w-full">
-                    <table className="w-full border-collapse">
-                      <thead>
-                        <tr className="bg-[#f7f9fb]">
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">#</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">MEDICATION <Req /></th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">DOSE CALC</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">DOSE</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">ROUTE</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">FREQUENCY</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">ADMIN NOTES</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">TOXICITY</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">REMARKS</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">ACTIONS</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {chemoPlans.map((row, idx) => (
-                          <tr key={idx}>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm text-[#8a97a6]">{idx + 1}</td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.medication}
-                                onChange={(e) => {
-                                  const n = [...chemoPlans];
-                                  n[idx].medication = e.target.value;
-                                  setChemoPlans(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="Medicine ID"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.doseCalc}
-                                onChange={(e) => {
-                                  const n = [...chemoPlans];
-                                  n[idx].doseCalc = e.target.value;
-                                  setChemoPlans(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="BSA etc"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.dose}
-                                onChange={(e) => {
-                                  const n = [...chemoPlans];
-                                  n[idx].dose = e.target.value;
-                                  setChemoPlans(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="80 mg/m²"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.route}
-                                onChange={(e) => {
-                                  const n = [...chemoPlans];
-                                  n[idx].route = e.target.value;
-                                  setChemoPlans(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="IV"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.frequency}
-                                onChange={(e) => {
-                                  const n = [...chemoPlans];
-                                  n[idx].frequency = e.target.value;
-                                  setChemoPlans(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="D1"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.adminNotes}
-                                onChange={(e) => {
-                                  const n = [...chemoPlans];
-                                  n[idx].adminNotes = e.target.value;
-                                  setChemoPlans(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="Notes"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.toxicity}
-                                onChange={(e) => {
-                                  const n = [...chemoPlans];
-                                  n[idx].toxicity = e.target.value;
-                                  setChemoPlans(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="Toxicity"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.remarks}
-                                onChange={(e) => {
-                                  const n = [...chemoPlans];
-                                  n[idx].remarks = e.target.value;
-                                  setChemoPlans(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="Remarks"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <button onClick={() => removeChemoPlan(idx)} className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6b7280] hover:text-red-600">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div
-                    className="text-center py-3.5 bg-[#fafbfc] text-[#12335c] font-bold text-sm cursor-pointer border-t border-[#e3e8ee] hover:bg-[#f0f2f5]"
-                    onClick={() => !disabled && addChemoPlan()}
-                  >
-                    + Add Row
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Supportive care */}
-            <div className="bg-white border border-[#e3e8ee] rounded-xl mb-5 overflow-hidden w-full">
-              <div
-                className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-[#f8f9fa]"
-                onClick={() => toggleSection("supportive")}
-              >
-                <div className="flex items-center gap-2.5 text-sm font-bold tracking-wide text-[#1b2530]">
-                  <ShieldPlus className="w-4 h-4 text-[#2f8f5b]" /> SUPPORTIVE CARE
-                </div>
-                {sections.supportive ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
-              </div>
-              {sections.supportive && (
-                <>
-                  <div className="overflow-x-auto w-full">
-                    <table className="w-full border-collapse">
-                      <thead>
-                        <tr className="bg-[#f7f9fb]">
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">#</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">SUPPORTIVE ITEM</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">INSTRUCTIONS</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">ACTIONS</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {supportive.map((row, idx) => (
-                          <tr key={idx}>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm text-[#8a97a6]">{idx + 1}</td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.item}
-                                onChange={(e) => {
-                                  const n = [...supportive];
-                                  n[idx].item = e.target.value;
-                                  setSupportive(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="Item / Medicine ID"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.instructions}
-                                onChange={(e) => {
-                                  const n = [...supportive];
-                                  n[idx].instructions = e.target.value;
-                                  setSupportive(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="Instructions"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <button onClick={() => removeSupportive(idx)} className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6b7280] hover:text-red-600">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="text-center py-3.5 bg-[#fafbfc] text-[#12335c] font-bold text-sm cursor-pointer border-t border-[#e3e8ee] hover:bg-[#f0f2f5]" onClick={() => !disabled && addSupportive()}>
-                    + ADD ROW
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Dilution details */}
-            <div className="bg-white border border-[#e3e8ee] rounded-xl mb-5 overflow-hidden w-full">
-              <div
-                className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-[#f8f9fa]"
-                onClick={() => toggleSection("dilution")}
-              >
-                <div className="flex items-center gap-2.5 text-sm font-bold tracking-wide text-[#1b2530]">
-                  <FlaskConical className="w-4 h-4 text-[#c9822f]" /> DILUTION DETAILS
-                </div>
-                {sections.dilution ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
-              </div>
-              {sections.dilution && (
-                <>
-                  <div className="overflow-x-auto w-full">
-                    <table className="w-full border-collapse">
-                      <thead>
-                        <tr className="bg-[#f7f9fb]">
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">#</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">MEDICATION</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">VOLUME</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">DILUENT</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">ACTIONS</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dilution.map((row, idx) => (
-                          <tr key={idx}>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm text-[#8a97a6]">{idx + 1}</td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.medication}
-                                onChange={(e) => {
-                                  const n = [...dilution];
-                                  n[idx].medication = e.target.value;
-                                  setDilution(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="Medicine ID"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <div className="flex items-center gap-1.5">
-                                <input
-                                  type="text"
-                                  value={row.volume}
-                                  onChange={(e) => {
-                                    const n = [...dilution];
-                                    n[idx].volume = e.target.value;
-                                    setDilution(n);
-                                  }}
-                                  className="w-20 border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                  placeholder="100"
-                                />
-                                <span className="text-sm text-[#5b6b7c]">ml</span>
-                              </div>
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.diluent}
-                                onChange={(e) => {
-                                  const n = [...dilution];
-                                  n[idx].diluent = e.target.value;
-                                  setDilution(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="0.9% NaCl"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <button onClick={() => removeDilution(idx)} className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6b7280] hover:text-red-600">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="text-center py-3.5 bg-[#fafbfc] text-[#12335c] font-bold text-sm cursor-pointer border-t border-[#e3e8ee] hover:bg-[#f0f2f5]" onClick={() => !disabled && addDilution()}>
-                    + ADD ROW
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Post-treatment medications */}
-            <div className="bg-white border border-[#e3e8ee] rounded-xl mb-5 overflow-hidden w-full">
-              <div
-                className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-[#f8f9fa]"
-                onClick={() => toggleSection("post")}
-              >
-                <div className="flex items-center gap-2.5 text-sm font-bold tracking-wide text-[#c0374a]">
-                  <ClipboardList className="w-4 h-4" /> POST-TREATMENT MEDICATIONS (ON DISCHARGE)
-                </div>
-                {sections.post ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
-              </div>
-              {sections.post && (
-                <>
-                  <div className="overflow-x-auto w-full">
-                    <table className="w-full border-collapse">
-                      <thead>
-                        <tr className="bg-[#f7f9fb]">
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">#</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">FORM</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">MEDICATION</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">STRENGTH</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">DOSE</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">UNIT</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">FREQUENCY</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">INSTRUCTIONS</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">DURATION</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">REMARKS</th>
-                          <th className="text-left text-xs font-bold tracking-wide text-[#8a97a6] px-5 py-3 border-t border-b border-[#e3e8ee]">ACTIONS</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {post.map((row, idx) => (
-                          <tr key={idx}>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm text-[#8a97a6]">{idx + 1}</td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.form}
-                                onChange={(e) => {
-                                  const n = [...post];
-                                  n[idx].form = e.target.value;
-                                  setPost(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="Tab"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.medication}
-                                onChange={(e) => {
-                                  const n = [...post];
-                                  n[idx].medication = e.target.value;
-                                  setPost(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="Medicine ID"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <div className="flex items-center gap-1.5">
-                                <input
-                                  type="text"
-                                  value={row.strength}
-                                  onChange={(e) => {
-                                    const n = [...post];
-                                    n[idx].strength = e.target.value;
-                                    setPost(n);
-                                  }}
-                                  className="w-16 border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                  placeholder="4"
-                                />
-                                <span className="text-sm text-[#5b6b7c]">mg</span>
-                              </div>
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <div className="flex items-center gap-1.5">
-                                <input
-                                  type="text"
-                                  value={row.dose}
-                                  onChange={(e) => {
-                                    const n = [...post];
-                                    n[idx].dose = e.target.value;
-                                    setPost(n);
-                                  }}
-                                  className="w-16 border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                  placeholder="4"
-                                />
-                                <span className="text-sm text-[#5b6b7c]">mg</span>
-                              </div>
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.unit}
-                                onChange={(e) => {
-                                  const n = [...post];
-                                  n[idx].unit = e.target.value;
-                                  setPost(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="mg"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.frequency}
-                                onChange={(e) => {
-                                  const n = [...post];
-                                  n[idx].frequency = e.target.value;
-                                  setPost(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="1-0-1"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.instructions}
-                                onChange={(e) => {
-                                  const n = [...post];
-                                  n[idx].instructions = e.target.value;
-                                  setPost(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="After Food"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <div className="flex items-center gap-1.5">
-                                <input
-                                  type="text"
-                                  value={row.duration}
-                                  onChange={(e) => {
-                                    const n = [...post];
-                                    n[idx].duration = e.target.value;
-                                    setPost(n);
-                                  }}
-                                  className="w-16 border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                  placeholder="4"
-                                />
-                                <span className="text-sm text-[#5b6b7c]">days</span>
-                              </div>
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <input
-                                type="text"
-                                value={row.remarks}
-                                onChange={(e) => {
-                                  const n = [...post];
-                                  n[idx].remarks = e.target.value;
-                                  setPost(n);
-                                }}
-                                className="w-full border border-[#e3e8ee] rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12335c]"
-                                placeholder="Remarks"
-                              />
-                            </td>
-                            <td className="px-5 py-3.5 border-b border-[#e3e8ee] text-sm">
-                              <button onClick={() => removePost(idx)} className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6b7280] hover:text-red-600">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="text-center py-3.5 bg-[#fafbfc] text-[#c0374a] font-bold text-sm cursor-pointer border-t border-[#e3e8ee] hover:bg-[#f5f0f0]" onClick={() => !disabled && addPost()}>
-                    + Add Row
-                  </div>
-                </>
-              )}
-            </div>
           </div>
 
           {/* Right sidebar */}
-          <div className="w-72 flex-shrink-0">
-            <div className="bg-white border border-[#e3e8ee] rounded-xl overflow-hidden sticky top-5">
-              <div className="bg-[#f2f5f9] px-6 py-5 flex justify-between items-start">
-                <div className="text-base font-extrabold leading-tight text-[#1b2530]">
+          <div className="w-[280px] shrink-0">
+            <div className={cardCls + " sticky top-5"}>
+              <div className="bg-[#eaf0f7] px-6 py-5 flex justify-between items-start">
+                <div className="text-[15px] font-extrabold leading-[1.3] text-[#12335c]">
                   PROTOCOL
                   <br />
                   SUMMARY
                 </div>
-                <ClipboardList className="w-5 h-5 text-[#12335c]" />
+                <ClipboardList className="w-[18px] h-[18px] text-[#12335c] shrink-0" />
               </div>
-              <div className="px-6 py-2 pb-6">
+              <div className="px-6 pt-1 pb-5">
                 <div className="py-4 border-b border-[#e3e8ee]">
                   <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">REGIMEN CODE</div>
                   <div className="text-sm font-bold text-[#1b2530] truncate">{regimenCode || "—"}</div>
@@ -1276,14 +1102,623 @@ export default function CreateProtocol() {
                 <div className="py-4">
                   <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">TOTAL DRUGS</div>
                   <div className="text-sm font-bold text-[#1b2530]">
-                    {[...premeds, ...chemoPlans, ...supportive, ...dilution, ...post].filter((r: any) => (r.medication || r.item)?.trim()).length} item(s)
+                    {[...premeds, ...chemoPlans, ...supportive, ...dilution, ...post, ...days.flatMap((d) => (d.dayNumber === activeDay ? [] : [...(premedsByDay[d.dayNumber] ?? []), ...(chemoPlansByDay[d.dayNumber] ?? []), ...(supportiveByDay[d.dayNumber] ?? []), ...(dilutionByDay[d.dayNumber] ?? []), ...(postByDay[d.dayNumber] ?? [])]))].filter((r: any) => (r.medication || r.item)?.trim()).length} item(s)
                   </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
+
+        {/* Pre-medications */}
+            <div className={cardCls + " mb-5"}>
+              <div
+                className="flex items-center justify-between px-6 py-[17px] cursor-pointer hover:bg-[#f8f9fb] transition-colors"
+                onClick={() => toggleSection("premeds")}
+              >
+                <div className="flex items-center gap-2.5 text-[13.5px] font-bold text-[#17212e]">
+                  <Pill className="w-4 h-4 text-[#12335c]" /> Pre-medications
+                </div>
+                {sections.premeds ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
+              </div>
+              {sections.premeds && (
+                <>
+                  <ProtocolGridTable
+                    columns={["#", "MEDICATION / DRUG *", "DOSE", "UNIT", "ADMIN NOTES", "REMARKS", "ACTIONS"]}
+                    template="44px 2fr 1fr 100px 1.5fr 1.5fr 40px"
+                    addLabel="+ Add Row"
+                    onAdd={addPremed}
+                    disabled={disabled}
+                    rows={premeds.map((row, idx) => [
+                      idx + 1,
+                      <FormProtocolDropdown
+                        key="m"
+                        options={premedMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
+                        value={row.medication}
+                        onValueChange={(v) => {
+                          const n = [...premeds];
+                          n[idx].medication = v;
+                          setPremeds(n);
+                        }}
+                        placeholder={loadingPremedMeds ? "Loading medicines..." : "Select medicine"}
+                        emptyMessage="No medicines found"
+                        loading={loadingPremedMeds}
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <input
+                        key="d"
+                        type="text"
+                        value={row.dose}
+                        onChange={(e) => {
+                          const n = [...premeds];
+                          n[idx].dose = e.target.value;
+                          setPremeds(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Enter dose"
+                        disabled={disabled}
+                      />,
+                      <FormProtocolDropdown
+                        key="u"
+                        options={Array.from(new Set([...fieldOptions.dosage_units, row.unit].filter(Boolean)))}
+                        value={row.unit}
+                        onValueChange={(v) => {
+                          const n = [...premeds];
+                          n[idx].unit = v;
+                          setPremeds(n);
+                        }}
+                        placeholder="Select unit"
+                        emptyMessage="No units found"
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <input
+                        key="a"
+                        type="text"
+                        value={row.adminNotes}
+                        onChange={(e) => {
+                          const n = [...premeds];
+                          n[idx].adminNotes = e.target.value;
+                          setPremeds(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Enter notes"
+                        disabled={disabled}
+                      />,
+                      <input
+                        key="r"
+                        type="text"
+                        value={row.remarks}
+                        onChange={(e) => {
+                          const n = [...premeds];
+                          n[idx].remarks = e.target.value;
+                          setPremeds(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Enter remarks"
+                        disabled={disabled}
+                      />,
+                      <button
+                        key="del"
+                        onClick={() => removePremed(idx)}
+                        disabled={disabled}
+                        className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6b7280] hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>,
+                    ])}
+                  />
+                </>
+              )}
+            </div>
+
+            {/* Chemotherapy plan */}
+            <div className={cardCls + " mb-5"}>
+              <div
+                className="flex items-center justify-between px-6 py-[17px] cursor-pointer hover:bg-[#f8f9fb] transition-colors"
+                onClick={() => toggleSection("chemo")}
+              >
+                <div className="flex items-center gap-2.5 text-[13.5px] font-bold text-[#17212e]">
+                  <Syringe className="w-4 h-4 text-[#12335c]" /> Chemotherapy Plan
+                </div>
+                {sections.chemo ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
+              </div>
+              {sections.chemo && (
+                <>
+                  <ProtocolGridTable
+                    columns={["#", "MEDICATION *", "DOSE CALC", "DOSE", "UNIT", "PATIENT DOSE", "UNIT", "ADMIN NOTES", "TOXICITY", "REMARKS", "ACTIONS"]}
+                    template="44px 1.8fr 1.1fr 1fr 0.8fr 1fr 0.7fr 1.4fr 1.3fr 1.3fr 40px"
+                    addLabel="+ Add Row"
+                    onAdd={addChemoPlan}
+                    disabled={disabled}
+                    rows={chemoPlans.map((row, idx) => [
+                      idx + 1,
+                      <FormProtocolDropdown
+                        key="m"
+                        options={chemoMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
+                        value={row.medication}
+                        onValueChange={(v) => {
+                          const n = [...chemoPlans];
+                          n[idx].medication = v;
+                          setChemoPlans(n);
+                        }}
+                        placeholder={loadingChemoMeds ? "Loading medicines..." : "Select medicine"}
+                        emptyMessage="No medicines found"
+                        loading={loadingChemoMeds}
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <FormProtocolDropdown
+                        key="dc"
+                        options={DOSE_CALC_OPTIONS}
+                        value={row.doseCalc}
+                        onValueChange={(v) => {
+                          const n = [...chemoPlans];
+                          n[idx].doseCalc = v;
+                          setChemoPlans(n);
+                        }}
+                        placeholder="Select dose calc"
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <input
+                        key="d"
+                        type="text"
+                        value={row.dose}
+                        onChange={(e) => {
+                          const n = [...chemoPlans];
+                          n[idx].dose = e.target.value;
+                          setChemoPlans(n);
+                        }}
+                        className={ptInput}
+                        placeholder="80 mg/m²"
+                        disabled={disabled}
+                      />,
+                      <FormProtocolDropdown
+                        key="u"
+                        options={Array.from(new Set([...fieldOptions.dosage_units, row.unit].filter(Boolean)))}
+                        value={row.unit}
+                        onValueChange={(v) => {
+                          const n = [...chemoPlans];
+                          n[idx].unit = v;
+                          setChemoPlans(n);
+                        }}
+                        placeholder="Select unit"
+                        emptyMessage="No units found"
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <input
+                        key="pd"
+                        type="text"
+                        value={row.patientDose}
+                        onChange={(e) => {
+                          const n = [...chemoPlans];
+                          n[idx].patientDose = e.target.value;
+                          setChemoPlans(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Patient dose"
+                        disabled={disabled}
+                      />,
+                      <input
+                        key="pu"
+                        type="text"
+                        value={row.patientUnit}
+                        onChange={(e) => {
+                          const n = [...chemoPlans];
+                          n[idx].patientUnit = e.target.value;
+                          setChemoPlans(n);
+                        }}
+                        className={ptInput}
+                        placeholder="mg"
+                        disabled={disabled}
+                      />,
+                      <input
+                        key="an"
+                        type="text"
+                        value={row.adminNotes}
+                        onChange={(e) => {
+                          const n = [...chemoPlans];
+                          n[idx].adminNotes = e.target.value;
+                          setChemoPlans(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Notes"
+                        disabled={disabled}
+                      />,
+                      <input
+                        key="t"
+                        type="text"
+                        value={row.toxicity}
+                        onChange={(e) => {
+                          const n = [...chemoPlans];
+                          n[idx].toxicity = e.target.value;
+                          setChemoPlans(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Toxicity"
+                        disabled={disabled}
+                      />,
+                      <input
+                        key="rm"
+                        type="text"
+                        value={row.remarks}
+                        onChange={(e) => {
+                          const n = [...chemoPlans];
+                          n[idx].remarks = e.target.value;
+                          setChemoPlans(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Remarks"
+                        disabled={disabled}
+                      />,
+                      <button
+                        key="del"
+                        onClick={() => removeChemoPlan(idx)}
+                        disabled={disabled}
+                        className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6b7280] hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>,
+                    ])}
+                  />
+                </>
+              )}
+            </div>
+
+            {/* Supportive care */}
+            <div className={cardCls + " mb-5"}>
+              <div
+                className="flex items-center justify-between px-6 py-[17px] cursor-pointer hover:bg-[#f8f9fb] transition-colors"
+                onClick={() => toggleSection("supportive")}
+              >
+                <div className="flex items-center gap-2.5 text-[13.5px] font-bold text-[#17212e]">
+                  <ShieldPlus className="w-4 h-4 text-[#2f8f5b]" /> Supportive Care
+                </div>
+                {sections.supportive ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
+              </div>
+              {sections.supportive && (
+                <>
+                  <ProtocolGridTable
+                    columns={["#", "SUPPORTIVE MEDICINE *", "ADMIN NOTES", "REMARKS", "ACTIONS"]}
+                    template="44px 2fr 1.5fr 1.5fr 40px"
+                    addLabel="+ Add Row"
+                    onAdd={addSupportive}
+                    disabled={disabled}
+                    rows={supportive.map((row, idx) => [
+                      idx + 1,
+                      <FormProtocolDropdown
+                        key="m"
+                        options={supportiveMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
+                        value={row.medication}
+                        onValueChange={(v) => {
+                          const n = [...supportive];
+                          n[idx].medication = v;
+                          setSupportive(n);
+                        }}
+                        placeholder={loadingSupportiveMeds ? "Loading medicines..." : "Select medicine"}
+                        emptyMessage="No supportive medicines found"
+                        loading={loadingSupportiveMeds}
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <input
+                        key="an"
+                        type="text"
+                        value={row.adminNotes}
+                        onChange={(e) => {
+                          const n = [...supportive];
+                          n[idx].adminNotes = e.target.value;
+                          setSupportive(n);
+                        }}
+                        className={`${ptInput} col-span-2`}
+                        placeholder="Enter notes"
+                        disabled={disabled}
+                      />,
+                      <input
+                        key="r"
+                        type="text"
+                        value={row.remarks}
+                        onChange={(e) => {
+                          const n = [...supportive];
+                          n[idx].remarks = e.target.value;
+                          setSupportive(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Enter remarks"
+                        disabled={disabled}
+                      />,
+                      <button
+                        key="d"
+                        onClick={() => removeSupportive(idx)}
+                        disabled={disabled}
+                        className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6b7280] hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>,
+                    ])}
+                  />
+                </>
+              )}
+            </div>
+
+            {/* Dilution details */}
+            <div className={cardCls + " mb-5"}>
+              <div
+                className="flex items-center justify-between px-6 py-[17px] cursor-pointer hover:bg-[#f8f9fb] transition-colors"
+                onClick={() => toggleSection("dilution")}
+              >
+                <div className="flex items-center gap-2.5 text-[13.5px] font-bold text-[#17212e]">
+                  <FlaskConical className="w-4 h-4 text-[#c9822f]" /> Dilution Details
+                </div>
+                {sections.dilution ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
+              </div>
+              {sections.dilution && (
+                <>
+                  <ProtocolGridTable
+                    columns={["#", "MEDICATION", "FORM", "DOSE", "DOSE UNIT", "DILUTION VOLUME", "VOLUME UNIT", "DILUENT", "ACTIONS"]}
+                    template="44px 1.8fr 1.1fr 0.8fr 1.1fr 1fr 1.1fr 1.5fr 40px"
+                    addLabel="+ Add Row"
+                    onAdd={addDilution}
+                    disabled={disabled}
+                    rows={dilution.map((row, idx) => [
+                      idx + 1,
+                      <FormProtocolDropdown
+                        key="m"
+                        options={dilutionMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
+                        value={row.medication}
+                        onValueChange={(v) => {
+                          const n = [...dilution];
+                          n[idx].medication = v;
+                          setDilution(n);
+                        }}
+                        placeholder={loadingDilutionMeds ? "Loading medicines..." : "Select medicine"}
+                        emptyMessage="No dilution medicines found"
+                        loading={loadingDilutionMeds}
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <FormProtocolDropdown
+                        key="f"
+                        options={fieldOptions.dilution_forms}
+                        value={row.form}
+                        onValueChange={(v) => {
+                          const n = [...dilution];
+                          n[idx].form = v;
+                          setDilution(n);
+                        }}
+                        placeholder="Select form"
+                        emptyMessage="No forms found"
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <input
+                        key="d"
+                        type="text"
+                        value={row.dose}
+                        onChange={(e) => {
+                          const n = [...dilution];
+                          n[idx].dose = e.target.value;
+                          setDilution(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Dose"
+                        disabled={disabled}
+                      />,
+                      <FormProtocolDropdown
+                        key="du"
+                        options={fieldOptions.dilution_dose_units}
+                        value={row.unit}
+                        onValueChange={(v) => {
+                          const n = [...dilution];
+                          n[idx].unit = v;
+                          setDilution(n);
+                        }}
+                        placeholder="Select unit"
+                        emptyMessage="No units found"
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <input
+                        key="v"
+                        type="text"
+                        value={row.volume}
+                        onChange={(e) => {
+                          const n = [...dilution];
+                          n[idx].volume = e.target.value;
+                          setDilution(n);
+                        }}
+                        className={ptInput}
+                        placeholder="100"
+                        disabled={disabled}
+                      />,
+                      <FormProtocolDropdown
+                        key="vu"
+                        options={fieldOptions.dilution_volume_units}
+                        value={row.volumeUnit}
+                        onValueChange={(v) => {
+                          const n = [...dilution];
+                          n[idx].volumeUnit = v;
+                          setDilution(n);
+                        }}
+                        placeholder="Select unit"
+                        emptyMessage="No units found"
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <FormProtocolDropdown
+                        key="dl"
+                        options={fieldOptions.diluents}
+                        value={row.diluent}
+                        onValueChange={(v) => {
+                          const n = [...dilution];
+                          n[idx].diluent = v;
+                          setDilution(n);
+                        }}
+                        placeholder="Select diluent"
+                        emptyMessage="No diluents found"
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <button
+                        key="x"
+                        onClick={() => removeDilution(idx)}
+                        disabled={disabled}
+                        className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6b7280] hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>,
+                    ])}
+                  />
+                </>
+              )}
+            </div>
+
+            {/* Post-treatment medications */}
+            <div className={cardCls + " mb-5"}>
+              <div
+                className="flex items-center justify-between px-6 py-[17px] cursor-pointer hover:bg-[#f8f9fb] transition-colors"
+                onClick={() => toggleSection("post")}
+              >
+                <div className="flex items-center gap-2.5 text-[13.5px] font-bold text-[#c0374a]">
+                  <ClipboardList className="w-4 h-4" /> Post-treatment Medications (On Discharge)
+                </div>
+                {sections.post ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
+              </div>
+              {sections.post && (
+                <>
+                  <ProtocolGridTable
+                    columns={["#", "FORM", "MEDICATION", "DOSE", "UNIT", "FREQUENCY", "INSTRUCTIONS", "DURATION", "REMARKS", "ACTIONS"]}
+                    template="44px 0.9fr 1.8fr 1fr 0.8fr 1.1fr 1.4fr 1.1fr 1.4fr 40px"
+                    addLabel="+ Add Row"
+                    onAdd={addPost}
+                    disabled={disabled}
+                    addClassName="text-[#c0374a] hover:bg-[#fbecef]"
+                    rows={post.map((row, idx) => [
+                      idx + 1,
+                      <input
+                        key="f"
+                        type="text"
+                        value={row.form}
+                        onChange={(e) => {
+                          const n = [...post];
+                          n[idx].form = e.target.value;
+                          setPost(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Tab"
+                        disabled={disabled}
+                      />,
+                      <FormProtocolDropdown
+                        key="m"
+                        options={premedMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
+                        value={row.medication}
+                        onValueChange={(v) => {
+                          const n = [...post];
+                          n[idx].medication = v;
+                          setPost(n);
+                        }}
+                        placeholder={loadingPremedMeds ? "Loading medicines..." : "Select medicine"}
+                        emptyMessage="No medicines found"
+                        loading={loadingPremedMeds}
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <input
+                        key="d"
+                        type="text"
+                        value={row.dose}
+                        onChange={(e) => {
+                          const n = [...post];
+                          n[idx].dose = e.target.value;
+                          setPost(n);
+                        }}
+                        className={ptInput}
+                        placeholder="4"
+                        disabled={disabled}
+                      />,
+                      <input
+                        key="u"
+                        type="text"
+                        value={row.unit}
+                        onChange={(e) => {
+                          const n = [...post];
+                          n[idx].unit = e.target.value;
+                          setPost(n);
+                        }}
+                        className={ptInput}
+                        placeholder="mg"
+                        disabled={disabled}
+                      />,
+                      <input
+                        key="fr"
+                        type="text"
+                        value={row.frequency}
+                        onChange={(e) => {
+                          const n = [...post];
+                          n[idx].frequency = e.target.value;
+                          setPost(n);
+                        }}
+                        className={ptInput}
+                        placeholder="1-0-1"
+                        disabled={disabled}
+                      />,
+                      <input
+                        key="i"
+                        type="text"
+                        value={row.instructions}
+                        onChange={(e) => {
+                          const n = [...post];
+                          n[idx].instructions = e.target.value;
+                          setPost(n);
+                        }}
+                        className={`${ptInput} col-span-2`}
+                        placeholder="Enter notes"
+                        disabled={disabled}
+                      />,
+                      <input
+                        key="r"
+                        type="text"
+                        value={row.remarks}
+                        onChange={(e) => {
+                          const n = [...premeds];
+                          n[idx].remarks = e.target.value;
+                          setPremeds(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Enter remarks"
+                        disabled={disabled}
+                      />,
+                      <input
+                        key="r"
+                        type="text"
+                        value={row.remarks}
+                        onChange={(e) => {
+                          const n = [...post];
+                          n[idx].remarks = e.target.value;
+                          setPost(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Remarks"
+                        disabled={disabled}
+                      />,
+                      <button
+                        key="x"
+                        onClick={() => removePost(idx)}
+                        disabled={disabled}
+                        className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6b7280] hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>,
+                    ])}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+        </div>
 
       <ConfirmationDialog
         open={showLeaveConfirm}

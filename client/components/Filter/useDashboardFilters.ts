@@ -111,6 +111,7 @@ export function useDashboardFilters({
   const appointmentFilterFields: FilterField[] = [
     { id: "patientName", label: "Patient Name", type: "text", placeholder: "Search by name" },
     { id: "doctorName", label: "Doctor Name", type: "text", placeholder: "Search by doctor" },
+    { id: "branch", label: "Branch", type: "multiselect", options: branchFilterOptions, compact: true },
     { id: "reason", label: "Reason", type: "text", placeholder: "Search reason" },
     { id: "status", label: "Status", type: "multiselect", options: appointmentStatusOptions },
   ];

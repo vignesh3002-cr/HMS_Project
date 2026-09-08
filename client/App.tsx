@@ -53,6 +53,8 @@ import NotFound from "./pages/NotFound";
 import Notifications from "./pages/Notifications";
 import Patients from "./pages/Patients";
 import ProtocolMaster from "./pages/ProtocolMaster";
+import OrderMaster from "./pages/OrderMaster";
+import Chat from "./pages/Chat";
 import CreateProtocol from "@/components/Forms/CreateProtocol";
 import ProtectedRoute from "./routes/ProtectedRoute";
 
@@ -90,7 +92,7 @@ import DoctorReviews from "./pages/doctor/ReviewPage";
 import DoctorProfile from "./pages/doctor/Profile";
 import Consultation from "./pages/doctor/Patientconsut";
 import DoctorPatientProfile from "./pages/doctor/notes and doc";
-import PatientDetails from "./pages/doctor/patient details";
+import PatientDetails from "./pages/doctor/patient-details";
 
 // ============================================================
 // HOOKS / AUTH
@@ -409,6 +411,25 @@ const protectedRoutes = [
   {
     path: "/protocol/edit/:protocolId",
     element: <CreateProtocol />,
+  },
+
+  // ----------------------------------------------------------
+  // Chemotherapy Orders
+  // ----------------------------------------------------------
+
+  {
+    path: "/orders",
+    element: <OrderMaster />,
+    permission: "chemo.plan.read",
+  },
+
+  // ----------------------------------------------------------
+  // AI Chat
+  // ----------------------------------------------------------
+
+  {
+    path: "/chat",
+    element: <Chat />,
   },
 
 ];

@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { UserAvatar } from "@/components/ui/UserAvatar";
 import { User, CreditCard, Bell, Settings, LogOut } from "lucide-react";
 import {
   DropdownMenu,
@@ -10,13 +11,16 @@ interface UserProfileDropdownProps {
   userName: string;
   userSubtext: string;
   userAvatar?: string;
+  /** True while the avatar is still being fetched (shows a Loader2 spinner). */
+  avatarLoading?: boolean;
   onLogout: () => void;
 }
 
 export function UserProfileDropdown({
   userName,
   userSubtext,
-  userAvatar = "https://i.pravatar.cc/40",
+  userAvatar,
+  avatarLoading = false,
   onLogout,
 }: UserProfileDropdownProps) {
   const navigate = useNavigate();
@@ -27,10 +31,13 @@ export function UserProfileDropdown({
         <button className="flex items-center gap-2 cursor-pointer outline-none">
           <span className="text-[#00488D] font-semibold text-xs">{userName}</span>
           <div className="relative">
-            <img
+            <UserAvatar
               src={userAvatar}
-              alt="Profile"
-              className="w-7 h-7 rounded-xl object-cover"
+              name={userName}
+              loading={avatarLoading}
+              className="w-7 h-7 rounded-xl"
+              spinnerClass="w-3.5 h-3.5"
+              initialClass="text-[11px]"
             />
           </div>
         </button>
@@ -45,10 +52,13 @@ export function UserProfileDropdown({
         <div className="p-4 bg-[#F8F9FF] border-b border-[#E5E7EB]">
           <div className="flex items-center gap-3">
             <div className="relative">
-              <img
+              <UserAvatar
                 src={userAvatar}
-                alt="Admin"
-                className="w-12 h-12 rounded-full object-cover shadow-sm border border-[#E5E7EB]"
+                name={userName}
+                loading={avatarLoading}
+                className="w-12 h-12 rounded-full shadow-sm border border-[#E5E7EB]"
+                spinnerClass="w-5 h-5"
+                initialClass="text-base"
               />
               <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-[#39B8FD] border-2 border-white rounded-full z-10" title="Active" />
             </div>

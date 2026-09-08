@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Check, ChevronDown, Loader2, Search } from "lucide-react";
+import { Check, ChevronDown, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createPortal } from "react-dom";
 
@@ -26,6 +26,20 @@ export interface FormDropdownProps
   loading?: boolean;
 }
 
+/**
+ * FormDropdown — styled to match CreateProtocol.tsx design tokens:
+ * - bg: #f8fafc (soft grey canvas)
+ * - border: #dde4ec
+ * - radius: rounded-[11px]
+ * - text: #17212e
+ * - placeholder: #a7b2bf
+ * - focus border: #12335c
+ * - focus bg: white
+ * - focus ring: 3px #12335c/15
+ * - disabled bg: #f1f3f5
+ * - disabled text: #9aa5b1
+ * - disabled cursor: not-allowed
+ */
 function normalizeOptions(
   options: (FormDropdownOption | string)[],
 ): FormDropdownOption[] {
@@ -34,13 +48,13 @@ function normalizeOptions(
   );
 }
 
-const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
+const FormProtocolDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
   (
     {
       options,
       value,
       onValueChange,
-      placeholder = "Search...",
+      placeholder = "Select...",
       emptyMessage = "No results found.",
       disabled,
       onFocus,
@@ -93,28 +107,10 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
       return () => document.removeEventListener("mousedown", handleClickOutside);
     }, [open, selectedOption]);
 
-    // Keep the portaled list pinned to the trigger while scrolling/resizing.
-    React.useEffect(() => {
-      if (!open) return;
-
-      function updateCoords() {
-        const el = containerRef.current;
-        if (!el) return;
-        const rect = el.getBoundingClientRect();
-        setCoords({ top: rect.bottom, left: rect.left, width: rect.width });
-      }
-
-      window.addEventListener("scroll", updateCoords, true);
-      window.addEventListener("resize", updateCoords);
-      return () => {
-        window.removeEventListener("scroll", updateCoords, true);
-        window.removeEventListener("resize", updateCoords);
-      };
-    }, [open]);
-
     const filtered = React.useMemo(() => {
       const query = search.trim().toLowerCase();
-      const isUnmodifiedSelection = selectedOption && search === selectedOption.label;
+      const isUnmodifiedSelection =
+        selectedOption && search === selectedOption.label;
       if (!query || isUnmodifiedSelection) return normalized;
       return normalized.filter((option) =>
         option.label.toLowerCase().includes(query),
@@ -152,15 +148,13 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
     }
 
     return (
-      <div ref={containerRef} className={cn("relative w-full")}>
+      <div ref={containerRef} className="relative w-full">
         <div className="relative">
           {leftIcon ? (
             <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
               {leftIcon}
             </div>
-          ) : (
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          )}
+          ) : null}
           <input
             {...inputProps}
             ref={handleMergeRefs}
@@ -172,11 +166,7 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
             disabled={disabled || loading}
             placeholder={placeholder}
             value={search}
-            className={cn(
-              "w-full py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200",
-               inputProps.className,
-               "pl-9 pr-9",
-            )}
+            className="w-full h-9 px-3 bg-[#f8fafc] border border-[#dde4ec] rounded-[11px] text-[13.5px] text-[#17212e] placeholder:text-[#a7b2bf] outline-none transition-all duration-150 hover:border-[#c7d2dd] hover:bg-[#f5f8fb] focus:border-[#12335c] focus:bg-white focus:ring-3 focus:ring-[#12335c]/15 disabled:bg-[#f1f3f5] disabled:text-[#9aa5b1] disabled:cursor-not-allowed"
             onFocus={(event) => {
               openDropdown();
               onFocus?.(event);
@@ -214,15 +204,15 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
               <div
                 ref={listRef}
                 style={{
-                  position: "fixed",
+                  position: "absolute",
                   top: coords.top,
                   left: coords.left,
                   width: coords.width,
                 }}
-                className="z-[9999] mt-1 max-h-64 slim-scrollbar overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 text-gray-900 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] origin-top"
+                className="z-[9999] mt-1 max-h-64 slim-scrollbar overflow-y-auto rounded-[11px] border border-[#dde4ec] bg-white py-1 text-[#17212e] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] origin-top"
               >
                 {filtered.length === 0 ? (
-                  <p className="px-4 py-3 text-center text-sm text-gray-400">
+                  <p className="px-4 py-3 text-center text-sm text-[#8a97a6]">
                     {emptyMessage}
                   </p>
                 ) : (
@@ -239,34 +229,34 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
                             handleSelect(option);
                           }}
                           className={cn(
-                            "flex cursor-pointer items-center justify-between px-4 py-2.5 text-sm transition-colors relative group",
+                            "flex cursor-pointer items-center justify-between px-3 py-2 rounded-[11px] text-[13.5px] transition-colors relative group",
                             isSelected
-                              ? "bg-blue-50 font-medium text-blue-700"
+                              ? "bg-[#f8fafc] font-medium text-[#12335c]"
                               : option.highlight
-                              ? "bg-blue-500/10 text-gray-900 hover:bg-blue-500/15"
-                              : "text-gray-900 hover:bg-gray-50",
+                              ? "bg-[#dde4ec]/10 text-[#17212c] hover:bg-[#dde4ec]/15"
+                              : "text-[#17212e] hover:bg-[#f4f6f9]",
                           )}
                         >
                           <span
                             className={cn(
-                              "absolute left-0 top-0 bottom-0 w-1 bg-blue-600 transition-transform duration-200 origin-center",
+                              "absolute left-0 top-0 bottom-0 w-1 bg-[#12335c] transition-transform duration-200 origin-center",
                               isSelected ? "scale-y-100" : "scale-y-0 group-hover:scale-y-100",
                             )}
                           />
                           <span className="pl-2 flex flex-col">
                             <span>{option.label}</span>
                             {option.badge && (
-                              <span className="text-[11px] font-medium text-blue-600">
+                              <span className="text-[11px] font-medium text-[#12335c]">
                                 {option.badge}
                               </span>
                             )}
                           </span>
-                          <Check
-                            className={cn(
-                              "h-4 w-4 text-blue-600 transition-opacity",
-                              isSelected ? "opacity-100" : "opacity-0",
-                            )}
-                          />
+<Check
+              className={cn(
+                "h-4 w-4 text-[#12335c] transition-opacity",
+                isSelected ? "opacity-100" : "opacity-0",
+              )}
+            />
                         </li>
                       );
                     })}
@@ -280,6 +270,7 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
     );
   },
 );
-FormDropdown.displayName = "FormDropdown";
 
-export { FormDropdown };
+FormProtocolDropdown.displayName = "FormProtocolDropdown";
+
+export { FormProtocolDropdown };
