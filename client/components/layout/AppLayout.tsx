@@ -14,6 +14,7 @@ import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Logo } from "@/components/hms/Logo";
 import {
   LayoutDashboard,
   Users,
@@ -288,13 +289,10 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
           )}
         >
           {/* LOGO */}
-          <div className="px-3 pb-8">
-            <div className="text-[#00488D] font-extrabold text-base tracking-[-0.8px] uppercase">
-              HMS
-            </div>
-            <div className="text-[#64748B] font-semibold text-[9px] tracking-[0.9px] capitalize">
-              admin portal
-            </div>
+          <div className="pb-6">
+            <Link to="/dashboard" className="block focus:outline-none">
+              <Logo className="w-full max-w-[175px] h-auto" iconPosition="left" />
+            </Link>
           </div>
 
           {/* NAV */}

@@ -17,6 +17,18 @@ import { FormDropdown } from "@/components/ui/form-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { getUser } from "@/utils/token";
 import { validateRequiredFields } from "@/lib/validation";
+import {
+  formatInputAadhaar,
+  formatInputPan,
+  formatInputPassport,
+  formatInputLicense,
+  formatInputGst,
+  formatInputAlpha,
+  formatInputDigits,
+  formatInputExperience,
+  formatInputAddress,
+  formatInputNoSpaces,
+} from "@/utils/formatters";
 
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 import { PhoneInput } from "@/components/ui/phone-input";
@@ -295,10 +307,78 @@ export default function AddBranch() {
     e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
+    let formatted: string;
+    switch (name) {
+      case "licenseNumber":
+        formatted = formatInputLicense(value);
+        break;
+      case "panNo":
+      case "adminPanNo":
+        formatted = formatInputPan(value);
+        break;
+      case "gstNo":
+        formatted = formatInputGst(value);
+        break;
+      case "faxNo":
+      case "adminEmergencyContactNumber":
+        formatted = formatInputDigits(value, 20);
+        break;
+      case "adminAadhaarNo":
+        formatted = formatInputAadhaar(value);
+        break;
+      case "adminPassportNo":
+        formatted = formatInputPassport(value);
+        break;
+      case "branchCode":
+      case "adminUsername":
+        formatted = formatInputNoSpaces(value);
+        break;
+      case "branchName":
+        formatted = formatInputAlpha(value, 100);
+        break;
+      case "area":
+      case "adminArea":
+      case "adminPermanentArea":
+        formatted = formatInputAlpha(value, 50);
+        break;
+      case "adminFirstName":
+      case "adminMiddleName":
+      case "adminLastName":
+      case "adminEmergencyContactName":
+        formatted = formatInputAlpha(value, 100);
+        break;
+      case "adminNationality":
+      case "adminEmergencyContactRelation":
+        formatted = formatInputAlpha(value, 60);
+        break;
+      case "adminExperience":
+        formatted = formatInputExperience(value);
+        break;
+      case "pincode":
+      case "adminPincode":
+      case "adminPermanentPincode":
+        formatted = formatInputDigits(value, 10);
+        break;
+      case "totalEmployees":
+        formatted = formatInputDigits(value, 10);
+        break;
+      case "address":
+      case "adminCurrentAddress":
+      case "adminPermanentAddress":
+        formatted = formatInputAddress(value);
+        break;
+      case "email":
+      case "adminEmail":
+      case "websiteAddress":
+        formatted = formatInputNoSpaces(value);
+        break;
+      default:
+        formatted = value;
+    }
     if (isAdminFieldKey(name)) {
-      setAdminData((prev) => ({ ...prev, [name]: value }));
+      setAdminData((prev) => ({ ...prev, [name]: formatted }));
     } else {
-      setBranchData((prev) => ({ ...prev, [name]: value }));
+      setBranchData((prev) => ({ ...prev, [name]: formatted }));
     }
   };
 

@@ -17,6 +17,17 @@ import { departmentApi, Department } from "@/api/department.api";
 import { qualificationApi, Qualification } from "@/api/qualification.api";
 import { getUser } from "@/utils/token";
 import { validateRequiredFields, type RequiredField } from "@/lib/validation";
+import {
+  formatInputAadhaar,
+  formatInputPan,
+  formatInputPassport,
+  formatInputLicense,
+  formatInputAlpha,
+  formatInputDigits,
+  formatInputExperience,
+  formatInputAddress,
+  formatInputNoSpaces,
+} from "@/utils/formatters";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -805,11 +816,56 @@ export default function AddEmployee() {
     e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
   ) => {
     const { name, value } = e.target;
+    let formatted: string;
+    switch (name) {
+      case "aadhaarNo":
+        formatted = formatInputAadhaar(value);
+        break;
+      case "panNo":
+        formatted = formatInputPan(value);
+        break;
+      case "passportNo":
+        formatted = formatInputPassport(value);
+        break;
+      case "docLicenseNo":
+        formatted = formatInputLicense(value);
+        break;
+      case "firstName":
+      case "middleName":
+      case "lastName":
+      case "emergencyContactName":
+        formatted = formatInputAlpha(value, 50);
+        break;
+      case "nationality":
+      case "currentArea":
+      case "permanentArea":
+      case "emergencyContactRelation":
+      case "designation":
+        formatted = formatInputAlpha(value, 60);
+        break;
+      case "experience":
+        formatted = formatInputExperience(value);
+        break;
+      case "currentPincode":
+      case "permanentPincode":
+        formatted = formatInputDigits(value, 10);
+        break;
+      case "currentAddress":
+      case "permanentAddress":
+        formatted = formatInputAddress(value);
+        break;
+      case "email":
+      case "username":
+        formatted = formatInputNoSpaces(value);
+        break;
+      default:
+        formatted = value;
+    }
     setFormData((p) => {
-      const next = { ...p, [name]: value };
+      const next = { ...p, [name]: formatted };
       if (sameAsCurrent && name.startsWith("current")) {
         const permKey = "permanent" + name.slice(7) as keyof EmployeeFormData;
-        if (permKey in next) (next as any)[permKey] = value;
+        if (permKey in next) (next as any)[permKey] = formatted;
       }
       return next;
     });

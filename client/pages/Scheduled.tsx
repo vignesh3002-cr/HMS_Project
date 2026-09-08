@@ -1,6 +1,8 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { format } from "date-fns";
+import { parseDate, calculateYearsSince } from "@/utils/parseDate";
+import { formatLicenseNo, formatMobile } from "@/utils/formatters";
 import {
   User, IdCard, Phone, Mail, MapPin, Cake, Droplet,
   VenusAndMars, Briefcase, X, Loader2, Star, CalendarOff,
@@ -188,8 +190,8 @@ export default function DoctorProfile() {
     toast({ description: message, ...(variant === "destructive" ? { variant } : {}) });
   };
 
-  const [activeTab, setActiveTab] = useState(() =>
-    location.pathname.includes("/doctor/day-view") ? "day" : "week",
+  const [activeTab, setActiveTab] = useState<"day" | "week">(() =>
+    location.pathname.includes("/doctor/week-view") || location.search.includes("view=week") ? "week" : "day",
   );
   const slotModalRef = useRef<ScheduleSlotModalHandle>(null);
   const [fromDate, setFromDate] = useState<Date | null>(null);
@@ -308,12 +310,16 @@ export default function DoctorProfile() {
   );
   const doctorIsAvailable = doctorEmployee?.emp_status === true || doctorDetail?.user?.user_status === 0;
   const doctorPhoto = doctorEmployee?.employee_photo_URL || "";
-  const doctorLicenseNo = doctorDetail?.doctorProfile?.license_no || doctorEmployee?.license_no || "—";
-  const doctorPhone = doctorEmployee?.mobile_no || "—";
+  const doctorLicenseNo = formatLicenseNo(doctorDetail?.doctorProfile?.license_no || doctorEmployee?.license_no || "—");
+  const doctorPhone = formatMobile(doctorEmployee?.mobile_no || "—");
   const doctorEmail = doctorEmployee?.email || "—";
   const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanent_address || "—";
   const doctorBloodGroup = doctorEmployee?.blood_group || "—";
-  const doctorExperience = doctorEmployee?.employee_no_experence != null ? `${doctorEmployee.employee_no_experence}+ yrs` : "—";
+  const priorExperience = doctorEmployee?.employee_no_experence != null ? Number(doctorEmployee.employee_no_experence) || 0 : 0;
+  const joiningDate = doctorEmployee?.joining_date ? parseDate(doctorEmployee.joining_date) : null;
+  const yearsSinceJoining = calculateYearsSince(joiningDate);
+  const totalExperience = priorExperience + yearsSinceJoining;
+  const doctorExperience = totalExperience > 0 ? `${totalExperience}+ yrs` : "—";
   const doctorDOB = (doctorEmployee as any)?.dob
     ? format(new Date((doctorEmployee as any).dob), "dd MMM yyyy")
     : "—";

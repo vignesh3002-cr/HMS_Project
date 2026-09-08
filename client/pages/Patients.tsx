@@ -63,10 +63,18 @@ function formatGender(gender: string | null): string {
 
 function formatMobile(mobile: string | null, nationality: string | null): string {
   if (!mobile) return "—";
-  if (nationality && nationality.toLowerCase().includes("india")) {
-    return `+91 ${mobile}`;
+  const trimmed = mobile.trim();
+  // If already starts with '+', don't add +91 again; format nicely with a space
+  if (trimmed.startsWith("+")) {
+    if (trimmed.startsWith("+91") && trimmed.length > 3 && !trimmed.startsWith("+91 ")) {
+      return `+91 ${trimmed.slice(3)}`;
+    }
+    return trimmed;
   }
-  return mobile;
+  if (nationality && nationality.toLowerCase().includes("india")) {
+    return `+91 ${trimmed}`;
+  }
+  return trimmed;
 }
 
 // Grid view needs: id, name, age, gender, mobile, bloodGroup, photo, status —

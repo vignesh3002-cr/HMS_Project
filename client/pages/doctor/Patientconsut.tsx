@@ -1450,7 +1450,7 @@ const Consultation: React.FC = () => {
                 }}
                 className="h-9 w-full rounded-md border border-blue-600 bg-white text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
               >
-                View Full Profile
+                View Full Profile {/* Working */}
               </button>
 
             </div>

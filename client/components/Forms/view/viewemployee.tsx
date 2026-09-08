@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { format } from "date-fns";
+import { parseDate, calculateYearsSince } from "@/utils/parseDate";
 import { ArrowLeft, IdCard, Phone, Mail, MapPin, Cake, Droplet, VenusAndMars, Briefcase, ShieldCheck, FileText, Building2, Award, Stethoscope, User } from "lucide-react";
 import { employeeApi, type EmployeeDetailResponse } from "@/api/employee.api";
+import { formatAadhaar, formatPan, formatLicenseNo, formatPassportNo, formatMobile } from "@/utils/formatters";
 
 function formatDoctorFullName(e: EmployeeDetailResponse["employee"] | null): string {
   if (!e) return "Doctor";
@@ -128,12 +130,18 @@ export default function DoctorDetailView() {
       : [];
   const doctorIsAvailable = doctorEmployee?.emp_status === true || doctorDetail.user?.user_status === 0;
   const doctorPhoto = doctorEmployee?.employee_photo_URL || "";
-  const doctorLicenseNo = doctorDetail.doctorProfile?.license_no || doctorEmployee?.license_no || "—";
-  const doctorPhone = doctorEmployee?.mobile_no || "—";
+  const doctorLicenseNo = formatLicenseNo(doctorDetail.doctorProfile?.license_no || doctorEmployee?.license_no || "—");
+  const doctorPhone = formatMobile(doctorEmployee?.mobile_no || "—");
+
+
   const doctorEmail = doctorEmployee?.email || "—";
   const doctorLocation = doctorEmployee?.current_address || doctorEmployee?.parmanent_address || "—";
   const doctorBloodGroup = doctorEmployee?.blood_group || "—";
-  const doctorExperience = doctorEmployee?.employee_no_experence != null ? `${doctorEmployee.employee_no_experence}+ yrs` : "—";
+  const priorExperience = doctorEmployee?.employee_no_experence != null ? Number(doctorEmployee.employee_no_experence) || 0 : 0;
+  const joiningDate = doctorEmployee?.joining_date ? parseDate(doctorEmployee.joining_date) : null;
+  const yearsSinceJoining = calculateYearsSince(joiningDate);
+  const totalExperience = priorExperience + yearsSinceJoining;
+  const doctorExperience = totalExperience > 0 ? `${totalExperience}+ yrs` : "—";
   const doctorDOB = (doctorEmployee as any)?.dob
     ? format(new Date((doctorEmployee as any).dob), "dd MMM yyyy")
     : "—";
@@ -209,9 +217,9 @@ export default function DoctorDetailView() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <InfoCell icon={User} title="Nationality" value={val(doctorEmployee?.nationality)} />
             <InfoCell icon={Award} title="Marital Status" value={val(doctorEmployee?.marital_status)} />
-            <InfoCell icon={IdCard} title="Aadhaar No" value={val(doctorEmployee?.aadhaar_no)} />
-            <InfoCell icon={FileText} title="PAN No" value={val(doctorEmployee?.pan_no)} />
-            <InfoCell icon={Stethoscope} title="Passport No" value={val(doctorEmployee?.passport_no)} />
+            <InfoCell icon={IdCard} title="Aadhaar No" value={val(formatAadhaar(doctorEmployee?.aadhaar_no))} />
+            <InfoCell icon={FileText} title="PAN No" value={val(formatPan(doctorEmployee?.pan_no))} />
+            <InfoCell icon={Stethoscope} title="Passport No" value={val(formatPassportNo(doctorEmployee?.passport_no))} />
             <InfoCell icon={Building2} title="Department" value={val(doctorDetail.doctorProfile?.specialization || doctorEmployee?.specialization)} />
             <InfoCell icon={Briefcase} title="Designation" value={val(doctorEmployee?.designation)} />
             <InfoCell icon={Award} title="Qualification" value={val(doctorQualification)} />
@@ -266,9 +274,9 @@ export default function DoctorDetailView() {
         {/* IDENTITY DOCUMENTS */}
         <Section title="Identity Documents">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <InfoCell icon={IdCard} title="Aadhaar No" value={val(doctorEmployee?.aadhaar_no)} />
-            <InfoCell icon={FileText} title="PAN No" value={val(doctorEmployee?.pan_no)} />
-            <InfoCell icon={FileText} title="Passport No" value={val(doctorEmployee?.passport_no)} />
+            <InfoCell icon={IdCard} title="Aadhaar No" value={val(formatAadhaar(doctorEmployee?.aadhaar_no))} />
+            <InfoCell icon={FileText} title="PAN No" value={val(formatPan(doctorEmployee?.pan_no))} />
+            <InfoCell icon={FileText} title="Passport No" value={val(formatPassportNo(doctorEmployee?.passport_no))} />
           </div>
         </Section>
       </main>

@@ -12,6 +12,13 @@ import type { IState } from "country-state-city";
 import { branchApi, Branch } from "@/api/branch.api";
 import { patientApi } from "@/api/patient.api";
 import { validateRequiredFields, type RequiredField } from "@/lib/validation";
+import {
+  formatInputAlpha,
+  formatInputDigits,
+  formatInputAddress,
+  formatInputNoSpaces,
+  formatInputAlnum,
+} from "@/utils/formatters";
 
 // Helper function to convert date to HTML input[type="date"] format (YYYY-MM-DD)
 const toDateInputValue = (date: string | Date | undefined | null): string => {
@@ -335,7 +342,42 @@ export default function PatientRegistrationForm({
     e: ChangeEvent<HTMLInputElement | HTMLSelectElement>,
     key: keyof FormData,
   ) => {
-    const value = e.target.value;
+    let value = e.target.value;
+
+    switch (key) {
+      case "patient_first_name":
+      case "patient_middle_name":
+      case "patient_last_name":
+      case "patient_emergency_name":
+      case "policy_holder_name":
+        value = formatInputAlpha(value, 50);
+        break;
+      case "patient_area":
+      case "patient_permanent_area":
+      case "patient_nationality":
+      case "patient_emergency_relation":
+        value = formatInputAlpha(value, 60);
+        break;
+      case "patient_pincode":
+      case "patient_permanent_pincode":
+        value = formatInputDigits(value, 10);
+        break;
+      case "patient_current_address":
+      case "patient_permanent_address":
+        value = formatInputAddress(value);
+        break;
+      case "patient_email":
+      case "patient_username":
+        value = formatInputNoSpaces(value);
+        break;
+      case "insurance_provider":
+      case "insurance_plan":
+      case "policy_number":
+        value = formatInputAlnum(value);
+        break;
+      default:
+        break;
+    }
 
     setFormData((prev) => {
       const next = { ...prev, [key]: value };

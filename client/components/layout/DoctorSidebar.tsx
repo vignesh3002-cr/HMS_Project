@@ -8,9 +8,10 @@ import {
   LogOut,
   Bell,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { remove } from "../../utils/token";
+import { Logo } from "@/components/hms/Logo";
 
 
 interface DoctorSidebarProps {
@@ -63,18 +64,10 @@ const DoctorSidebar: React.FC<DoctorSidebarProps> = ({
     <aside className="w-[230px] h-screen bg-[#f6f7f9] flex flex-col border-r border-gray-200 flex-shrink-0">
       
       {/* ================= HEADER ================= */}
-      <div className="px-6 pt-7 pb-8">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-[20px] font-bold text-[#0f3d91] leading-tight tracking-tight">
-              HMS Portal
-            </h1>
-
-            <p className="text-[11px] font-semibold text-gray-500 tracking-[1px] mt-1 uppercase">
-              Doctor Dashboard
-            </p>
-          </div>
-        </div>
+      <div className="px-5 pt-6 pb-6">
+        <Link to="/doctor" className="block focus:outline-none">
+          <Logo className="w-full max-w-[175px] h-auto" iconPosition="left" />
+        </Link>
       </div>
 
       <ConfirmationDialog

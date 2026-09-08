@@ -118,6 +118,22 @@ function formatBranch(branch: EmployeeRecord["branch"]): string {
   return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
 }
 
+function formatPhone(phone: string | null | undefined): string {
+  if (!phone) return "—";
+  const trimmed = phone.trim();
+  if (trimmed.startsWith("+91")) {
+    const rest = trimmed.slice(3).replace(/^[\s-]+/, "");
+    return rest ? `+91 ${rest}` : "+91";
+  }
+  if (trimmed.startsWith("+")) {
+    return trimmed;
+  }
+  if (/^\d{10}$/.test(trimmed)) {
+    return `+91 ${trimmed}`;
+  }
+  return trimmed;
+}
+
 function getDesignationLabel(emp: EmployeeRecord): string {
   const roleType = (emp.user_table?.role_type || "STAFF").toUpperCase();
   const designation = emp.designation || "";
@@ -159,7 +175,7 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
     return {
       initials: getInitials(fullName),
       name: fullName,
-      phone: emp.mobile_no,
+      phone: formatPhone(emp.mobile_no),
       id: emp.employee_id,
       designation: getDesignationLabel(emp),
       dept: deptName,
@@ -176,7 +192,7 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
       name: fullName,
       id: emp.employee_id,
       roleType,
-      phone: emp.mobile_no,
+      phone: formatPhone(emp.mobile_no),
       dept: deptName,
       designation: getDesignationLabel(emp),
       designationColor: (index % 2 === 0 ? "purple" : "indigo") as "purple" | "indigo",
@@ -196,7 +212,7 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
     return {
       initials: getInitials(fullName),
       name: fullName,
-      phone: emp.mobile_no,
+      phone: formatPhone(emp.mobile_no),
       id: emp.employee_id,
       dept: staffDesignation,
       designation: staffDesignation,
@@ -210,7 +226,7 @@ function mapEmployeeToStaffData(emp: EmployeeRecord, index: number) {
   return {
     initials: getInitials(fullName),
     name: fullName,
-    phone: emp.mobile_no,
+    phone: formatPhone(emp.mobile_no),
     id: emp.employee_id,
     designation: getDesignationLabel(emp),
     dept: deptName,
