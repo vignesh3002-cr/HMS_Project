@@ -2391,9 +2391,20 @@ const LabReview: React.FC<{
       .then((response) => {
         if (cancelled) return;
         const allItems = response.data.data ?? [];
+        const now = new Date();
         const forPatient = allItems.filter(
-          (item) =>
-            item.lab_order?.patient_history?.patient_id === patientId
+          (item) => {
+            if (item.lab_order?.patient_history?.patient_id !== patientId) return false;
+            const dateStr = item.lab_order?.order_datetime ?? item.created_at;
+            if (!dateStr) return false;
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return false;
+            return (
+              d.getFullYear() === now.getFullYear() &&
+              d.getMonth() === now.getMonth() &&
+              d.getDate() === now.getDate()
+            );
+          }
         );
         setOrderedItems(forPatient);
       })
@@ -4950,7 +4961,7 @@ const ChemotherapyOrder: React.FC<{
 
   /* Edit-in-place state (medication rows) */
   const [editingRow, setEditingRow] = useState<{
-    kind: "drug" | "premedication";
+    kind: "drug" | "premedication" | "supportive";
     id: number;
   } | null>(null);
   const [editDraft, setEditDraft] = useState<Drug | null>(null);
@@ -5670,10 +5681,15 @@ const ChemotherapyOrder: React.FC<{
     );
   };
 
-  const startEdit = (kind: "drug" | "premedication", drug: Drug) => {
+  const startEdit = (
+    kind: "drug" | "premedication" | "supportive",
+    drug: Drug
+  ) => {
     if (editingRow || savingEdit) return;
 
-    userTouched.current[kind === "drug" ? "drugs" : "premedication"] = true;
+    userTouched.current[
+      kind === "drug" ? "drugs" : kind === "premedication" ? "premedication" : "supportive"
+    ] = true;
     setEditError("");
     setEditingRow({ kind, id: drug.id });
     setEditDraft({ ...drug });
@@ -5697,6 +5713,14 @@ const ChemotherapyOrder: React.FC<{
     }
   };
 
+  const handleEditSupportive = (id: number) => {
+    const drug = supportiveDrugs.find((item) => item.id === id);
+
+    if (drug) {
+      startEdit("supportive", drug);
+    }
+  };
+
   const cancelEdit = () => {
     if (savingEdit) return;
 
@@ -5717,11 +5741,16 @@ const ChemotherapyOrder: React.FC<{
   };
 
   const resolvePlanItemId = (
-    kind: "drug" | "premedication",
+    kind: "drug" | "premedication" | "supportive",
     name: string,
     medicineId?: string
   ) => {
-    const role = kind === "drug" ? "PRIMARY" : "PREMEDICATION";
+    const role =
+      kind === "drug"
+        ? "PRIMARY"
+        : kind === "premedication"
+        ? "PREMEDICATION"
+        : "SUPPORTIVE";
     const normalizedName = name.trim().toLowerCase();
 
     // 1. Exact medicine_id match within same role
@@ -5816,7 +5845,12 @@ const ChemotherapyOrder: React.FC<{
               `/chemotherapy/plans/${planIdRef.current}/items`,
               {
                 medicine_id: editDraft.medicineId,
-                drug_role: editingRow.kind === "drug" ? "PRIMARY" : "PREMEDICATION",
+                drug_role:
+                  editingRow.kind === "drug"
+                    ? "PRIMARY"
+                    : editingRow.kind === "premedication"
+                    ? "PREMEDICATION"
+                    : "SUPPORTIVE",
                 drug_sequence: planItemsRef.current.length + 1,
                 dosage: trimmedDose === "" ? null : Number(trimmedDose),
                 dosage_unit: editDraft.unit.trim() || null,
@@ -5878,8 +5912,14 @@ const ChemotherapyOrder: React.FC<{
             item.id === editingRow.id ? updatedDrug : item
           )
         );
-      } else {
+      } else if (editingRow.kind === "premedication") {
         setPremedicationDrugs((current) =>
+          current.map((item) =>
+            item.id === editingRow.id ? updatedDrug : item
+          )
+        );
+      } else {
+        setSupportiveDrugs((current) =>
           current.map((item) =>
             item.id === editingRow.id ? updatedDrug : item
           )
@@ -5906,6 +5946,12 @@ const ChemotherapyOrder: React.FC<{
     setPremedicationDrugs((current) =>
       current.filter((drug) => drug.id !== id)
     );
+  };
+
+  const handleDeleteSupportive = (id: number) => {
+    userTouched.current.supportive = true;
+
+    setSupportiveDrugs((current) => current.filter((drug) => drug.id !== id));
   };
 
   /* Icons (scoped inside the component) */
@@ -6526,6 +6572,11 @@ const ChemotherapyOrder: React.FC<{
           </div>
         ) : activeTab === "Supportive" ? (
           <div className="p-8">
+            {editingRow?.kind === "supportive" && editError && (
+              <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+                {editError}
+              </div>
+            )}
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -6545,6 +6596,10 @@ const ChemotherapyOrder: React.FC<{
                     <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                       Unit
                     </th>
+
+                    <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Action
+                    </th>
                   </tr>
                 </thead>
 
@@ -6552,7 +6607,7 @@ const ChemotherapyOrder: React.FC<{
                   {planLoading && (
                     <tr>
                       <td
-                        colSpan={4}
+                        colSpan={5}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
                         Loading supportive drugs
@@ -6565,7 +6620,7 @@ const ChemotherapyOrder: React.FC<{
                     supportiveDrugs.length === 0 && (
                       <tr>
                         <td
-                          colSpan={4}
+                          colSpan={5}
                           className="px-6 py-8 text-center text-sm text-gray-500"
                         >
                           No supportive drugs found for this protocol.
@@ -6576,7 +6631,7 @@ const ChemotherapyOrder: React.FC<{
                   {planError && (
                     <tr>
                       <td
-                        colSpan={4}
+                        colSpan={5}
                         className="px-6 py-8 text-center text-sm text-red-500"
                       >
                         {planError}
@@ -6584,7 +6639,66 @@ const ChemotherapyOrder: React.FC<{
                     </tr>
                   )}
 
-                  {supportiveDrugs.map((drug) => (
+                  {supportiveDrugs.map((drug) => {
+                    const isEditingRow =
+                      editingRow?.kind === "supportive" &&
+                      editingRow.id === drug.id;
+
+                    if (isEditingRow && editDraft) {
+                      return (
+                        <tr
+                          key={drug.id}
+                          className="bg-blue-50/40 transition-colors"
+                        >
+                          <td className="whitespace-nowrap px-3 py-3 pl-6 pr-3 text-base font-medium text-gray-900">
+                            {editDraft.name}
+                          </td>
+
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-gray-500">
+                            {editDraft.form}
+                          </td>
+
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.dose}
+                              onChange={(event) =>
+                                updateEditDraft("dose", event.target.value)
+                              }
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </td>
+
+                          <td className="whitespace-nowrap px-3 py-3 text-base text-blue-500">
+                            {editDraft.unit}
+                          </td>
+
+                          <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={saveEditedDrug}
+                                disabled={savingEdit}
+                                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {savingEdit ? "Saving" : "Save"}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={cancelEdit}
+                                disabled={savingEdit}
+                                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return (
                     <tr
                       key={drug.id}
                       className="transition-colors hover:bg-gray-50"
@@ -6604,8 +6718,31 @@ const ChemotherapyOrder: React.FC<{
                       <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
                         {drug.unit}
                       </td>
+
+                      <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
+                        <div className="flex items-center justify-end gap-3 text-gray-500">
+                          <button
+                            type="button"
+                            aria-label={`Edit ${drug.name}`}
+                            onClick={() => handleEditSupportive(drug.id)}
+                            className="transition-colors hover:text-gray-900 focus:outline-none"
+                          >
+                            <EditIcon />
+                          </button>
+
+                          <button
+                            type="button"
+                            aria-label={`Delete ${drug.name}`}
+                            onClick={() => handleDeleteSupportive(drug.id)}
+                            className="transition-colors hover:text-red-600 focus:outline-none"
+                          >
+                            <DeleteIcon />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

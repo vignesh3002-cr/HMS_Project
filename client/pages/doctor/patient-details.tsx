@@ -1426,12 +1426,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
       )
         .then((results) => {
           if (cancelled) return;
-          const items = results.filter(Boolean) as LabOrderItemRecord[];
-          if (items.length > 0) {
-            setLabItems(items);
-            return;
-          }
-          fetchAllAndFilter();
+          fetchAllAndFilter(results.filter(Boolean) as LabOrderItemRecord[]);
         })
         .catch(() => { fetchAllAndFilter(); })
         .finally(() => { if (!cancelled) setLabItemsLoading(false); });
@@ -1439,7 +1434,10 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
       fetchAllAndFilter();
     }
 
-    function fetchAllAndFilter() {
+    /* Lab Validation shows ALL reports for this patient regardless of
+       ordered date (past, present, future). The freshly ordered items
+       from this visit are merged in on top so nothing is hidden. */
+    function fetchAllAndFilter(preferred: LabOrderItemRecord[] = []) {
       labOrderItemApi
         .getAll()
         .then((response) => {
@@ -1448,7 +1446,16 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
           const forPatient = allItems.filter(
             (item) => item.lab_order?.patient_history?.patient_id === pid
           );
-          setLabItems(forPatient);
+          const merged = [
+            ...preferred,
+            ...forPatient.filter(
+              (item) =>
+                !preferred.some(
+                  (p) => p.lab_order_item_id === item.lab_order_item_id
+                )
+            ),
+          ];
+          setLabItems(merged);
         })
         .catch((error: any) => {
           if (!cancelled) {
