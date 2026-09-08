@@ -4917,6 +4917,7 @@ const ChemotherapyOrder: React.FC<{
   const [cycleDay, setCycleDay] = useState("");
   const [startDate, setStartDate] = useState("");
   const [activeTab, setActiveTab] = useState("Chemotherapy Orders");
+  const [cycleDayOpen, setCycleDayOpen] = useState(false);
   const [protocolName, setProtocolName] = useState("");
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState("");
@@ -5364,6 +5365,38 @@ const ChemotherapyOrder: React.FC<{
     );
     return adminDays.size > 0 ? Math.max(...adminDays) : 6;
   })();
+
+  /* The distinct days that have medications in the protocol, used to
+     render the day-selector buttons. Falls back to a sequential
+     1..protocolDayCount range when the protocol has not loaded yet. */
+  const availableDays = (() => {
+    const days = getAvailableDays(protocolRef.current);
+    if (days.length > 0) return days;
+    return Array.from({ length: protocolDayCount }, (_, i) => i + 1);
+  })();
+
+  /* The distinct cycles (1..standard_cycles) available for the selected
+     protocol, used to render the cycle-selector checkboxes. */
+  const availableCycles = (() => {
+    const total = Number(protocolRef.current?.standard_cycles ?? 0);
+    if (Number.isFinite(total) && total > 0) {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    return Array.from({ length: 6 }, (_, i) => i + 1);
+  })();
+
+  /* Set the cycle while preserving the currently selected day (clamped to
+     the protocol's available days). Updates the Cycle / Day field and
+     refetches that cycle's medications. */
+  const selectCycle = (cycle: number) => {
+    const currentDay = getCycleDayNumber(cycleDay) ?? availableDays[0] ?? 1;
+    const day = availableDays.includes(currentDay)
+      ? currentDay
+      : (availableDays[0] ?? 1);
+    const value = `Cycle ${cycle} / Day ${day}`;
+    updateCycleDay(value);
+    applySelectedDay(value);
+  };
 
   /* Jump to a specific day in the current cycle, preserving the cycle
      number already selected in the Cycle / Day field. The filtered drugs
@@ -6099,24 +6132,98 @@ const ChemotherapyOrder: React.FC<{
               Cycle / Day
             </label>
 
-            <div className="relative mt-1 rounded-md shadow-sm">
-              <input
-                id="cycle-day"
-                type="text"
-                value={cycleDay}
-                onChange={(e) => {
-                  userTouched.current.cycleDay = true;
-                  updateCycleDay(e.target.value);
-                  void applySelectedDay(e.target.value);
-                }}
-                className="block w-full rounded-md border border-gray-300 py-3 pl-4 pr-10 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-              />
+            {/* Dropdown trigger */}
+            <button
+              type="button"
+              onClick={() => setCycleDayOpen((prev) => !prev)}
+              className="relative mt-1 flex w-full items-center justify-between rounded-md border border-gray-300 bg-white px-4 py-3 text-left text-base text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            >
+              <span className={cycleDay ? "text-gray-900" : "text-gray-400"}>
+                {cycleDay || "Select Cycle / Day"}
+              </span>
 
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
-                <RefreshIcon />
+              <svg
+                className={`h-4 w-4 text-gray-400 transition-transform ${
+                  cycleDayOpen ? "rotate-180" : ""
+                }`}
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
+
+            {/* Dropdown panel - only shows when open */}
+            {cycleDayOpen && (
+              <div className="absolute z-20 mt-1 w-full rounded-md border border-gray-300 bg-white p-3 shadow-lg">
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Cycles */}
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                      Cycles
+                    </div>
+                    <div className="max-h-40 space-y-1 overflow-y-auto">
+                      {availableCycles.map((cycle) => {
+                        const isChecked = getCycleNumber(cycleDay) === cycle;
+                        return (
+                          <label
+                            key={cycle}
+                            className="flex cursor-pointer items-center gap-2 text-sm text-gray-700"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {
+                                userTouched.current.cycleDay = true;
+                                setCycleDayOpen(false);
+                                selectCycle(cycle);
+                              }}
+                              className="h-4 w-4 shrink-0 cursor-pointer rounded border border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span>Cycle {cycle}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Days */}
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                      Days
+                    </div>
+                    <div className="max-h-40 space-y-1 overflow-y-auto">
+                      {availableDays.map((day) => {
+                        const isChecked = getCycleDayNumber(cycleDay) === day;
+                        return (
+                          <label
+                            key={day}
+                            className="flex cursor-pointer items-center gap-2 text-sm text-gray-700"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {
+                                userTouched.current.cycleDay = true;
+                                setCycleDayOpen(false);
+                                selectDay(day);
+                              }}
+                              className="h-4 w-4 shrink-0 cursor-pointer rounded border border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span>Day {day}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-
+            )}
           </div>
 
           {/* Start Date */}
