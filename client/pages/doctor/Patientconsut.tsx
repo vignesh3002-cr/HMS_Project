@@ -4979,6 +4979,11 @@ const ChemotherapyOrder: React.FC<{
   const protocolDaysRef = useRef<RegimenProtocolDay[]>([]);
   const cycleDayRef = useRef<string>("");
   const planIdRef = useRef<string>("");
+  /* Snapshot of the previously-scheduled next cycle, captured at the very
+     start of mount (before any ref/plan/protocol loads rewrite the shared
+     localStorage key), so a returning patient's order can resume at the
+     exact cycle/day the last visit scheduled. */
+  const storedNextCycleRef = useRef<string>("");
   const planItemsRef = useRef<ChemotherapyPlanItem[]>([]);
   const selectedProtocolIdRef = useRef<string>("");
 
@@ -5045,17 +5050,18 @@ const ChemotherapyOrder: React.FC<{
        the order advance day-by-day within the cycle (Cycle 2 / Day 1 ->
        Cycle 2 / Day 2 -> ...) and roll to the next cycle's Day 1 once a
        cycle completes, instead of always starting at Day 1.
-       That stored value is only authoritative when the patient actually
-       has a recorded cycle in the DB. A brand-new treatment (no recorded
-       cycle yet) must always present Cycle 1 / Day 1, never a leftover
-       hms_next_cycle value from an abandoned earlier session - which this
-       very function (and the follow-up effect) also rewrite during the
-       same mount. */
-    const storedParsed = latestCycle
-      ? getCycleAndDay(
-          localStorage.getItem(`hms_next_cycle_${resolvedPatientId}`) ?? ""
-        )
-      : null;
+       The stored value is authoritative when the patient has a recorded
+       cycle in the DB OR an active treatment plan exists (the plan the
+       doctor already saved - so the next scheduled cycle/day is honored
+       even before a cycle record exists). A truly brand-new treatment
+       (no plan and no recorded cycle) must always present Cycle 1 / Day
+       1, never a leftover hms_next_cycle value from an abandoned earlier
+       session - which this very function (and the follow-up effect) also
+       rewrite during the same mount. */
+    const storedParsed =
+      latestCycle || planIdRef.current
+        ? getCycleAndDay(storedNextCycleRef.current)
+        : null;
 
     let formCycleNumber = storedParsed
       ? storedParsed.cycle
@@ -5150,14 +5156,31 @@ const ChemotherapyOrder: React.FC<{
      per cycle (no_of_days), compute the next scheduled day:
        - same cycle, next day while the cycle has more days to run
        - next cycle, Day 1 once the current cycle's last day completes
-     (some protocols run >6 days, some <6, some exactly 6). */
+     Rest days (days with no drugs) are skipped using the protocol's
+     actual medication days, so protocols with >6 / <6 / exactly 6 days
+     advance correctly. */
   const computeNextCycle = (
     cycleDayValue: string,
     noOfDays: number | null
   ): string => {
     const current = getCycleAndDay(cycleDayValue);
     if (!current) return "";
-    const daysPerCycle = noOfDays && noOfDays > 0 ? noOfDays : 6;
+    const protocol = protocolRef.current;
+    const medDays = getAvailableDays(protocol);
+    const daysPerCycle =
+      noOfDays && noOfDays > 0
+        ? noOfDays
+        : medDays.length > 0
+        ? Math.max(...medDays)
+        : 6;
+    const lastDay = medDays.length > 0 ? medDays[medDays.length - 1] : daysPerCycle;
+    if (medDays.length > 0) {
+      if (current.day >= lastDay) {
+        return `Cycle ${current.cycle + 1} / Day ${medDays[0] ?? 1}`;
+      }
+      const nextMedDay = medDays.find((d) => d > current.day);
+      return `Cycle ${current.cycle} / Day ${nextMedDay ?? (medDays[0] ?? 1)}`;
+    }
     if (current.day < daysPerCycle) {
       return `Cycle ${current.cycle} / Day ${current.day + 1}`;
     }
@@ -5600,6 +5623,13 @@ const ChemotherapyOrder: React.FC<{
     let cancelled = false;
     setPlanLoading(true);
     setPlanError("");
+
+    /* Snapshot the previously scheduled next cycle/day BEFORE any protocol
+       or plan load rewrites hms_next_cycle during this mount, so a
+       returning visit resumes at the exact cycle the last visit planned
+       (e.g. Cycle 2 / Day 1 -> Cycle 2 / Day 2). */
+    storedNextCycleRef.current =
+      localStorage.getItem(`hms_next_cycle_${resolvedPatientId}`) ?? "";
 
     const savedStartDate = localStorage.getItem(
       `hms_planned_start_date_${resolvedPatientId}`
@@ -7333,6 +7363,19 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
     )
       .then((response) => {
         const protocol = response.data.data;
+
+        /* The protocol's actual medication days (from the flat items'
+           administration_day). This honours protocols where some cycles
+           have more than 6 days, some fewer, or exactly 6 - and skips
+           rest days that carry no drugs. */
+        const availableDays = [
+          ...new Set(
+            (protocol.chemotherapy_regimen_protocol_items ?? [])
+              .map((item) => Number(item.administration_day))
+              .filter((d) => Number.isFinite(d) && d > 0)
+          ),
+        ].sort((a, b) => a - b);
+
         const total =
           protocol.standard_cycles && protocol.standard_cycles > 0
             ? protocol.standard_cycles
@@ -7340,17 +7383,30 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
         const daysPerCycle =
           protocol.no_of_days && protocol.no_of_days > 0
             ? protocol.no_of_days
+            : availableDays.length > 0
+            ? Math.max(...availableDays)
             : 6;
         setProtocolCycles(total);
         setProtocolDays(daysPerCycle);
+
+        /* The stored hms_next_cycle (written by the Chemo Order tab) is
+           ALREADY the next scheduled cycle/day - e.g. selecting "Cycle 2 /
+           Day 1" in the chemo order stores "Cycle 2 / Day 2". Display it
+           verbatim so the Follow-Up mirrors exactly what the Chemo Order
+           computed (rest-day aware, protocol-driven, rolls to the next
+           cycle's Day 1 once a cycle completes). */
+        const nextCycleValue = normalizedCycle;
+
         const options: string[] = [];
         for (let c = 1; c <= total; c++) {
-          for (let d = 1; d <= daysPerCycle; d++) {
+          (availableDays.length > 0 ? availableDays : 
+            Array.from({ length: daysPerCycle }, (_, i) => i + 1)
+          ).forEach((d) => {
             options.push(`Cycle ${c} / Day ${d}`);
-          }
+          });
         }
-        if (normalizedCycle && !options.includes(normalizedCycle)) {
-          options.unshift(normalizedCycle);
+        if (nextCycleValue && !options.includes(nextCycleValue)) {
+          options.unshift(nextCycleValue);
         }
         if (!options.includes("Treatment ends")) {
           options.push("Treatment ends");
