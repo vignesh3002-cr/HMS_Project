@@ -23,6 +23,8 @@ import {
 import { computeBsa } from "../../utils/vitals";
 import { generatePrescriptionPdf, type PrescriptionData } from "../../utils/prescriptionPdf";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
+import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
+import { employeeApi } from "../../api/employee.api";
 
 interface ConsultationState {
   patientId?: string;
@@ -1346,6 +1348,8 @@ function useLatestPatientVitals(
 }
 
 function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
   const [activeTab, setActiveTab] = useState("Order Summary");
   const [selectedDay, setSelectedDay] = useState("Day 1");
   const [selectedCycle] = useState(1);
@@ -1402,6 +1406,27 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [labItems, setLabItems] = useState<LabOrderItemRecord[]>([]);
   const [labItemsLoading, setLabItemsLoading] = useState(false);
   const [labItemsError, setLabItemsError] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchAvatar = () => {
+      employeeApi
+        .getMe()
+        .then((res) => {
+          if (!mounted) return;
+          const url = res.data?.data?.employee?.employee_photo_URL || "";
+          setUserAvatarUrl(url);
+          if (url) localStorage.setItem("user_photo", url);
+          else localStorage.removeItem("user_photo");
+          setAvatarLoading(false);
+        })
+        .catch(() => {
+          if (mounted) setAvatarLoading(false);
+        });
+    };
+    fetchAvatar();
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     const pid = consultationState?.patientId;
@@ -2146,12 +2171,15 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </div>
 <div className="flex items-center space-x-6">
 <BellNotificationButton size="md" />
-<div className="flex items-center space-x-3 cursor-pointer pl-6 border-l border-[#e2e8f0]">
-<span className="text-sm font-bold text-[#1d4ed8]">HMS</span>
-<div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white">
-<i className="fa-solid fa-user text-sm"></i>
-</div>
-</div>
+<UserProfileDropdown
+  userName={getUser()?.username || "Doctor"}
+  userSubtext={getUser()?.role || "Doctor"}
+  userAvatar={userAvatarUrl || undefined}
+  avatarLoading={avatarLoading}
+  onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+  profilePath="/doctor/profile"
+  notificationsPath="/doctor/notifications"
+/>
 </div>
 </header>
 {/* END: Top Header */}

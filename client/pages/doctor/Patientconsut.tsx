@@ -43,6 +43,7 @@ import {
 } from "../../components/ui/popover";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import { MultiSelectDropdown } from "../../components/ui/multi-select-dropdown";
+import { UserProfileDropdown } from "../../components/ui/User_profile_dropdown";
 
 const formatPickedDate = (date: Date) => {
   const day = String(date.getDate()).padStart(2, "0");
@@ -780,6 +781,8 @@ const Consultation: React.FC = () => {
   ============================================================ */
 
   const [toast, setToast] = useState<ToastMessage>("");
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const [consultationNotes, setConsultationNotes] = useState("");
 
@@ -872,6 +875,27 @@ const Consultation: React.FC = () => {
     }
     return value;
   };
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchAvatar = () => {
+      employeeApi
+        .getMe()
+        .then((res) => {
+          if (!mounted) return;
+          const url = res.data?.data?.employee?.employee_photo_URL || "";
+          setUserAvatarUrl(url);
+          if (url) localStorage.setItem("user_photo", url);
+          else localStorage.removeItem("user_photo");
+          setAvatarLoading(false);
+        })
+        .catch(() => {
+          if (mounted) setAvatarLoading(false);
+        });
+    };
+    fetchAvatar();
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
@@ -1655,20 +1679,15 @@ const Consultation: React.FC = () => {
 
                 {/* USER */}
 
-                <button
-                  onClick={() => navigate("/doctor/profile")}
-                  className="flex items-center gap-3 cursor-pointer"
-                >
-
-                  <div className="text-sm font-bold leading-5 text-slate-700">
-                    HMS
-                  </div>
-
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-950 text-xs font-bold leading-4 text-white">
-                    DR
-                  </div>
-
-                </button>
+                <UserProfileDropdown
+                  userName={getUser()?.username || "Doctor"}
+                  userSubtext={getUser()?.role || "Doctor"}
+                  userAvatar={userAvatarUrl || undefined}
+                  avatarLoading={avatarLoading}
+                  onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+                  profilePath="/doctor/profile"
+                  notificationsPath="/doctor/notifications"
+                />
 
               </div>
 
@@ -2848,13 +2867,15 @@ const LabReview: React.FC<{
             )}
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="font-semibold text-gray-700">HMS</span>
-
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1E3A8A] font-bold text-white shadow-sm">
-              DR
-            </div>
-          </div>
+          <UserProfileDropdown
+            userName={getUser()?.username || "Doctor"}
+            userSubtext={getUser()?.role || "Doctor"}
+            userAvatar={userAvatarUrl || undefined}
+            avatarLoading={avatarLoading}
+            onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+            profilePath="/doctor/profile"
+            notificationsPath="/doctor/notifications"
+          />
         </div>
       </header>
 
@@ -3923,15 +3944,15 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
           <div className="flex items-center gap-4 sm:gap-6">
             <BellNotificationButton size="md" />
 
-            <div className="flex items-center gap-3">
-              <span className="hidden text-sm font-semibold text-gray-700 sm:block">
-                HMS
-              </span>
-
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#1e3a8a] text-sm font-bold text-white">
-                DR
-              </div>
-            </div>
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
           </div>
         </header>
 
@@ -4720,15 +4741,15 @@ if (embedded) {
             </button>
 
             {/* User */}
-            <div className="flex items-center gap-4 border-l border-gray-200 pl-6">
-              <span className="text-sm font-bold tracking-wide text-gray-700">
-                HMS
-              </span>
-
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-900 text-sm font-bold text-white">
-                DR
-              </div>
-            </div>
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
           </div>
         </header>
 
@@ -7246,15 +7267,15 @@ const ChemotherapyOrder: React.FC<{
           </button>
 
           {/* User */}
-          <div className="flex items-center gap-3">
-            <span className="text-base font-medium text-gray-700">
-              HMS
-            </span>
-
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-900 text-sm font-semibold text-white shadow-sm">
-              DR
-            </div>
-          </div>
+          <UserProfileDropdown
+            userName={getUser()?.username || "Doctor"}
+            userSubtext={getUser()?.role || "Doctor"}
+            userAvatar={userAvatarUrl || undefined}
+            avatarLoading={avatarLoading}
+            onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+            profilePath="/doctor/profile"
+            notificationsPath="/doctor/notifications"
+          />
         </div>
       </header>
 
@@ -8096,20 +8117,15 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
             </button>
 
             {/* User */}
-            <div className="flex items-center space-x-3">
-
-              <span className="text-sm font-bold text-gray-800">
-                HMS
-              </span>
-
-              <button
-                type="button"
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-800 text-sm font-bold text-white shadow-sm transition-colors hover:bg-blue-900"
-              >
-                DR
-              </button>
-
-            </div>
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
           </div>
         </header>
 
@@ -9187,17 +9203,15 @@ const TreatmentPlan: React.FC<{
               <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500" />
             </button>
 
-            <div className="flex items-center space-x-3 border-l border-slate-200 pl-6">
-
-              <span className="font-bold text-slate-800">
-                HMS
-              </span>
-
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-800 text-xs font-bold text-white">
-                DR
-              </div>
-
-            </div>
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
           </div>
         </header>
 
@@ -10554,15 +10568,15 @@ const Summary: React.FC<{
             </button>
 
             {/* User */}
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-slate-600">
-                HMS
-              </span>
-
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1E3A8A] text-xs font-semibold text-white">
-                DR
-              </div>
-            </div>
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
           </div>
         </header>
 
