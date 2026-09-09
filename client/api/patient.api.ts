@@ -28,6 +28,11 @@ export interface CreatePatientPayload {
   emergency_name?: string;
   emergency_relation?: string;
   emergency_mobile?: string;
+  // Referral details — sent as null unless patient_type === "Referral"
+  referral_type?: string | null;
+  referred_by?: string | null;
+  referral_contact?: string | null;
+  referral_notes?: string | null;
   photo?: string;
   branch_id: string;
   created_by: string;
@@ -82,6 +87,11 @@ export interface UpdatePatientPayload {
   emergency_name?: string;
   emergency_relation?: string;
   emergency_mobile?: string;
+  // Referral details — sent as null unless patient_type === "Referral"
+  referral_type?: string | null;
+  referred_by?: string | null;
+  referral_contact?: string | null;
+  referral_notes?: string | null;
   photo?: string;
 }
 
@@ -113,6 +123,11 @@ export interface PatientRecord {
   patient_district: string | null;
   patient_area: string | null;
   patient_pincode: number | null;
+  // Referral details columns on patient_bio_data
+  referral_type?: string | null;
+  referred_by?: string | null;
+  referral_contact?: string | null;
+  referral_notes?: string | null;
   branch: { branch_name: string | null } | null;
   user_table: { role_type: string | null; user_status: number | null; created_at?: string | null } | null;
 }
@@ -147,8 +162,8 @@ export const patientApi = {
     });
   },
 
-  getById: (patientId: string) =>
-    API.get<{ success: boolean; data: PatientRecord }>(`/patients/${patientId}`),
+  getById: (patientId: string, config?: { signal?: AbortSignal }) =>
+    API.get<{ success: boolean; data: PatientRecord }>(`/patients/${patientId}`, config),
 
   update: (patientId: string, data: UpdatePatientPayload) =>
     API.put<{ success: boolean; message: string; data?: unknown }>(`/patients/${patientId}`, data),

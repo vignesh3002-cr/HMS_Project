@@ -387,138 +387,177 @@ export default function CreateProtocol() {
         if (loadedDays[0]?.date) setScheduleDate(loadedDays[0].date);
         loadedItemIdsRef.current = items.filter((x: any) => x.protocol_item_id).map((x: any) => x.protocol_item_id as string);
         if (items.length || protocolDilutions.length || protocolDischarge.length) {
-          const dayOf = (x: any) => Math.min(x.administration_day ?? 1, dayCount);
-          const premedsM: Record<number, Premed[]> = {};
-              const chemoM: Record<number, ChemoPlan[]> = {};
-              const suppM: Record<number, SupportiveCare[]> = {};
-            const diluM: Record<number, DilutionDetail[]> = {};
-          for (const x of items) {
-            const dayIndex = dayOf(x);
-            if (x.drug_role === "PREMEDICATION") {
-              (premedsM[dayIndex] = premedsM[dayIndex] ?? []).push({
-                id: (x.protocol_item_id as string) ?? "",
-                medication: x.medicine_id ?? x.medicine_master?.medicine_name ?? "",
-                dose: (x.patient_dose as any) ?? "",
-                unit: x.patient_dose_unit ?? "",
-                adminNotes: x.administration_detail ?? "",
-                remarks: x.remarks ?? "",
-              });
-            } else if (x.drug_role === "PRIMARY") {
-              (chemoM[dayIndex] = chemoM[dayIndex] ?? []).push({
-                id: (x.protocol_item_id as string) ?? "",
-                medication: x.medicine_id ?? "",
-                doseCalc: (x as any).dose_calculation_method ?? "",
-                dose: (x.dosage as any) ?? "",
-                unit: x.dosage_unit ?? "",
-                patientDose: (x.patient_dose as any) ?? "",
-                patientUnit: x.patient_dose_unit ?? "",
-                adminNotes: x.administration_detail ?? "",
-                toxicity: x.previous_toxicity ?? "",
-                remarks: x.remarks ?? "",
-              });
-            } else if (x.drug_role === "SUPPORTIVE") {
-              const xs: any[] = x.chemotherapy_protocol_dilutions ?? [];
-              if (xs.length) {
-                for (const d of xs) {
-                  const dilutionDay = Math.min(d.administration_day ?? x.administration_day ?? 1, dayCount);
-                  (diluM[dilutionDay] = diluM[dilutionDay] ?? []).push({
-                    dilutionId: (d.protocol_dilution_id as string) ?? "",
-                    id: (x.protocol_item_id as string) ?? "",
-                    medication: d.medicine_id ?? x.medicine_id ?? "",
-                    form: d.form ?? "",
-                    dose: d.dose != null ? String(d.dose) : "",
-                    unit: d.dose_unit ?? "",
-                    volume: d.dilution_volume != null ? String(d.dilution_volume) : "",
-                    volumeUnit: d.dilution_volume_unit ?? "",
-                    diluent: d.diluent ?? "",
-                  });
+                  const dayOf = (x: any) => Math.min(x.administration_day ?? 1, dayCount);
+                  const premedsM: Record<number, Premed[]> = {};
+                  const chemoM: Record<number, ChemoPlan[]> = {};
+                  const suppM: Record<number, SupportiveCare[]> = {};
+                  for (const x of items) {
+                    const dayIndex = dayOf(x);
+                    if (x.drug_role === "PREMEDICATION") {
+                      const xs: any[] = x.chemotherapy_protocol_dilutions ?? [];
+                      (premedsM[dayIndex] = premedsM[dayIndex] ?? []).push({
+                        id: (x.protocol_item_id as string) ?? "",
+                        medication: x.medicine_id ?? x.medicine_master?.medicine_name ?? "",
+                        dose: (x.patient_dose as any) ?? "",
+                        unit: x.patient_dose_unit ?? "",
+                        adminNotes: x.administration_detail ?? "",
+                        remarks: x.remarks ?? "",
+                        dilutions: xs.map((d) => ({
+                          dilutionId: (d.protocol_dilution_id as string) ?? "",
+                          id: (x.protocol_item_id as string) ?? "",
+                          medication: d.medicine_id ?? x.medicine_id ?? "",
+                          form: d.form ?? "",
+                          dose: d.dose != null ? String(d.dose) : "",
+                          unit: d.dose_unit ?? "",
+                          volume: d.dilution_volume != null ? String(d.dilution_volume) : "",
+                          volumeUnit: d.dilution_volume_unit ?? "",
+                          diluent: d.diluent ?? "",
+                        })),
+                      });
+                    } else if (x.drug_role === "PRIMARY") {
+                      const xs: any[] = x.chemotherapy_protocol_dilutions ?? [];
+                      (chemoM[dayIndex] = chemoM[dayIndex] ?? []).push({
+                        id: (x.protocol_item_id as string) ?? "",
+                        medication: x.medicine_id ?? "",
+                        doseCalc: (x as any).dose_calculation_method ?? "",
+                        dose: (x.dosage as any) ?? "",
+                        unit: x.dosage_unit ?? "",
+                        patientDose: (x.patient_dose as any) ?? "",
+                        patientUnit: x.patient_dose_unit ?? "",
+                        adminNotes: x.administration_detail ?? "",
+                        toxicity: x.previous_toxicity ?? "",
+                        remarks: x.remarks ?? "",
+                        dilutions: xs.map((d) => ({
+                          dilutionId: (d.protocol_dilution_id as string) ?? "",
+                          id: (x.protocol_item_id as string) ?? "",
+                          medication: d.medicine_id ?? x.medicine_id ?? "",
+                          form: d.form ?? "",
+                          dose: d.dose != null ? String(d.dose) : "",
+                          unit: d.dose_unit ?? "",
+                          volume: d.dilution_volume != null ? String(d.dilution_volume) : "",
+                          volumeUnit: d.dilution_volume_unit ?? "",
+                          diluent: d.diluent ?? "",
+                        })),
+                      });
+                    } else if (x.drug_role === "SUPPORTIVE") {
+                      const xs: any[] = x.chemotherapy_protocol_dilutions ?? [];
+                      if (xs.length) {
+                        (suppM[dayIndex] = suppM[dayIndex] ?? []).push({
+                          id: (x.protocol_item_id as string) ?? "",
+                          medication: x.medicine_id ?? "",
+                          adminNotes: x.administration_detail ?? "",
+                          remarks: x.remarks ?? "",
+                          dilutions: xs.map((d) => ({
+                            dilutionId: (d.protocol_dilution_id as string) ?? "",
+                            id: (x.protocol_item_id as string) ?? "",
+                            medication: d.medicine_id ?? x.medicine_id ?? "",
+                            form: d.form ?? "",
+                            dose: d.dose != null ? String(d.dose) : "",
+                            unit: d.dose_unit ?? "",
+                            volume: d.dilution_volume != null ? String(d.dilution_volume) : "",
+                            volumeUnit: d.dilution_volume_unit ?? "",
+                            diluent: d.diluent ?? "",
+                          })),
+                        });
+                      } else if (isLegacyDilution(x)) {
+                        const diluent =
+                          (x.administration_detail ?? "").trim() ||
+                          (typeof x.remarks === "string" ? x.remarks.replace(/^Diluent:\s*/i, "").trim() : "");
+                        (suppM[dayIndex] = suppM[dayIndex] ?? []).push({
+                          id: (x.protocol_item_id as string) ?? "",
+                          medication: x.medicine_id ?? "",
+                          adminNotes: x.administration_detail ?? "",
+                          remarks: x.remarks ?? "",
+                          dilutions: [{
+                            dilutionId: "",
+                            id: (x.protocol_item_id as string) ?? "",
+                            medication: x.medicine_id ?? "",
+                            form: "",
+                            dose: x.dosage != null ? String(x.dosage) : "",
+                            unit: x.dosage_unit ?? "",
+                            volume: "",
+                            volumeUnit: "",
+                            diluent,
+                          }],
+                        });
+                      } else {
+                        (suppM[dayIndex] = suppM[dayIndex] ?? []).push({
+                          id: (x.protocol_item_id as string) ?? "",
+                          medication: x.medicine_id ?? "",
+                          adminNotes: x.administration_detail ?? "",
+                          remarks: x.remarks ?? "",
+                          dilutions: [],
+                        });
+                      }
+                    }
+                  }
+                  // POST-TREATMENT (ON DISCHARGE) medications are persisted in the
+                  // chemotherapy_discharge_instructions table (surfaced as
+                  // protocol_discharge_instructions). Protocols created before that
+                  // switch still carry them as POSTMEDICATION items - fall back to
+                  // those so nothing disappears on edit.
+                  const dischargeRows: any[] = protocolDischarge;
+                  const postM: Record<number, PostTreatment[]> = {};
+                  if (dischargeRows.length) {
+                    for (const d of dischargeRows) {
+                      const dayIndex = Math.min(d.administration_day ?? 1, dayCount);
+                      (postM[dayIndex] = postM[dayIndex] ?? []).push({
+                        id: (d.discharge_instruction_id as string) ?? "",
+                        form: d.drug_from ?? "Tab",
+                        medication: d.medicine_id ?? "",
+                        dose: d.patient_dose != null ? String(d.patient_dose) : "",
+                        unit: d.patient_dose_unit ?? "",
+                        frequency: d.frequency ?? "",
+                        instructions: d.administration_detail ?? "",
+                        duration: d.duration ?? "",
+                        remarks: d.comment ?? "",
+                      });
+                    }
+                  } else {
+                    for (const x of items.filter((x: any) => x.drug_role === "POSTMEDICATION")) {
+                      const dayIndex = Math.min(x.administration_day ?? 1, dayCount);
+                      (postM[dayIndex] = postM[dayIndex] ?? []).push({
+                        id: (x.protocol_item_id as string) ?? "",
+                        form: "Tab",
+                        medication: x.medicine_id ?? "",
+                        dose: (x.dosage as any) ?? "",
+                        unit: x.dosage_unit ?? "",
+                        frequency: x.frequency ?? "",
+                        instructions: x.administration_detail ?? "",
+                        duration: x.administration_day != null ? "Day " + x.administration_day : "",
+                        remarks: typeof x.remarks === "string" ? x.remarks : "",
+                      });
+                    }
+                  }
+                  const protoDils: any[] = protocolDilutions;
+                  if (protoDils.length) {
+                    // Legacy protocol-level dilutions (not attached to items) - attach to supportive care for now
+                    for (const d of protoDils) {
+                      const dilutionDay = Math.min(d.administration_day ?? 1, dayCount);
+                      (suppM[dilutionDay] = suppM[dilutionDay] ?? []).push({
+                        id: (d.protocol_item_id as string) ?? "",
+                        medication: d.medicine_id ?? "",
+                        adminNotes: "",
+                        remarks: "",
+                        dilutions: [{
+                          dilutionId: (d.protocol_dilution_id as string) ?? "",
+                          id: (d.protocol_item_id as string) ?? "",
+                          medication: d.medicine_id ?? "",
+                          form: d.form ?? "",
+                          dose: d.dose != null ? String(d.dose) : "",
+                          unit: d.dose_unit ?? "",
+                          volume: d.dilution_volume != null ? String(d.dilution_volume) : "",
+                          volumeUnit: d.dilution_volume_unit ?? "",
+                          diluent: d.diluent ?? "",
+                        }],
+                      });
+                    }
+                  }
+                  setPremedsByDay(premedsM);
+                  setChemoPlansByDay(chemoM);
+                  setSupportiveByDay(suppM);
+                  if (Object.keys(postM).length) setPostByDay(postM);
                 }
-              } else if (isLegacyDilution(x)) {
-                const diluent =
-                  (x.administration_detail ?? "").trim() ||
-                  (typeof x.remarks === "string" ? x.remarks.replace(/^Diluent:\s*/i, "").trim() : "");
-                (diluM[dayIndex] = diluM[dayIndex] ?? []).push({
-                  dilutionId: "",
-                  id: (x.protocol_item_id as string) ?? "",
-                  medication: x.medicine_id ?? "",
-                  form: "",
-                  dose: x.dosage != null ? String(x.dosage) : "",
-                  unit: x.dosage_unit ?? "",
-                  volume: "",
-                  volumeUnit: "",
-                  diluent,
-                });
-              } else {
-                (suppM[dayIndex] = suppM[dayIndex] ?? []).push({
-                  id: (x.protocol_item_id as string) ?? "",
-                  medication: x.medicine_id ?? "",
-                  adminNotes: x.administration_detail ?? "",
-                  remarks: x.remarks ?? "",
-                });
-              }
-            }
-          }
-          // POST-TREATMENT (ON DISCHARGE) medications are persisted in the
-          // chemotherapy_discharge_instructions table (surfaced as
-          // protocol_discharge_instructions). Protocols created before that
-          // switch still carry them as POSTMEDICATION items - fall back to
-          // those so nothing disappears on edit.
-          const dischargeRows: any[] = protocolDischarge;
-          const postM: Record<number, PostTreatment[]> = {};
-          if (dischargeRows.length) {
-            for (const d of dischargeRows) {
-              const dayIndex = Math.min(d.administration_day ?? 1, dayCount);
-              (postM[dayIndex] = postM[dayIndex] ?? []).push({
-                id: (d.discharge_instruction_id as string) ?? "",
-                form: d.drug_from ?? "Tab",
-                medication: d.medicine_id ?? "",
-                dose: d.patient_dose != null ? String(d.patient_dose) : "",
-                unit: d.patient_dose_unit ?? "",
-                frequency: d.frequency ?? "",
-                instructions: d.administration_detail ?? "",
-                duration: d.duration ?? "",
-                remarks: d.comment ?? "",
-              });
-            }
-          } else {
-            for (const x of items.filter((x: any) => x.drug_role === "POSTMEDICATION")) {
-              const dayIndex = Math.min(x.administration_day ?? 1, dayCount);
-              (postM[dayIndex] = postM[dayIndex] ?? []).push({
-                id: (x.protocol_item_id as string) ?? "",
-                form: "Tab",
-                medication: x.medicine_id ?? "",
-                dose: (x.dosage as any) ?? "",
-                unit: x.dosage_unit ?? "",
-                frequency: x.frequency ?? "",
-                instructions: x.administration_detail ?? "",
-                duration: x.administration_day != null ? "Day " + x.administration_day : "",
-                remarks: typeof x.remarks === "string" ? x.remarks : "",
-              });
-            }
-          }
-          const protoDils: any[] = protocolDilutions;
-          if (Object.keys(diluM).length === 0 && protoDils.length) {
-            for (const d of protoDils) {
-              const dilutionDay = Math.min(d.administration_day ?? 1, dayCount);
-              (diluM[dilutionDay] = diluM[dilutionDay] ?? []).push({
-                dilutionId: (d.protocol_dilution_id as string) ?? "",
-                id: (d.protocol_item_id as string) ?? "",
-                medication: d.medicine_id ?? "",
-                form: d.form ?? "",
-                dose: d.dose != null ? String(d.dose) : "",
-                unit: d.dose_unit ?? "",
-                volume: d.dilution_volume != null ? String(d.dilution_volume) : "",
-                volumeUnit: d.dilution_volume_unit ?? "",
-                diluent: d.diluent ?? "",
-              });
-            }
-          }
-          setPremedsByDay(premedsM);
-          setChemoPlansByDay(chemoM);
-          setSupportiveByDay(suppM);
-          setDilutionByDay(diluM);
-          if (Object.keys(postM).length) setPostByDay(postM);
-        }
       })
       .catch((e: any) => {
         toast({ title: "Failed to load protocol", description: e.response?.data?.message ?? e.message, variant: "destructive" });
@@ -561,10 +600,9 @@ export default function CreateProtocol() {
     setDays([...days, { dayNumber: nextNum, date: nextDate }]);
     setPremedsByDay((prev) => ({ ...prev, [nextNum]: [emptyPremed()] }));
     setChemoPlansByDay((prev) => ({ ...prev, [nextNum]: [emptyChemo()] }));
-    setSupportiveByDay((prev) => ({ ...prev, [nextNum]: [emptySupportive()] }));
-    setDilutionByDay((prev) => ({ ...prev, [nextNum]: [emptyDilution()] }));
-    setPostByDay((prev) => ({ ...prev, [nextNum]: [emptyPost()] }));
-    setActiveDay(nextNum);
+      setSupportiveByDay((prev) => ({ ...prev, [nextNum]: [emptySupportive()] }));
+      setPostByDay((prev) => ({ ...prev, [nextNum]: [emptyPost()] }));
+      setActiveDay(nextNum);
   };
   const handleDayDateChange = (dayNumber: number, newDate: string) => {
     if (disabled) return;
@@ -580,104 +618,120 @@ export default function CreateProtocol() {
       Object.fromEntries(oldNumbers.map((old, i) => [i + 1, map[old] ?? []]));
     setPremedsByDay((prev) => shift(prev));
     setChemoPlansByDay((prev) => shift(prev));
-    setSupportiveByDay((prev) => shift(prev));
-    setDilutionByDay((prev) => shift(prev));
-    setPostByDay((prev) => shift(prev));
-    if (activeDay === dayNumber) setActiveDay(filtered[0].dayNumber);
+      setSupportiveByDay((prev) => shift(prev));
+      setPostByDay((prev) => shift(prev));
+      if (activeDay === dayNumber) setActiveDay(filtered[0].dayNumber);
     else if (activeDay > dayNumber) setActiveDay(activeDay - 1);
   };
 
   const buildItems = () => {
-    const items: Array<{
-      protocol_item_id?: string;
-      medicine_id: string;
-      drug_role: string;
-      drug_type?: string | null;
-      drug_sequence: number;
-      dosage?: string | null;
-      dosage_unit?: string | null;
-      dose_calculation_method?: string | null;
-      frequency?: string | null;
-      remarks?: string | null;
-      patient_dose?: string | null;
-      patient_dose_unit?: string | null;
-      administration_detail?: string | null;
-      previous_toxicity?: string | null;
-      administration_day?: number | null;
-      dilutions?: RegimenProtocolDilutionInput[];
-    }> = [];
-    let seq = 1;
-    for (const day of days) {
-      const dayNum = day.dayNumber;
-      for (const row of premedsByDay[dayNum] ?? []) {
-        if (!row.medication.trim()) continue;
-        items.push({
-          protocol_item_id: row.id || undefined,
-          medicine_id: row.medication.trim(),
-          drug_role: "PREMEDICATION",
-          drug_type: "PREMEDICATION",
-          drug_sequence: seq++,
-          patient_dose: row.dose || null,
-          patient_dose_unit: row.unit || null,
-          administration_detail: row.adminNotes || null,
-          remarks: row.remarks || null,
-          administration_day: dayNum,
-        });
-      }
-      for (const row of chemoPlansByDay[dayNum] ?? []) {
-        if (!row.medication.trim()) continue;
-        items.push({
-          protocol_item_id: row.id || undefined,
-          medicine_id: row.medication.trim(),
-          drug_role: "PRIMARY",
-          drug_type: "PRIMARY",
-          drug_sequence: seq++,
-          dosage: row.dose || null,
-          dosage_unit: row.unit || null,
-          patient_dose: row.patientDose || null,
-          patient_dose_unit: row.patientUnit || null,
-          dose_calculation_method: row.doseCalc || null,
-          previous_toxicity: row.toxicity || null,
-          administration_detail: row.adminNotes || null,
-          remarks: row.remarks || null,
-          administration_day: dayNum,
-        });
-      }
-      for (const row of supportiveByDay[dayNum] ?? []) {
-        if (!row.medication.trim()) continue;
-        items.push({ protocol_item_id: row.id || undefined, medicine_id: row.medication.trim(), drug_role: "SUPPORTIVE", drug_type: "SUPPORTIVE", drug_sequence: seq++, administration_detail: row.adminNotes || null, remarks: row.remarks || null, administration_day: dayNum });
-      }
-      for (const row of dilutionByDay[dayNum] ?? []) {
-        if (!row.medication.trim()) continue;
-        items.push({
-          protocol_item_id: row.id || undefined,
-          medicine_id: row.medication.trim(),
-          drug_role: "SUPPORTIVE",
-          drug_sequence: seq++,
-          dosage: null,
-          dosage_unit: null,
-          administration_detail: null,
-          remarks: null,
-          administration_day: dayNum,
-          dilutions: [{
-            protocol_dilution_id: row.dilutionId || undefined,
+      const items: Array<{
+        protocol_item_id?: string;
+        medicine_id: string;
+        drug_role: string;
+        drug_type?: string | null;
+        drug_sequence: number;
+        dosage?: string | null;
+        dosage_unit?: string | null;
+        dose_calculation_method?: string | null;
+        frequency?: string | null;
+        remarks?: string | null;
+        patient_dose?: string | null;
+        patient_dose_unit?: string | null;
+        administration_detail?: string | null;
+        previous_toxicity?: string | null;
+        administration_day?: number | null;
+        dilutions?: RegimenProtocolDilutionInput[];
+      }> = [];
+      let seq = 1;
+      for (const day of days) {
+        const dayNum = day.dayNumber;
+        for (const row of premedsByDay[dayNum] ?? []) {
+          if (!row.medication.trim()) continue;
+          items.push({
+            protocol_item_id: row.id || undefined,
             medicine_id: row.medication.trim(),
-            form: row.form || null,
-            dose: row.dose || null,
-            dose_unit: row.unit || null,
-            dilution_volume: row.volume || null,
-            dilution_volume_unit: row.volumeUnit || null,
-            diluent: row.diluent || null,
+            drug_role: "PREMEDICATION",
+            drug_type: "PREMEDICATION",
+            drug_sequence: seq++,
+            patient_dose: row.dose || null,
+            patient_dose_unit: row.unit || null,
+            administration_detail: row.adminNotes || null,
+            remarks: row.remarks || null,
             administration_day: dayNum,
-          }],
-        });
+            dilutions: (row.dilutions ?? []).map((d) => ({
+              protocol_dilution_id: d.dilutionId || undefined,
+              medicine_id: d.medication.trim(),
+              form: d.form || null,
+              dose: d.dose || null,
+              dose_unit: d.unit || null,
+              dilution_volume: d.volume || null,
+              dilution_volume_unit: d.volumeUnit || null,
+              diluent: d.diluent || null,
+              comment: d.diluent || null,
+            })),
+          });
+        }
+        for (const row of chemoPlansByDay[dayNum] ?? []) {
+          if (!row.medication.trim()) continue;
+          items.push({
+            protocol_item_id: row.id || undefined,
+            medicine_id: row.medication.trim(),
+            drug_role: "PRIMARY",
+            drug_type: "PRIMARY",
+            drug_sequence: seq++,
+            dosage: row.dose || null,
+            dosage_unit: row.unit || null,
+            patient_dose: row.patientDose || null,
+            patient_dose_unit: row.patientUnit || null,
+            dose_calculation_method: row.doseCalc || null,
+            previous_toxicity: row.toxicity || null,
+            administration_detail: row.adminNotes || null,
+            remarks: row.remarks || null,
+            administration_day: dayNum,
+            dilutions: (row.dilutions ?? []).map((d) => ({
+              protocol_dilution_id: d.dilutionId || undefined,
+              medicine_id: d.medication.trim(),
+              form: d.form || null,
+              dose: d.dose || null,
+              dose_unit: d.unit || null,
+              dilution_volume: d.volume || null,
+              dilution_volume_unit: d.volumeUnit || null,
+              diluent: d.diluent || null,
+              comment: d.diluent || null,
+            })),
+          });
+        }
+        for (const row of supportiveByDay[dayNum] ?? []) {
+          if (!row.medication.trim()) continue;
+          items.push({
+            protocol_item_id: row.id || undefined,
+            medicine_id: row.medication.trim(),
+            drug_role: "SUPPORTIVE",
+            drug_type: "SUPPORTIVE",
+            drug_sequence: seq++,
+            administration_detail: row.adminNotes || null,
+            remarks: row.remarks || null,
+            administration_day: dayNum,
+            dilutions: (row.dilutions ?? []).map((d) => ({
+              protocol_dilution_id: d.dilutionId || undefined,
+              medicine_id: d.medication.trim(),
+              form: d.form || null,
+              dose: d.dose || null,
+              dose_unit: d.unit || null,
+              dilution_volume: d.volume || null,
+              dilution_volume_unit: d.volumeUnit || null,
+              diluent: d.diluent || null,
+              comment: d.diluent || null,
+            })),
+          });
+        }
       }
-    }
-    // NOTE: POST-TREATMENT (ON DISCHARGE) medications are NOT protocol items;
-    // they are persisted separately as chemotherapy_discharge_instructions
-    // (see buildDischargeInstructions below).
-    return items;
-  };
+      // NOTE: POST-TREATMENT (ON DISCHARGE) medications are NOT protocol items;
+      // they are persisted separately as chemotherapy_discharge_instructions
+      // (see buildDischargeInstructions below).
+      return items;
+    };
 
   const buildDischargeInstructions = (): DischargeInstructionInput[] => {
     const instructions: DischargeInstructionInput[] = [];

@@ -17,22 +17,22 @@
     @apply text-[#111827] text-2xl font-bold leading-tight tracking-[-0.03em];
     @apply text-[#111827] text-2xl font-bold leading-tight tracking-[-0.03em];
    }
-   .hms-subheading {
-    @apply text-[#424752] text-xs font-medium leading-4;
-  }
+  .hms-subheading {
+   @apply text-[#424752] text-xs font-medium leading-4;
+ }
   .hms-table-header {
     @apply text-[12px] font-bold text-[#01091a] tracking-[0.9px] capitalize;
   }
   .hms-avatar-text {
   @apply text-[10px] font-semibold;
 }
-   .hms-name-text {
+  .hms-name-text {
   @apply text-[#111827] font-semibold text-sm leading-[1.2];
 }
-   .hms-id-text {
+  .hms-id-text {
   @apply text-[#8C8D8F] font-semibold text-[10px] uppercase;
 }
-   .hms-department-text {
+  .hms-department-text {
   @apply text-[11px] font-semibold; /* 10 */
 }
     .hms-content-text {
@@ -117,7 +117,7 @@
    * Tailwind CSS theme
    * tailwind.config.ts expects the following color variables to be expressed as HSL values.
    * A different format will require also updating the theme in tailwind.config.ts.
-  */
+   */
   :root {
     --background: 210 33% 98%;
     --foreground: 222 15% 28%;

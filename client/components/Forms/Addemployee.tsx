@@ -16,6 +16,7 @@ import { branchApi, Branch, AssignableUser } from "@/api/branch.api";
 import { departmentApi, Department } from "@/api/department.api";
 import { qualificationApi, Qualification } from "@/api/qualification.api";
 import { getUser } from "@/utils/token";
+import { usePermission } from "@/context/PermissionContext";
 import { validateRequiredFields, type RequiredField } from "@/lib/validation";
 import {
   formatInputAadhaar,
@@ -430,6 +431,8 @@ export default function AddEmployee() {
   const isSelfEdit = searchParams.get("self") === "1";
   const { toast } = useToast();
 
+  const { can } = usePermission();
+
   // Get current user's role for permission checks
   const currentUser = getUser();
   const callerRole = currentUser?.role_type || currentUser?.role || "";
@@ -437,6 +440,7 @@ export default function AddEmployee() {
   const isBranchAdmin = callerRole === "BRANCH_ADMIN";
   const isStaffAdmin = callerRole === "ADMIN";
   const isTopLevelAdmin = callerRole === "HEAD_ADMIN" || callerRole === "SUPER_ADMIN";
+  const canAssignDoctorGlobally = isTopLevelAdmin || can("doctor.assign_global");
 
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(isEditMode);
@@ -495,7 +499,10 @@ export default function AddEmployee() {
   useEffect(() => {
     // For non-top-level admins, default branch to their assigned branch
     if (!isTopLevelAdmin && callerBranchId && !isEditMode) {
-      setFormData((p) => ({ ...p, branchIds: [callerBranchId] }));
+      setFormData((p) => ({
+        ...p,
+        branchIds: p.branchIds.length > 0 ? p.branchIds : [callerBranchId],
+      }));
     }
 
     employeeApi
@@ -1189,15 +1196,10 @@ export default function AddEmployee() {
       ...(isMedical
         ? [
             { key: "qualification" as const, label: "Qualification" },
-            { key: "docLicenseNo" as const, label: "License No" },
+            { key: "docLicenseNo" as const, label: roleConfig?.licenseLabel ?? "License No" },
           ]
         : []),
       ...(formData.roleType === "DOCTOR" ? [{ key: "doctorBio" as const, label: "Doctor Bio" }] : []),
-      ...(isMedical ? [
-        { key: "specialization" as const, label: isMedical ? "Specialization" : "Department" },
-        { key: "qualification" as const, label: "Qualification" },
-        { key: "docLicenseNo" as const, label: roleConfig?.licenseLabel ?? "License No" },
-      ] : []),
       ...(showSchedule ? [{ key: "consultationMinutes" as const, label: "Consultation Minutes" }] : []),
       ...(isSupportingStaff ? [] : [{ key: "username" as const, label: "Username" }]),
       ...(isEditMode
@@ -1418,58 +1420,20 @@ export default function AddEmployee() {
         {/* ── Body ── */}
         <form onSubmit={handleSubmit} className="px-8 pt-7 pb-8">
 
-          {/* Photo + Role */}
-          <div className="flex items-start gap-x-[600px] pb-6 border-b border-gray-100 mb-7">
+          {/* Photo + Role / Status */}
+          <div className="flex items-start justify-between gap-8 pb-6 border-b border-gray-100 mb-7">
             <AvatarUpload
               value={formData.photoUrl}
               onChange={(url) => setFormData((p) => ({ ...p, photoUrl: url }))}
               label="Employee photo"
-              hint="Click or drag an image to upload (Max 1MB)"
+              hint="Click or drag an image to upload only JPEG format."
               size={96}
             />
 
-            {isEditMode && !isSelfEdit && (isTopLevelAdmin || isBranchAdmin) && (
-            <div className="w-64">
-              <label className={labelCls}>Status <Req /></label>
-              <div className="flex items-center gap-3 h-10">
-                <button
-                  type="button"
-                  onClick={() => setIsActive(!isActive)}
-                  disabled={submitting}
-                  className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                    isActive ? "bg-blue-500" : "bg-gray-300"
-                  }`}
-                  role="switch"
-                  aria-checked={isActive}
-                >
-                  <span
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition-transform duration-200 ${
-                      isActive ? "translate-x-6" : "translate-x-1"
-                    }`}
-                  />
-                </button>
-                <div className="flex items-center gap-2">
-                  <span className={`text-[13px] font-medium ${isActive ? "text-green-700" : "text-gray-500"}`}>
-                    {isActive ? "Active" : "Inactive"}
-                  </span>
-                  {isActive ? (
-                    <span className="text-xs text-blue-600">✓</span>
-                  ) : (
-                    <span className="text-xs text-gray-400">✕</span>
-                  )}
-                </div>
-              </div>
-            </div>
-            )}
-          </div>
-
-          {/* Role Section - Only show in create mode */}
-          {!isEditMode && (
-            <Section
-              title="Select Role"
-              sub="Select role based on requirements."
-            >
-              <div className="w-full max-w-md">
+            {/* Create mode: show Role dropdown next to photo */}
+            {!isEditMode && (
+              <div className="w-64">
+                <label className={labelCls}>Select Role <Req /></label>
                 <FormDropdown
                   name="role"
                   className={inputCls}
@@ -1480,14 +1444,52 @@ export default function AddEmployee() {
                   disabled={submitting || roleOptions.length === 0}
                 />
               </div>
-            </Section>
-          )}
+            )}
 
-
-          {/* Role hint banner */}
-          <div className="text-[11.5px] text-blue-600 bg-blue-50 rounded-lg px-3.5 py-2.5 mb-6">
-            {roleHintText}
+            {/* Edit mode: show Status toggle next to photo */}
+            {isEditMode && !isSelfEdit && (isTopLevelAdmin || isBranchAdmin) && (
+              <div className="w-64">
+                <label className={labelCls}>Status <Req /></label>
+                <div className="flex items-center gap-3 h-10">
+                  <button
+                    type="button"
+                    onClick={() => setIsActive(!isActive)}
+                    disabled={submitting}
+                    className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                      isActive ? "bg-blue-500" : "bg-gray-300"
+                    }`}
+                    role="switch"
+                    aria-checked={isActive}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition-transform duration-200 ${
+                        isActive ? "translate-x-6" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[13px] font-medium ${isActive ? "text-green-700" : "text-gray-500"}`}>
+                      {isActive ? "Active" : "Inactive"}
+                    </span>
+                    {isActive ? (
+                      <span className="text-xs text-blue-600">✓</span>
+                    ) : (
+                      <span className="text-xs text-gray-400">✕</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
+
+
+          {/* Role hint banner — only meaningful on create, where the admin
+              picks the role; edit mode has the role fixed and prefilled. */}
+          {!isEditMode && (
+            <div className="text-[11.5px] text-blue-600 bg-blue-50 rounded-lg px-3.5 py-2.5 mb-6">
+              {roleHintText}
+            </div>
+          )}
 
           {/* ── General information ── */}
           <Section
@@ -1554,24 +1556,6 @@ export default function AddEmployee() {
                   value={formData.dateOfBirth}
                   onChange={handleChange}
                   disabled={submitting}
-                />
-              </div>
-
-              <div>
-                <label className={labelCls}>Age</label>
-                <input
-                  name="age"
-                  placeholder="Auto-calculated"
-                  className={inputCls + " bg-gray-50 text-gray-500"}
-                  value={
-                    formData.dateOfBirth
-                      ? Math.floor(
-                          (Date.now() - new Date(formData.dateOfBirth).getTime()) /
-                            31557600000,
-                        ).toString()
-                      : ""
-                  }
-                  disabled
                 />
               </div>
 
@@ -2082,11 +2066,11 @@ export default function AddEmployee() {
                 )}
               </AnimatePresence>
 
-              {/* Branch — multi for Doctor (top-level only), single for TOP_LEVEL_ADMIN, read-only for all others */}
+              {/* Branch — multi for Doctor (if top-level or has doctor.assign_global), single for TOP_LEVEL_ADMIN, read-only for all others */}
               <div className="col-span-2">
                 <label className={labelCls}>Branch <Req /></label>
-                {isTopLevelAdmin ? (
-                  formData.roleType === "DOCTOR" ? (
+                {formData.roleType === "DOCTOR" ? (
+                  canAssignDoctorGlobally ? (
                     <>
                       <MultiSelectDropdown
                         options={branchOptions}
@@ -2108,20 +2092,30 @@ export default function AddEmployee() {
                       )}
                     </>
                   ) : (
-                    <FormDropdown
-                      name="branchId"
-                      className={inputCls}
-                      options={singleBranchOptions}
-                      value={formData.branchIds[0] ?? ""}
-                      onValueChange={(v) =>
-                        setFormData((p) => ({ ...p, branchIds: v ? [v] : [] }))
-                      }
-                      placeholder={
-                        branches.length ? "Select branch" : "No branches available"
-                      }
-                      disabled={submitting || branches.length === 0}
-                    />
+                    <>
+                      <div className={inputCls + " bg-gray-50 text-gray-600"}>
+                        {branches.find(b => b.branch_id === callerBranchId)?.branch_name || callerBranchId || "Your assigned branch"}
+                      </div>
+                      <input type="hidden" name="branchId" value={callerBranchId} />
+                      <p className="text-[11px] text-blue-600 mt-1">
+                        Branch is automatically set to your assigned branch.
+                      </p>
+                    </>
                   )
+                ) : isTopLevelAdmin ? (
+                  <FormDropdown
+                    name="branchId"
+                    className={inputCls}
+                    options={singleBranchOptions}
+                    value={formData.branchIds[0] ?? ""}
+                    onValueChange={(v) =>
+                      setFormData((p) => ({ ...p, branchIds: v ? [v] : [] }))
+                    }
+                    placeholder={
+                      branches.length ? "Select branch" : "No branches available"
+                    }
+                    disabled={submitting || branches.length === 0}
+                  />
                 ) : (
                   // For all non-top-level admins, branch is fixed to their assigned branch
                   <>
@@ -2322,6 +2316,13 @@ export default function AddEmployee() {
             <div className="grid grid-cols-3 gap-x-5 gap-y-[18px]">
               <div>
                 <label className={labelCls}>Username <Req /></label>
+                {/* Block browser autofill of the previously saved login — this
+                    is a create-credential form and must start empty. Chrome
+                    ignores autoComplete="off" for login-shaped fields, so the
+                    field also mounts readOnly (password managers skip readonly
+                    inputs) and unlocks on first focus, which always fires
+                    before the first keystroke. Create-mode-only: the whole
+                    section is hidden in edit mode. */}
                 <input
                   name="username"
                   placeholder="Enter username"
@@ -2330,6 +2331,9 @@ export default function AddEmployee() {
                   value={formData.username}
                   onChange={handleChange}
                   disabled={submitting}
+                  autoComplete="off"
+                  readOnly
+                  onFocus={(e) => e.currentTarget.removeAttribute("readonly")}
                 />
               </div>
               <div>
@@ -2345,6 +2349,9 @@ export default function AddEmployee() {
                   value={formData.password}
                   onChange={handleChange}
                   disabled={submitting}
+                  // "new-password" tells the browser this is a create-new-
+                  // credential field, so the saved login password is not filled.
+                  autoComplete="new-password"
                 />
               </div>
               <div>
@@ -2359,6 +2366,7 @@ export default function AddEmployee() {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   disabled={submitting}
+                  autoComplete="new-password"
                 />
               </div>
             </div>
