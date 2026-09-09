@@ -3566,13 +3566,13 @@ const Diagnosis: React.FC<{
             </div>
           </div>
 
-          {/* Sub Type */}
+          {/* Histopathology */}
           <div>
             <label
               htmlFor="subType"
               className="mb-2 block text-sm font-semibold text-gray-600"
             >
-              Sub Type
+              Histopathology 
             </label>
 
             <div className="relative">
@@ -8238,7 +8238,9 @@ type TreatmentType =
   | "Chemotherapy"
   | "Surgery"
   | "Radiation"
-  | "Targeted Therapy";
+  | "Targeted Therapy"
+  | "Immunotherapy"
+  | "Radioiodine therapy";
 
 interface RegimenProtocol {
   protocol_id: string;
@@ -8358,6 +8360,8 @@ const TreatmentPlan: React.FC<{
     "Surgery",
     "Radiation",
     "Targeted Therapy",
+    "Immunotherapy",
+    "Radioiodine therapy",
   ];
 
   /* Single-select behaviour - only one treatment type can be
@@ -8511,6 +8515,14 @@ const TreatmentPlan: React.FC<{
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleBack = () => {
+    window.history.back();
+  };
+
+  const handleViewProfile = () => {
+    console.log("View Full Profile clicked");
   };
 
   /* =========================================================
