@@ -38,6 +38,7 @@ import AddAppointment from "@/components/Forms/AddAppointment";
 // ============================================================
 
 import PatientProfile from "@/components/Forms/view/patientProfile";
+import PatientDetailView from "@/components/Forms/view/viewpatient";
 import ViewAppointmentScheduled from "@/components/Forms/view/View Appointment Scheduled";
 import Profile from "@/components/Forms/view/view profile ";
 import Security from "@/components/Forms/view/Security";
@@ -203,6 +204,11 @@ const protectedRoutes = [
   {
     path: "/patients/view/:id",
     element: <PatientProfile />,
+    permission: "patient.read",
+  },
+  {
+    path: "/patients/full-record/:id",
+    element: <PatientDetailView />,
     permission: "patient.read",
   },
 

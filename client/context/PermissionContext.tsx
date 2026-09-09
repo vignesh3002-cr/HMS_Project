@@ -8,6 +8,7 @@ interface PermissionContextType {
   can: (permission: string) => boolean;
   canAny: (permissionList: string[]) => boolean;
   canAll: (permissionList: string[]) => boolean;
+  canAssignDoctorGlobally: boolean;
   refetch: () => Promise<void>;
 }
 
@@ -50,6 +51,8 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
     return permissionList.every((p) => permissions.includes(p));
   };
 
+  const canAssignDoctorGlobally = permissions.includes("doctor.assign_global");
+
   return (
     <PermissionContext.Provider
       value={{
@@ -59,6 +62,7 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
         can,
         canAny,
         canAll,
+        canAssignDoctorGlobally,
         refetch: fetchPermissions,
       }}
     >
@@ -88,4 +92,9 @@ export function useCanAny(permissionList: string[]): boolean {
 export function useCanAll(permissionList: string[]): boolean {
   const { canAll, loading } = usePermission();
   return loading ? false : canAll(permissionList);
+}
+
+export function useCanAssignDoctorGlobally(): boolean {
+  const { canAssignDoctorGlobally, loading } = usePermission();
+  return loading ? false : canAssignDoctorGlobally;
 }

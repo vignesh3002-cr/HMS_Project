@@ -153,11 +153,6 @@ export default function PatientProfile() {
     return age >= 0 ? `${age}` : "—";
   }
 
-  const assignedDoctorId = useMemo(() => {
-    const apt = appointments.find((a) => a.doctorId && a.doctorId !== "—");
-    return apt ? apt.doctorId : null;
-  }, [appointments]);
-
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -404,16 +399,7 @@ export default function PatientProfile() {
                 <div className="flex flex-col items-center gap-11 sm:items-stretch">
                   <button
                     type="button"
-                    onClick={() => {
-                      if (assignedDoctorId) {
-                        navigate(`/doctor/view/${assignedDoctorId}`);
-                      } else {
-                        toast({
-                          title: "No Assigned Doctor",
-                          description: "This patient does not currently have an assigned doctor with an employee record.",
-                        });
-                      }
-                    }}
+                    onClick={() => navigate(`/patients/full-record/${id}`)}
                     className="text-center text-sm font-semibold text-[#00488D] hover:underline cursor-pointer"
                   >
                     View Full Record

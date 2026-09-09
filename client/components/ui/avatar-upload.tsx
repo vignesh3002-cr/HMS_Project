@@ -24,7 +24,7 @@ export interface AvatarUploadProps {
 
 const OUTPUT_SIZE = 320;
 const JPEG_QUALITY = 0.85;
-const DEFAULT_MAX_SIZE_MB = 1;
+const DEFAULT_MAX_SIZE_MB = 0.3;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 3;
 const VIEWPORT = 220;
@@ -277,7 +277,7 @@ export function AvatarUpload({
         <input
           ref={inputRef}
           type="file"
-          accept="image/*"
+          accept="image/jpeg"
           className="hidden"
           onChange={handleFileChange}
         />
