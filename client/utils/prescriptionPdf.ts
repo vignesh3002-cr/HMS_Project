@@ -1,4 +1,5 @@
 import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 export interface PrescriptionItem {
   medicine_name?: string;
@@ -83,8 +84,22 @@ const formatDate = (value?: string) => {
 
 export function generatePrescriptionPdf(prescription: PrescriptionData) {
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-  const margin = 50;
+  const margin = 40;
   let y = 50;
+
+  const tableStyles = {
+    fontSize: 8,
+    cellPadding: 5,
+    textColor: [30, 41, 59] as [number, number, number],
+    lineColor: [226, 232, 240] as [number, number, number],
+    lineWidth: 0.5,
+  };
+  const headStyles = {
+    fillColor: [0, 71, 133] as [number, number, number],
+    textColor: [255, 255, 255] as [number, number, number],
+    fontSize: 8.5,
+    fontStyle: "bold" as const,
+  };
 
   const patientName = [prescription.patient_history?.patient_first_name, prescription.patient_history?.patient_last_name].filter(Boolean).join(" ") || "—";
   const patientId = prescription.patient_history?.patient_display_id || prescription.patient_history?.patient_id || "—";
@@ -103,10 +118,6 @@ export function generatePrescriptionPdf(prescription: PrescriptionData) {
   const patientGender = prescription.patient_history?.patient_gender || prescription.patient_history?.gender || "—";
   
   const prescriptionDate = prescription.prescription_date ? new Date(prescription.prescription_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : formatDate(prescription.patient_history?.visit_date);
-
-  // Outer border
-  doc.setLineWidth(1);
-  doc.rect(margin - 10, 40, 545, 800);
 
   // Header
   doc.setFontSize(16);
@@ -268,9 +279,9 @@ export function generatePrescriptionPdf(prescription: PrescriptionData) {
 
   doc.setFontSize(11);
   doc.setFont(undefined, 'bold');
-  doc.setTextColor(0,71,133);
+  doc.setTextColor(49, 46, 129);
   doc.text("MEDICATIONS", margin, y);
-  y += 18;
+  y += 8;
 
   doc.setFontSize(9);
   doc.setTextColor(30,30,30);
@@ -278,96 +289,97 @@ export function generatePrescriptionPdf(prescription: PrescriptionData) {
 
   allRoles.forEach((role, roleIdx) => {
     if (roleIdx > 0) y += 16;
-
-    // Role banner with breathing room
-    const bannerHeight = 20;
-    doc.setFillColor(230, 242, 255);
-    doc.rect(margin, y, 525, bannerHeight, 'F');
+    doc.setFontSize(11);
+    doc.setTextColor(49, 46, 129);
     doc.setFont(undefined, 'bold');
-    doc.setTextColor(0,71,133);
-    doc.setFontSize(10);
-    doc.text(`${role} MEDICATIONS`, margin + 6, y + 13);
-    y += bannerHeight + 8;
+    doc.text(`${role} MEDICATIONS`, margin, y);
+    y += 8;
 
-    // Table header with light background
-    const headerHeight = 18;
-    doc.setFillColor(245, 247, 250);
-    doc.rect(margin, y, 525, headerHeight, 'F');
-    doc.setTextColor(40,40,40);
-    doc.setFont(undefined, 'bold');
-    doc.setFontSize(9);
-    doc.text("Medicine", colX.medicine, y + 12);
-    doc.text("Dosage", colX.dosage, y + 12);
-    doc.text("Frequency", colX.frequency, y + 12);
-    doc.text("Instruction", colX.instruction, y + 12);
-    y += headerHeight + 4;
-    doc.setDrawColor(210,210,210);
-    doc.setLineWidth(0.5);
-    doc.line(margin, y, maxContentWidth, y);
-    y += 6;
+    const body = grouped[role]
+      .filter(it => (it.medicine_name || it.medicine_master?.medicine_name))
+      .map(it => [
+        it.medicine_name || it.medicine_master?.medicine_name || '',
+        `${it.dosage || ''} ${it.unit || ''}`.trim() || '',
+        it.frequency || '',
+        it.instruction || '',
+      ]);
 
-    doc.setFont(undefined, 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(30,30,30);
-
-    grouped[role].forEach(it => {
-      const med = it.medicine_name || it.medicine_master?.medicine_name || '—';
-      const dosage = `${it.dosage || ''} ${it.unit || ''}`.trim() || '—';
-      const freq = it.frequency || '—';
-      const instr = it.instruction || '—';
-
-      const medLines = printWrappedCell(med, colX.medicine, y, colWidths.medicine);
-      const dosLines = printWrappedCell(dosage, colX.dosage, y, colWidths.dosage);
-      const freqLines = printWrappedCell(freq, colX.frequency, y, colWidths.frequency);
-      const instrLines = printWrappedCell(instr, colX.instruction, y, colWidths.instruction);
-
-      const rowHeight = Math.max(medLines, dosLines, freqLines, instrLines) * medLineHeight + 8;
-      // row separator below content
-      doc.setDrawColor(235,235,235);
-      doc.line(margin, y + rowHeight - 6, maxContentWidth, y + rowHeight - 6);
-      y += rowHeight;
-
-      // simple page overflow guard
-      if (y > 790) {
-        doc.addPage();
-        doc.setLineWidth(1);
-        doc.rect(margin - 10, 40, 545, 800);
-        y = 60;
-      }
+    autoTable(doc, {
+      startY: y,
+      head: [['Medicine', 'Dosage', 'Frequency', 'Instruction']],
+      body,
+      styles: tableStyles,
+      headStyles,
+      alternateRowStyles: { fillColor: [247, 249, 251] },
+      margin: { left: margin, right: margin },
     });
 
-    y += 8;
-    doc.setDrawColor(180,180,180);
-    doc.setLineWidth(0.8);
-    doc.line(margin, y, maxContentWidth, y);
-    y += 14;
+    y = (doc as any).lastAutoTable.finalY ?? y;
+    y += 24;
   });
 
   doc.setTextColor(30,30,30);
   y += 6;
 
   // Instructions
-  doc.setFontSize(10);
+  doc.setFontSize(11);
   doc.setFont(undefined, 'bold');
-  doc.setTextColor(0,71,133);
+  doc.setTextColor(49, 46, 129);
   doc.text("Instructions", margin, y);
-  y += 12;
-  doc.setTextColor(30,30,30);
-  doc.setFont(undefined, 'normal');
-  doc.setFontSize(9);
+  y += 8;
   const advice = prescription.advice || '';
+  let instructionRows: string[];
   if (advice) {
-    const lines = doc.splitTextToSize(advice, 470);
-    doc.text(`• ${lines[0]}`, margin+10, y);
-    y += 14;
-    for (let i=1;i<lines.length;i++){
-      doc.text(`• ${lines[i]}`, margin+10, y);
-      y += 14;
-    }
+    const lines = doc.splitTextToSize(advice, 470).filter(l => l && l.trim().length > 0);
+    instructionRows = lines;
   } else {
-    doc.text("• Take medicines after food.", margin+10, y); y += 14;
-    doc.text("• Drink plenty of water.", margin+10, y); y += 14;
-    doc.text("• Take adequate rest.", margin+10, y); y += 14;
+    instructionRows = [
+      'Take medicines after food.',
+      'Drink plenty of water.',
+      'Take adequate rest.'
+    ].filter(l => l && l.trim().length > 0);
+  }
+  autoTable(doc, {
+    startY: y,
+    head: [['Instructions']],
+    body: instructionRows.map(r => [r]),
+    styles: tableStyles,
+    headStyles,
+    alternateRowStyles: { fillColor: [247, 249, 251] },
+    margin: { left: margin, right: margin },
+  });
+  y = (doc as any).lastAutoTable.finalY ?? y;
+  y += 16;
+
+  // Discharge Medication table inside instructions area
+  const dischargeItems = (prescription.prescription_items || []).filter(it => {
+    const role = (it.drug_role || '').toString().toUpperCase();
+    return role === 'DISCHARGE';
+  });
+  const dischargeItemsFiltered = dischargeItems.filter(it => it.medicine_name || it.medicine_master?.medicine_name);
+  if (dischargeItemsFiltered.length > 0) {
+    doc.setFontSize(11);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(49, 46, 129);
+    doc.text('Discharge Medication', margin, y);
+    y += 8;
+    const body = dischargeItemsFiltered.map(it => [
+      it.medicine_name || it.medicine_master?.medicine_name || '',
+      `${it.dosage || ''} ${it.unit || ''}`.trim() || '',
+      it.frequency || '',
+      it.instruction || '',
+    ]);
+    autoTable(doc, {
+      startY: y,
+      head: [['Medicine', 'Dosage', 'Frequency', 'Instruction']],
+      body,
+      styles: tableStyles,
+      headStyles,
+      alternateRowStyles: { fillColor: [247, 249, 251] },
+      margin: { left: margin, right: margin },
+    });
+    y = (doc as any).lastAutoTable.finalY ?? y;
+    y += 16;
   }
 
   // Investigations
@@ -399,18 +411,21 @@ export function generatePrescriptionPdf(prescription: PrescriptionData) {
   doc.setFontSize(9);
   const followup = prescription.followup_date ? `After ${prescription.followup_date}` : "After 7 days";
   doc.text(followup, margin+10, y);
-  y += 30;
+  y += 24;
 
-  doc.setFontSize(10);
+  doc.setFontSize(11);
   doc.setFont(undefined, 'bold');
+  doc.setTextColor(49, 46, 129);
   doc.text("Doctor Signature", margin, y);
-  y += 16;
+  y += 12;
+  doc.setTextColor(0,0,0);
   doc.setDrawColor(0,0,0);
-  doc.line(margin, y, margin+200, y);
-  y += 6;
-  doc.setFontSize(8);
+  doc.line(margin, y, margin+220, y);
+  y += 10;
+  doc.setFontSize(9);
   doc.setFont(undefined, 'normal');
-  doc.text(doctorName, margin, y);
+  doc.setTextColor(30,30,30);
+  doc.text(`Dr. ${doctorName}`, margin, y);
 
   const blob = doc.output("blob");
   const url = URL.createObjectURL(blob);
