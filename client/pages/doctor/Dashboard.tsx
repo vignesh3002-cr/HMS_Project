@@ -10,6 +10,7 @@ import {
 } from "../../api/doctorDashboard.api";
 import { activeBranches } from "../../lib/utils";
 import { encounterApi } from "../../api/encounter.api";
+import { getUser } from "../../utils/token";
 import { useToast } from "@/hooks/use-toast";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 
@@ -315,10 +316,11 @@ export default function DoctorDashboard() {
       setDashboardError("");
 
       const authResponse = await doctorDashboardApi.getCurrentUser();
-      const employeeId = authResponse.data.user?.employee_id;
+      const employeeId = authResponse.data.user?.employee_id ?? getUser()?.employee_id ?? null;
 
       if (!employeeId) {
-        throw new Error("No employee ID is linked to the logged-in user.");
+        setDashboardError("No employee ID is linked to the logged-in user. Please contact your administrator.");
+        return;
       }
 
       setDoctorEmployeeId(employeeId);

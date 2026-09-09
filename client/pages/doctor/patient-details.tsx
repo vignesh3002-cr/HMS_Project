@@ -278,14 +278,7 @@ const MedicationPortal: React.FC<{
             <button onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-slate-500 lg:hidden">
               <i className="fa-solid fa-bars" />
             </button>
-            <button
-              type="button"
-              onClick={goNextTab}
-              className="flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-100"
-            >
-              Next
-              <i className="fa-solid fa-arrow-right text-xs" />
-            </button>
+          
            
           </div>
           <div className="flex items-center gap-5">
@@ -1433,12 +1426,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
       )
         .then((results) => {
           if (cancelled) return;
-          const items = results.filter(Boolean) as LabOrderItemRecord[];
-          if (items.length > 0) {
-            setLabItems(items);
-            return;
-          }
-          fetchAllAndFilter();
+          fetchAllAndFilter(results.filter(Boolean) as LabOrderItemRecord[]);
         })
         .catch(() => { fetchAllAndFilter(); })
         .finally(() => { if (!cancelled) setLabItemsLoading(false); });
@@ -1446,7 +1434,10 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
       fetchAllAndFilter();
     }
 
-    function fetchAllAndFilter() {
+    /* Lab Validation shows ALL reports for this patient regardless of
+       ordered date (past, present, future). The freshly ordered items
+       from this visit are merged in on top so nothing is hidden. */
+    function fetchAllAndFilter(preferred: LabOrderItemRecord[] = []) {
       labOrderItemApi
         .getAll()
         .then((response) => {
@@ -1455,7 +1446,16 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
           const forPatient = allItems.filter(
             (item) => item.lab_order?.patient_history?.patient_id === pid
           );
-          setLabItems(forPatient);
+          const merged = [
+            ...preferred,
+            ...forPatient.filter(
+              (item) =>
+                !preferred.some(
+                  (p) => p.lab_order_item_id === item.lab_order_item_id
+                )
+            ),
+          ];
+          setLabItems(merged);
         })
         .catch((error: any) => {
           if (!cancelled) {
@@ -2852,15 +2852,29 @@ const HistoryDashboard: React.FC<{
       prescription_id: p.prescription_id,
       prescription_date: p.prescription_date,
       advice: p.advice,
+      visit_type: p.visit_type,
+      chief_complaint: p.chief_complaint,
+      clinical_notes: p.clinical_notes,
+      followup_date: p.followup_date,
+      prescription_status: p.prescription_status,
+      branch_name: p.branch?.branch_name,
+      department_name: p.department_master?.department_name,
+      patient_vitals: p.patient_vitals || null,
+      patient_allergies: p.patient_allergies || null,
+      patient_symptoms: p.patient_symptoms || null,
       patient_history: {
         patient_first_name: p.patient_history?.patient_bio_data?.patient_first_name || '',
         patient_last_name: p.patient_history?.patient_bio_data?.patient_last_name || '',
         patient_id: p.patient_history?.patient_bio_data?.patient_id || '',
         patient_display_id: p.patient_history?.patient_bio_data?.patient_id || '',
+        patient_mobile: p.patient_history?.patient_bio_data?.patient_primary_mobile || '',
+        visit_date: p.patient_history?.visit_date || '',
+        patient_dob: p.patient_history?.patient_bio_data?.patient_dob || p.patient_history?.patient_bio_data?.date_of_birth || '',
       },
       employees: {
         first_name: p.employees?.first_name || '',
         last_name: p.employees?.last_name || '',
+        specialization: p.employees?.specialization || '',
       },
       diagnosis: {
         diagnosis_name: p.diagnosis?.diagnosis_name || '',
@@ -2879,10 +2893,55 @@ const HistoryDashboard: React.FC<{
     };
   };
 
-  const openPrescriptionPdf = (p: any, index: number) => {
+  const openPrescriptionPdf = async (p: any, index: number) => {
     try {
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+      const patientId = p.patient_history?.patient_bio_data?.patient_id;
+      const prescriptionDate = p.prescription_date;
+      let vitals = null;
+      let allergies = null;
+      let symptoms = null;
+      if (patientId) {
+        try {
+          // Fetch latest encounter for patient and pick one matching prescription date
+          const encRes = await API.get('/encounters/latest', { params: { patientId, limit: 10 } });
+          const encounters = encRes.data?.data?.encounters || encRes.data?.encounters || encRes.data || [];
+          const targetDate = prescriptionDate ? new Date(prescriptionDate).toISOString().slice(0,10) : null;
+          const enc = encounters.find((e:any) => {
+            const eDate = e.encounter_ts ? new Date(e.encounter_ts).toISOString().slice(0,10) : null;
+            return !targetDate || eDate === targetDate;
+          }) || encounters[0];
+          if (enc) {
+            vitals = {
+              bp: enc.systolic_bp && enc.diastolic_bp ? `${enc.systolic_bp}/${enc.diastolic_bp}` : enc.bp || '',
+              pulse: enc.pulse,
+              temperature: enc.temperature,
+              weight: enc.weight,
+              height: enc.height,
+              spo2: enc.spo2,
+            };
+            // Fetch allergies
+            try {
+              const allergyRes = await API.get(`/clinical-details/patients/${patientId}/allergies`);
+              allergies = allergyRes.data?.data || [];
+            } catch {}
+            // Fetch encounter symptoms if encounterNo exists
+            if (enc.encounter_no) {
+              try {
+                const symRes = await API.get(`/clinical-details/encounters/${enc.encounter_no}`);
+                const complete = symRes.data?.data || {};
+                symptoms = complete.symptoms || symRes.data?.data?.symptoms || [];
+              } catch {}
+            }
+          }
+        } catch (e) {
+          console.warn('Vitals fetch failed', e);
+        }
+      }
       const data = buildPrescriptionData(p);
+      data.patient_vitals = vitals;
+      data.patient_allergies = allergies;
+      data.patient_symptoms = symptoms;
       const { url } = generatePrescriptionPdf(data as any);
       setSelectedPrescription(p);
       setPrescriptionIndex(index);
@@ -3338,34 +3397,33 @@ const HistoryDashboard: React.FC<{
                 No prescriptions found for this patient yet.
               </div>
             ) : (
-              <div className="space-y-3">
+                  <div className="space-y-3">
                 {selectedPrescription && pdfUrl && (
                   <>
-                    <div className="rounded-lg border border-gray-200 bg-white p-3">
-                      <div className="flex items-start justify-between">
-                          <div className="flex items-start gap-3">
-                          <div className="w-10 h-10 bg-red-50 rounded-lg flex items-center justify-center border border-red-100">
-                            <span className="text-sm font-bold text-red-600">PDF</span>
-                          </div>
-                          <div>
-                            <div className="text-xs font-semibold text-gray-900">Prescription-{selectedPrescription.prescription_id}.pdf</div>
-                            <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">
-                              {selectedPrescription.prescription_date ? new Date(selectedPrescription.prescription_date).toLocaleDateString() : ''} • {`${selectedPrescription.employees?.first_name || ''} ${selectedPrescription.employees?.last_name || ''}`.trim() || '—'} • {selectedPrescription.prescription_status || '—'}
+                    <div className="rounded-lg border border-gray-200 bg-white p-4">
+                      <div className="flex items-start justify-between mb-2">
+                            <div>
+                              <div className="text-base font-bold text-red-800">{selectedPrescription.diagnosis?.diagnosis_name || '—'}</div>
+                              {selectedPrescription.chief_complaint && (
+                                <div className="text-xs text-red-700 mt-1">{selectedPrescription.chief_complaint}</div>
+                              )}
+                            </div>
+                            <div className="text-xs text-red-600">
+                              {selectedPrescription.prescription_date ? new Date(selectedPrescription.prescription_date).toLocaleDateString() : '—'}
                             </div>
                           </div>
-                        </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center justify-end gap-2">
                           <a
                             href={pdfUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-[10px] px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+                            className="text-xs px-3 py-1.5 rounded bg-red-600 text-white hover:bg-red-700"
                           >
                             View
                           </a>
                           <button
                             type="button"
-                            className="text-[10px] px-2 py-1 rounded border border-gray-300 hover:bg-gray-50"
+                            className="text-xs px-3 py-1.5 rounded border border-red-300 text-red-700 hover:bg-red-50"
                             onClick={() => {
                               try {
                                 const data = buildPrescriptionData(selectedPrescription);
@@ -3384,7 +3442,6 @@ const HistoryDashboard: React.FC<{
                           </button>
                         </div>
                       </div>
-                    </div>
                     <div className="flex items-center justify-center gap-3">
                       <button
                         type="button"
@@ -3826,7 +3883,6 @@ function DischargeDetailsPortal({
 }) {
   const [showHistory, setShowHistory] = useState(false);
   const [showNotesDocs, setShowNotesDocs] = useState(false);
-  const [showOrderSummary, setShowOrderSummary] = useState(false);
   const [planPreview, setPlanPreview] = useState<ChemoPlanPreview | null>(null);
   const [stagingDetail, setStagingDetail] =
     useState<StagingDetailRecord | null>(null);
@@ -4403,9 +4459,9 @@ function DischargeDetailsPortal({
 <div className="border-b border-[#e2e8f0] mb-6">
 <nav className="flex space-x-8">
 {tabs.map((tab) => {
-const isActive = showNotesDocs ? tab === "Notes & Documents" : showHistory ? tab === "History" : showOrderSummary ? tab === "Order Summary" : tab === "Discharge";
+const isActive = showNotesDocs ? tab === "Notes & Documents" : showHistory ? tab === "History" : tab === "Discharge";
 return (
-<button key={tab} type="button" onClick={() => { if (tab === "History") { setShowHistory(true); setShowNotesDocs(false); setShowOrderSummary(false); return; } if (tab === "Notes & Documents") { setShowNotesDocs(true); setShowHistory(false); setShowOrderSummary(false); return; } if (tab === "Order Summary") { setShowHistory(false); setShowNotesDocs(false); setShowOrderSummary(true); return; } setShowHistory(false); setShowNotesDocs(false); setShowOrderSummary(false); if (tab !== "Discharge") { onBack?.(); } }} className={`px-1 py-3 border-b-2 text-sm font-medium transition-colors ${isActive ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
+<button key={tab} type="button" onClick={() => { if (tab === "History") { setShowHistory(true); setShowNotesDocs(false); return; } if (tab === "Notes & Documents") { setShowNotesDocs(true); setShowHistory(false); return; } if (tab === "Order Summary") { onBack?.(); return; } setShowHistory(false); setShowNotesDocs(false); if (tab !== "Discharge") { onBack?.(); } }} className={`px-1 py-3 border-b-2 text-sm font-medium transition-colors ${isActive ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
 {tab}
 </button>
 );
@@ -4431,54 +4487,6 @@ return (
             <HistoryDashboard embedded patientId={patientId} />
           ) : showNotesDocs ? (
             <PatientNotesDocuments embedded patientId={patientId} />
-          ) : showOrderSummary ? (
-          /* =================================================
-              ORDER SUMMARY - ALL recent details of the selected
-              patient fetched from the backend
-          ================================================== */
-          <div className="space-y-6">
-            {planPreviewLoading && (
-              <div className="flex items-center rounded-[12px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
-                <i className="fa-solid fa-circle-notch fa-spin mr-2"></i> Loading recent details…
-              </div>
-            )}
-            {!planPreviewLoading && planPreviewError && (
-              <div className="flex items-center rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                <i className="fa-solid fa-triangle-exclamation mr-2"></i> {planPreviewError}
-              </div>
-            )}
-            {!planPreviewLoading && (planPreview || stagingDetail) && (
-              <>
-                <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                  <SectionHeader icon="fa-solid fa-file-medical" title={`Diagnosis & Staging — ${orderSummaryDiagnosis || "—"}`} badge={stagingDetail?.clinical_stage || planPreview?.clinical_stage || "—"} />
-                  {diagnosisEntries.length > 0 ? renderEntryGrid(diagnosisEntries) : (
-                    <p className="px-6 py-6 text-sm text-slate-400">No diagnosis fields saved yet.</p>
-                  )}
-                </section>
-
-                {derivedEntries.length > 0 && (
-                  <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                    <SectionHeader icon="fa-solid fa-wand-magic-sparkles" title="Auto-Derived Classification" badge="Derived Fields" badgeClass="bg-purple-100 text-purple-700" />
-                    {renderEntryGrid(derivedEntries)}
-                  </section>
-                )}
-
-                {ihc && ihcEntries.length > 0 && (
-                  <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                    <SectionHeader icon="fa-solid fa-microscope" title={`IHC Results${ihc.ihc_id ? ` — ${ihc.ihc_id}` : ""}`} badge={`${ihcEntries.length} Values`} badgeClass="bg-cyan-100 text-cyan-700" />
-                    {renderEntryGrid(ihcEntries)}
-                  </section>
-                )}
-
-                {mol && molecularEntries.length > 0 && (
-                  <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                    <SectionHeader icon="fa-solid fa-dna" title={`Molecular Results${mol.mol_id ? ` — ${mol.mol_id}` : ""}`} badge={`${molecularEntries.length} Values`} badgeClass="bg-emerald-100 text-emerald-700" />
-                    {renderEntryGrid(molecularEntries)}
-                  </section>
-                )}
-              </>
-            )}
-          </div>
           ) : (
           <div className="grid gap-6 xl:grid-cols-3">
             {/* ===================================================
