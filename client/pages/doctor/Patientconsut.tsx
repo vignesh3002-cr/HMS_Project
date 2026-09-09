@@ -4982,57 +4982,6 @@ const ChemotherapyOrder: React.FC<{
   );
   const [supportiveDrugs, setSupportiveDrugs] = useState<Drug[]>([]);
 
-  const [currentCycleNumber, setCurrentCycleNumber] = useState<number | null>(null);
-
-  useEffect(() => {
-    const match = cycleDay.match(/Cycle\s+(\d+)/i);
-    if (match) {
-      const cycleNum = Number(match[1]);
-      setCurrentCycleNumber(cycleNum);
-    } else {
-      setCurrentCycleNumber(null);
-    }
-  }, [cycleDay]);
-
-  useEffect(() => {
-    if (!protocolRef.current) return;
-    const protocol = protocolRef.current;
-    const items = protocol.chemotherapy_regimen_protocol_items ?? [];
-    const toDrug = (item: RegimenProtocolDetail["chemotherapy_regimen_protocol_items"][number], index: number): Drug => ({
-      id: index,
-      name:
-        item.medicine_master?.medicine_name ||
-        item.medicine_master?.generic_name ||
-        "",
-      form:
-        item.medicine_master?.dosage_form ||
-        item.administration_route ||
-        "",
-      dose: item.dosage != null ? String(item.dosage) : "",
-      unit:
-        item.dosage_unit ||
-        item.medicine_master?.unit ||
-        "",
-      volume: "",
-    });
-
-    const filteredItems = items.filter((item) => {
-      if (currentCycleNumber === null) return true;
-      return item.cycle_day === currentCycleNumber;
-    });
-
-    setDrugs(
-      filteredItems
-        .filter((item) => item.drug_role === "PRIMARY")
-        .map(toDrug)
-    );
-    setPremedicationDrugs(
-      filteredItems
-        .filter((item) => item.drug_role === "PREMEDICATION")
-        .map(toDrug)
-    );
-  }, [currentCycleNumber]);
-
   const userTouched = useRef({
     cycleDay: false,
     startDate: false,
@@ -5253,16 +5202,24 @@ const ChemotherapyOrder: React.FC<{
     return `Cycle ${current.cycle + 1} / Day 1`;
   };
 
+  /* A protocol item's day within a cycle, using the field the backend
+     actually populates (administration_day) or, failing that, the legacy
+     cycle_day. Items without any explicit day belong to Day 1. */
+  const protocolItemDay = (item: RegimenProtocolItem): number => {
+    const d = Number(item.administration_day ?? item.cycle_day);
+    return Number.isFinite(d) && d > 0 ? d : 1;
+  };
+
   /* The distinct cycle days that actually have medication in the protocol,
-     derived from the flat items' administration_day. Protocols with rest
-     days (e.g. day 2 has no drugs) simply won't list that day here. */
+     derived from the flat items' day (administration_day ?? cycle_day).
+     Protocols with rest days (e.g. day 2 has no drugs) simply won't list
+     that day here. */
   const getAvailableDays = (
     protocol: RegimenProtocolDetail | null | undefined
   ): number[] => {
     const set = new Set<number>();
     (protocol?.chemotherapy_regimen_protocol_items ?? []).forEach((item) => {
-      const d = Number(item.administration_day);
-      if (Number.isFinite(d) && d > 0) set.add(d);
+      set.add(protocolItemDay(item));
     });
     return [...set].sort((a, b) => a - b);
   };
@@ -5297,11 +5254,11 @@ const ChemotherapyOrder: React.FC<{
     }
 
     // The daily breakdown is not an array of items per day; instead the
-    // flat chemotherapy_regimen_protocol_items rows carry an
-    // administration_day that maps them onto a protocol day. Filter them
-    // the same way the backend's day view does.
+    // flat chemotherapy_regimen_protocol_items rows carry a day (either
+    // administration_day or cycle_day) that maps them onto a protocol
+    // day. Filter them the same way the backend's day view does.
     const flat = protocolRef.current?.chemotherapy_regimen_protocol_items ?? [];
-    return flat.filter((item) => item.administration_day === dayNumber);
+    return flat.filter((item) => protocolItemDay(item) === dayNumber);
   };
 
   const toDrugFromItem = (
@@ -5328,7 +5285,6 @@ const ChemotherapyOrder: React.FC<{
     days: RegimenProtocolDay[] | null | undefined
   ) => {
     let dayNumber = getCycleDayNumber(dayValue);
-    const hasDayStructure = (days ?? []).length > 0;
 
     // If the selected day is a rest day (or not parseable) but the
     // protocol has medication days, snap forward to the next day that
@@ -5341,16 +5297,12 @@ const ChemotherapyOrder: React.FC<{
       dayNumber = fallback;
     }
 
-    // When the protocol defines a day breakdown, show only the medicines
-    // mapped to the selected day. If a valid day is missing, show nothing
-    // (never dump the whole cycle across every day). Only protocols
-    // WITHOUT a day breakdown fall back to the full flat item list.
+    // Show only the medicines mapped to the selected cycle's day. Protocols
+    // with items that have no explicit day treat all of them as Day 1. If a
+    // valid day is missing, show nothing (never dump the whole cycle across
+    // every day).
     const items =
-      !hasDayStructure
-        ? (protocolRef.current?.chemotherapy_regimen_protocol_items ?? [])
-        : dayNumber != null
-        ? resolveProtocolDayItems(days, dayNumber)
-        : [];
+      dayNumber != null ? resolveProtocolDayItems(days, dayNumber) : [];
 
     setDrugs(
       items
