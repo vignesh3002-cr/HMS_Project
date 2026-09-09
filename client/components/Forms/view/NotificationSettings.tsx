@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Switch } from "@/components/ui/switch";
+import { getUser } from "@/utils/token";
 
 const SETTINGS_KEY = "hms_notification_settings";
 
@@ -147,6 +148,11 @@ export default function NotificationSettings() {
     useState<NotificationSettings>(loadSettings);
   const [saved, setSaved] = useState(false);
 
+  const isDoctor = useMemo(() => {
+    const user = getUser();
+    return String(user?.role_type || "").toUpperCase() === "DOCTOR";
+  }, []);
+
   useEffect(() => {
     try {
       localStorage.setItem(
@@ -171,6 +177,11 @@ export default function NotificationSettings() {
     }));
   };
 
+  const visibleGroups = useMemo(() => {
+    if (!isDoctor) return TYPE_GROUPS;
+    return TYPE_GROUPS.filter(g => g.title !== "Employees");
+  }, [isDoctor]);
+
   return (
     <div className="w-full">
       <div className="mb-8 flex items-center justify-between">
@@ -189,7 +200,7 @@ export default function NotificationSettings() {
       </div>
 
       <div className="space-y-6">
-        {TYPE_GROUPS.map((group) => (
+        {visibleGroups.map((group) => (
           <section
             key={group.title}
             className="rounded-xl border p-5"
