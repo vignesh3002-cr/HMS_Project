@@ -289,11 +289,13 @@ export function generatePrescriptionPdf(prescription: PrescriptionData) {
 
   allRoles.forEach((role, roleIdx) => {
     if (roleIdx > 0) y += 16;
-    doc.setFontSize(11);
-    doc.setTextColor(49, 46, 129);
-    doc.setFont(undefined, 'bold');
-    doc.text(`${role} MEDICATIONS`, margin, y);
-    y += 8;
+    if (role !== 'OTHER') {
+      doc.setFontSize(11);
+      doc.setTextColor(49, 46, 129);
+      doc.setFont(undefined, 'bold');
+      doc.text(`${role} MEDICATIONS`, margin, y);
+      y += 8;
+    }
 
     const body = grouped[role]
       .filter(it => (it.medicine_name || it.medicine_master?.medicine_name))
