@@ -276,6 +276,10 @@ export default function AddBranch() {
   const navigate = useNavigate();
   const { id: branchId } = useParams<{ id: string }>();
   const isEditMode = Boolean(branchId);
+  // Browser-autofill prevention on the NEW-admin credential fields is a
+  // create-mode-only behavior — an edit session keeps the browser's native
+  // autofill behavior on those fields completely untouched.
+  const preventAutofill = !isEditMode;
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(isEditMode);
@@ -1881,6 +1885,10 @@ export default function AddBranch() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-x-5 gap-y-[18px]">
                     <div>
                       <label className={labelCls}>Username <Req /></label>
+                      {/* Create-mode-only block of the browser's saved-login
+                          autofill (must start empty) — same readonly-until-
+                          focus pattern as Addemployee.tsx. In edit mode the
+                          browser's native autofill behavior is left untouched. */}
                       <input
                         type="text"
                         name="adminUsername"
@@ -1889,6 +1897,9 @@ export default function AddBranch() {
                         value={adminData.adminUsername}
                         onChange={handleChange}
                         disabled={submitting}
+                        autoComplete={preventAutofill ? "off" : "on"}
+                        readOnly={preventAutofill}
+                        onFocus={preventAutofill ? (e) => e.currentTarget.removeAttribute("readonly") : undefined}
                       />
                     </div>
                     <div>
@@ -1901,6 +1912,9 @@ export default function AddBranch() {
                         value={adminData.password}
                         onChange={handleChange}
                         disabled={submitting}
+                        // "new-password" tells the browser this is a create-new-
+                        // credential field, so the saved login password is not filled.
+                        autoComplete={preventAutofill ? "new-password" : "on"}
                       />
                     </div>
                     <div>
@@ -1913,6 +1927,7 @@ export default function AddBranch() {
                         value={adminData.confirmPassword}
                         onChange={handleChange}
                         disabled={submitting}
+                        autoComplete={preventAutofill ? "new-password" : "on"}
                       />
                     </div>
                   </div>

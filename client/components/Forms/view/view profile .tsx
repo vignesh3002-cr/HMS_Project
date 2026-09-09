@@ -15,6 +15,7 @@ import {
   Wallet,
   Link,
   FileText,
+  ArrowLeft,
 } from "lucide-react";
 import { branchApi, type BranchDetail } from "@/api/branch.api";
 import { employeeApi, EmployeeDetailResponse } from "@/api/employee.api";
@@ -139,6 +140,11 @@ const Profile = () => {
   const isAdmin = ["SUPER_ADMIN", "HEAD_ADMIN", "BRANCH_ADMIN"].includes(
     String(getUser()?.role_type ?? "").toUpperCase()
   );
+  const isDoctor = String(getUser()?.role_type ?? "").toUpperCase() === "DOCTOR";
+
+  const handleBack = () => {
+    navigate(-1);
+  };
 
   useEffect(() => {
     const branchId = !isAllBranches ? selectedBranchId : getUser()?.branch_id;
@@ -312,6 +318,16 @@ const Profile = () => {
 
             {/* Right Panel Starts Here */}
             <div className="flex-1 p-8 overflow-auto">
+              <div className="mb-6">
+                <button
+                  type="button"
+                  onClick={handleBack}
+                  className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900"
+                >
+                  <ArrowLeft size={16} />
+                  Back
+                </button>
+              </div>
               {activeMenu === "Security" ? (
                 <Security embedded />
               ) : activeMenu === "Notification" ? (

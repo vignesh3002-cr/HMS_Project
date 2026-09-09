@@ -26,7 +26,7 @@ import API, { getActiveBranchId } from "../../api/axios";
 import { getUser } from "../../utils/token";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1400,7 +1400,7 @@ export default function AppointmentPage() {
           </div>
 
           {/* ==================== NOTIFICATION BELL (Global) ==================== */}
-          <BellNotificationButton size="sm" />
+          
 
           {/* ==================== MAIN CARD ==================== */}
           <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-sm flex flex-col transition-all duration-300 hover:shadow-md">

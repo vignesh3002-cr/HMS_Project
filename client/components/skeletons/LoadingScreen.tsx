@@ -3,17 +3,25 @@ import { Logo, OncoNexaEmblem } from "@/components/hms/Logo";
 
 export function LoadingScreen({ message = "Loading dashboard..." }: { message?: string }) {
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center bg-[#F7F9FB] p-8">
-      <div className="flex flex-col items-center gap-6">
-        <div className="flex flex-col items-center gap-2">
-          <OncoNexaEmblem size={54} className="h-13 w-auto drop-shadow-sm" />
-          
-          <div className="text-[#64748B] text-[11px] font-semibold tracking-[0.5px]">admin portal</div>
-        </div>
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="w-8 h-8 animate-spin text-[#00488D]" />
-          <p className="text-sm font-semibold text-[#334155]">{message}</p>
-          <p className="text-xs text-[#94A3B8]">Preparing your workspace...</p>
+    <div className="min-h-screen w-full bg-[#F7F9FB] px-8 py-12">
+      <div className="flex min-h-[calc(100vh-6rem)] w-full flex-col items-center justify-center">
+        <div className="flex w-full max-w-sm flex-col items-center gap-6 text-center">
+          <div className="flex flex-col items-center gap-2">
+            <div className="flex h-[70px] w-[70px] items-center justify-center rounded-2xl border border-[#E5E7EB] bg-white shadow-[0_8px_24px_rgba(0,72,141,0.08)]">
+              <OncoNexaEmblem
+                size={54}
+                className="h-[54px] w-[54px] drop-shadow-sm"
+              />
+            </div>
+            <div className="text-[11px] font-semibold tracking-[0.5px] text-[#64748B]">
+              admin portal
+            </div>
+          </div>
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="h-8 w-8 animate-spin text-[#00488D]" aria-label="Loading" />
+            <p className="m-0 text-sm font-semibold text-[#334155]">{message}</p>
+            <p className="m-0 text-xs text-[#94A3B8]">Preparing your workspace...</p>
+          </div>
         </div>
       </div>
     </div>
@@ -37,9 +45,8 @@ export function DashboardLoadingScreen() {
       {/* Center loader */}
       <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-8">
         <div className="bg-white rounded-2xl shadow-xl border border-[#E5E7EB] p-8 flex flex-col items-center gap-4 min-w-[320px]">
-          <div className="flex flex-col items-center gap-2">
-            <OncoNexaEmblem size={52} className="h-13 w-auto drop-shadow-sm" />
-            <Logo className="w-44 sm:w-52 h-auto" />
+          <div className="flex w-full items-center justify-center">
+            <Logo className="h-auto w-44 sm:w-52" iconPosition="left" />
           </div>
           <Loader2 className="w-7 h-7 animate-spin text-[#00488D]" />
           <div className="text-center">

@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
 import { CalendarDays, CheckCircle2, Loader2 } from "lucide-react";
 import API from "@/api/axios";
-import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import {
   doctorLeaveApi,
   type ApplyDoctorLeavePayload,
@@ -648,7 +647,7 @@ const AbsenceManagement: React.FC = () => {
 
             <div className="flex items-center gap-4">
 
-              <BellNotificationButton size="md" />
+              
 
 
               <div className="h-8 w-px bg-[#c3c6d6]" />

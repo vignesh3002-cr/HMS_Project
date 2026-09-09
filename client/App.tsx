@@ -38,6 +38,7 @@ import AddAppointment from "@/components/Forms/AddAppointment";
 // ============================================================
 
 import PatientProfile from "@/components/Forms/view/patientProfile";
+import PatientDetailView from "@/components/Forms/view/viewpatient";
 import ViewAppointmentScheduled from "@/components/Forms/view/View Appointment Scheduled";
 import Profile from "@/components/Forms/view/view profile ";
 import Security from "@/components/Forms/view/Security";
@@ -90,6 +91,7 @@ import DoctorLeave from "./pages/doctor/LeavePage";
 import DoctorSchedule from "./pages/doctor/MySchedulePage";
 import DoctorReviews from "./pages/doctor/ReviewPage";
 import DoctorProfile from "./pages/doctor/Profile";
+import DoctorNotifications from "./pages/doctor/DoctorNotifications";
 import Consultation from "./pages/doctor/Patientconsut";
 import DoctorPatientProfile from "./pages/doctor/notes and doc";
 import PatientDetails from "./pages/doctor/patient-details";
@@ -145,10 +147,14 @@ const doctorRoutes = [
     path: "/doctor/reviews",
     element: <DoctorReviews />,
   },
-{
+  {
     path: "/doctor/profile",
-    element: <DoctorProfile />,
-},
+    element: <Profile />,
+  },
+  {
+    path: "/doctor/notifications",
+    element: <DoctorNotifications />,
+  },
 ];
 
 // ============================================================
@@ -198,6 +204,11 @@ const protectedRoutes = [
   {
     path: "/patients/view/:id",
     element: <PatientProfile />,
+    permission: "patient.read",
+  },
+  {
+    path: "/patients/full-record/:id",
+    element: <PatientDetailView />,
     permission: "patient.read",
   },
 

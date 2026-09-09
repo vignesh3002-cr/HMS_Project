@@ -14,6 +14,8 @@ interface UserProfileDropdownProps {
   /** True while the avatar is still being fetched (shows a Loader2 spinner). */
   avatarLoading?: boolean;
   onLogout: () => void;
+  profilePath?: string;
+  notificationsPath?: string;
 }
 
 export function UserProfileDropdown({
@@ -22,6 +24,8 @@ export function UserProfileDropdown({
   userAvatar,
   avatarLoading = false,
   onLogout,
+  profilePath = "/profile",
+  notificationsPath = "/notifications",
 }: UserProfileDropdownProps) {
   const navigate = useNavigate();
 
@@ -75,7 +79,7 @@ export function UserProfileDropdown({
           <div className="px-2 mt-1 space-y-0.5">
             <button
               type="button"
-              onClick={() => navigate("/profile")}
+              onClick={() => navigate(profilePath)}
               className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[#464555] hover:bg-[#D3E4FE] hover:text-[#3525CD] transition-colors group"
             >
               <User size={18} className="group-hover:text-[#3525CD] transition-colors" />
@@ -97,7 +101,7 @@ export function UserProfileDropdown({
           <div className="px-2 mt-1 space-y-0.5">
             <button
               type="button"
-              onClick={() => navigate("/notifications")}
+              onClick={() => navigate(notificationsPath)}
               className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[#464555] hover:bg-[#D3E4FE] hover:text-[#3525CD] transition-colors group"
             >
               <Bell size={18} className="group-hover:text-[#3525CD] transition-colors" />
