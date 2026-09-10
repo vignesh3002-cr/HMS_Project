@@ -11,6 +11,7 @@ import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { applySearchAndFilter } from "@/components/Filter/utils";
 import { useToast } from "@/hooks/use-toast";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import API from "@/api/axios";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { encounterApi, type EncounterRecord } from "@/api/encounter.api";
 import { patientApi } from "@/api/patient.api";
@@ -478,11 +479,15 @@ export default function Dashboard() {
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
   const [appointmentCount, setAppointmentCount] = useState<number>(0);
 
+  const [prescriptionCount, setPrescriptionCount] = useState<number>(0);
+  const [isPrescriptionsLoading, setIsPrescriptionsLoading] = useState(false);
+
   // Track previous counts to compute "newly added" deltas
   const prevDoctorsRef = useRef<number>(0);
   const prevPatientsRef = useRef<number>(0);
   const prevStaffRef = useRef<number>(0);
   const prevAppointmentsRef = useRef<number>(0);
+  const prevPrescriptionsRef = useRef<number>(0);
   const isInitialLoadRef = useRef(true);
 
   // Date selection state -- declared early since fetchAppointments below
@@ -744,6 +749,41 @@ export default function Dashboard() {
     setPatientLoading(patientsQuery.isLoading || patientsQuery.isFetching);
   }, [patientsQuery.isLoading, patientsQuery.isFetching]);
 
+  const prescriptionsQuery = useQuery({
+    queryKey: ["dashboard-prescriptions", isAllBranches ? "all" : selectedBranchId, dateStr],
+    queryFn: async () => {
+      const res = await API.get<{
+        success: boolean;
+        message: string;
+        data: { total: number };
+      }>("/prescriptions", {
+        params: {
+          limit: 1,
+          date: dateStr,
+          branchId: isAllBranches ? undefined : selectedBranchId,
+        },
+      }).catch((err) => {
+        if (err?.response?.status === 403) {
+          return { data: { success: true, message: "", data: { total: 0 } } } as any;
+        }
+        throw err;
+      });
+      return res.data?.data?.total ?? 0;
+    },
+    refetchOnWindowFocus: false,
+    staleTime: 1000 * 60 * 2,
+  });
+
+  useEffect(() => {
+    if (prescriptionsQuery.data === undefined) return;
+    prevPrescriptionsRef.current = prescriptionCount;
+    setPrescriptionCount(prescriptionsQuery.data);
+  }, [prescriptionsQuery.data]);
+
+  useEffect(() => {
+    setIsPrescriptionsLoading(prescriptionsQuery.isLoading || prescriptionsQuery.isFetching);
+  }, [prescriptionsQuery.isLoading, prescriptionsQuery.isFetching]);
+
   // Reflect React Query's pending state into the UI loading flags so the
   // table spinner and stat-card skeletons stay in sync with real requests.
   useEffect(() => {
@@ -767,11 +807,13 @@ export default function Dashboard() {
     const currentStaff = realStaff?.length ?? 0;
     const currentPatients = patientCount;
     const currentAppointments = appointmentCount;
+    const currentPrescriptions = prescriptionCount;
 
     const doctorDelta = currentDoctors - prevDoctorsRef.current;
     const staffDelta = currentStaff - prevStaffRef.current;
     const patientDelta = currentPatients - prevPatientsRef.current;
     const appointmentDelta = currentAppointments - prevAppointmentsRef.current;
+    const prescriptionDelta = currentPrescriptions - prevPrescriptionsRef.current;
 
     // Only show delta after initial load
     const showDelta = !isInitialLoadRef.current;
@@ -837,9 +879,10 @@ export default function Dashboard() {
     {
       label: "Prescription Generated",
       permission: undefined,
-      value: "0",
-      change: "124",
-      changeType: "negative",
+      loading: isPrescriptionsLoading,
+      value: currentPrescriptions.toLocaleString(),
+      change: showDelta && prescriptionDelta > 0 ? `+${prescriptionDelta}` : "",
+      changeType: prescriptionDelta >= 0 ? "positive" : "negative",
       bg: "#E6E8EA",
       border: "#4A5F83",
       valueColor: "#4A5F83",
@@ -859,7 +902,7 @@ export default function Dashboard() {
       iconBg: "rgba(255,255,255,0.20)",
     },
     ];
-}, [realDoctors, realStaff, patientCount, appointmentCount, isEmployeesLoading, isAppointmentsLoading]);
+}, [realDoctors, realStaff, patientCount, appointmentCount, prescriptionCount, isEmployeesLoading, isAppointmentsLoading, isPrescriptionsLoading]);
 
   const visibleStats = liveStats.filter((stat) => !stat.permission || can(stat.permission));
 
@@ -1560,7 +1603,12 @@ export default function Dashboard() {
                   onOpenChange={setIsFilterOpen}
                 />
                 <RefreshButton
-                  onClick={activeTab === "appointments" ? fetchAppointments : () => employeesQuery.refetch()}
+                  onClick={() => {
+                    if (activeTab === "appointments") fetchAppointments();
+                    else employeesQuery.refetch();
+                    patientsQuery.refetch();
+                    prescriptionsQuery.refetch();
+                  }}
                   isLoading={activeTab === "appointments" ? isAppointmentsLoading : isEmployeesLoading}
                 />
               </div>

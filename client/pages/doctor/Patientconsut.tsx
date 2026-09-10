@@ -73,6 +73,38 @@ const parseDateValue = (value?: string | null): Date | null => {
 };
 
 /* ============================================================
+   SHARED DOCTOR AVATAR HOOK
+   Fetches the logged-in doctor's avatar and caches it in localStorage.
+   Shared across Consultation and all step subcomponents.
+   ============================================================ */
+const useDoctorAvatar = () => {
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
+  useEffect(() => {
+    let mounted = true;
+    employeeApi
+      .getMe()
+      .then((res) => {
+        if (!mounted) return;
+        const url = res.data?.data?.employee?.employee_photo_URL || "";
+        setUserAvatarUrl(url);
+        if (url) localStorage.setItem("user_photo", url);
+        else localStorage.removeItem("user_photo");
+        setAvatarLoading(false);
+      })
+      .catch(() => {
+        if (mounted) setAvatarLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  return { userAvatarUrl, avatarLoading };
+};
+
+/* ============================================================
    PROTOCOL-DRIVEN NEXT VISIT DATE
    The "Next Visit Date" shown in the Follow Up and Summary steps
    is derived from the selected regimen protocol's cycle interval
@@ -781,8 +813,7 @@ const Consultation: React.FC = () => {
   ============================================================ */
 
   const [toast, setToast] = useState<ToastMessage>("");
-  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
-  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
 
   const [consultationNotes, setConsultationNotes] = useState("");
 
@@ -875,27 +906,6 @@ const Consultation: React.FC = () => {
     }
     return value;
   };
-
-  useEffect(() => {
-    let mounted = true;
-    const fetchAvatar = () => {
-      employeeApi
-        .getMe()
-        .then((res) => {
-          if (!mounted) return;
-          const url = res.data?.data?.employee?.employee_photo_URL || "";
-          setUserAvatarUrl(url);
-          if (url) localStorage.setItem("user_photo", url);
-          else localStorage.removeItem("user_photo");
-          setAvatarLoading(false);
-        })
-        .catch(() => {
-          if (mounted) setAvatarLoading(false);
-        });
-    };
-    fetchAvatar();
-    return () => { mounted = false; };
-  }, []);
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
@@ -2742,6 +2752,7 @@ const LabReview: React.FC<{
   onOrdered,
   onNext,
 }) => {
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
   const [observations, setObservations] = useState("");
   const [notifications, setNotifications] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -3384,6 +3395,7 @@ const Diagnosis: React.FC<{
   const statePatientId =
     (location.state as ConsultationState | null)?.patientId ?? "";
   const resolvedPatientId = patientId || statePatientId;
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
 
   const [formData, setFormData] = useState<FormData>({
     type: "",
@@ -4459,6 +4471,7 @@ const DischargeMedication: React.FC<{
 }) => {
   const resolvedPatientId = patientId || "";
   const navigate = useNavigate();
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
 
   const [medications, setMedications] = useState<DischargeMedicationItem[]>(
     []
@@ -5309,6 +5322,7 @@ const ChemotherapyOrder: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
 
   const [cycleDay, setCycleDay] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -7660,6 +7674,7 @@ const FollowUp: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
   const [activeStep, setActiveStep] = useState<FollowUpStep>(1);
   const [nextVisitDate, setNextVisitDate] = useState("");
   const [nextCycle, setNextCycle] = useState("");
@@ -8559,6 +8574,7 @@ const TreatmentPlan: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
 
   const handleBack = () => {
     window.history.back();
@@ -8816,14 +8832,6 @@ const TreatmentPlan: React.FC<{
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleBack = () => {
-    window.history.back();
-  };
-
-  const handleViewProfile = () => {
-    console.log("View Full Profile clicked");
   };
 
   /* =========================================================
@@ -9748,6 +9756,7 @@ const Summary: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
 
   const [nextVisitDate, setNextVisitDate] = useState(() =>
     resolvedPatientId
