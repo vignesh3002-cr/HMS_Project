@@ -43,6 +43,7 @@ import {
 } from "../../components/ui/popover";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import { MultiSelectDropdown } from "../../components/ui/multi-select-dropdown";
+import { UserProfileDropdown } from "../../components/ui/User_profile_dropdown";
 
 const formatPickedDate = (date: Date) => {
   const day = String(date.getDate()).padStart(2, "0");
@@ -780,6 +781,8 @@ const Consultation: React.FC = () => {
   ============================================================ */
 
   const [toast, setToast] = useState<ToastMessage>("");
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const [consultationNotes, setConsultationNotes] = useState("");
 
@@ -872,6 +875,27 @@ const Consultation: React.FC = () => {
     }
     return value;
   };
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchAvatar = () => {
+      employeeApi
+        .getMe()
+        .then((res) => {
+          if (!mounted) return;
+          const url = res.data?.data?.employee?.employee_photo_URL || "";
+          setUserAvatarUrl(url);
+          if (url) localStorage.setItem("user_photo", url);
+          else localStorage.removeItem("user_photo");
+          setAvatarLoading(false);
+        })
+        .catch(() => {
+          if (mounted) setAvatarLoading(false);
+        });
+    };
+    fetchAvatar();
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
@@ -1747,20 +1771,15 @@ const Consultation: React.FC = () => {
 
                 {/* USER */}
 
-                <button
-                  onClick={() => navigate("/doctor/profile")}
-                  className="flex items-center gap-3 cursor-pointer"
-                >
-
-                  <div className="text-sm font-bold leading-5 text-slate-700">
-                    HMS
-                  </div>
-
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-950 text-xs font-bold leading-4 text-white">
-                    DR
-                  </div>
-
-                </button>
+                <UserProfileDropdown
+                  userName={getUser()?.username || "Doctor"}
+                  userSubtext={getUser()?.role || "Doctor"}
+                  userAvatar={userAvatarUrl || undefined}
+                  avatarLoading={avatarLoading}
+                  onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+                  profilePath="/doctor/profile"
+                  notificationsPath="/doctor/notifications"
+                />
 
               </div>
 
@@ -3169,13 +3188,15 @@ const LabReview: React.FC<{
             )}
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="font-semibold text-gray-700">HMS</span>
-
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1E3A8A] font-bold text-white shadow-sm">
-              DR
-            </div>
-          </div>
+          <UserProfileDropdown
+            userName={getUser()?.username || "Doctor"}
+            userSubtext={getUser()?.role || "Doctor"}
+            userAvatar={userAvatarUrl || undefined}
+            avatarLoading={avatarLoading}
+            onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+            profilePath="/doctor/profile"
+            notificationsPath="/doctor/notifications"
+          />
         </div>
       </header>
 
@@ -3887,13 +3908,13 @@ const Diagnosis: React.FC<{
             </div>
           </div>
 
-          {/* Sub Type */}
+          {/* Histopathology */}
           <div>
             <label
               htmlFor="subType"
               className="mb-2 block text-sm font-semibold text-gray-600"
             >
-              Sub Type
+              Histopathology 
             </label>
 
             <div className="relative">
@@ -4244,15 +4265,15 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
           <div className="flex items-center gap-4 sm:gap-6">
             <BellNotificationButton size="md" />
 
-            <div className="flex items-center gap-3">
-              <span className="hidden text-sm font-semibold text-gray-700 sm:block">
-                HMS
-              </span>
-
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#1e3a8a] text-sm font-bold text-white">
-                DR
-              </div>
-            </div>
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
           </div>
         </header>
 
@@ -5041,15 +5062,15 @@ if (embedded) {
             </button>
 
             {/* User */}
-            <div className="flex items-center gap-4 border-l border-gray-200 pl-6">
-              <span className="text-sm font-bold tracking-wide text-gray-700">
-                HMS
-              </span>
-
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-900 text-sm font-bold text-white">
-                DR
-              </div>
-            </div>
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
           </div>
         </header>
 
@@ -5303,57 +5324,6 @@ const ChemotherapyOrder: React.FC<{
   );
   const [supportiveDrugs, setSupportiveDrugs] = useState<Drug[]>([]);
 
-  const [currentCycleNumber, setCurrentCycleNumber] = useState<number | null>(null);
-
-  useEffect(() => {
-    const match = cycleDay.match(/Cycle\s+(\d+)/i);
-    if (match) {
-      const cycleNum = Number(match[1]);
-      setCurrentCycleNumber(cycleNum);
-    } else {
-      setCurrentCycleNumber(null);
-    }
-  }, [cycleDay]);
-
-  useEffect(() => {
-    if (!protocolRef.current) return;
-    const protocol = protocolRef.current;
-    const items = protocol.chemotherapy_regimen_protocol_items ?? [];
-    const toDrug = (item: RegimenProtocolDetail["chemotherapy_regimen_protocol_items"][number], index: number): Drug => ({
-      id: index,
-      name:
-        item.medicine_master?.medicine_name ||
-        item.medicine_master?.generic_name ||
-        "",
-      form:
-        item.medicine_master?.dosage_form ||
-        item.administration_route ||
-        "",
-      dose: item.dosage != null ? String(item.dosage) : "",
-      unit:
-        item.dosage_unit ||
-        item.medicine_master?.unit ||
-        "",
-      volume: "",
-    });
-
-    const filteredItems = items.filter((item) => {
-      if (currentCycleNumber === null) return true;
-      return item.cycle_day === currentCycleNumber;
-    });
-
-    setDrugs(
-      filteredItems
-        .filter((item) => item.drug_role === "PRIMARY")
-        .map(toDrug)
-    );
-    setPremedicationDrugs(
-      filteredItems
-        .filter((item) => item.drug_role === "PREMEDICATION")
-        .map(toDrug)
-    );
-  }, [currentCycleNumber]);
-
   const userTouched = useRef({
     cycleDay: false,
     startDate: false,
@@ -5574,16 +5544,24 @@ const ChemotherapyOrder: React.FC<{
     return `Cycle ${current.cycle + 1} / Day 1`;
   };
 
+  /* A protocol item's day within a cycle, using the field the backend
+     actually populates (administration_day) or, failing that, the legacy
+     cycle_day. Items without any explicit day belong to Day 1. */
+  const protocolItemDay = (item: RegimenProtocolItem): number => {
+    const d = Number(item.administration_day ?? item.cycle_day);
+    return Number.isFinite(d) && d > 0 ? d : 1;
+  };
+
   /* The distinct cycle days that actually have medication in the protocol,
-     derived from the flat items' administration_day. Protocols with rest
-     days (e.g. day 2 has no drugs) simply won't list that day here. */
+     derived from the flat items' day (administration_day ?? cycle_day).
+     Protocols with rest days (e.g. day 2 has no drugs) simply won't list
+     that day here. */
   const getAvailableDays = (
     protocol: RegimenProtocolDetail | null | undefined
   ): number[] => {
     const set = new Set<number>();
     (protocol?.chemotherapy_regimen_protocol_items ?? []).forEach((item) => {
-      const d = Number(item.administration_day);
-      if (Number.isFinite(d) && d > 0) set.add(d);
+      set.add(protocolItemDay(item));
     });
     return [...set].sort((a, b) => a - b);
   };
@@ -5618,11 +5596,11 @@ const ChemotherapyOrder: React.FC<{
     }
 
     // The daily breakdown is not an array of items per day; instead the
-    // flat chemotherapy_regimen_protocol_items rows carry an
-    // administration_day that maps them onto a protocol day. Filter them
-    // the same way the backend's day view does.
+    // flat chemotherapy_regimen_protocol_items rows carry a day (either
+    // administration_day or cycle_day) that maps them onto a protocol
+    // day. Filter them the same way the backend's day view does.
     const flat = protocolRef.current?.chemotherapy_regimen_protocol_items ?? [];
-    return flat.filter((item) => item.administration_day === dayNumber);
+    return flat.filter((item) => protocolItemDay(item) === dayNumber);
   };
 
   const toDrugFromItem = (
@@ -5649,7 +5627,6 @@ const ChemotherapyOrder: React.FC<{
     days: RegimenProtocolDay[] | null | undefined
   ) => {
     let dayNumber = getCycleDayNumber(dayValue);
-    const hasDayStructure = (days ?? []).length > 0;
 
     // If the selected day is a rest day (or not parseable) but the
     // protocol has medication days, snap forward to the next day that
@@ -5662,16 +5639,12 @@ const ChemotherapyOrder: React.FC<{
       dayNumber = fallback;
     }
 
-    // When the protocol defines a day breakdown, show only the medicines
-    // mapped to the selected day. If a valid day is missing, show nothing
-    // (never dump the whole cycle across every day). Only protocols
-    // WITHOUT a day breakdown fall back to the full flat item list.
+    // Show only the medicines mapped to the selected cycle's day. Protocols
+    // with items that have no explicit day treat all of them as Day 1. If a
+    // valid day is missing, show nothing (never dump the whole cycle across
+    // every day).
     const items =
-      !hasDayStructure
-        ? (protocolRef.current?.chemotherapy_regimen_protocol_items ?? [])
-        : dayNumber != null
-        ? resolveProtocolDayItems(days, dayNumber)
-        : [];
+      dayNumber != null ? resolveProtocolDayItems(days, dayNumber) : [];
 
     setDrugs(
       items
@@ -7567,15 +7540,15 @@ const ChemotherapyOrder: React.FC<{
           </button>
 
           {/* User */}
-          <div className="flex items-center gap-3">
-            <span className="text-base font-medium text-gray-700">
-              HMS
-            </span>
-
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-900 text-sm font-semibold text-white shadow-sm">
-              DR
-            </div>
-          </div>
+          <UserProfileDropdown
+            userName={getUser()?.username || "Doctor"}
+            userSubtext={getUser()?.role || "Doctor"}
+            userAvatar={userAvatarUrl || undefined}
+            avatarLoading={avatarLoading}
+            onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+            profilePath="/doctor/profile"
+            notificationsPath="/doctor/notifications"
+          />
         </div>
       </header>
 
@@ -8417,20 +8390,15 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
             </button>
 
             {/* User */}
-            <div className="flex items-center space-x-3">
-
-              <span className="text-sm font-bold text-gray-800">
-                HMS
-              </span>
-
-              <button
-                type="button"
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-800 text-sm font-bold text-white shadow-sm transition-colors hover:bg-blue-900"
-              >
-                DR
-              </button>
-
-            </div>
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
           </div>
         </header>
 
@@ -8559,7 +8527,9 @@ type TreatmentType =
   | "Chemotherapy"
   | "Surgery"
   | "Radiation"
-  | "Targeted Therapy";
+  | "Targeted Therapy"
+  | "Immunotherapy"
+  | "Radioiodine therapy";
 
 interface RegimenProtocol {
   protocol_id: string;
@@ -8691,6 +8661,8 @@ const TreatmentPlan: React.FC<{
     "Surgery",
     "Radiation",
     "Targeted Therapy",
+    "Immunotherapy",
+    "Radioiodine therapy",
   ];
 
   /* Single-select behaviour - only one treatment type can be
@@ -8844,6 +8816,14 @@ const TreatmentPlan: React.FC<{
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleBack = () => {
+    window.history.back();
+  };
+
+  const handleViewProfile = () => {
+    console.log("View Full Profile clicked");
   };
 
   /* =========================================================
@@ -9520,17 +9500,15 @@ const TreatmentPlan: React.FC<{
               <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500" />
             </button>
 
-            <div className="flex items-center space-x-3 border-l border-slate-200 pl-6">
-
-              <span className="font-bold text-slate-800">
-                HMS
-              </span>
-
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-800 text-xs font-bold text-white">
-                DR
-              </div>
-
-            </div>
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
           </div>
         </header>
 
@@ -10887,15 +10865,15 @@ const Summary: React.FC<{
             </button>
 
             {/* User */}
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-slate-600">
-                HMS
-              </span>
-
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1E3A8A] text-xs font-semibold text-white">
-                DR
-              </div>
-            </div>
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
           </div>
         </header>
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -6,7 +6,6 @@ import {
   FileText,
   CalendarCheck,
   LogOut,
-  Bell,
 } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
@@ -142,52 +141,9 @@ const DoctorSidebar: React.FC<DoctorSidebarProps> = ({
         })}
       </nav>
 
-      {confirmOpen && (
-        <ConfirmationDialog
-          open={confirmOpen}
-          title="Logout"
-          description="Are you sure you want to logout?"
-          type="warning"
-          onConfirm={() => {
-            remove();
-            localStorage.removeItem("user_info");
-            navigate("/");
-          }}
-          onCancel={() => setConfirmOpen(false)}
-        />
-      )}
-
       {/* ================= PROFILE ================= */}
       <div className="px-4 pb-5 pt-3">
-        
-        {/* Logout button above divider */}
-        <button
-          type="button"
-          onClick={() => setConfirmOpen(true)}
-          className="w-full flex items-center justify-center py-2 rounded-md text-red-600 hover:bg-red-100 mb-3"
-        >
-          <LogOut className="w-5 h-5" /> Logout
-        </button>
-
-        {/* Divider */}
-        <div className="border-t border-gray-200 mb-4" />
-
-        <div className="flex items-center gap-3 px-1 cursor-pointer" onClick={() => navigate("/doctor/profile")}>
-          
-          {/* Profile Image */}
-          <img
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuBJ9i_cigQWWeyKsB64g5ceQatvOSkGHDQnEyA1_0zMrtWlfbwspYRUpV4spkSMmEDzu3MKqi8Qy11D_v-CTmQLt0VJn3GVfMbaymXJv3z_RalZA0Oz5hMPh1-pTavp9HjpTEcvwZ1nxzo7cdsZXoYfS-7R7fSrnopXkwvTsDb3L06Gi7TXgW6K_hfkWcirroLjoO1DKK0tSWE37GeK5_VgsLvVqt3ia1IPaDMxAIdYegI0CbvOOwtc3BWSjjPNf4lpcw"
-            alt="Doctor"
-            className="w-[42px] h-[42px] rounded-[12px] object-cover border border-gray-200 flex-shrink-0"
-          />
-
-          {/* Profile Info */}
-          <div className="flex flex-col min-w-0">
-            <span className="text-[11px] text-gray-500 font-medium mt-1 truncate">
-              Specialist
-            </span>
-          </div>
-        </div>
+        {/* Profile moved to top-right header */}
       </div>
     </aside>
   );

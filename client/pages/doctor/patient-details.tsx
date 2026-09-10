@@ -23,6 +23,8 @@ import {
 import { computeBsa } from "../../utils/vitals";
 import { generatePrescriptionPdf, type PrescriptionData } from "../../utils/prescriptionPdf";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
+import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
+import { employeeApi } from "../../api/employee.api";
 
 interface ConsultationState {
   patientId?: string;
@@ -1346,6 +1348,8 @@ function useLatestPatientVitals(
 }
 
 function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
   const [activeTab, setActiveTab] = useState("Order Summary");
   const [selectedDay, setSelectedDay] = useState("Day 1");
   const [selectedCycle] = useState(1);
@@ -1402,6 +1406,27 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [labItems, setLabItems] = useState<LabOrderItemRecord[]>([]);
   const [labItemsLoading, setLabItemsLoading] = useState(false);
   const [labItemsError, setLabItemsError] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchAvatar = () => {
+      employeeApi
+        .getMe()
+        .then((res) => {
+          if (!mounted) return;
+          const url = res.data?.data?.employee?.employee_photo_URL || "";
+          setUserAvatarUrl(url);
+          if (url) localStorage.setItem("user_photo", url);
+          else localStorage.removeItem("user_photo");
+          setAvatarLoading(false);
+        })
+        .catch(() => {
+          if (mounted) setAvatarLoading(false);
+        });
+    };
+    fetchAvatar();
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     const pid = consultationState?.patientId;
@@ -2146,12 +2171,15 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </div>
 <div className="flex items-center space-x-6">
 <BellNotificationButton size="md" />
-<div className="flex items-center space-x-3 cursor-pointer pl-6 border-l border-[#e2e8f0]">
-<span className="text-sm font-bold text-[#1d4ed8]">HMS</span>
-<div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white">
-<i className="fa-solid fa-user text-sm"></i>
-</div>
-</div>
+<UserProfileDropdown
+  userName={getUser()?.username || "Doctor"}
+  userSubtext={getUser()?.role || "Doctor"}
+  userAvatar={userAvatarUrl || undefined}
+  avatarLoading={avatarLoading}
+  onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+  profilePath="/doctor/profile"
+  notificationsPath="/doctor/notifications"
+/>
 </div>
 </header>
 {/* END: Top Header */}
@@ -2861,7 +2889,12 @@ const HistoryDashboard: React.FC<{
       department_name: p.department_master?.department_name,
       patient_vitals: p.patient_vitals || null,
       patient_allergies: p.patient_allergies || null,
-      patient_symptoms: p.patient_symptoms || null,
+      patient_symptoms: (p.patient_symptoms || []).map((s:any) => ({
+        symptom: s.symptom_master?.symptom_name || s.symptomMaster?.symptom_name || s.symptom_name || s.symptom || '',
+        severity: s.severity || s.status || '',
+        notes: s.notes || s.clinical_notes || s.remarks || '',
+        symptom_master: s.symptom_master || s.symptomMaster || null,
+      })),
       patient_history: {
         patient_first_name: p.patient_history?.patient_bio_data?.patient_first_name || '',
         patient_last_name: p.patient_history?.patient_bio_data?.patient_last_name || '',
@@ -2870,6 +2903,8 @@ const HistoryDashboard: React.FC<{
         patient_mobile: p.patient_history?.patient_bio_data?.patient_primary_mobile || '',
         visit_date: p.patient_history?.visit_date || '',
         patient_dob: p.patient_history?.patient_bio_data?.patient_dob || p.patient_history?.patient_bio_data?.date_of_birth || '',
+        age: p.patient_history?.patient_bio_data?.age ?? p.patient_history?.patient_bio_data?.patient_age,
+        patient_gender: p.patient_history?.patient_bio_data?.patient_gender || p.patient_history?.patient_bio_data?.gender,
       },
       employees: {
         first_name: p.employees?.first_name || '',
@@ -2880,16 +2915,31 @@ const HistoryDashboard: React.FC<{
         diagnosis_name: p.diagnosis?.diagnosis_name || '',
         icd10_code: p.diagnosis?.icd_code || '',
       },
-      prescription_items: (p.prescription_items || []).map((it: any) => ({
-        medicine_name: it.medicine_master?.medicine_name || '',
-        medicine_master: it.medicine_master,
-        dosage: it.dosage,
-        unit: it.unit,
-        route: it.route,
-        frequency: it.frequency,
-        instruction: it.instruction,
-        drug_role: it.drug_role,
-      })),
+      prescription_items: (() => {
+        const items = p.prescription_items || p.chemotherapy_plan_items || [];
+        return items.map((it: any) => {
+          const medicineName = it.medicine_name || it.medicine_master?.medicine_name || it.medicine?.medicine_name || it.medicine_id || '';
+          const dosage = it.dosage ?? it.protocol_dose ?? it.calculated_dose ?? '';
+          const unit = it.unit ?? it.protocol_dose_unit ?? '';
+          const frequency = it.frequency ?? (it.administration_day ? `Day ${it.administration_day}` : '');
+          const instruction = it.instruction ?? it.remarks ?? '';
+          const drugRole = (it.drug_role || it.drug_type || '').toString().toUpperCase().trim() || '';
+          return {
+            medicine_name: medicineName,
+            medicine_master: it.medicine_master || it.medicine,
+            dosage,
+            dose: it.dose ?? it.protocol_dose,
+            unit,
+            route: it.route ?? it.administration_route,
+            administration_route: it.administration_route || it.route,
+            frequency,
+            instruction,
+            remarks: it.remarks,
+            cycle_day: it.cycle_day,
+            drug_role: drugRole,
+          };
+        });
+      })(),
     };
   };
 
@@ -2930,7 +2980,13 @@ const HistoryDashboard: React.FC<{
               try {
                 const symRes = await API.get(`/clinical-details/encounters/${enc.encounter_no}`);
                 const complete = symRes.data?.data || {};
-                symptoms = complete.symptoms || symRes.data?.data?.symptoms || [];
+                const rawSymptoms = complete.symptoms || symRes.data?.data?.symptoms || [];
+                symptoms = rawSymptoms.map((s:any) => ({
+                  symptom: s.symptom_master?.symptom_name || s.symptomMaster?.symptom_name || s.symptom_name || s.symptom || '',
+                  severity: s.severity || s.status || '',
+                  notes: s.notes || s.clinical_notes || s.remarks || '',
+                  symptom_master: s.symptom_master || s.symptomMaster || null,
+                }));
               } catch {}
             }
           }
@@ -2939,10 +2995,10 @@ const HistoryDashboard: React.FC<{
         }
       }
       const data = buildPrescriptionData(p);
-      data.patient_vitals = vitals;
-      data.patient_allergies = allergies;
-      data.patient_symptoms = symptoms;
-      const { url } = generatePrescriptionPdf(data as any);
+      data.patient_vitals = vitals || data.patient_vitals;
+      data.patient_allergies = allergies || data.patient_allergies;
+      data.patient_symptoms = (symptoms && symptoms.length > 0) ? symptoms : data.patient_symptoms;
+      const { url } = await generatePrescriptionPdf(data as any);
       setSelectedPrescription(p);
       setPrescriptionIndex(index);
       setPdfUrl(url);
@@ -3424,10 +3480,10 @@ const HistoryDashboard: React.FC<{
                           <button
                             type="button"
                             className="text-xs px-3 py-1.5 rounded border border-red-300 text-red-700 hover:bg-red-50"
-                            onClick={() => {
+                            onClick={async () => {
                               try {
                                 const data = buildPrescriptionData(selectedPrescription);
-                                const { url } = generatePrescriptionPdf(data as any);
+                                const { url } = await generatePrescriptionPdf(data as any);
                                 const a = document.createElement('a');
                                 a.href = url;
                                 a.download = `prescription-${selectedPrescription.prescription_id}.pdf`;

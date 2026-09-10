@@ -5,6 +5,8 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { useNavigate } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 import {
   employeeApi,
   EmployeeRecord,
@@ -1186,6 +1188,7 @@ function accountActivityToNotification(
 /* -------------------------------------------------------------------------- */
 
 export default function Notifications() {
+  const navigate = useNavigate();
   const [
     notifications,
     setNotifications,
@@ -2486,9 +2489,18 @@ export default function Notifications() {
   return (
     <div className="w-full overflow-hidden rounded-xl bg-white">
       <header className="flex items-center justify-between border-b border-[#e5e7ef] bg-white px-5 py-4">
-        <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">
-          Notifications
-        </h1>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(-1)}
+            className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900"
+          >
+            <ArrowLeft size={16} />
+            Back
+          </button>
+          <h1 className="text-base font-semibold tracking-[0.01em] text-[#131b2e]">
+            Notifications
+          </h1>
+        </div>
 
         <div className="flex shrink-0 items-center gap-3">
           <button

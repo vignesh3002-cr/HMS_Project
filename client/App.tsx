@@ -91,6 +91,7 @@ import DoctorLeave from "./pages/doctor/LeavePage";
 import DoctorSchedule from "./pages/doctor/MySchedulePage";
 import DoctorReviews from "./pages/doctor/ReviewPage";
 import DoctorProfile from "./pages/doctor/Profile";
+import DoctorNotifications from "./pages/doctor/DoctorNotifications";
 import Consultation from "./pages/doctor/Patientconsut";
 import DoctorPatientProfile from "./pages/doctor/notes and doc";
 import PatientDetails from "./pages/doctor/patient-details";
@@ -146,10 +147,14 @@ const doctorRoutes = [
     path: "/doctor/reviews",
     element: <DoctorReviews />,
   },
-{
+  {
     path: "/doctor/profile",
-    element: <DoctorProfile />,
-},
+    element: <Profile />,
+  },
+  {
+    path: "/doctor/notifications",
+    element: <DoctorNotifications />,
+  },
 ];
 
 // ============================================================
