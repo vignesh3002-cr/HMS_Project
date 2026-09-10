@@ -164,6 +164,41 @@ const MedicationPortal: React.FC<{
   const [activeTab, setActiveTab] = useState<Tab>("Medications");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showDischargeDashboard, setShowDischargeDashboard] = useState(false);
+  const [liveProtocolName, setLiveProtocolName] = useState<string | null>(
+    () => (patientId ? localStorage.getItem(`hms_selected_protocol_name_${patientId}`) : null)
+  );
+  const [liveCancerType, setLiveCancerType] = useState<string | null>(
+    () => {
+      try {
+        const raw = localStorage.getItem("hms_diagnosis_selection");
+        return raw ? (JSON.parse(raw) as { cancer_type?: string })?.cancer_type ?? null : null;
+      } catch {
+        return null;
+      }
+    }
+  );
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.patientId === patientId) {
+        setLiveProtocolName(detail.protocolName || null);
+      }
+    };
+    window.addEventListener("protocol-changed", handler);
+    return () => window.removeEventListener("protocol-changed", handler);
+  }, [patientId]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.patientId === patientId) {
+        setLiveCancerType(detail.cancerType || null);
+      }
+    };
+    window.addEventListener("cancer-type-changed", handler);
+    return () => window.removeEventListener("cancer-type-changed", handler);
+  }, [patientId]);
 
   /* Move to the next tab in the tabs array with a single click. */
   const goNextTab = () => {
@@ -308,7 +343,7 @@ const MedicationPortal: React.FC<{
             <div className="text-sm text-[#64748b] flex items-center space-x-3">
 <span>{patientAgeSex}</span>
             <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-<span className="text-[#1d4ed8] font-semibold">{[plan?.cancer_subtype || plan?.cancer_type, plan?.cancer_stage].filter(Boolean).join(" ") || "—"}</span>
+<span className="text-[#1d4ed8] font-semibold">{[liveCancerType || plan?.cancer_subtype || plan?.cancer_type, plan?.cancer_stage].filter(Boolean).join(" ") || "—"}</span>
             </div>
             </div>
             </div>
@@ -358,7 +393,7 @@ const MedicationPortal: React.FC<{
             <div className="pl-8">
             <div className="bg-blue-50/50 border border-blue-100 rounded-[12px] p-4 w-[220px]">
             <div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: {plan?.treatment_intent || "—"}</div>
-            <div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">{plan?.regimen_name || "—"}</div>
+            <div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">{liveProtocolName || plan?.regimen_name || "—"}</div>
             <div className="flex items-center text-xs text-[#64748b] font-medium">
             <span className={`w-2 h-2 rounded-full mr-2 ${plan ? "bg-[#10b981]" : "bg-slate-300"}`}></span> {plan?.treatment_status || "No Plan"}
                     </div>
@@ -1355,6 +1390,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [selectedCycle] = useState(1);
   const [showMedicationPortal, setShowMedicationPortal] = useState(false);
   const [showDischargePortal, setShowDischargePortal] = useState(false);
+  const [protocolVersion, setProtocolVersion] = useState(0);
 
   const [savedPlan, setSavedPlan] = useState<SummaryPlan | null>(null);
   const [planNotice, setPlanNotice] = useState("");
@@ -1390,6 +1426,20 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const location = useLocation();
   const consultationState = location.state as ConsultationState | null;
   const { selectedBranchId } = useBranchFilter();
+
+  /* When the doctor reassigns a protocol in the Treatment Plan step,
+     re-fetch the saved plan so Order Summary reflects the new protocol
+     immediately. */
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail?.patientId || detail.patientId === consultationState?.patientId) {
+        setProtocolVersion((v) => v + 1);
+      }
+    };
+    window.addEventListener("protocol-changed", handler);
+    return () => window.removeEventListener("protocol-changed", handler);
+  }, [consultationState?.patientId]);
 
   /* Latest vitals (encounter + chemo merged) for the header strip.
      Re-runs when the branch selection changes so scoped fallbacks and
@@ -1552,7 +1602,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [consultationState?.patientId, activeTab, selectedBranchId]);
+  }, [consultationState?.patientId, activeTab, selectedBranchId, protocolVersion]);
 
   // Pre-fetch doctor-described medications for all cycles
   useEffect(() => {
@@ -1585,7 +1635,14 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   }, [savedPlan?.chemotherapy_plan_id, selectedBranchId]);
 
   useEffect(() => {
-    const protocolId = savedPlan?.source_protocol_id;
+    /* Prefer the freshly-selected protocol from localStorage (doctor
+       may have changed it in Treatment Plan but not saved the plan yet)
+       over the backend plan's source_protocol_id. */
+    const pid = consultationState?.patientId;
+    const localProtocolId = pid
+      ? localStorage.getItem(`hms_selected_protocol_id_${pid}`)
+      : null;
+    const protocolId = localProtocolId || savedPlan?.source_protocol_id;
     if (!protocolId) {
       setRegimenProtocol(null);
       setRegimenError("");
@@ -1613,7 +1670,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [savedPlan?.source_protocol_id]);
+  }, [savedPlan?.source_protocol_id, protocolVersion, consultationState?.patientId]);
 
   useEffect(() => {
     const planId = savedPlan?.chemotherapy_plan_id;
@@ -1836,7 +1893,23 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 
   const patientDisplayId = patient?.patient_id || "";
 
+  const recentCancerTypeFromStorage = (() => {
+    try {
+      const raw = localStorage.getItem("hms_diagnosis_selection");
+      return raw
+        ? (JSON.parse(raw) as { cancer_type?: string; subtype_name?: string })
+        : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const recentProtocolFromStorage = consultationState?.patientId
+    ? localStorage.getItem(`hms_selected_protocol_name_${consultationState.patientId}`)
+    : null;
+
   const recentCancerType =
+    recentCancerTypeFromStorage?.cancer_type ||
     [savedPlan?.cancer_type, savedPlan?.cancer_subtype]
       .filter(Boolean)
       .join(" ");
@@ -1845,13 +1918,13 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 
   const recentDiagnosis =
     [
-      savedPlan?.cancer_subtype || savedPlan?.cancer_type,
+      recentCancerTypeFromStorage?.cancer_type || savedPlan?.cancer_subtype || savedPlan?.cancer_type,
       savedPlan?.cancer_stage,
     ]
       .filter(Boolean)
       .join(" ");
 
-  const recentTherapy = savedPlan?.regimen_name || "";
+  const recentTherapy = recentProtocolFromStorage || savedPlan?.regimen_name || "";
 
   const recentIntent = savedPlan?.treatment_intent || "";
 
@@ -1873,7 +1946,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     ).padStart(2, "0")}-${d.getFullYear()}`;
   };
 
-  const orderTherapy = savedPlan?.regimen_name || recentTherapy;
+  const orderTherapy = recentTherapy || savedPlan?.regimen_name;
   const orderIntent = savedPlan?.treatment_intent || recentIntent;
 
   const planCycles = (savedPlan?.chemotherapy_cycle ?? []).filter(
@@ -2066,8 +2139,8 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   } = useDischargeMedicines(savedPlan?.source_protocol_id || "");
 
   const diagnosisOrderEntries = buildOrderEntries([
-    ["Cancer Type", osd?.cancer_types?.cancer_type ?? savedPlan?.cancer_type],
-    ["Subtype", osd?.cancer_subtypes?.subtype_name ?? savedPlan?.cancer_subtype],
+    ["Cancer Type", recentCancerTypeFromStorage?.cancer_type || osd?.cancer_types?.cancer_type || savedPlan?.cancer_type],
+    ["Subtype", recentCancerTypeFromStorage?.subtype_name || osd?.cancer_subtypes?.subtype_name || savedPlan?.cancer_subtype],
     ["Clinical Stage", osd?.clinical_stage ?? savedPlan?.cancer_stage],
     ["Staging System", osd?.staging_system],
     ["T Stage", osd?.t_stage],
@@ -2316,7 +2389,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 {/* BEGIN: Recent Details Sections (fetched for the selected patient) */}
 {diagnosisOrderEntries.length > 0 && (
 <section className="mb-6 overflow-hidden rounded-[16px] shadow-sm border border-[#e2e8f0] bg-white">
-  <SectionHeader icon="fa-solid fa-file-medical" title={`Diagnosis & Staging — ${[osd?.cancer_types?.cancer_type, osd?.cancer_subtypes?.subtype_name].filter(Boolean).join(" — ") || orderTherapy || "—"}`} badge={osd?.clinical_stage || savedPlan?.cancer_stage || "—"} />
+  <SectionHeader icon="fa-solid fa-file-medical" title={`Diagnosis & Staging — ${[recentCancerTypeFromStorage?.cancer_type || osd?.cancer_types?.cancer_type, recentCancerTypeFromStorage?.subtype_name || osd?.cancer_subtypes?.subtype_name].filter(Boolean).join(" — ") || orderTherapy || "—"}`} badge={osd?.clinical_stage || savedPlan?.cancer_stage || "—"} />
   {renderOrderEntryGrid(diagnosisOrderEntries)}
 </section>
 )}
@@ -4045,11 +4118,21 @@ function DischargeDetailsPortal({
     .filter(Boolean)
     .join(", ");
 
-  const orderSummaryDiagnosis = planPreview
-    ? [planPreview.cancer_type, planPreview.cancer_subtype]
-        .filter(Boolean)
-        .join(" — ")
-    : "";
+  const orderSummaryDiagnosis = (() => {
+    let fromStorage: string | null = null;
+    try {
+      const raw = localStorage.getItem("hms_diagnosis_selection");
+      if (raw) {
+        const parsed = JSON.parse(raw) as { cancer_type?: string; subtype_name?: string };
+        fromStorage = [parsed.cancer_type, parsed.subtype_name].filter(Boolean).join(" — ") || null;
+      }
+    } catch { /* ignore */ }
+    return fromStorage || (planPreview
+      ? [planPreview.cancer_type, planPreview.cancer_subtype]
+          .filter(Boolean)
+          .join(" — ")
+      : "");
+  })();
 
   /* Every non-empty saved field, ready to render. */
   const fmtDate = (value?: string | null) => {
@@ -4283,6 +4366,7 @@ function DischargeDetailsPortal({
     vitalEntries.find(([key]) => key === label)?.[1] || "—";
 
   const intentTherapy =
+    (patientId ? localStorage.getItem(`hms_selected_protocol_name_${patientId}`) : null) ||
     dischargePlan?.regimen_name ||
     planPreview?.matching_protocols?.[0]?.regimen_name ||
     planPreview?.suggested_therapy ||
