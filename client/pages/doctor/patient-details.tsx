@@ -1390,6 +1390,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [selectedCycle] = useState(1);
   const [showMedicationPortal, setShowMedicationPortal] = useState(false);
   const [showDischargePortal, setShowDischargePortal] = useState(false);
+  const [protocolVersion, setProtocolVersion] = useState(0);
 
   const [savedPlan, setSavedPlan] = useState<SummaryPlan | null>(null);
   const [planNotice, setPlanNotice] = useState("");
@@ -1425,6 +1426,20 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const location = useLocation();
   const consultationState = location.state as ConsultationState | null;
   const { selectedBranchId } = useBranchFilter();
+
+  /* When the doctor reassigns a protocol in the Treatment Plan step,
+     re-fetch the saved plan so Order Summary reflects the new protocol
+     immediately. */
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail?.patientId || detail.patientId === consultationState?.patientId) {
+        setProtocolVersion((v) => v + 1);
+      }
+    };
+    window.addEventListener("protocol-changed", handler);
+    return () => window.removeEventListener("protocol-changed", handler);
+  }, [consultationState?.patientId]);
 
   /* Latest vitals (encounter + chemo merged) for the header strip.
      Re-runs when the branch selection changes so scoped fallbacks and
@@ -1587,7 +1602,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [consultationState?.patientId, activeTab, selectedBranchId]);
+  }, [consultationState?.patientId, activeTab, selectedBranchId, protocolVersion]);
 
   // Pre-fetch doctor-described medications for all cycles
   useEffect(() => {
@@ -1620,7 +1635,14 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   }, [savedPlan?.chemotherapy_plan_id, selectedBranchId]);
 
   useEffect(() => {
-    const protocolId = savedPlan?.source_protocol_id;
+    /* Prefer the freshly-selected protocol from localStorage (doctor
+       may have changed it in Treatment Plan but not saved the plan yet)
+       over the backend plan's source_protocol_id. */
+    const pid = consultationState?.patientId;
+    const localProtocolId = pid
+      ? localStorage.getItem(`hms_selected_protocol_id_${pid}`)
+      : null;
+    const protocolId = localProtocolId || savedPlan?.source_protocol_id;
     if (!protocolId) {
       setRegimenProtocol(null);
       setRegimenError("");
@@ -1648,7 +1670,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [savedPlan?.source_protocol_id]);
+  }, [savedPlan?.source_protocol_id, protocolVersion, consultationState?.patientId]);
 
   useEffect(() => {
     const planId = savedPlan?.chemotherapy_plan_id;

@@ -5490,13 +5490,19 @@ const ChemotherapyOrder: React.FC<{
     return adminDays.size > 0 ? Math.max(...adminDays) : 6;
   })();
 
-  /* The distinct days that have medications in the protocol, used to
-     render the day-selector buttons. Falls back to a sequential
-     1..protocolDayCount range when the protocol has not loaded yet. */
+  /* The distinct days selectable for the current cycle, driven by the
+     protocol's no_of_days (all days 1..N regardless of which days
+     have items) merged with the distinct item-level days. This ensures
+     the day-selector always matches the protocol header's day count. */
   const availableDays = (() => {
-    const days = getAvailableDays(protocolRef.current);
-    if (days.length > 0) return days;
-    return Array.from({ length: protocolDayCount }, (_, i) => i + 1);
+    const set = new Set<number>(getAvailableDays(protocolRef.current));
+    const explicit = Number(protocolRef.current?.no_of_days ?? null);
+    if (Number.isFinite(explicit) && explicit > 0) {
+      for (let i = 1; i <= explicit; i++) set.add(i);
+    } else if (set.size === 0) {
+      return Array.from({ length: protocolDayCount }, (_, i) => i + 1);
+    }
+    return [...set].sort((a, b) => a - b);
   })();
 
   /* The distinct cycles (1..standard_cycles) available for the selected
