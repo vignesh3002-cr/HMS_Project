@@ -807,6 +807,39 @@ const createChemotherapyPlanForPatient = async (
   }
 };
 
+const DoctorProfileMenu = () => {
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
+  useEffect(() => {
+    let mounted = true;
+    employeeApi.getMe().then(res => {
+      if (!mounted) return;
+      const url = res.data?.data?.employee?.employee_photo_URL || "";
+      setUserAvatarUrl(url);
+      if (url) localStorage.setItem("user_photo", url);
+      else localStorage.removeItem("user_photo");
+      setAvatarLoading(false);
+    }).catch(() => {
+      if (mounted) setAvatarLoading(false);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  const user = getUser();
+  return (
+    <UserProfileDropdown
+      userName={user?.username || "Doctor"}
+      userSubtext={user?.role || "Doctor"}
+      userAvatar={userAvatarUrl || undefined}
+      avatarLoading={avatarLoading}
+      onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+      profilePath="/doctor/profile"
+      notificationsPath="/doctor/notifications"
+    />
+  );
+};
+
 const Consultation: React.FC = () => {
   /* ============================================================
      STATE
@@ -1781,15 +1814,7 @@ const Consultation: React.FC = () => {
 
                 {/* USER */}
 
-                <UserProfileDropdown
-                  userName={getUser()?.username || "Doctor"}
-                  userSubtext={getUser()?.role || "Doctor"}
-                  userAvatar={userAvatarUrl || undefined}
-                  avatarLoading={avatarLoading}
-                  onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-                  profilePath="/doctor/profile"
-                  notificationsPath="/doctor/notifications"
-                />
+                <DoctorProfileMenu />
 
               </div>
 
@@ -3199,15 +3224,7 @@ const LabReview: React.FC<{
             )}
           </div>
 
-          <UserProfileDropdown
-            userName={getUser()?.username || "Doctor"}
-            userSubtext={getUser()?.role || "Doctor"}
-            userAvatar={userAvatarUrl || undefined}
-            avatarLoading={avatarLoading}
-            onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-            profilePath="/doctor/profile"
-            notificationsPath="/doctor/notifications"
-          />
+          <DoctorProfileMenu />
         </div>
       </header>
 
@@ -4287,15 +4304,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
           <div className="flex items-center gap-4 sm:gap-6">
             <BellNotificationButton size="md" />
 
-            <UserProfileDropdown
-              userName={getUser()?.username || "Doctor"}
-              userSubtext={getUser()?.role || "Doctor"}
-              userAvatar={userAvatarUrl || undefined}
-              avatarLoading={avatarLoading}
-              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-              profilePath="/doctor/profile"
-              notificationsPath="/doctor/notifications"
-            />
+            <DoctorProfileMenu />
           </div>
         </header>
 
@@ -5085,15 +5094,7 @@ if (embedded) {
             </button>
 
             {/* User */}
-            <UserProfileDropdown
-              userName={getUser()?.username || "Doctor"}
-              userSubtext={getUser()?.role || "Doctor"}
-              userAvatar={userAvatarUrl || undefined}
-              avatarLoading={avatarLoading}
-              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-              profilePath="/doctor/profile"
-              notificationsPath="/doctor/notifications"
-            />
+            <DoctorProfileMenu />
           </div>
         </header>
 
@@ -5813,13 +5814,19 @@ const ChemotherapyOrder: React.FC<{
     return adminDays.size > 0 ? Math.max(...adminDays) : 6;
   })();
 
-  /* The distinct days that have medications in the protocol, used to
-     render the day-selector buttons. Falls back to a sequential
-     1..protocolDayCount range when the protocol has not loaded yet. */
+  /* The distinct days selectable for the current cycle, driven by the
+     protocol's no_of_days (all days 1..N regardless of which days
+     have items) merged with the distinct item-level days. This ensures
+     the day-selector always matches the protocol header's day count. */
   const availableDays = (() => {
-    const days = getAvailableDays(protocolRef.current);
-    if (days.length > 0) return days;
-    return Array.from({ length: protocolDayCount }, (_, i) => i + 1);
+    const set = new Set<number>(getAvailableDays(protocolRef.current));
+    const explicit = Number(protocolRef.current?.no_of_days ?? null);
+    if (Number.isFinite(explicit) && explicit > 0) {
+      for (let i = 1; i <= explicit; i++) set.add(i);
+    } else if (set.size === 0) {
+      return Array.from({ length: protocolDayCount }, (_, i) => i + 1);
+    }
+    return [...set].sort((a, b) => a - b);
   })();
 
   /* The distinct cycles (1..standard_cycles) available for the selected
@@ -7563,18 +7570,10 @@ const ChemotherapyOrder: React.FC<{
             <span className="absolute right-0 top-0 block h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
           </button>
 
-          {/* User */}
-          <UserProfileDropdown
-            userName={getUser()?.username || "Doctor"}
-            userSubtext={getUser()?.role || "Doctor"}
-            userAvatar={userAvatarUrl || undefined}
-            avatarLoading={avatarLoading}
-            onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-            profilePath="/doctor/profile"
-            notificationsPath="/doctor/notifications"
-          />
-        </div>
-      </header>
+            {/* User */}
+            <DoctorProfileMenu />
+          </div>
+        </header>
 
       {/* ================= MAIN ================= */}
       <main className="flex min-h-[calc(100vh-73px)] flex-grow justify-center p-8">
@@ -8404,28 +8403,20 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
           <div className="flex items-center space-x-6">
 
             {/* Notification */}
-            <button
-              type="button"
-              className="relative text-gray-400 transition-colors hover:text-gray-600"
-              aria-label="Notifications"
-            >
-              <BellIcon />
+              <button
+                type="button"
+                className="relative text-gray-400 transition-colors hover:text-gray-600"
+                aria-label="Notifications"
+              >
+                <BellIcon />
 
-              <span className="absolute right-0 top-0 h-2 w-2 rounded-full border border-white bg-red-500" />
-            </button>
+                <span className="absolute right-0 top-0 h-2 w-2 rounded-full border border-white bg-red-500" />
+              </button>
 
-            {/* User */}
-            <UserProfileDropdown
-              userName={getUser()?.username || "Doctor"}
-              userSubtext={getUser()?.role || "Doctor"}
-              userAvatar={userAvatarUrl || undefined}
-              avatarLoading={avatarLoading}
-              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-              profilePath="/doctor/profile"
-              notificationsPath="/doctor/notifications"
-            />
-          </div>
-        </header>
+              {/* User */}
+              <DoctorProfileMenu />
+            </div>
+          </header>
 
         {/* =======================================================
             SCROLLABLE CONTENT
@@ -9542,15 +9533,7 @@ const TreatmentPlan: React.FC<{
               <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500" />
             </button>
 
-            <UserProfileDropdown
-              userName={getUser()?.username || "Doctor"}
-              userSubtext={getUser()?.role || "Doctor"}
-              userAvatar={userAvatarUrl || undefined}
-              avatarLoading={avatarLoading}
-              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-              profilePath="/doctor/profile"
-              notificationsPath="/doctor/notifications"
-            />
+            <DoctorProfileMenu />
           </div>
         </header>
 
@@ -10928,15 +10911,7 @@ const Summary: React.FC<{
             </button>
 
             {/* User */}
-            <UserProfileDropdown
-              userName={getUser()?.username || "Doctor"}
-              userSubtext={getUser()?.role || "Doctor"}
-              userAvatar={userAvatarUrl || undefined}
-              avatarLoading={avatarLoading}
-              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-              profilePath="/doctor/profile"
-              notificationsPath="/doctor/notifications"
-            />
+            <DoctorProfileMenu />
           </div>
         </header>
 
