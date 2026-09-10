@@ -38,6 +38,8 @@ export interface AppointmentResponse {
   appointment_date: string;
   appointment_time: string;
   appointment_status: string;
+  patient_visit_type?: string;
+  Patient_visit_type?: string;
 }
 
 // Shape actually returned by GET /appointments — matches the
@@ -61,6 +63,8 @@ export interface AppointmentRecord {
   patient_type: string | null;
   patient_visit_type: string | null;
   referred_by: string | null;
+  chemo_fitness?: string | null;
+  chemo_unfit_reason?: string | null;
   patient_bio_data: {
     patient_id: string;
     patient_first_name: string;
@@ -187,6 +191,15 @@ export const appointmentApi = {
     API.patch<{ success: boolean; message: string; data: AppointmentRecord }>(
       `/appointments/${appointmentNo}/status`,
       { status, cancel_reason: cancelReason, cancelled_by: cancelledBy },
+    ),
+
+  updateChemoFitness: (
+    appointmentNo: string,
+    payload: { fitness: "FIT" | "UNFIT" | "PENDING"; reason?: string; notes?: string }
+  ) =>
+    API.patch<{ success: boolean; message: string; data: AppointmentRecord }>(
+      `/appointments/${appointmentNo}/chemo-fitness`,
+      payload
     ),
 
   getAll: (params?: GetAppointmentsParams, config?: AxiosRequestConfig) =>

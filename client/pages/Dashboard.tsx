@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2 } from "lucide-react";
+import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2, Activity, AlertCircle, FlaskConical, CheckCircle2, XCircle } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays, startOfWeek, endOfWeek, subWeeks, startOfMonth, endOfMonth, subMonths } from "date-fns";
@@ -250,9 +250,10 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
     : "Unknown Patient";
 
   const doctor = doc.employees;
-  const doctorName = doctor
+  const isLab = (doc.Patient_visit_type || "").toLowerCase().includes("lab");
+  const doctorName = (!isLab && doctor)
     ? `${doctor.first_name} ${doctor.middle_name ? doctor.middle_name + " " : ""}${doctor.last_name}`.trim()
-    : doc.doctor_name || "Unassigned";
+    : (!isLab && doc.doctor_name && doc.doctor_name !== "Laboratory" && doc.doctor_name !== "Unassigned" ? doc.doctor_name : "—");
   const branchName = doc.branch
     ? doc.branch.branch_area
       ? `${doc.branch.branch_name} (${doc.branch.branch_area})`
@@ -268,7 +269,7 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
     avatarColor: patientPalette.avatarColor,
     avatarBg: patientPalette.initBg,
     doctorName,
-    doctorId: doc.employee_id ?? "—",
+    doctorId: (!isLab && doc.employee_id) ? doc.employee_id : "—",
     doctorAvatar: getInitials(doctorName),
     doctorAvatarcolor: doctorPalette.avatarColor,
     doctorAvatarBg: doctorPalette.initBg,
@@ -279,6 +280,10 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
     time: formatTimeOnly(doc.appointment_time),
     status: formatAppointmentStatus(doc.status ?? ""),
     appointmentDateISO: doc.appointment_date,
+    visitType: doc.Patient_visit_type || "",
+    chemo_fitness: doc.chemo_fitness,
+    chemo_unfit_reason: doc.chemo_unfit_reason,
+    rawRecord: doc,
   };
 }
 
@@ -858,6 +863,59 @@ export default function Dashboard() {
 
   const visibleStats = liveStats.filter((stat) => !stat.permission || can(stat.permission));
 
+  // Oncology & Daycare Daily Tracking Metrics
+  const oncologyMetrics = useMemo(() => {
+    const list = (realAppointments as any[]) || [];
+    let totalOpVisits = 0;
+    let actualChemoDelivered = 0;
+    let cancelledChemo = 0;
+    let labVisits = 0;
+
+    for (const appt of list) {
+      const visitType = String(appt.visitType || appt.reason || "").toLowerCase();
+      const status = String(appt.status || "").toLowerCase();
+      const id = String(appt.id || appt.appointmentNo || "");
+
+      const backendFitness = (appt.chemo_fitness || (appt.rawRecord as any)?.chemo_fitness || "") as string;
+      const localFitness = id ? localStorage.getItem(`hms_chemo_fitness_${id}`) : null;
+      const effectiveFitness = backendFitness || localFitness;
+      const isUnfit = effectiveFitness === "UNFIT";
+      const isFit = effectiveFitness === "FIT";
+
+      const isChemo = visitType.includes("chemo");
+      const isLab = visitType.includes("lab");
+
+      // 1. Lab-Only Visits
+      if (isLab) {
+        labVisits++;
+      }
+
+      // 2. Cancelled / Deferred Chemo
+      if (isChemo && (status.includes("cancel") || isUnfit)) {
+        cancelledChemo++;
+      }
+
+      // 3. Actual Chemo Delivered
+      if (isChemo && !status.includes("cancel") && !isUnfit && (status.includes("complete") || isFit)) {
+        actualChemoDelivered++;
+      }
+
+      // 4. Total OP Visits (all OP consultations including chemo-unfit visits which proceed as OP consultation)
+      if (!isLab) {
+        if (!status.includes("cancel") || isUnfit) {
+          totalOpVisits++;
+        }
+      }
+    }
+
+    return {
+      totalOpVisits,
+      actualChemoDelivered,
+      cancelledChemo,
+      labVisits,
+    };
+  }, [realAppointments]);
+
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -958,7 +1016,7 @@ export default function Dashboard() {
 
   const searchableFields =
     activeTab === "appointments"
-      ? ["appointmentNo", "patientName", "doctorName", "branch", "reason", "status"]
+      ? ["appointmentNo", "patientName", "doctorName", "branch", "reason", "status", "visitType"]
       : ["name", "id", "dept", "branch", "status"];
 
   // Dashboard receives its filtered rows straight from Filter/'s
@@ -1229,6 +1287,162 @@ export default function Dashboard() {
             ))}
           </div>
 
+          {/* Oncology & Daycare Clinical Operations Tracking */}
+          <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-slate-800 tracking-wide">
+                    Oncology & Daycare Daily Tracking
+                  </h3>
+                  <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700 border border-blue-200">
+                    Clinical Operations
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Daily breakdown for Outpatient consultations, Chemotherapy delivery, cancellations, and Lab visits.
+                </p>
+              </div>
+              <div className="text-xs text-slate-400 font-medium">
+                {format(selectedDate, "dd MMM yyyy")}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-1">
+              {/* Card 1: Total OP Visits */}
+              <div
+                onClick={() => {
+                  setActiveTab("appointments");
+                  setSearchQuery("");
+                }}
+                className="group flex flex-col justify-between rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50/70 to-white p-4 shadow-sm hover:border-blue-400 hover:shadow-md transition-all cursor-pointer"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
+                    <Activity className="h-5 w-5" />
+                  </div>
+                  <span className="rounded-full bg-blue-100/70 px-2 py-0.5 text-[10px] font-bold text-blue-800">
+                    All Consultations
+                  </span>
+                </div>
+                <div className="mt-3">
+                  <div className="text-2xl font-black text-blue-900">
+                    {isAppointmentsLoading ? (
+                      <div className="h-7 w-12 rounded bg-blue-200/50 animate-pulse" />
+                    ) : (
+                      <CountUp target={oncologyMetrics.totalOpVisits} />
+                    )}
+                  </div>
+                  <div className="text-xs font-bold text-slate-700 mt-0.5">
+                    Total OP Visits
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">
+                    Includes OPD & Chemo-unfit consultations
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 2: Actual Chemo Delivered */}
+              <div
+                onClick={() => {
+                  setActiveTab("appointments");
+                  setSearchQuery("Chemotherapy");
+                }}
+                className="group flex flex-col justify-between rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50/70 to-white p-4 shadow-sm hover:border-emerald-400 hover:shadow-md transition-all cursor-pointer"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+                    <CheckCircle2 className="h-5 w-5" />
+                  </div>
+                  <span className="rounded-full bg-emerald-100/70 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                    Administered / Fit
+                  </span>
+                </div>
+                <div className="mt-3">
+                  <div className="text-2xl font-black text-emerald-900">
+                    {isAppointmentsLoading ? (
+                      <div className="h-7 w-12 rounded bg-emerald-200/50 animate-pulse" />
+                    ) : (
+                      <CountUp target={oncologyMetrics.actualChemoDelivered} />
+                    )}
+                  </div>
+                  <div className="text-xs font-bold text-slate-700 mt-0.5">
+                    Actual Chemo Delivered
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">
+                    Completed or cleared daycare cycles
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 3: Cancelled / Deferred Chemo */}
+              <div
+                onClick={() => {
+                  setActiveTab("appointments");
+                  setSearchQuery("Chemo");
+                }}
+                className="group flex flex-col justify-between rounded-xl border border-rose-200 bg-gradient-to-br from-rose-50/70 to-white p-4 shadow-sm hover:border-rose-400 hover:shadow-md transition-all cursor-pointer"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-100 text-rose-700">
+                    <XCircle className="h-5 w-5" />
+                  </div>
+                  <span className="rounded-full bg-rose-100/70 px-2 py-0.5 text-[10px] font-bold text-rose-800">
+                    Unfit / Deferred
+                  </span>
+                </div>
+                <div className="mt-3">
+                  <div className="text-2xl font-black text-rose-900">
+                    {isAppointmentsLoading ? (
+                      <div className="h-7 w-12 rounded bg-rose-200/50 animate-pulse" />
+                    ) : (
+                      <CountUp target={oncologyMetrics.cancelledChemo} />
+                    )}
+                  </div>
+                  <div className="text-xs font-bold text-slate-700 mt-0.5">
+                    Cancelled / Deferred Chemo
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">
+                    Unfit for chemo (OP visit retained)
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 4: Lab Visits */}
+              <div
+                onClick={() => {
+                  setActiveTab("appointments");
+                  setSearchQuery("Lab");
+                }}
+                className="group flex flex-col justify-between rounded-xl border border-purple-200 bg-gradient-to-br from-purple-50/70 to-white p-4 shadow-sm hover:border-purple-400 hover:shadow-md transition-all cursor-pointer"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-100 text-purple-700">
+                    <FlaskConical className="h-5 w-5" />
+                  </div>
+                  <span className="rounded-full bg-purple-100/70 px-2 py-0.5 text-[10px] font-bold text-purple-800">
+                    Lab Diagnostic
+                  </span>
+                </div>
+                <div className="mt-3">
+                  <div className="text-2xl font-black text-purple-900">
+                    {isAppointmentsLoading ? (
+                      <div className="h-7 w-12 rounded bg-purple-200/50 animate-pulse" />
+                    ) : (
+                      <CountUp target={oncologyMetrics.labVisits} />
+                    )}
+                  </div>
+                  <div className="text-xs font-bold text-slate-700 mt-0.5">
+                    Lab Visits
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">
+                    Direct laboratory visits without doctor
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
 {/* Overview Header */}
            <div className="flex items-end justify-between">
              <div>
@@ -1373,15 +1587,38 @@ export default function Dashboard() {
                     <span className="px-3 py-1 rounded-[20px] hms-content-text inline-block" style={{ background: "#EEF2FF", color: "#4F46E5" }}>{r.appointmentNo}</span>
                   )},
                   { key: "doctorName", label: "Assigned Doctor", render: (r: any) => (
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.doctorAvatarBg, color: r.doctorAvatarcolor }}>{r.doctorAvatar}</div>
-                      <div><div className="hms-name-text">{r.doctorName}</div><div className="hms-id-text">{r.doctorId}</div></div>
-                    </div>
+                    r.visitType?.toLowerCase().includes("lab") ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-full">
+                        <FlaskConical className="h-3.5 w-3.5" /> Direct Lab Visit
+                      </span>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.doctorAvatarBg, color: r.doctorAvatarcolor }}>{r.doctorAvatar}</div>
+                        <div><div className="hms-name-text">{r.doctorName}</div><div className="hms-id-text">{r.doctorId}</div></div>
+                      </div>
+                    )
                   )},
                   { key: "branch", label: "Branch", render: (r: any) => (
                     <span className="text-[#191C1E] hms-content-text leading-4">{r.branch}</span>
                   )},
-                  { key: "reason", label: "Reason", render: (r: any) => <span className="text-[#191C1E] hms-content-text leading-4">{r.reason}</span> },
+                  { key: "reason", label: "Reason / Type", render: (r: any) => (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[#191C1E] hms-content-text leading-4">{r.reason}</span>
+                      {r.visitType && (
+                        <span
+                          className={`inline-block w-fit text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                            r.visitType.toLowerCase().includes("chemo")
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : r.visitType.toLowerCase().includes("lab")
+                              ? "bg-purple-50 text-purple-700 border-purple-200"
+                              : "bg-blue-50 text-blue-700 border-blue-200"
+                          }`}
+                        >
+                          {r.visitType}
+                        </span>
+                      )}
+                    </div>
+                  )},
                   { key: "date", label: "Timing", render: (r: any) => (
                     <div className="text-[#191C1E] hms-content-text leading-4"><div>{r.date}</div><div className="text-[#8C8D8F] hms-department-text">{r.time}</div></div>
                   )},

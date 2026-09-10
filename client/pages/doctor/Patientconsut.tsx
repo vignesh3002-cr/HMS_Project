@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   useEffect,
   useRef,
   useState,
@@ -1058,8 +1058,15 @@ const Consultation: React.FC = () => {
       .getOne(appointmentId)
       .then((response) => {
         if (cancelled) return;
-        const value = response.data?.data?.Patient_visit_type ?? "";
+        const apptData = response.data?.data;
+        const value = apptData?.Patient_visit_type ?? "";
         setFallbackVisitType(value);
+        if (apptData?.chemo_fitness) {
+          setChemoFitness(apptData.chemo_fitness as "PENDING" | "FIT" | "UNFIT");
+          if (apptData.chemo_unfit_reason) {
+            setChemoUnfitReason(apptData.chemo_unfit_reason);
+          }
+        }
       })
       .catch((error) => {
         console.error("Failed to load appointment visit type:", error);
@@ -1073,6 +1080,91 @@ const Consultation: React.FC = () => {
     consultationState?.visit_type || fallbackVisitType || "";
 
   const consultedBy = consultationState?.consultedBy || "";
+
+  /* ============================================================
+     CHEMOTHERAPY FITNESS ASSESSMENT (Doctor Clinical Decision)
+  ============================================================ */
+  const activeApptId = consultationState?.appointmentId || encounter?.appointment_id || "";
+  const [chemoFitness, setChemoFitness] = useState<"PENDING" | "FIT" | "UNFIT">(() => {
+    if (!activeApptId) return "PENDING";
+    const saved = localStorage.getItem(`hms_chemo_fitness_${activeApptId}`);
+    return (saved as "PENDING" | "FIT" | "UNFIT") || "PENDING";
+  });
+  const [chemoUnfitReason, setChemoUnfitReason] = useState<string>(() => {
+    if (!activeApptId) return "";
+    return localStorage.getItem(`hms_chemo_unfit_reason_${activeApptId}`) || "";
+  });
+  const [chemoUnfitNotes, setChemoUnfitNotes] = useState<string>("");
+  const [showUnfitModal, setShowUnfitModal] = useState(false);
+  const [selectedUnfitOption, setSelectedUnfitOption] = useState("Low ANC / Neutropenia");
+  const [customUnfitReason, setCustomUnfitReason] = useState("");
+
+  const UNFIT_REASON_OPTIONS = [
+    "Low ANC / Neutropenia",
+    "Low Platelets / Thrombocytopenia",
+    "Elevated Creatinine / Renal Impairment",
+    "Abnormal LFT / Hepatic Impairment",
+    "Active Infection / Fever",
+    "Poor Performance Status / ECOG Drop",
+    "Patient Exhaustion / Severe Toxicity",
+    "Others",
+  ];
+
+  const handleMarkChemoFit = async () => {
+    setChemoFitness("FIT");
+    setChemoUnfitReason("");
+    if (activeApptId) {
+      localStorage.setItem(`hms_chemo_fitness_${activeApptId}`, "FIT");
+      localStorage.removeItem(`hms_chemo_unfit_reason_${activeApptId}`);
+      appointmentApi.updateChemoFitness(activeApptId, { fitness: "FIT" }).catch(() => {});
+    }
+    showToast("Patient marked FIT for Chemotherapy Daycare.");
+    try {
+      await API.post("/audit/log", {
+        action_type: "CHEMO_FITNESS_EVALUATION",
+        status: "FIT",
+        appointment_id: activeApptId,
+        patient_id: consultationState?.patientId || patientDisplayId,
+      }).catch(() => {});
+    } catch {}
+  };
+
+  const handleConfirmUnfit = async () => {
+    const finalReason = selectedUnfitOption === "Others" ? (customUnfitReason.trim() || "Others") : selectedUnfitOption;
+    setChemoFitness("UNFIT");
+    setChemoUnfitReason(finalReason);
+    if (activeApptId) {
+      localStorage.setItem(`hms_chemo_fitness_${activeApptId}`, "UNFIT");
+      localStorage.setItem(`hms_chemo_unfit_reason_${activeApptId}`, finalReason);
+      if (chemoUnfitNotes) {
+        localStorage.setItem(`hms_chemo_unfit_notes_${activeApptId}`, chemoUnfitNotes);
+      }
+      appointmentApi
+        .updateChemoFitness(activeApptId, {
+          fitness: "UNFIT",
+          reason: finalReason,
+          notes: chemoUnfitNotes,
+        })
+        .catch(() => {});
+    }
+    // Append to consultation notes automatically so the doctor has it documented
+    setConsultationNotes((prev) => {
+      const deferralText = `\n[CHEMOTHERAPY DEFERRED FOR TODAY - UNFIT]\nReason: ${finalReason}${chemoUnfitNotes ? `\nClinical Notes: ${chemoUnfitNotes}` : ""}\nPlan: Defer chemotherapy cycle. Conducted OPD consultation and supportive care.\n`;
+      return prev ? `${prev}\n${deferralText}` : deferralText;
+    });
+    setShowUnfitModal(false);
+    showToast("Chemotherapy cancelled for today. OPD Consultation remains active.");
+    try {
+      await API.post("/audit/log", {
+        action_type: "CHEMO_FITNESS_UNFIT",
+        status: "UNFIT",
+        appointment_id: activeApptId,
+        patient_id: consultationState?.patientId || patientDisplayId,
+        reason: finalReason,
+        notes: chemoUnfitNotes,
+      }).catch(() => {});
+    } catch {}
+  };
 
   /* ============================================================
      LATEST VITALS (from the active encounter record)
@@ -2030,6 +2122,235 @@ const Consultation: React.FC = () => {
                   </div>
 
                 </section>
+
+                {/* =================================================
+                    CHEMOTHERAPY FITNESS ASSESSMENT (Doctor Clinical Decision)
+                ================================================= */}
+                <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg font-bold leading-7 text-slate-800">
+                          Chemotherapy Fitness Assessment
+                        </span>
+                        <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700 border border-blue-200">
+                          Visit Type: {visitType || "Outpatient / Daycare"}
+                        </span>
+                      </div>
+                      <p className="text-xs leading-5 text-slate-500">
+                        Doctor clinical decision for daycare chemotherapy administration. If marked Unfit, chemotherapy is cancelled/deferred, while the outpatient (OP) consultation remains active.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {chemoFitness === "FIT" && (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800 border border-emerald-300">
+                          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                          FIT FOR CHEMOTHERAPY
+                        </span>
+                      )}
+                      {chemoFitness === "UNFIT" && (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-800 border border-rose-300">
+                          <span className="h-2 w-2 rounded-full bg-rose-500" />
+                          CHEMO CANCELLED (UNFIT)
+                        </span>
+                      )}
+                      {chemoFitness === "PENDING" && (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800 border border-amber-300">
+                          <span className="h-2 w-2 rounded-full bg-amber-500" />
+                          EVALUATION PENDING
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Actions & Status details */}
+                  <div className="flex flex-col gap-4">
+                    {chemoFitness === "UNFIT" && (
+                      <div className="rounded-lg border border-rose-200 bg-rose-50/80 p-4">
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-700 font-bold text-base">
+                            ✕
+                          </div>
+                          <div className="flex-1 space-y-1">
+                            <div className="text-sm font-bold text-rose-900">
+                              Chemotherapy Cancelled / Deferred for Today
+                            </div>
+                            <div className="text-xs font-medium text-rose-800">
+                              <span className="font-semibold">Reason:</span> {chemoUnfitReason || "Not specified"}
+                            </div>
+                            {chemoUnfitNotes && (
+                              <div className="text-xs text-rose-700">
+                                <span className="font-semibold">Supportive / Deferral Plan:</span> {chemoUnfitNotes}
+                              </div>
+                            )}
+                            <div className="mt-2 rounded bg-white/70 p-2 text-xs text-rose-900 border border-rose-200/60">
+                              💡 <strong>Outpatient (OP) consultation remains active:</strong> Clinical notes, supportive medications, and diagnostic investigations can still be completed and billed normally.
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {chemoFitness === "FIT" && (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-4">
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 font-bold text-base">
+                            ✓
+                          </div>
+                          <div className="flex-1 space-y-1">
+                            <div className="text-sm font-bold text-emerald-900">
+                              Patient Cleared for Chemotherapy
+                            </div>
+                            <div className="text-xs text-emerald-800">
+                              Patient meets clinical tolerance criteria. Cleared for Daycare bed admission and chemotherapy protocol administration.
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-3 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleMarkChemoFit}
+                        className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors ${
+                          chemoFitness === "FIT"
+                            ? "bg-emerald-700 text-white ring-2 ring-emerald-400 ring-offset-1"
+                            : "bg-emerald-600 text-white hover:bg-emerald-700"
+                        }`}
+                      >
+                        <span>✓</span>
+                        Mark Fit — Clear for Chemo
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowUnfitModal(true)}
+                        className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors ${
+                          chemoFitness === "UNFIT"
+                            ? "bg-rose-700 text-white ring-2 ring-rose-400 ring-offset-1"
+                            : "bg-rose-600 text-white hover:bg-rose-700"
+                        }`}
+                      >
+                        <span>✕</span>
+                        Mark Unfit — Cancel Chemo (OPD Only)
+                      </button>
+
+                      {chemoFitness !== "PENDING" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setChemoFitness("PENDING");
+                            setChemoUnfitReason("");
+                            setChemoUnfitNotes("");
+                            if (activeApptId) {
+                              localStorage.removeItem(`hms_chemo_fitness_${activeApptId}`);
+                              localStorage.removeItem(`hms_chemo_unfit_reason_${activeApptId}`);
+                              localStorage.removeItem(`hms_chemo_unfit_notes_${activeApptId}`);
+                              appointmentApi.updateChemoFitness(activeApptId, { fitness: "PENDING" }).catch(() => {});
+                            }
+                            showToast("Chemotherapy fitness status reset to Pending.");
+                          }}
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 transition-colors"
+                        >
+                          Reset Decision
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </section>
+
+                {/* =================================================
+                    CHEMOTHERAPY UNFIT REASON MODAL
+                ================================================= */}
+                {showUnfitModal && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+                    <div
+                      className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl space-y-4"
+                      role="dialog"
+                      aria-modal="true"
+                    >
+                      <div className="border-b border-slate-100 pb-3">
+                        <h3 className="text-lg font-bold text-slate-900">
+                          Mark Patient Unfit for Chemotherapy
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Chemotherapy administration will be cancelled/deferred for today. The OPD consultation visit remains active.
+                        </p>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                            Primary Reason for Deferral <span className="text-rose-600">*</span>
+                          </label>
+                          <select
+                            value={selectedUnfitOption}
+                            onChange={(e) => setSelectedUnfitOption(e.target.value)}
+                            className="w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm font-medium text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          >
+                            {UNFIT_REASON_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {selectedUnfitOption === "Others" && (
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                              Custom Reason <span className="text-rose-600">*</span>
+                            </label>
+                            <input
+                              type="text"
+                              value={customUnfitReason}
+                              onChange={(e) => setCustomUnfitReason(e.target.value)}
+                              placeholder="e.g., Uncontrolled hypertension, severe mucositis..."
+                              className="w-full rounded-lg border border-slate-300 p-2.5 text-sm font-medium text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                          </div>
+                        )}
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                            Clinical Deferral Notes & Supportive Care (Optional)
+                          </label>
+                          <textarea
+                            rows={3}
+                            value={chemoUnfitNotes}
+                            onChange={(e) => setChemoUnfitNotes(e.target.value)}
+                            placeholder="e.g., Prescribe Filgrastim 300mcg OD for 3 days. Re-check CBC on Monday. Continue OPD consultation..."
+                            className="w-full rounded-lg border border-slate-300 p-2.5 text-xs text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+
+                        <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
+                          <strong>Note:</strong> Selecting this will cancel the Daycare chemo session for today. The patient's visit will remain as an Outpatient (OP) consultation, and notes will be preserved.
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => setShowUnfitModal(false)}
+                          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleConfirmUnfit}
+                          disabled={selectedUnfitOption === "Others" && !customUnfitReason.trim()}
+                          className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-50 transition-colors shadow-sm"
+                        >
+                          Confirm Chemo Cancellation
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* =================================================
                     INVESTIGATIONS
@@ -8262,11 +8583,23 @@ const TreatmentPlan: React.FC<{
   appointmentId?: string;
   encounterNo?: string;
 }> = ({ embedded = false, patientId, measurements, onNext, appointmentId, encounterNo }) => {
+  const navigate = useNavigate();
   const location = useLocation();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
+
+  const handleBack = () => {
+    window.history.back();
+  };
+
+  const handleViewProfile = () => {
+    if (!resolvedPatientId) return;
+    navigate("/doctor/patient-details", {
+      state: { patientId: resolvedPatientId },
+    });
+  };
 
   const [treatmentIntent, setTreatmentIntent] =
     useState("");
