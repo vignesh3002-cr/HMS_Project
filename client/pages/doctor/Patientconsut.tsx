@@ -2421,6 +2421,9 @@ const LabReview: React.FC<{
   onOrdered,
   onNext,
 }) => {
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
   const [observations, setObservations] = useState("");
   const [notifications, setNotifications] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -3064,6 +3067,9 @@ const Diagnosis: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? "";
   const resolvedPatientId = patientId || statePatientId;
 
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
   const [formData, setFormData] = useState<FormData>({
     type: "",
     subType: "",
@@ -3138,8 +3144,18 @@ const Diagnosis: React.FC<{
           diagnosis_id: diagnosisId,
         })
       );
+
+      window.dispatchEvent(
+        new CustomEvent("cancer-type-changed", {
+          detail: {
+            patientId: resolvedPatientId,
+            cancerType: matchedType.cancer_type,
+            cancerSubtype: matchedSubtype.subtype_name,
+          },
+        })
+      );
     }
-  }, [formData.type, formData.subType, cancerTypes, subtypes, diagnosisCatalogReady]);
+  }, [formData.type, formData.subType, cancerTypes, subtypes, diagnosisCatalogReady, resolvedPatientId]);
 
   const [stageLabels, setStageLabels] = useState<string[]>([]);
   const [tnmStages, setTnmStages] = useState<string[]>([]);
@@ -4139,6 +4155,9 @@ const DischargeMedication: React.FC<{
   const resolvedPatientId = patientId || "";
   const navigate = useNavigate();
 
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
   const [medications, setMedications] = useState<DischargeMedicationItem[]>(
     []
   );
@@ -4983,6 +5002,9 @@ const ChemotherapyOrder: React.FC<{
   patientId?: string;
   onNext?: () => void;
 }> = ({ embedded = false, patientId, onNext }) => {
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
   const location = useLocation();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
@@ -7339,6 +7361,9 @@ const FollowUp: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
   const [activeStep, setActiveStep] = useState<FollowUpStep>(1);
   const [nextVisitDate, setNextVisitDate] = useState("");
   const [nextCycle, setNextCycle] = useState("");
@@ -8238,6 +8263,9 @@ const TreatmentPlan: React.FC<{
   );
   const resolvedPatientId = patientId || statePatientId;
 
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
   const [treatmentIntent, setTreatmentIntent] =
     useState("");
 
@@ -8907,9 +8935,32 @@ const TreatmentPlan: React.FC<{
                     `hms_selected_protocol_id_${resolvedPatientId}`,
                     value
                   );
+                  const selected = protocols.find(
+                    (p) => p.protocol_id === value
+                  );
+                  if (selected) {
+                    const label = `${selected.regimen_code} - ${selected.regimen_name}`;
+                    localStorage.setItem(
+                      `hms_selected_protocol_name_${resolvedPatientId}`,
+                      label
+                    );
+                    window.dispatchEvent(
+                      new CustomEvent("protocol-changed", {
+                        detail: { patientId: resolvedPatientId, protocolName: label },
+                      })
+                    );
+                  }
                 } else {
                   localStorage.removeItem(
                     `hms_selected_protocol_id_${resolvedPatientId}`
+                  );
+                  localStorage.removeItem(
+                    `hms_selected_protocol_name_${resolvedPatientId}`
+                  );
+                  window.dispatchEvent(
+                    new CustomEvent("protocol-changed", {
+                      detail: { patientId: resolvedPatientId, protocolName: "" },
+                    })
                   );
                 }
               }}
@@ -9416,6 +9467,9 @@ const Summary: React.FC<{
   );
   const resolvedPatientId = patientId || statePatientId;
 
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
   const [nextVisitDate, setNextVisitDate] = useState(() =>
     resolvedPatientId
       ? (localStorage.getItem(
@@ -9674,7 +9728,22 @@ const Summary: React.FC<{
       time: item.frequency || "",
     }));
 
+  const diagnosisSelectionFromStorage = (() => {
+    try {
+      const raw = localStorage.getItem("hms_diagnosis_selection");
+      return raw
+        ? (JSON.parse(raw) as {
+            cancer_type?: string;
+            subtype_name?: string;
+          })
+        : null;
+    } catch {
+      return null;
+    }
+  })();
+
   const cancerType =
+    diagnosisSelectionFromStorage?.cancer_type ||
     plan?.oncology_staging_detail?.cancer_types?.cancer_type ||
     plan?.cancer_type ||
     "";
@@ -9687,7 +9756,12 @@ const Summary: React.FC<{
 
   const context = plan?.treatment_intent || plan?.treatment_goal || "";
 
+  const protocolFromStorage = resolvedPatientId
+    ? localStorage.getItem(`hms_selected_protocol_name_${resolvedPatientId}`)
+    : null;
+
   const protocol =
+    protocolFromStorage ||
     plan?.protocol_name ||
     (plan?.regimen_code
       ? `${plan.regimen_code} - ${plan.regimen_name}`
