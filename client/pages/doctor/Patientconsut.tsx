@@ -293,6 +293,7 @@ interface MeasurementValues {
   pulse: string;
   temp: string;
   spo2: string;
+  painScore: string;
 }
 
 const vitalNum = (
@@ -329,6 +330,7 @@ const buildMeasurements = (
   const pulse = getField("pulse");
   const temp = getField("temperature");
   const spo2 = getField("spo2");
+  const painScore = getField("pain_score");
   const bmiStored = getField("BMI");
 
   const bsaValue = computeBsa(height, weight);
@@ -351,6 +353,7 @@ const buildMeasurements = (
     pulse: pulse !== null ? `${pulse} bpm` : "",
     temp: temp !== null ? `${temp} °C` : "",
     spo2: spo2 !== null ? `${spo2}%` : "",
+    painScore: painScore !== null ? `${painScore}/10` : "",
   };
 };
 
@@ -1734,6 +1737,15 @@ const Consultation: React.FC = () => {
                   </div>
                   <div className="text-sm font-bold leading-5 text-slate-800">
                     {measurements.spo2}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    PAIN SCORE
+                  </div>
+                  <div className="text-sm font-bold leading-5 text-slate-800">
+                    {measurements.painScore}
                   </div>
                 </div>
 

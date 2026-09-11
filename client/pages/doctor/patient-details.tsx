@@ -1125,6 +1125,7 @@ interface LatestPatientVitalsValues {
   spo2: number | null;
   bmi: number | null;
   bsa: number | null;
+  painScore: number | null;
 }
 
 interface UseLatestPatientVitalsResult {
@@ -1346,6 +1347,7 @@ function useLatestPatientVitals(
     bsa:
       num(latestChemoVitals?.body_surface_area) ??
       computeBsa(heightValue, weightValue),
+    painScore: encNum(firstEncounterValue(e => e.pain_score)),
   };
 
   const vitalEntries: [string, string][] = [
@@ -1362,6 +1364,7 @@ function useLatestPatientVitals(
     ["TEMP", vitals.temp != null ? `${vitals.temp} °C` : ""],
     ["BMI", vitals.bmi != null ? `${vitals.bmi}` : ""],
     ["SPO2", vitals.spo2 != null ? `${vitals.spo2}%` : ""],
+    ["PAIN", vitals.painScore != null ? `${vitals.painScore}/10` : ""],
   ];
 
   const lastCheckedLabel = formatLastChecked([
@@ -4433,6 +4436,11 @@ function DischargeDetailsPortal({
       label: "SpO2",
       value: mergedVitals.spo2 != null ? `${mergedVitals.spo2}%` : "—",
       status: latestChemoVitals?.oxygen_support ? "On Support" : "Room Air",
+    },
+    {
+      label: "Pain Score",
+      value: mergedVitals.painScore != null ? `${mergedVitals.painScore}/10` : "—",
+      status: latestEncounter?.pain_score != null ? "Recorded" : "Not recorded",
     },
   ];
 
