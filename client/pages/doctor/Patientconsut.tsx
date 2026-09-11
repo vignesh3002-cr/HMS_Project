@@ -803,6 +803,14 @@ const Consultation: React.FC = () => {
   const [showLabReview, setShowLabReview] = useState(false);
   const [activeStep, setActiveStep] = useState("CONSULTATION");
   const [proceeding, setProceeding] = useState(false);
+  const [tabsHovered, setTabsHovered] = useState(false);
+  const tabsScrollRef = useRef<HTMLDivElement>(null);
+
+  const slideTabs = (direction: 1 | -1) => {
+    const el = tabsScrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: direction * 298.66, behavior: "smooth" });
+  };
 
   const STEP_ORDER = [
     "CONSULTATION",
@@ -1478,9 +1486,16 @@ const Consultation: React.FC = () => {
                 STEPS
             ================================================== */}
 
-            <div className="z-20 h-[88px] w-full shrink-0 overflow-hidden bg-white">
+            <div
+              onMouseEnter={() => setTabsHovered(true)}
+              onMouseLeave={() => setTabsHovered(false)}
+              className="relative z-20 h-[88px] w-full shrink-0 overflow-hidden bg-white"
+            >
 
-              <div className="hide-scrollbar ml-0 flex h-[88.5px] w-full overflow-x-auto">
+              <div
+                ref={tabsScrollRef}
+                className="hide-scrollbar ml-0 flex h-[88.5px] w-full overflow-x-auto"
+              >
 
                 {steps.map((step, index) => (
 
@@ -1530,10 +1545,58 @@ const Consultation: React.FC = () => {
 
               </div>
 
+              {/* FLOATING BACK / NEXT ARROWS (near tabs, hover only) */}
+
+              <div className={`pointer-events-none absolute left-2 top-1/2 z-30 -translate-y-1/2 transition-opacity duration-200 ${tabsHovered ? "pointer-events-auto opacity-100" : "opacity-0"}`}>
+
+                <button
+                  onClick={() => slideTabs(-1)}
+                  aria-label="Go back"
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-lg transition hover:bg-slate-50"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-5 w-5"
+                  >
+                    <path d="M19 12H5" />
+                    <path d="m12 19-7-7 7-7" />
+                  </svg>
+                </button>
+
+              </div>
+
+              <div className={`pointer-events-none absolute right-2 top-1/2 z-30 -translate-y-1/2 transition-opacity duration-200 ${tabsHovered ? "pointer-events-auto opacity-100" : "opacity-0"}`}>
+
+                <button
+                  onClick={() => slideTabs(1)}
+                  aria-label="Go to next tab"
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-lg transition hover:bg-slate-50"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-5 w-5"
+                  >
+                    <path d="M5 12h14" />
+                    <path d="m12 5 7 7-7 7" />
+                  </svg>
+                </button>
+
+              </div>
+
             </div>
 
             {/* ==================================================
-                CONTENT
+                const tabs
             ================================================== */}
 
             <section className="w-full bg-slate-50 px-[22px] py-7">
@@ -1595,7 +1658,9 @@ const Consultation: React.FC = () => {
                     encounterNo={encounter?.encounter_no}
                   />
                 ) : (
-                  <>
+                  <div
+                      className="relative flex w-full flex-col gap-5"
+                    >
                     {/* =================================================
                         PATIENT HEADER
                     ================================================= */}
@@ -2466,9 +2531,9 @@ const Consultation: React.FC = () => {
 
                   </div>
 
-                </div>
+                  </div>
 
-                  </>
+                  </div>
                 )}
 
               </div>
@@ -3903,7 +3968,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
             </div>
           </div>
 
-          {/* Grade 
+          {/* Grade */}
           <div>
             <label
               htmlFor="grade"
@@ -3937,7 +4002,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                 <ChevronDownIcon />
               </div>
             </div>
-          </div>*/}
+          </div>
 
           {/* T Stage */}
           <div>
