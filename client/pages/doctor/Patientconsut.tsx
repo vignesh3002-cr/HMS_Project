@@ -1483,6 +1483,223 @@ const Consultation: React.FC = () => {
             </header>
 
             {/* ==================================================
+                PATIENT HEADER
+            ================================================== */}
+
+            <section className="w-full bg-slate-50">
+
+              <div className="flex w-full flex-col gap-5">
+
+                <section className="flex w-full flex-col gap-5 bg-white p-5">
+
+                  <div className="flex w-full items-center gap-4">
+
+                    <img
+                      src={patientPhoto}
+                      alt={patientName}
+                      className="h-20 w-20 shrink-0 rounded-full border-4 border-white object-cover shadow-sm"
+                    />
+
+                    <div className="min-w-0 flex-1">
+
+                      <div className="mb-1 flex min-w-0 items-center space-x-2">
+
+                        <h2 className="truncate text-xl font-bold leading-7 text-[#1e293b]">
+                          {patientName}
+                        </h2>
+
+                        <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-[#64748b]">
+                          {patientDisplayId}
+                        </span>
+
+                      </div>
+
+                      <div className="flex min-w-0 items-center space-x-2 text-sm leading-5 text-[#64748b]">
+
+                        <span className="truncate">{patientAgeSex}</span>
+
+                        <span className="h-1 w-1 shrink-0 rounded-full bg-slate-300" />
+
+                        <span className="shrink-0 font-semibold text-[#1d4ed8]">
+                          —
+                        </span>
+
+                      </div>
+
+                    </div>
+
+                   {/* PHONE + EMAIL (vertical stack) */}
+
+                    <div className="flex flex-col gap-1">
+
+                      <div className="flex items-center gap-2">
+
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        className="h-4 w-4 shrink-0 text-slate-400"
+                      >
+                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                      </svg>
+
+                      <div className="flex flex-col">
+
+                        <div className="text-[10px] font-bold leading-[15px] tracking-[0.5px] text-slate-400">
+                          PHONE
+                        </div>
+
+                        <div className="whitespace-nowrap text-sm font-medium leading-5 text-slate-700">
+                          {patientPhone}
+                        </div>
+
+                      </div>
+
+                    </div>
+
+                      {/* EMAIL */}
+
+                      <div className="flex items-center gap-2">
+
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        className="h-4 w-4 shrink-0 text-slate-400"
+                      >
+                        <rect
+                          x="3"
+                          y="5"
+                          width="18"
+                          height="14"
+                          rx="2"
+                        />
+
+                        <path d="m3 7 9 6 9-6" />
+                      </svg>
+
+                      <div className="flex flex-col">
+
+                        <div className="text-[10px] font-bold leading-[15px] tracking-[0.5px] text-slate-400">
+                          EMAIL
+                        </div>
+
+<div className="whitespace-normal break-all text-sm font-medium leading-5 text-slate-700">
+                        {patientEmail}
+                      </div>
+
+                      </div>
+
+                    </div>
+
+                    </div>
+
+                    {/* MEASUREMENTS */}
+
+                    <div className="grid grid-cols-4 gap-x-6 gap-y-3">
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          HEIGHT
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.height}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          WEIGHT
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.weight}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          BSA
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.bsa}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          BMI
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.bmi}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          BP
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.bp}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          PULSE
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.pulse}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          TEMP
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.temp}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          SPO2
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.spo2}
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* PROFILE */}
+
+                    <button
+                      onClick={() => {
+                        const pid = consultationState?.patientId;
+                        if (pid) {
+                          localStorage.setItem("hms_last_viewed_patient_id", pid);
+                        }
+                        navigate("/doctor/patient-details", {
+                          state: { patientId: pid },
+                        });
+                      }}
+                      className="ml-auto h-9 rounded-md border border-blue-600 bg-white px-4 text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
+                    >
+                      View Full Profile
+                    </button>
+
+                  </div>
+
+                </section>
+
+              </div>
+
+            </section>
+
+            {/* ==================================================
                 STEPS
             ================================================== */}
 
@@ -1599,7 +1816,7 @@ const Consultation: React.FC = () => {
                 const tabs
             ================================================== */}
 
-            <section className="w-full bg-slate-50 px-[22px] py-7">
+            <section className="w-full bg-slate-50 px-[22px] pb-7">
 
               <div className="flex w-full flex-col gap-5">
 
@@ -1661,215 +1878,6 @@ const Consultation: React.FC = () => {
                   <div
                       className="relative flex w-full flex-col gap-5"
                     >
-                    {/* =================================================
-                        PATIENT HEADER
-                    ================================================= */}
-
-                    <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
-
-                      <div className="flex w-full items-center gap-4">
-
-                        <img
-                          src={patientPhoto}
-                          alt={patientName}
-                          className="h-20 w-20 shrink-0 rounded-full border-4 border-white object-cover shadow-sm"
-                        />
-
-                        <div className="min-w-0 flex-1">
-
-                          <div className="mb-1 flex min-w-0 items-center space-x-2">
-
-                            <h2 className="truncate text-xl font-bold leading-7 text-[#1e293b]">
-                              {patientName}
-                            </h2>
-
-                            <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-[#64748b]">
-                              {patientDisplayId}
-                            </span>
-
-                          </div>
-
-                          <div className="flex min-w-0 items-center space-x-2 text-sm leading-5 text-[#64748b]">
-
-                            <span className="truncate">{patientAgeSex}</span>
-
-                            <span className="h-1 w-1 shrink-0 rounded-full bg-slate-300" />
-
-                            <span className="shrink-0 font-semibold text-[#1d4ed8]">
-                              —
-                            </span>
-
-                          </div>
-
-                        </div>
-
-                       {/* PHONE + EMAIL (vertical stack) */}
-
-                        <div className="flex flex-col gap-1">
-
-                          <div className="flex items-center gap-2">
-
-                          <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.7"
-                            className="h-4 w-4 shrink-0 text-slate-400"
-                          >
-                            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-                          </svg>
-
-                          <div className="flex flex-col">
-
-                            <div className="text-[10px] font-bold leading-[15px] tracking-[0.5px] text-slate-400">
-                              PHONE
-                            </div>
-
-                            <div className="whitespace-nowrap text-sm font-medium leading-5 text-slate-700">
-                              {patientPhone}
-                            </div>
-
-                          </div>
-
-                        </div>
-
-                          {/* EMAIL */}
-
-                          <div className="flex items-center gap-2">
-
-                          <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.7"
-                            className="h-4 w-4 shrink-0 text-slate-400"
-                          >
-                            <rect
-                              x="3"
-                              y="5"
-                              width="18"
-                              height="14"
-                              rx="2"
-                            />
-
-                            <path d="m3 7 9 6 9-6" />
-                          </svg>
-
-                          <div className="flex flex-col">
-
-                            <div className="text-[10px] font-bold leading-[15px] tracking-[0.5px] text-slate-400">
-                              EMAIL
-                            </div>
-
-<div className="whitespace-normal break-all text-sm font-medium leading-5 text-slate-700">
-                            {patientEmail}
-                          </div>
-
-                          </div>
-
-                        </div>
-
-                        </div>
-
-                        {/* MEASUREMENTS */}
-
-                        <div className="grid grid-cols-4 gap-x-6 gap-y-3">
-
-                          <div className="flex flex-col">
-                            <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                              HEIGHT
-                            </div>
-                            <div className="text-sm font-bold leading-5 text-slate-800">
-                              {measurements.height}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col">
-                            <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                              WEIGHT
-                            </div>
-                            <div className="text-sm font-bold leading-5 text-slate-800">
-                              {measurements.weight}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col">
-                            <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                              BSA
-                            </div>
-                            <div className="text-sm font-bold leading-5 text-slate-800">
-                              {measurements.bsa}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col">
-                            <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                              BMI
-                            </div>
-                            <div className="text-sm font-bold leading-5 text-slate-800">
-                              {measurements.bmi}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col">
-                            <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                              BP
-                            </div>
-                            <div className="text-sm font-bold leading-5 text-slate-800">
-                              {measurements.bp}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col">
-                            <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                              PULSE
-                            </div>
-                            <div className="text-sm font-bold leading-5 text-slate-800">
-                              {measurements.pulse}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col">
-                            <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                              TEMP
-                            </div>
-                            <div className="text-sm font-bold leading-5 text-slate-800">
-                              {measurements.temp}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col">
-                            <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                              SPO2
-                            </div>
-                            <div className="text-sm font-bold leading-5 text-slate-800">
-                              {measurements.spo2}
-                            </div>
-                          </div>
-
-                        </div>
-
-                        {/* PROFILE */}
-
-                        <button
-                          onClick={() => {
-                            const pid = consultationState?.patientId;
-                            if (pid) {
-                              localStorage.setItem("hms_last_viewed_patient_id", pid);
-                            }
-                            navigate("/doctor/patient-details", {
-                              state: { patientId: pid },
-                            });
-                          }}
-                          className="ml-auto h-9 rounded-md border border-blue-600 bg-white px-4 text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
-                        >
-                          View Full Profile
-                        </button>
-
-                      </div>
-
-                    </section>
-
                     {/* =================================================
                     CONSULTATION SUMMARY
                 ================================================= */}
