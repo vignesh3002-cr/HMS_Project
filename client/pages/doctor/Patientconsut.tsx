@@ -73,6 +73,38 @@ const parseDateValue = (value?: string | null): Date | null => {
 };
 
 /* ============================================================
+   SHARED DOCTOR AVATAR HOOK
+   Fetches the logged-in doctor's avatar and caches it in localStorage.
+   Shared across Consultation and all step subcomponents.
+   ============================================================ */
+const useDoctorAvatar = () => {
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
+  useEffect(() => {
+    let mounted = true;
+    employeeApi
+      .getMe()
+      .then((res) => {
+        if (!mounted) return;
+        const url = res.data?.data?.employee?.employee_photo_URL || "";
+        setUserAvatarUrl(url);
+        if (url) localStorage.setItem("user_photo", url);
+        else localStorage.removeItem("user_photo");
+        setAvatarLoading(false);
+      })
+      .catch(() => {
+        if (mounted) setAvatarLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  return { userAvatarUrl, avatarLoading };
+};
+
+/* ============================================================
    PROTOCOL-DRIVEN NEXT VISIT DATE
    The "Next Visit Date" shown in the Follow Up and Summary steps
    is derived from the selected regimen protocol's cycle interval
@@ -775,14 +807,46 @@ const createChemotherapyPlanForPatient = async (
   }
 };
 
+const DoctorProfileMenu = () => {
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
+  useEffect(() => {
+    let mounted = true;
+    employeeApi.getMe().then(res => {
+      if (!mounted) return;
+      const url = res.data?.data?.employee?.employee_photo_URL || "";
+      setUserAvatarUrl(url);
+      if (url) localStorage.setItem("user_photo", url);
+      else localStorage.removeItem("user_photo");
+      setAvatarLoading(false);
+    }).catch(() => {
+      if (mounted) setAvatarLoading(false);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  const user = getUser();
+  return (
+    <UserProfileDropdown
+      userName={user?.username || "Doctor"}
+      userSubtext={user?.role || "Doctor"}
+      userAvatar={userAvatarUrl || undefined}
+      avatarLoading={avatarLoading}
+      onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+      profilePath="/doctor/profile"
+      notificationsPath="/doctor/notifications"
+    />
+  );
+};
+
 const Consultation: React.FC = () => {
   /* ============================================================
      STATE
   ============================================================ */
 
   const [toast, setToast] = useState<ToastMessage>("");
-  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
-  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
 
   const [consultationNotes, setConsultationNotes] = useState("");
 
@@ -883,27 +947,6 @@ const Consultation: React.FC = () => {
     }
     return value;
   };
-
-  useEffect(() => {
-    let mounted = true;
-    const fetchAvatar = () => {
-      employeeApi
-        .getMe()
-        .then((res) => {
-          if (!mounted) return;
-          const url = res.data?.data?.employee?.employee_photo_URL || "";
-          setUserAvatarUrl(url);
-          if (url) localStorage.setItem("user_photo", url);
-          else localStorage.removeItem("user_photo");
-          setAvatarLoading(false);
-        })
-        .catch(() => {
-          if (mounted) setAvatarLoading(false);
-        });
-    };
-    fetchAvatar();
-    return () => { mounted = false; };
-  }, []);
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
@@ -1090,8 +1133,15 @@ const Consultation: React.FC = () => {
       .getOne(appointmentId)
       .then((response) => {
         if (cancelled) return;
-        const value = response.data?.data?.Patient_visit_type ?? "";
+        const apptData = response.data?.data;
+        const value = apptData?.Patient_visit_type ?? "";
         setFallbackVisitType(value);
+        if (apptData?.chemo_fitness) {
+          setChemoFitness(apptData.chemo_fitness as "PENDING" | "FIT" | "UNFIT");
+          if (apptData.chemo_unfit_reason) {
+            setChemoUnfitReason(apptData.chemo_unfit_reason);
+          }
+        }
       })
       .catch((error) => {
         console.error("Failed to load appointment visit type:", error);
@@ -1105,6 +1155,91 @@ const Consultation: React.FC = () => {
     consultationState?.visit_type || fallbackVisitType || "";
 
   const consultedBy = consultationState?.consultedBy || "";
+
+  /* ============================================================
+     CHEMOTHERAPY FITNESS ASSESSMENT (Doctor Clinical Decision)
+  ============================================================ */
+  const activeApptId = consultationState?.appointmentId || encounter?.appointment_id || "";
+  const [chemoFitness, setChemoFitness] = useState<"PENDING" | "FIT" | "UNFIT">(() => {
+    if (!activeApptId) return "PENDING";
+    const saved = localStorage.getItem(`hms_chemo_fitness_${activeApptId}`);
+    return (saved as "PENDING" | "FIT" | "UNFIT") || "PENDING";
+  });
+  const [chemoUnfitReason, setChemoUnfitReason] = useState<string>(() => {
+    if (!activeApptId) return "";
+    return localStorage.getItem(`hms_chemo_unfit_reason_${activeApptId}`) || "";
+  });
+  const [chemoUnfitNotes, setChemoUnfitNotes] = useState<string>("");
+  const [showUnfitModal, setShowUnfitModal] = useState(false);
+  const [selectedUnfitOption, setSelectedUnfitOption] = useState("Low ANC / Neutropenia");
+  const [customUnfitReason, setCustomUnfitReason] = useState("");
+
+  const UNFIT_REASON_OPTIONS = [
+    "Low ANC / Neutropenia",
+    "Low Platelets / Thrombocytopenia",
+    "Elevated Creatinine / Renal Impairment",
+    "Abnormal LFT / Hepatic Impairment",
+    "Active Infection / Fever",
+    "Poor Performance Status / ECOG Drop",
+    "Patient Exhaustion / Severe Toxicity",
+    "Others",
+  ];
+
+  const handleMarkChemoFit = async () => {
+    setChemoFitness("FIT");
+    setChemoUnfitReason("");
+    if (activeApptId) {
+      localStorage.setItem(`hms_chemo_fitness_${activeApptId}`, "FIT");
+      localStorage.removeItem(`hms_chemo_unfit_reason_${activeApptId}`);
+      appointmentApi.updateChemoFitness(activeApptId, { fitness: "FIT" }).catch(() => {});
+    }
+    showToast("Patient marked FIT for Chemotherapy Daycare.");
+    try {
+      await API.post("/audit/log", {
+        action_type: "CHEMO_FITNESS_EVALUATION",
+        status: "FIT",
+        appointment_id: activeApptId,
+        patient_id: consultationState?.patientId || patientDisplayId,
+      }).catch(() => {});
+    } catch {}
+  };
+
+  const handleConfirmUnfit = async () => {
+    const finalReason = selectedUnfitOption === "Others" ? (customUnfitReason.trim() || "Others") : selectedUnfitOption;
+    setChemoFitness("UNFIT");
+    setChemoUnfitReason(finalReason);
+    if (activeApptId) {
+      localStorage.setItem(`hms_chemo_fitness_${activeApptId}`, "UNFIT");
+      localStorage.setItem(`hms_chemo_unfit_reason_${activeApptId}`, finalReason);
+      if (chemoUnfitNotes) {
+        localStorage.setItem(`hms_chemo_unfit_notes_${activeApptId}`, chemoUnfitNotes);
+      }
+      appointmentApi
+        .updateChemoFitness(activeApptId, {
+          fitness: "UNFIT",
+          reason: finalReason,
+          notes: chemoUnfitNotes,
+        })
+        .catch(() => {});
+    }
+    // Append to consultation notes automatically so the doctor has it documented
+    setConsultationNotes((prev) => {
+      const deferralText = `\n[CHEMOTHERAPY DEFERRED FOR TODAY - UNFIT]\nReason: ${finalReason}${chemoUnfitNotes ? `\nClinical Notes: ${chemoUnfitNotes}` : ""}\nPlan: Defer chemotherapy cycle. Conducted OPD consultation and supportive care.\n`;
+      return prev ? `${prev}\n${deferralText}` : deferralText;
+    });
+    setShowUnfitModal(false);
+    showToast("Chemotherapy cancelled for today. OPD Consultation remains active.");
+    try {
+      await API.post("/audit/log", {
+        action_type: "CHEMO_FITNESS_UNFIT",
+        status: "UNFIT",
+        appointment_id: activeApptId,
+        patient_id: consultationState?.patientId || patientDisplayId,
+        reason: finalReason,
+        notes: chemoUnfitNotes,
+      }).catch(() => {});
+    } catch {}
+  };
 
   /* ============================================================
      LATEST VITALS (from the active encounter record)
@@ -2696,9 +2831,7 @@ const LabReview: React.FC<{
   onOrdered,
   onNext,
 }) => {
-  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
-  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
-
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
   const [observations, setObservations] = useState("");
   const [notifications, setNotifications] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -3145,15 +3278,7 @@ const LabReview: React.FC<{
             )}
           </div>
 
-          <UserProfileDropdown
-            userName={getUser()?.username || "Doctor"}
-            userSubtext={getUser()?.role || "Doctor"}
-            userAvatar={userAvatarUrl || undefined}
-            avatarLoading={avatarLoading}
-            onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-            profilePath="/doctor/profile"
-            notificationsPath="/doctor/notifications"
-          />
+          <DoctorProfileMenu />
         </div>
       </header>
 
@@ -3341,9 +3466,7 @@ const Diagnosis: React.FC<{
   const statePatientId =
     (location.state as ConsultationState | null)?.patientId ?? "";
   const resolvedPatientId = patientId || statePatientId;
-
-  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
-  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
 
   const [formData, setFormData] = useState<FormData>({
     type: "",
@@ -4235,15 +4358,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
           <div className="flex items-center gap-4 sm:gap-6">
             <BellNotificationButton size="md" />
 
-            <UserProfileDropdown
-              userName={getUser()?.username || "Doctor"}
-              userSubtext={getUser()?.role || "Doctor"}
-              userAvatar={userAvatarUrl || undefined}
-              avatarLoading={avatarLoading}
-              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-              profilePath="/doctor/profile"
-              notificationsPath="/doctor/notifications"
-            />
+            <DoctorProfileMenu />
           </div>
         </header>
 
@@ -4429,9 +4544,7 @@ const DischargeMedication: React.FC<{
 }) => {
   const resolvedPatientId = patientId || "";
   const navigate = useNavigate();
-
-  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
-  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
 
   const [medications, setMedications] = useState<DischargeMedicationItem[]>(
     []
@@ -5035,15 +5148,7 @@ if (embedded) {
             </button>
 
             {/* User */}
-            <UserProfileDropdown
-              userName={getUser()?.username || "Doctor"}
-              userSubtext={getUser()?.role || "Doctor"}
-              userAvatar={userAvatarUrl || undefined}
-              avatarLoading={avatarLoading}
-              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-              profilePath="/doctor/profile"
-              notificationsPath="/doctor/notifications"
-            />
+            <DoctorProfileMenu />
           </div>
         </header>
 
@@ -5277,14 +5382,12 @@ const ChemotherapyOrder: React.FC<{
   patientId?: string;
   onNext?: () => void;
 }> = ({ embedded = false, patientId, onNext }) => {
-  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
-  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
-
   const location = useLocation();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
 
   const [cycleDay, setCycleDay] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -7521,18 +7624,10 @@ const ChemotherapyOrder: React.FC<{
             <span className="absolute right-0 top-0 block h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
           </button>
 
-          {/* User */}
-          <UserProfileDropdown
-            userName={getUser()?.username || "Doctor"}
-            userSubtext={getUser()?.role || "Doctor"}
-            userAvatar={userAvatarUrl || undefined}
-            avatarLoading={avatarLoading}
-            onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-            profilePath="/doctor/profile"
-            notificationsPath="/doctor/notifications"
-          />
-        </div>
-      </header>
+            {/* User */}
+            <DoctorProfileMenu />
+          </div>
+        </header>
 
       {/* ================= MAIN ================= */}
       <main className="flex min-h-[calc(100vh-73px)] flex-grow justify-center p-8">
@@ -7642,9 +7737,7 @@ const FollowUp: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
-  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
-  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
-
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
   const [activeStep, setActiveStep] = useState<FollowUpStep>(1);
   const [nextVisitDate, setNextVisitDate] = useState("");
   const [nextCycle, setNextCycle] = useState("");
@@ -8364,28 +8457,20 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
           <div className="flex items-center space-x-6">
 
             {/* Notification */}
-            <button
-              type="button"
-              className="relative text-gray-400 transition-colors hover:text-gray-600"
-              aria-label="Notifications"
-            >
-              <BellIcon />
+              <button
+                type="button"
+                className="relative text-gray-400 transition-colors hover:text-gray-600"
+                aria-label="Notifications"
+              >
+                <BellIcon />
 
-              <span className="absolute right-0 top-0 h-2 w-2 rounded-full border border-white bg-red-500" />
-            </button>
+                <span className="absolute right-0 top-0 h-2 w-2 rounded-full border border-white bg-red-500" />
+              </button>
 
-            {/* User */}
-            <UserProfileDropdown
-              userName={getUser()?.username || "Doctor"}
-              userSubtext={getUser()?.role || "Doctor"}
-              userAvatar={userAvatarUrl || undefined}
-              avatarLoading={avatarLoading}
-              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-              profilePath="/doctor/profile"
-              notificationsPath="/doctor/notifications"
-            />
-          </div>
-        </header>
+              {/* User */}
+              <DoctorProfileMenu />
+            </div>
+          </header>
 
         {/* =======================================================
             SCROLLABLE CONTENT
@@ -8538,14 +8623,25 @@ const TreatmentPlan: React.FC<{
   appointmentId?: string;
   encounterNo?: string;
 }> = ({ embedded = false, patientId, measurements, onNext, appointmentId, encounterNo }) => {
+  const navigate = useNavigate();
   const location = useLocation();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
 
-  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
-  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+  const handleBack = () => {
+    window.history.back();
+  };
+
+  const handleViewProfile = () => {
+    if (!resolvedPatientId) return;
+    navigate("/doctor/patient-details", {
+      state: { patientId: resolvedPatientId },
+    });
+  };
+
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
 
   const [treatmentIntent, setTreatmentIntent] =
     useState("");
@@ -8792,14 +8888,6 @@ const TreatmentPlan: React.FC<{
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleBack = () => {
-    window.history.back();
-  };
-
-  const handleViewProfile = () => {
-    console.log("View Full Profile clicked");
   };
 
   /* =========================================================
@@ -9499,15 +9587,7 @@ const TreatmentPlan: React.FC<{
               <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500" />
             </button>
 
-            <UserProfileDropdown
-              userName={getUser()?.username || "Doctor"}
-              userSubtext={getUser()?.role || "Doctor"}
-              userAvatar={userAvatarUrl || undefined}
-              avatarLoading={avatarLoading}
-              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-              profilePath="/doctor/profile"
-              notificationsPath="/doctor/notifications"
-            />
+            <DoctorProfileMenu />
           </div>
         </header>
 
@@ -9747,9 +9827,7 @@ const Summary: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
-
-  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
-  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
 
   const [nextVisitDate, setNextVisitDate] = useState(() =>
     resolvedPatientId
@@ -10887,15 +10965,7 @@ const Summary: React.FC<{
             </button>
 
             {/* User */}
-            <UserProfileDropdown
-              userName={getUser()?.username || "Doctor"}
-              userSubtext={getUser()?.role || "Doctor"}
-              userAvatar={userAvatarUrl || undefined}
-              avatarLoading={avatarLoading}
-              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-              profilePath="/doctor/profile"
-              notificationsPath="/doctor/notifications"
-            />
+            <DoctorProfileMenu />
           </div>
         </header>
 

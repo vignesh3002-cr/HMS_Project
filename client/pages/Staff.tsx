@@ -91,7 +91,7 @@ const StaffPhoto = ({ photo, name }: { photo: string; name: string }) => (
   </div>
 );
 
-const TABS = ["All staff", "Medical Staff", "Admin", "Supporting"];
+const TABS = ["All staff", "Medical Staff", "Admin", "Support staff"];
 
 const supportBadgeColors: Record<SupportStaffRow["deptClass"], string> = {
   blue: "bg-blue-100 text-blue-700",
@@ -485,7 +485,7 @@ export default function Staff() {
   const activeTabName = TABS[activeTab];
   const isMedicalTab = activeTabName === "Medical Staff";
   const isAdminTab = activeTabName === "Admin";
-  const isSupportingTab = activeTabName === "Supporting";
+  const isSupportingTab = activeTabName === "Support staff";
 
   const [realStaff, setRealStaff] = useState<EmployeeRecord[] | null>(null);
   const [isStaffLoading, setIsStaffLoading] = useState(true);
