@@ -40,7 +40,13 @@ function timeAgo(timestamp: number) {
 export function BellNotification() {
   const { unreadCount, notifications, markAllAsRead, removeNotification } = useNotifications();
   const [open, setOpen] = useState(false);
+  const [tick, setTick] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const interval = setInterval(() => setTick((t) => t + 1), 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -72,9 +78,12 @@ export function BellNotification() {
       >
         <Bell className="w-4 h-4 text-[#6B7280]" />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none shadow-sm">
-            {unreadCount > 99 ? "99+" : unreadCount}
-          </span>
+          <>
+            <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white animate-pulse" />
+            <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none shadow-sm">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          </>
         )}
       </button>
 
@@ -146,7 +155,7 @@ export function BellNotification() {
                       {item.message}
                     </p>
                     <span className="text-[10px] text-[#94A3B8] mt-1 block">
-                      {item.time || timeAgo(item.createdAt)}
+                      {timeAgo(item.createdAt)}
                     </span>
                   </div>
 
