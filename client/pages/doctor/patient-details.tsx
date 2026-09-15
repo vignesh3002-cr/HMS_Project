@@ -3093,46 +3093,6 @@ const HistoryDashboard: React.FC<{
     return { cycle, date: fmtHistoryDate(d.toISOString()) };
   })();
 
-  useEffect(() => {
-    if (currentCycleInfo?.cycle) {
-      const idx = Math.max(0, currentCycleInfo.cycle - 1);
-      setActiveCycleIndex(idx);
-      const timer = setTimeout(() => {
-        if (timelineScrollRef.current) {
-          const el = timelineScrollRef.current;
-          el.scrollTo({
-            left: idx * el.clientWidth,
-            behavior: "auto",
-          });
-        }
-      }, 150);
-      return () => clearTimeout(timer);
-    }
-  }, [plan?.chemotherapy_plan_id, currentCycleInfo?.cycle]);
-
-  /* Timeline entries straight from the saved cycles. */
-  const timelineItems = planCyclesSorted.map((cycle, index) => {
-    const start = fmtHistoryDate(cycle.planned_date);
-    const end =
-      fmtHistoryDate(cycle.actual_date) || fmtHistoryDate(cycle.next_cycle_date);
-    const status = (cycle.cycle_status ?? "PLANNED").toUpperCase();
-    return {
-      cycle: `CYCLE ${String(cycle.cycle_number).padStart(2, "0")}${
-        index === 0 && status === "COMPLETED" ? " (LATEST)" : ""
-      }`,
-      date: end && start !== end ? `${start} - ${end}` : start,
-      description:
-        cycle.remarks?.trim() ||
-        `Status: ${status}${
-          cycle.completion_status
-            ? ` · Completion: ${cycle.completion_status}`
-            : ""
-        }`,
-      final: index === 0,
-      status,
-    };
-  });
-
   /* Cycle-history table rows: agent/dose come from the plan's
      PRIMARY items; outcome is the real cycle_status. */
   const primaryPlanItems = (plan?.chemotherapy_plan_items ?? []).filter(
@@ -3263,15 +3223,207 @@ const HistoryDashboard: React.FC<{
         weightTrend.length
       : null;
 
+  const fmtTimelineDate = (value?: string | Date | null): string => {
+    if (!value) return "";
+    const d = typeof value === "string" ? new Date(value) : value;
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  };
+
   const historyTimelineRange = (() => {
     const dates = planCyclesSorted
-      .map((cycle) => cycle.planned_date)
+      .map((cycle) => cycle.actual_date || cycle.planned_date)
       .filter(Boolean)
       .sort();
-    if (dates.length === 0) return "";
-    const first = fmtHistoryDate(dates[0]);
-    const last = fmtHistoryDate(dates[dates.length - 1]);
-    return first === last ? first : `${first} - ${last}`;
+
+    if (dates.length > 0) {
+      const first = fmtTimelineDate(dates[0]);
+      const last = fmtTimelineDate(dates[dates.length - 1]);
+      return first === last ? first : `${first} - ${last}`;
+    }
+
+    if (plan?.treatment_start_date) {
+      const d = new Date(plan.treatment_start_date);
+      if (!Number.isNaN(d.getTime())) {
+        const startMonthYear = d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+        if ((plan?.treatment_status ?? "").toUpperCase() === "COMPLETED" && plan?.expected_end_date) {
+          const endD = new Date(plan.expected_end_date);
+          const endMonthYear = !Number.isNaN(endD.getTime())
+            ? endD.toLocaleDateString("en-GB", { month: "short", year: "numeric" })
+            : "";
+          return endMonthYear ? `${startMonthYear} - ${endMonthYear}` : `${startMonthYear} - Present`;
+        }
+        return `${startMonthYear} - Present`;
+      }
+    }
+
+    return "No treatment dates recorded";
+  })();
+
+  /* Timeline entries straight from the patient's plan and saved cycles with clear status categories */
+  const timelineItems = (() => {
+    if (!plan && planCyclesSorted.length === 0 && !currentCycleInfo) {
+      return [];
+    }
+
+    const isPlanCompleted =
+      (plan?.treatment_status ?? "").toUpperCase() === "COMPLETED" ||
+      (plan?.planned_cycles != null &&
+        plan?.completed_cycles != null &&
+        plan.completed_cycles >= plan.planned_cycles);
+
+    const inProgressCycle = planCyclesSorted.find(
+      (c) => (c.cycle_status ?? "").toUpperCase() === "IN_PROGRESS"
+    );
+    const activeCycleNum = isPlanCompleted
+      ? null
+      : inProgressCycle
+      ? inProgressCycle.cycle_number
+      : currentCycleInfo?.cycle ?? (plan?.completed_cycles ? plan.completed_cycles + 1 : 1);
+
+    const maxRecordedCycle = planCyclesSorted.reduce(
+      (max, c) => Math.max(max, c.cycle_number || 0),
+      0
+    );
+
+    const totalCycles = Math.max(
+      plan?.planned_cycles || (maxRecordedCycle > 0 ? maxRecordedCycle : 6),
+      plan?.completed_cycles || 0,
+      maxRecordedCycle,
+      activeCycleNum || 0,
+      1
+    );
+
+    const interval = plan?.cycle_interval_days || 21;
+    const startDate = plan?.treatment_start_date ? new Date(plan.treatment_start_date) : null;
+
+    const existingMap = new Map();
+    planCyclesSorted.forEach((c) => {
+      if (c.cycle_number != null) existingMap.set(c.cycle_number, c);
+    });
+
+    const items: Array<{
+      cycle: string;
+      date: string;
+      description: string;
+      final: boolean;
+      status: string;
+      category: "COMPLETED" | "CURRENT" | "UPCOMING";
+      cycleNumber: number;
+    }> = [];
+
+    // Reverse order from totalCycles down to Cycle 1 (Cycle 6 at top, Cycle 1 at bottom)
+    for (let cNum = totalCycles; cNum >= 1; cNum--) {
+      const existing = existingMap.get(cNum);
+      const detail = existing
+        ? cycleDetails.find((d) => d.chemotherapy_cycle_id === existing.chemotherapy_cycle_id)
+        : null;
+
+      const isCompleted =
+        isPlanCompleted ||
+        (existing && (existing.cycle_status ?? "").toUpperCase() === "COMPLETED") ||
+        (plan?.completed_cycles != null && cNum <= plan.completed_cycles) ||
+        (activeCycleNum != null && cNum < activeCycleNum);
+
+      const isCurrent =
+        !isCompleted &&
+        Boolean(
+          (existing && (existing.cycle_status ?? "").toUpperCase() === "IN_PROGRESS") ||
+            (activeCycleNum && cNum === activeCycleNum)
+        );
+
+      const category: "COMPLETED" | "CURRENT" | "UPCOMING" = isCompleted
+        ? "COMPLETED"
+        : isCurrent
+        ? "CURRENT"
+        : "UPCOMING";
+
+      // Dynamic real dates (no arbitrary +3 days)
+      let dateStr = "";
+      if (existing) {
+        const plannedStr = fmtTimelineDate(detail?.planned_date || existing.planned_date);
+        const actualStr = fmtTimelineDate(detail?.actual_date || existing.actual_date);
+        if (plannedStr && actualStr && plannedStr !== actualStr) {
+          dateStr = `${plannedStr} - ${actualStr}`;
+        } else {
+          dateStr = actualStr || plannedStr || "";
+        }
+      }
+      if (!dateStr && startDate && !Number.isNaN(startDate.getTime())) {
+        const d = new Date(startDate);
+        d.setDate(startDate.getDate() + (cNum - 1) * interval);
+        dateStr = fmtTimelineDate(d);
+      }
+
+      // Dynamic cycle title
+      const isFinal = cNum === totalCycles;
+      let cycleTitle = `CYCLE ${String(cNum).padStart(2, "0")}`;
+      if (isFinal) {
+        cycleTitle += " (FINAL)";
+      }
+
+      // Dynamic description from real remarks, adverse events, or status
+      let description = "";
+      if (detail?.remarks?.trim()) {
+        description = detail.remarks.trim();
+      } else if (existing?.remarks?.trim()) {
+        description = existing.remarks.trim();
+      }
+
+      if (!description) {
+        const adverseEvents = detail?.chemotherapy_adverse_event ?? existing?.chemotherapy_adverse_event ?? [];
+        if (adverseEvents.length > 0) {
+          const names = adverseEvents
+            .map((ae) => {
+              const grade = ae.ctcae_grade || ae.reaction_grade || ae.severity;
+              return `${ae.adverse_event_name || "Adverse event"}${grade ? ` (Grade ${grade})` : ""}`;
+            })
+            .join(", ");
+          description = `Adverse events: ${names}.`;
+        }
+      }
+
+      if (!description) {
+        if (category === "CURRENT") {
+          description = plan?.regimen_name
+            ? `Cycle in progress per ${plan.regimen_name} protocol.`
+            : "Cycle in progress as scheduled.";
+        } else if (category === "COMPLETED") {
+          const comp = detail?.completion_status || existing?.completion_status;
+          description = comp
+            ? `Cycle completed (${comp.replace(/_/g, " ")}).`
+            : isFinal
+            ? "Protocol completed. All planned cycles successfully administered."
+            : "Cycle completed as scheduled.";
+        } else {
+          description = "Scheduled per treatment protocol.";
+        }
+      }
+
+      const status = existing
+        ? (
+            detail?.cycle_status ||
+            existing.cycle_status ||
+            (category === "COMPLETED" ? "COMPLETED" : category === "CURRENT" ? "IN_PROGRESS" : "SCHEDULED")
+          ).toUpperCase()
+        : category === "CURRENT"
+        ? "IN_PROGRESS"
+        : category === "COMPLETED"
+        ? "COMPLETED"
+        : "SCHEDULED";
+
+      items.push({
+        cycle: cycleTitle,
+        date: dateStr,
+        description,
+        final: isFinal,
+        status,
+        category,
+        cycleNumber: cNum,
+      });
+    }
+
+    return items;
   })();
 
   /* =========================================================
@@ -3318,815 +3470,120 @@ const HistoryDashboard: React.FC<{
             </div>
 
             {/* Timeline */}
-            <style>{`
-              .timeline-scroll-container::-webkit-scrollbar {
-                height: 10px;
-                width: 10px;
-                display: block !important;
-              }
-              .timeline-scroll-container::-webkit-scrollbar-track {
-                background: #f1f5f9;
-                border-radius: 9999px;
-              }
-              .timeline-scroll-container::-webkit-scrollbar-thumb {
-                background: #2563eb;
-                border-radius: 9999px;
-              }
-              .timeline-scroll-container::-webkit-scrollbar-thumb:hover {
-                background: #1d4ed8;
-              }
-            `}</style>
+            <div className="relative pl-4 space-y-4 max-h-[560px] overflow-y-auto pr-2" style={{ scrollbarWidth: "thin", scrollbarColor: "#2563eb #f1f5f9" }}>
+              {timelineItems.length > 0 && (
+                <div
+                  aria-hidden="true"
+                  className="absolute left-[21px] top-4 bottom-4 w-px bg-gray-200"
+                />
+              )}
 
-            {(() => {
-              // Regimen medicines from primary plan items (or all items if no PRIMARY tagged)
-              const primaryItems = (plan?.chemotherapy_plan_items ?? []).filter(
-                (i) => (i.drug_role ?? "").toUpperCase() === "PRIMARY"
-              );
-              const itemsToUse = primaryItems.length > 0 ? primaryItems : (plan?.chemotherapy_plan_items ?? []);
-              const uniqueMedsMap = new Map();
-              itemsToUse.forEach((pi) => {
-                const key =
-                  pi.medicine_master?.medicine_name || pi.chemotherapy_plan_item_id;
-                if (key && !uniqueMedsMap.has(key)) {
-                  uniqueMedsMap.set(key, pi);
-                }
-              });
-              const planMedicines = Array.from(uniqueMedsMap.values()).map((pi) => ({
-                id: pi.chemotherapy_plan_item_id,
-                name: pi.medicine_master?.medicine_name || "—",
-                dose: pi.protocol_dose
-                  ? `${pi.protocol_dose} ${pi.protocol_dose_unit ?? ""}`.trim()
-                  : "",
-                route: pi.administration_route || undefined,
-              }));
+              {timelineItems.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-gray-300 bg-white p-6 text-sm text-gray-500">
+                  No chemotherapy cycles found for this patient yet. Save a
+                  Treatment Plan and record cycles to build the timeline.
+                </div>
+              ) : (
+                timelineItems.map((item) => {
+                  const isCompleted = item.category === "COMPLETED";
+                  const isCurrent = item.category === "CURRENT";
+                  const isUpcoming = item.category === "UPCOMING";
 
-              const calcCycleDate = (cycleNum: number): string => {
-                if (!plan?.treatment_start_date) return "—";
-                const start = new Date(plan.treatment_start_date);
-                if (Number.isNaN(start.getTime())) return "—";
-                const interval = plan.cycle_interval_days || 21;
-                const d = new Date(start);
-                d.setDate(d.getDate() + (cycleNum - 1) * interval);
-                return fmtHistoryDate(d.toISOString());
-              };
-
-              const isPlanCompleted =
-                (plan?.treatment_status ?? "").toUpperCase() === "COMPLETED" ||
-                (plan?.planned_cycles != null &&
-                  plan?.completed_cycles != null &&
-                  plan.completed_cycles >= plan.planned_cycles);
-
-              // Identify in-progress or active cycle number
-              const inProgressCycle = planCyclesSorted.find(
-                (c) => (c.cycle_status ?? "").toUpperCase() === "IN_PROGRESS"
-              );
-              const activeCycleNum = isPlanCompleted
-                ? null
-                : inProgressCycle
-                ? inProgressCycle.cycle_number
-                : currentCycleInfo?.cycle ?? (plan?.completed_cycles ? plan.completed_cycles + 1 : 1);
-
-              const maxRecordedCycle = planCyclesSorted.reduce(
-                (max, c) => Math.max(max, c.cycle_number || 0),
-                0
-              );
-
-              const highestCycle = Math.max(
-                activeCycleNum || 0,
-                plan?.completed_cycles || 0,
-                maxRecordedCycle,
-                currentCycleInfo?.cycle || 0,
-                1
-              );
-
-              // Build a lookup map of existing cycle records from database
-              const existingCyclesMap = new Map();
-              planCyclesSorted.forEach((c) => {
-                if (c.cycle_number != null) {
-                  existingCyclesMap.set(c.cycle_number, c);
-                }
-              });
-
-              interface TimelineCycleCardItem {
-                cycleId?: string;
-                cycleNumber: number;
-                cycleTitle: string;
-                plannedDate?: string | null;
-                actualDate?: string | null;
-                nextCycleDate?: string | null;
-                displayDate: string;
-                cycleStatus: string;
-                completionStatus?: string | null;
-                remarks?: string | null;
-                isCurrent: boolean;
-                isCompleted: boolean;
-                isPlanned: boolean;
-                final: boolean;
-                vitals: ChemoVitalsEntry[];
-                primaryVital?: ChemoVitalsEntry | null;
-                adverseEvents: ChemoAdverseEventEntry[];
-                medicines: Array<{
-                  id: string;
-                  name: string;
-                  dose?: string;
-                  route?: string;
-                }>;
-              }
-
-              const displayItems: TimelineCycleCardItem[] = [];
-
-              // Generate items in chronological order: Cycle 1 to highestCycle
-              for (let cNum = 1; cNum <= highestCycle; cNum++) {
-                const existing = existingCyclesMap.get(cNum);
-                const detail = existing
-                  ? cycleDetails.find((d) => d.chemotherapy_cycle_id === existing.chemotherapy_cycle_id)
-                  : null;
-
-                const isCurrent = Boolean(activeCycleNum && cNum === activeCycleNum);
-                const isCompleted = isPlanCompleted || (!isCurrent && (!activeCycleNum || cNum < activeCycleNum));
-                const isPlanned = !isPlanCompleted && !isCurrent && Boolean(activeCycleNum && cNum > activeCycleNum);
-
-                const plannedDateStr = existing
-                  ? fmtHistoryDate(detail?.planned_date || existing.planned_date)
-                  : calcCycleDate(cNum);
-
-                const actualDateStr = existing
-                  ? fmtHistoryDate(detail?.actual_date || existing.actual_date)
-                  : (isCompleted ? calcCycleDate(cNum) : null);
-
-                const nextDateStr = existing
-                  ? fmtHistoryDate(detail?.next_cycle_date || existing.next_cycle_date)
-                  : calcCycleDate(cNum + 1);
-
-                const status = existing
-                  ? (detail?.cycle_status || existing.cycle_status || "PLANNED").toUpperCase()
-                  : isCurrent
-                  ? "IN_PROGRESS"
-                  : isCompleted
-                  ? "COMPLETED"
-                  : "PLANNED";
-
-                const completionStatus = existing
-                  ? (detail?.completion_status || existing.completion_status)
-                  : (isCompleted ? "FULL_DOSE" : null);
-
-                const vitalsList = (
-                  detail?.chemotherapy_vitals ??
-                  existing?.chemotherapy_vitals ??
-                  []
-                ).slice();
-                vitalsList.sort((a, b) =>
-                  (b.recorded_at ?? "").localeCompare(a.recorded_at ?? "")
-                );
-                let primaryVital = vitalsList[0] ?? null;
-
-                // Fallback to latest patient vitals if cycle has no vitals recorded
-                if (
-                  !primaryVital &&
-                  patientVitals &&
-                  (patientVitals.bpSystolic != null ||
-                    patientVitals.pulse != null ||
-                    patientVitals.weight != null ||
-                    patientVitals.temp != null)
-                ) {
-                  primaryVital = {
-                    blood_pressure_systolic: patientVitals.bpSystolic,
-                    blood_pressure_diastolic: patientVitals.bpDiastolic,
-                    pulse_rate: patientVitals.pulse,
-                    body_temperature: patientVitals.temp,
-                    weight: patientVitals.weight,
-                    spo2: patientVitals.spo2,
-                    body_surface_area: patientVitals.bsa,
-                    bmi: patientVitals.bmi,
-                    vital_stage: isCurrent ? "Current Vitals" : "Recorded Vitals",
-                  };
-                }
-
-                const adverseEventsList = (
-                  detail?.chemotherapy_adverse_event ??
-                  existing?.chemotherapy_adverse_event ??
-                  []
-                ).slice();
-
-                const remarksText =
-                  detail?.remarks?.trim() ||
-                  existing?.remarks?.trim() ||
-                  (isCurrent
-                    ? "Currently running cycle according to treatment protocol schedule."
-                    : isCompleted
-                    ? "Cycle completed per regimen protocol schedule."
-                    : undefined);
-
-                displayItems.push({
-                  cycleId: existing?.chemotherapy_cycle_id,
-                  cycleNumber: cNum,
-                  cycleTitle: `CYCLE ${String(cNum).padStart(2, "0")}${
-                    cNum === highestCycle && isCompleted ? " (LATEST)" : ""
-                  }`,
-                  plannedDate: plannedDateStr,
-                  actualDate: actualDateStr,
-                  nextCycleDate: nextDateStr,
-                  displayDate: actualDateStr || plannedDateStr || "—",
-                  cycleStatus: status,
-                  completionStatus,
-                  remarks: remarksText,
-                  isCurrent,
-                  isCompleted,
-                  isPlanned,
-                  final: cNum === highestCycle,
-                  vitals: vitalsList,
-                  primaryVital,
-                  adverseEvents: adverseEventsList,
-                  medicines: planMedicines,
-                });
-              }
-
-              if (displayItems.length === 0) {
-                return (
-                  <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500">
-                    No chemotherapy cycles found for this patient yet. Save a Treatment Plan and record cycles to build the timeline.
-                  </div>
-                );
-              }
-
-              const doctorName = plan?.employees?.first_name
-                ? `Dr. ${plan.employees.first_name}${plan.employees.last_name ? ` ${plan.employees.last_name}` : ""}`
-                : "Dr. Naveen";
-              const doctorInitials = plan?.employees?.first_name
-                ? `${plan.employees.first_name[0]}${plan.employees.last_name ? plan.employees.last_name[0] : ""}`.toUpperCase()
-                : "DN";
-
-              const scrollToCycle = (idx: number) => {
-                if (!timelineScrollRef.current) return;
-                const el = timelineScrollRef.current;
-                const width = el.clientWidth;
-                el.scrollTo({
-                  left: idx * width,
-                  behavior: "smooth",
-                });
-                setActiveCycleIndex(idx);
-              };
-
-              const handleTimelineScroll = () => {
-                if (!timelineScrollRef.current) return;
-                const el = timelineScrollRef.current;
-                const width = el.clientWidth;
-                if (width > 0) {
-                  const newIdx = Math.round(el.scrollLeft / width);
-                  if (newIdx >= 0 && newIdx < displayItems.length && newIdx !== activeCycleIndex) {
-                    setActiveCycleIndex(newIdx);
-                  }
-                }
-              };
-
-              const renderCycleCard = (item: TimelineCycleCardItem, isListView: boolean = false) => {
-                const isCurrent = Boolean(item.isCurrent);
-                const isCompleted = Boolean(item.isCompleted);
-                const primaryVital = item.primaryVital;
-                const hasVitalsData = Boolean(
-                  primaryVital &&
-                    (primaryVital.blood_pressure_systolic != null ||
-                      primaryVital.pulse_rate != null ||
-                      primaryVital.body_temperature != null ||
-                      primaryVital.weight != null ||
-                      primaryVital.spo2 != null ||
-                      primaryVital.body_surface_area != null)
-                );
-                const hasAdverseEvents = (item.adverseEvents?.length ?? 0) > 0;
-
-                return (
-                  <div
-                    className={`rounded-3xl border transition-colors p-6 sm:p-8 ${
-                      isCurrent
-                        ? "bg-blue-50/30 border-blue-200 shadow-[0_4px_24px_-4px_rgba(37,99,235,0.08)]"
-                        : isCompleted
-                        ? "bg-white border-slate-200/90 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.03)] hover:border-slate-300"
-                        : "bg-white/80 border-slate-200/80 hover:border-slate-300"
-                    }`}
-                  >
-                    {/* Header Badges & Date */}
-                    <div className="flex items-start justify-between gap-4 mb-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold tracking-wider uppercase bg-blue-50 text-blue-600 border border-blue-100">
-                          TREATMENT
-                        </span>
-                        {isCurrent ? (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold tracking-wider uppercase bg-blue-600 text-white shadow-sm">
-                            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                            CURRENT CYCLE
-                          </span>
-                        ) : isCompleted ? (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold tracking-wider uppercase bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            <i className="fa-solid fa-check text-[11px]" />
-                            COMPLETED CYCLE
-                          </span>
-                        ) : item.cycleStatus === "DELAYED" ? (
-                          <span className="inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold tracking-wider uppercase bg-amber-50 text-amber-700 border border-amber-200">
-                            DELAYED
-                          </span>
-                        ) : item.cycleStatus === "IN_PROGRESS" ? (
-                          <span className="inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold tracking-wider uppercase bg-blue-50 text-blue-700 border border-blue-200">
-                            IN PROGRESS
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold tracking-wider uppercase bg-slate-100 text-slate-600 border border-slate-200">
-                            {item.cycleStatus || "PLANNED"}
-                          </span>
-                        )}
-                        {item.completionStatus && (
-                          <span
-                            className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold tracking-wide uppercase ${
-                              item.completionStatus.toUpperCase().includes("REDUC")
-                                ? "bg-amber-100 text-amber-800 border border-amber-200"
-                                : item.completionStatus.toUpperCase().includes("DELAY")
-                                ? "bg-rose-100 text-rose-800 border border-rose-200"
-                                : "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                            }`}
-                          >
-                            {item.completionStatus.replace(/_/g, " ")}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <div className="text-base sm:text-lg font-bold text-slate-800 tracking-tight">
-                          {item.displayDate || "—"}
-                        </div>
-                        <div className="text-xs font-medium text-slate-400">
-                          {item.actualDate ? "Administered Date" : "Planned Date"}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Cycle Title and Dates Meta Row */}
-                    <div className="space-y-4">
-                      <h2
-                        className={`text-xl sm:text-2xl font-bold tracking-tight ${
-                          isCurrent ? "text-blue-700" : "text-slate-900"
+                  return (
+                    <div
+                      key={item.cycleNumber}
+                      className="relative flex items-start"
+                    >
+                      {/* Node circle on the vertical line with status colors */}
+                      <div
+                        className={`absolute left-[11px] top-3.5 w-5 h-5 rounded-full flex items-center justify-center ring-4 z-10 shadow-sm ${
+                          isCompleted
+                            ? "bg-emerald-600 ring-white"
+                            : isCurrent
+                            ? "bg-blue-600 ring-blue-100"
+                            : "bg-slate-300 ring-white"
                         }`}
                       >
-                        {item.cycleTitle}
-                      </h2>
-
-                      {/* Planned vs Administered Dates */}
-                      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs bg-slate-50/80 rounded-xl px-4 py-2.5 border border-slate-200/60">
-                        {item.plannedDate && (
-                          <div className="flex items-center gap-1.5 text-slate-600">
-                            <span className="font-semibold text-slate-500">Planned Date:</span>
-                            <span className="font-medium text-slate-800">{item.plannedDate}</span>
-                          </div>
-                        )}
-                        {item.actualDate && (
-                          <div className="flex items-center gap-1.5 text-emerald-700 font-semibold">
-                            <i className="fa-solid fa-circle-check text-emerald-600 text-[11px]" />
-                            <span>Administered Date:</span>
-                            <span className="font-bold text-slate-900">{item.actualDate}</span>
-                          </div>
-                        )}
-                        {item.nextCycleDate && (
-                          <div className="flex items-center gap-1.5 text-slate-600">
-                            <span className="font-semibold text-slate-500">Next Cycle:</span>
-                            <span className="font-medium text-slate-800">{item.nextCycleDate}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Regimen Medicines */}
-                      <div>
-                        <div className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                          Regimen Medicines:
-                        </div>
-                        {item.medicines.length === 0 ? (
-                          <div className="text-xs text-slate-400 italic">No medicines recorded for this regimen</div>
+                        {isCompleted ? (
+                          <i className="fa-solid fa-check text-white text-[10px]" />
+                        ) : isCurrent ? (
+                          <i className="fa-solid fa-play text-white text-[9px] ml-0.5" />
                         ) : (
-                          <div className="flex flex-wrap gap-2">
-                            {item.medicines.map((med, mIdx) => (
-                              <span
-                                key={`${med.id}-${mIdx}`}
-                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-slate-50 text-slate-800 border border-slate-200 shadow-sm"
-                              >
-                                <i className="fa-solid fa-pills text-blue-500 text-[11px]" />
-                                <span>{med.name}</span>
-                                {med.dose && <span className="text-blue-600 font-normal">({med.dose})</span>}
-                                {med.route && <span className="text-slate-400 text-[10px]">· {med.route}</span>}
-                              </span>
-                            ))}
-                          </div>
+                          <i className="fa-regular fa-calendar text-slate-600 text-[10px]" />
                         )}
                       </div>
 
-                      {/* Recorded Vitals for Cycle */}
-                      {hasVitalsData ? (
-                        <div className="pt-3 border-t border-slate-100">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold uppercase tracking-wider text-slate-600">
-                                Recorded Cycle Vitals
-                              </span>
-                              {primaryVital?.vital_stage && (
-                                <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">
-                                  {primaryVital.vital_stage.replace(/_/g, " ")}
-                                </span>
-                              )}
-                            </div>
-                            {item.vitals && item.vitals.length > 1 && (
-                              <span className="text-[11px] text-slate-400">
-                                Latest of {item.vitals.length} recorded entries
-                              </span>
-                            )}
-                          </div>
-                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
-                            {/* BP */}
-                            <div className="bg-slate-50/80 border border-slate-200/70 rounded-xl p-2.5 text-center">
-                              <div className="text-[10px] font-semibold uppercase text-slate-400">BP</div>
-                              <div className="text-sm font-bold text-slate-800 mt-0.5">
-                                {primaryVital?.blood_pressure_systolic && primaryVital?.blood_pressure_diastolic
-                                  ? `${primaryVital.blood_pressure_systolic}/${primaryVital.blood_pressure_diastolic}`
-                                  : primaryVital?.blood_pressure_systolic
-                                  ? `${primaryVital.blood_pressure_systolic}`
-                                  : "—"}
-                              </div>
-                              <div className="text-[9px] text-slate-400">mmHg</div>
-                            </div>
-                            {/* Pulse */}
-                            <div className="bg-slate-50/80 border border-slate-200/70 rounded-xl p-2.5 text-center">
-                              <div className="text-[10px] font-semibold uppercase text-slate-400">Pulse</div>
-                              <div className="text-sm font-bold text-slate-800 mt-0.5">
-                                {primaryVital?.pulse_rate ?? "—"}
-                              </div>
-                              <div className="text-[9px] text-slate-400">bpm</div>
-                            </div>
-                            {/* Temp */}
-                            <div className="bg-slate-50/80 border border-slate-200/70 rounded-xl p-2.5 text-center">
-                              <div className="text-[10px] font-semibold uppercase text-slate-400">Temp</div>
-                              <div className="text-sm font-bold text-slate-800 mt-0.5">
-                                {primaryVital?.body_temperature ?? "—"}
-                              </div>
-                              <div className="text-[9px] text-slate-400">°F</div>
-                            </div>
-                            {/* Weight */}
-                            <div className="bg-slate-50/80 border border-slate-200/70 rounded-xl p-2.5 text-center">
-                              <div className="text-[10px] font-semibold uppercase text-slate-400">Weight</div>
-                              <div className="text-sm font-bold text-slate-800 mt-0.5">
-                                {primaryVital?.weight ?? "—"}
-                              </div>
-                              <div className="text-[9px] text-slate-400">kg</div>
-                            </div>
-                            {/* SpO2 */}
-                            <div className="bg-slate-50/80 border border-slate-200/70 rounded-xl p-2.5 text-center">
-                              <div className="text-[10px] font-semibold uppercase text-slate-400">SpO2</div>
-                              <div className="text-sm font-bold text-slate-800 mt-0.5">
-                                {primaryVital?.spo2 != null ? `${primaryVital.spo2}%` : "—"}
-                              </div>
-                              <div className="text-[9px] text-slate-400">saturation</div>
-                            </div>
-                            {/* BSA */}
-                            <div className="bg-slate-50/80 border border-slate-200/70 rounded-xl p-2.5 text-center">
-                              <div className="text-[10px] font-semibold uppercase text-slate-400">BSA</div>
-                              <div className="text-sm font-bold text-slate-800 mt-0.5">
-                                {primaryVital?.body_surface_area ?? "—"}
-                              </div>
-                              <div className="text-[9px] text-slate-400">m²</div>
-                            </div>
-                          </div>
-                        </div>
-                      ) : isCompleted ? (
-                        <div className="pt-3 border-t border-slate-100 text-xs text-slate-400 italic">
-                          No vitals recorded for this cycle
-                        </div>
-                      ) : null}
-
-                      {/* Adverse Events & Toxicities */}
-                      {hasAdverseEvents ? (
-                        <div className="pt-3 border-t border-slate-100">
-                          <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-4">
-                            <div className="flex items-center gap-2 mb-2.5">
-                              <i className="fa-solid fa-triangle-exclamation text-amber-600 text-sm" />
-                              <span className="text-xs font-bold uppercase tracking-wider text-amber-900">
-                                Recorded Adverse Events & Toxicities ({item.adverseEvents.length})
-                              </span>
-                            </div>
-                            <div className="space-y-2.5">
-                              {item.adverseEvents.map((ae, aeIdx) => {
-                                const grade = ae.ctcae_grade || ae.reaction_grade || ae.severity;
-                                const action =
-                                  ae.doctor_action ||
-                                  ae.nursing_action ||
-                                  (ae.dose_reduced
-                                    ? "Dose reduced"
-                                    : ae.dose_delayed
-                                    ? "Dose delayed"
-                                    : ae.treatment_interrupted
-                                    ? "Treatment interrupted"
-                                    : null);
-                                return (
-                                  <div
-                                    key={ae.adverse_event_id ?? `${item.cycleNumber}-ae-${aeIdx}`}
-                                    className="bg-white/95 border border-amber-200/80 rounded-xl p-3 text-xs text-slate-700 shadow-sm"
-                                  >
-                                    <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
-                                      <span className="font-bold text-slate-900 text-sm">
-                                        {ae.adverse_event_name || "Unspecified Reaction"}
-                                      </span>
-                                      <div className="flex items-center gap-1.5">
-                                        {grade && (
-                                          <span className="px-2 py-0.5 rounded-md font-bold text-[11px] bg-red-100 text-red-700 border border-red-200">
-                                            Grade {grade}
-                                          </span>
-                                        )}
-                                        {ae.treatment_stopped && (
-                                          <span className="px-2 py-0.5 rounded-md font-bold text-[11px] bg-red-600 text-white">
-                                            Treatment Stopped
-                                          </span>
-                                        )}
-                                        {ae.hospitalization_required && (
-                                          <span className="px-2 py-0.5 rounded-md font-bold text-[11px] bg-rose-500 text-white">
-                                            Hospitalized
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                    {action && (
-                                      <div className="text-slate-600 mt-1">
-                                        <span className="font-semibold text-slate-700">Action: </span>
-                                        {action}
-                                      </div>
-                                    )}
-                                    {ae.event_date && (
-                                      <div className="text-[11px] text-slate-400 mt-1">
-                                        Recorded: {fmtHistoryDate(ae.event_date)}
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        </div>
-                      ) : isCompleted ? (
-                        <div className="pt-3 border-t border-slate-100">
-                          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-200/70">
-                            <i className="fa-solid fa-circle-check text-emerald-600 text-xs" />
-                            <span>No adverse events or toxicities reported for this cycle</span>
-                          </div>
-                        </div>
-                      ) : null}
-
-                      {/* Clinical Remarks */}
-                      {item.remarks && (
-                        <div className="pt-3 border-t border-slate-100">
-                          <div className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                            Doctor Remarks & Clinical Notes:
-                          </div>
-                          <div className="text-sm bg-slate-50 border border-slate-200/70 rounded-xl p-3.5 text-slate-700 leading-relaxed">
-                            {item.remarks}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Footer with Attending Oncologist & Quick Link */}
-                    <div className="mt-6 pt-5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-4">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold tracking-wider">
-                          {doctorInitials}
-                        </div>
-                        <div>
-                          <span className="text-sm font-semibold text-slate-800 block leading-tight">
-                            {doctorName}
-                          </span>
-                          <span className="text-[11px] text-slate-400">Attending Oncologist</span>
-                        </div>
-                      </div>
-                      <a
-                        className="inline-flex items-center text-xs font-bold text-blue-600 hover:text-blue-700 transition-colors gap-1.5 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg"
-                        href="#chemotherapy-cycle-history"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          const el = document.getElementById("chemotherapy-cycle-history");
-                          if (el) el.scrollIntoView({ behavior: "smooth" });
-                        }}
-                      >
-                        <span>View Cycle History</span>
-                        <i className="fa-solid fa-arrow-down text-[10px]" />
-                      </a>
-                    </div>
-                  </div>
-                );
-              };
-
-              return (
-                <div className="space-y-4">
-                  {/* Top Bar: View Mode Switcher + Quick Stats */}
-                  <div className="flex items-center justify-between gap-3 flex-wrap pb-2 border-b border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                        View Mode:
-                      </span>
-                      <div className="inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
-                        <button
-                          type="button"
-                          onClick={() => setTimelineViewMode("one-by-one")}
-                          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                            timelineViewMode === "one-by-one"
-                              ? "bg-white text-blue-700 shadow-sm"
-                              : "text-slate-600 hover:text-slate-900"
-                          }`}
-                        >
-                          <i className="fa-solid fa-square-caret-right text-[11px]" />
-                          <span>One by One</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setTimelineViewMode("list")}
-                          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                            timelineViewMode === "list"
-                              ? "bg-white text-blue-700 shadow-sm"
-                              : "text-slate-600 hover:text-slate-900"
-                          }`}
-                        >
-                          <i className="fa-solid fa-list-ul text-[11px]" />
-                          <span>View All ({displayItems.length})</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="text-xs font-semibold text-slate-500">
-                      Total Cycles: <span className="font-bold text-slate-800">{displayItems.length}</span>
-                    </div>
-                  </div>
-
-                  {timelineViewMode === "one-by-one" ? (
-                    <div>
-                      {/* One by One Controls & Stepper */}
-                      <div className="mb-4 bg-slate-50 border border-slate-200/80 rounded-2xl p-3 sm:p-4 shadow-sm">
-                        {/* Upper row: Prev / Next Buttons & Title */}
-                        <div className="flex items-center justify-between gap-2 mb-3">
-                          <button
-                            type="button"
-                            onClick={() => scrollToCycle(activeCycleIndex - 1)}
-                            disabled={activeCycleIndex <= 0}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                          >
-                            <i className="fa-solid fa-chevron-left text-[11px]" />
-                            <span>Previous Cycle</span>
-                          </button>
-
-                          <div className="text-center">
-                            <div className="text-xs font-bold text-slate-800 flex items-center justify-center gap-1.5 flex-wrap">
-                              <span>
-                                Cycle {displayItems[activeCycleIndex]?.cycleNumber ?? (activeCycleIndex + 1)} of {displayItems.length}
-                              </span>
-                              {displayItems[activeCycleIndex]?.isCurrent && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-200">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
-                                  Current
-                                </span>
-                              )}
-                              {displayItems[activeCycleIndex]?.isCompleted && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 border border-emerald-200">
-                                  <i className="fa-solid fa-check text-[9px]" />
-                                  Completed
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[11px] text-slate-400 mt-0.5">
-                              {displayItems[activeCycleIndex]?.displayDate || "—"}
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => scrollToCycle(activeCycleIndex + 1)}
-                            disabled={activeCycleIndex >= displayItems.length - 1}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                          >
-                            <span>Next Cycle</span>
-                            <i className="fa-solid fa-chevron-right text-[11px]" />
-                          </button>
-                        </div>
-
-                        {/* Lower row: Cycle tabs */}
-                        <div className="flex items-center justify-center gap-2 overflow-x-auto py-1">
-                          {displayItems.map((item, idx) => {
-                            const isSelected = idx === activeCycleIndex;
-                            return (
-                              <button
-                                key={`tab-${item.cycleNumber}-${idx}`}
-                                type="button"
-                                onClick={() => scrollToCycle(idx)}
-                                className={`group flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold transition-all ${
-                                  isSelected
-                                    ? "bg-blue-600 text-white shadow-md ring-2 ring-blue-300"
-                                    : item.isCurrent
-                                    ? "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
-                                    : item.isCompleted
-                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
-                                    : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
-                                }`}
-                              >
-                                <span
-                                  className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-extrabold ${
-                                    isSelected
-                                      ? "bg-white text-blue-600"
-                                      : item.isCurrent
-                                      ? "bg-blue-600 text-white"
-                                      : item.isCompleted
-                                      ? "bg-emerald-600 text-white"
-                                      : "bg-slate-200 text-slate-600"
-                                  }`}
-                                >
-                                  {item.isCompleted ? (
-                                    <i className="fa-solid fa-check text-[8px]" />
-                                  ) : item.isCurrent ? (
-                                    <i className="fa-solid fa-play text-[7px]" />
-                                  ) : (
-                                    item.cycleNumber
-                                  )}
-                                </span>
-                                <span className="whitespace-nowrap">{item.cycleTitle}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      {/* Horizontal One-by-One Container with visible blue scrollbar */}
+                      {/* Clean timeline card matching design with green/blue/grey colors */}
                       <div
-                        ref={timelineScrollRef}
-                        onScroll={handleTimelineScroll}
-                        className="flex overflow-x-auto snap-x snap-mandatory scroll-smooth pb-4 pt-1 gap-6 timeline-scroll-container"
-                        style={{
-                          scrollbarWidth: "auto",
-                          scrollbarColor: "#2563eb #e2e8f0",
-                        }}
+                        className={`ml-8 w-full rounded-xl p-4 transition hover:shadow-sm ${
+                          isCompleted
+                            ? "bg-white border border-emerald-200"
+                            : isCurrent
+                            ? "bg-blue-50/60 border border-blue-200"
+                            : "bg-slate-50/60 border border-dashed border-slate-200"
+                        }`}
                       >
-                        {displayItems.map((item, idx) => (
-                          <div
-                            key={`one-by-one-${item.cycleTitle}-${item.cycleNumber}-${idx}`}
-                            className="min-w-full w-full flex-shrink-0 snap-center"
-                          >
-                            {renderCycleCard(item, false)}
+                        <div className="flex justify-between items-center mb-1.5 flex-wrap gap-2">
+                          <div className="flex items-center gap-2">
+                            <h3
+                              className={`font-bold text-sm ${
+                                isCompleted
+                                  ? "text-emerald-900"
+                                  : isCurrent
+                                  ? "text-blue-700"
+                                  : "text-slate-600"
+                              }`}
+                            >
+                              {item.cycle}
+                            </h3>
+
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${
+                                isCompleted
+                                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                  : isCurrent
+                                  ? "bg-blue-100 text-blue-700 border-blue-200"
+                                  : "bg-slate-100 text-slate-500 border-slate-200"
+                              }`}
+                            >
+                              {isCompleted
+                                ? "Completed"
+                                : isCurrent
+                                ? "Current"
+                                : "Upcoming"}
+                            </span>
                           </div>
-                        ))}
-                      </div>
 
-                      {/* Scroll Bar Instruction & Indicator */}
-                      <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
-                        <div className="flex items-center gap-1.5 font-medium text-slate-500">
-                          <i className="fa-solid fa-arrows-left-right text-blue-500" />
-                          <span>Use the blue scroll bar above or Previous/Next buttons to view cycles one by one</span>
+                          <span
+                            className={`text-xs sm:text-sm font-medium ${
+                              isCurrent
+                                ? "text-blue-600 font-semibold"
+                                : isCompleted
+                                ? "text-gray-500"
+                                : "text-slate-400"
+                            }`}
+                          >
+                            {item.date || "—"}
+                          </span>
                         </div>
-                        <div className="font-bold text-slate-700">
-                          Viewing Cycle {activeCycleIndex + 1} of {displayItems.length}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    /* Vertical List View with scrollable container */
-                    <div
-                      className="relative pl-12 sm:pl-16 space-y-12 max-h-[620px] overflow-y-auto pr-3 timeline-scroll-container"
-                      style={{
-                        scrollbarWidth: "auto",
-                        scrollbarColor: "#2563eb #e2e8f0",
-                      }}
-                    >
-                      <div aria-hidden="true" className="absolute left-[15px] sm:left-[19px] top-4 bottom-4 w-[2px] bg-slate-200" />
 
-                      {displayItems.slice().reverse().map((item, idx) => (
-                        <section
-                          key={`list-${item.cycleTitle}-${item.cycleNumber}-${idx}`}
-                          className="relative"
-                          data-purpose="timeline-event"
+                        <p
+                          className={`text-xs sm:text-sm leading-relaxed ${
+                            isCompleted
+                              ? "text-gray-600"
+                              : isCurrent
+                              ? "text-gray-700 font-medium"
+                              : "text-slate-500"
+                          }`}
                         >
-                          {/* Timeline Node Icon */}
-                          <div
-                            className={`absolute -left-12 sm:-left-16 top-6 -translate-x-1/2 flex items-center justify-center w-8 h-8 rounded-full ${
-                              item.isCurrent
-                                ? "bg-blue-600 ring-4 ring-blue-100 shadow-md"
-                                : item.isCompleted
-                                ? "bg-emerald-500 ring-4 ring-emerald-100 shadow-sm"
-                                : item.cycleStatus === "DELAYED"
-                                ? "bg-amber-500 ring-4 ring-amber-100 shadow-sm"
-                                : "bg-slate-300 ring-4 ring-slate-100 shadow-sm"
-                            } text-white`}
-                          >
-                            {item.isCurrent ? (
-                              <i className="fa-solid fa-play text-xs" />
-                            ) : item.isCompleted ? (
-                              <i className="fa-solid fa-check text-xs font-bold" />
-                            ) : (
-                              <i className="fa-solid fa-calendar-days text-xs" />
-                            )}
-                          </div>
-
-                          {renderCycleCard(item, true)}
-                        </section>
-                      ))}
+                          {item.description}
+                        </p>
+                      </div>
                     </div>
-                  )}
-                </div>
-              );
-            })()}
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
 
