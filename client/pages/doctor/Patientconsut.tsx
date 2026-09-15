@@ -868,6 +868,20 @@ const Consultation: React.FC = () => {
     Record<string, string>
   >({});
 
+  const [generalExamIcterus, setGeneralExamIcterus] = useState(false);
+  const [generalExamPallor, setGeneralExamPallor] = useState(false);
+  const [generalExamClubbing, setGeneralExamClubbing] = useState(false);
+  const [generalExamCyanosis, setGeneralExamCyanosis] = useState(false);
+  const [generalExamOedema, setGeneralExamOedema] = useState(false);
+  const [generalExamLymphadenopathy, setGeneralExamLymphadenopathy] =
+    useState(false);
+
+  const [systemicCns, setSystemicCns] = useState("");
+  const [systemicCvs, setSystemicCvs] = useState("");
+  const [systemicRespiratory, setSystemicRespiratory] = useState("");
+  const [systemicPerAbdomen, setSystemicPerAbdomen] = useState("");
+  const [allVitalsNormal, setAllVitalsNormal] = useState(false);
+
   const [labTests, setLabTests] = useState<LabTestMasterRecord[]>([]);
   const [labTestsLoading, setLabTestsLoading] = useState(true);
   const [labTestsError, setLabTestsError] = useState("");
@@ -2617,6 +2631,110 @@ const Consultation: React.FC = () => {
 
                     </div>
 
+                  </div>
+
+                </section>
+
+                {/* =================================================
+                    GENERAL EXAMINATION
+                ================================================= */}
+
+                <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
+
+                  <div className="text-lg font-bold leading-7 text-slate-800">
+                    General Examination
+                  </div>
+
+                  <div className="grid w-full grid-cols-3 gap-x-6 gap-y-4 pt-2">
+
+                    {[
+                      { label: "Icterus", checked: generalExamIcterus, onChange: setGeneralExamIcterus },
+                      { label: "Pallor", checked: generalExamPallor, onChange: setGeneralExamPallor },
+                      { label: "Clubbing", checked: generalExamClubbing, onChange: setGeneralExamClubbing },
+                      { label: "Cyanosis", checked: generalExamCyanosis, onChange: setGeneralExamCyanosis },
+                      { label: "Oedema", checked: generalExamOedema, onChange: setGeneralExamOedema },
+                      { label: "Lymphadenopathy", checked: generalExamLymphadenopathy, onChange: setGeneralExamLymphadenopathy },
+                    ].map((item) => (
+                      <label
+                        key={item.label}
+                        className="flex items-center gap-3 cursor-pointer select-none"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={item.checked}
+                          onChange={(e) => item.onChange(e.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm font-medium text-slate-700">
+                          {item.label}
+                        </span>
+                      </label>
+                    ))}
+
+                  </div>
+
+                </section>
+
+                {/* =================================================
+                    SYSTEMIC EXAMINATION
+                ================================================= */}
+
+                <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
+
+                  <div className="text-lg font-bold leading-7 text-slate-800">
+                    Systemic Examination
+                  </div>
+
+                  <div className="grid w-full grid-cols-2 gap-x-6 gap-y-4 pt-2">
+
+                    {[
+                      { label: "CNS", value: systemicCns, onChange: setSystemicCns },
+                      { label: "CVS", value: systemicCvs, onChange: setSystemicCvs },
+                      { label: "Respiratory", value: systemicRespiratory, onChange: setSystemicRespiratory },
+                      { label: "Per Abdomen", value: systemicPerAbdomen, onChange: setSystemicPerAbdomen },
+                    ].map((item) => (
+                      <div key={item.label} className="flex flex-col gap-2">
+                        <label className="text-xs font-bold leading-4 text-slate-500">
+                          {item.label}
+                        </label>
+                        <textarea
+                          value={item.value}
+                          onChange={(event) => item.onChange(event.target.value)}
+                          placeholder={`Type ${item.label.toLowerCase()} findings...`}
+                          className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
+                        />
+                      </div>
+                    ))}
+
+                  </div>
+
+                  <div className="flex items-center gap-4 pt-2">
+                    <label className="flex items-center gap-3 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={allVitalsNormal}
+                        onChange={(e) => setAllVitalsNormal(e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm font-medium text-slate-700">
+                        All Vitals Looks Normal?
+                      </span>
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const normalText = "Normal";
+                        setSystemicCns(normalText);
+                        setSystemicCvs(normalText);
+                        setSystemicRespiratory(normalText);
+                        setSystemicPerAbdomen(normalText);
+                        setAllVitalsNormal(true);
+                      }}
+                      className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
+                    >
+                      Apply Normal To All
+                    </button>
                   </div>
 
                 </section>
