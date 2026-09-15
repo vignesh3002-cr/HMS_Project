@@ -34,7 +34,10 @@ import {
   type LabOrderItemRecord,
 } from "../../api/labOrder.api";
 import { Calendar } from "../../components/ui/calendar";
-import { ClinicalDetailsSection } from "../../components/hms/ClinicalDetailsSection";
+import {
+  ClinicalDetailsSection,
+  type ClinicalDetailsSectionHandle,
+} from "../../components/hms/ClinicalDetailsSection";
 import PatientVitalsPanel from "../../components/hms/PatientVitalsPanel";
 import {
   Popover,
@@ -201,6 +204,30 @@ interface ConsultationState {
   consultedBy?: string;
   visit_type?: string;
 }
+
+/* Quick-select chips for the Reason of Visit free-text box. Clicking a
+   chip appends the value to the typed reason (comma-separated). */
+const REASON_OF_VISIT_SUGGESTIONS = [
+  "Fever",
+  "Pain",
+  "Cough",
+  "Headache",
+  "Fatigue",
+  "Weight loss",
+  "Breathing difficulty",
+  "Nausea / Vomiting",
+  "Body ache",
+  "Weakness",
+  "Bleeding",
+  "Lump / Swelling",
+  "Follow-up review",
+  "Chemotherapy",
+];
+
+/* Past History shares the encounter's clinical_notes column with
+   Consultation Notes. This marker separates the two sections so they
+   can be split back apart when the encounter is loaded again. */
+const PAST_HISTORY_MARKER = "[Past History]";
 
 const StepCheckLogo = ({ active = false }: { active?: boolean }) => (
   <svg
@@ -786,6 +813,24 @@ const Consultation: React.FC = () => {
 
   const [consultationNotes, setConsultationNotes] = useState("");
 
+  const [historyOfPresentIllness, setHistoryOfPresentIllness] = useState("");
+
+  const [patientHistory, setPatientHistory] = useState("");
+  const [pastHistory, setPastHistory] = useState("");
+
+  const [chiefComplaint, setChiefComplaint] = useState("");
+  const [reasonOfVisit, setReasonOfVisit] = useState("");
+
+  const [otherReasonExpanded, setOtherReasonExpanded] = useState(false);
+  const [otherReasonName, setOtherReasonName] = useState("");
+
+  const [otherInvestigationExpanded, setOtherInvestigationExpanded] =
+    useState(false);
+  const [otherInvestigationName, setOtherInvestigationName] = useState("");
+  const [customInvestigations, setCustomInvestigations] = useState<string[]>(
+    []
+  );
+
   const [medications, setMedications] = useState<Medication[]>([]);
 
   const [selectedInvestigations, setSelectedInvestigations] = useState<
@@ -805,6 +850,13 @@ const Consultation: React.FC = () => {
   const [proceeding, setProceeding] = useState(false);
   const [tabsHovered, setTabsHovered] = useState(false);
   const tabsScrollRef = useRef<HTMLDivElement>(null);
+  const clinicalDetailsRef = useRef<ClinicalDetailsSectionHandle>(null);
+  const [clinicalSaveState, setClinicalSaveState] = useState<{
+    saving: boolean;
+    disabled: boolean;
+    saveError: string | null;
+    saveSuccess: boolean;
+  }>({ saving: false, disabled: true, saveError: null, saveSuccess: false });
 
   const slideTabs = (direction: 1 | -1) => {
     const el = tabsScrollRef.current;
@@ -1007,6 +1059,53 @@ const Consultation: React.FC = () => {
   }, [consultationState?.patientId, consultationState?.appointmentId]);
 
   /* ============================================================
+     SYNC HISTORY OF PRESENT ILLNESS FROM ACTIVE ENCOUNTER
+     Seed the free-text HOPI box with the encounter's saved
+     symptoms when the encounter loads. Only applied on load so
+     it never stomps in-progress typing after an update.
+   ============================================================ */
+
+  useEffect(() => {
+    setHistoryOfPresentIllness(encounter?.symptoms ?? "");
+    setChiefComplaint(encounter?.chief_complaint ?? "");
+    setPatientHistory(encounter?.chief_complaint ?? "");
+
+    /* Consultation Notes and Past History share the encounter's
+       clinical_notes column, separated by a [Past History] marker
+       (see proceedNext). A saved draft takes precedence over the
+       encounter so in-session work is never clobbered. */
+    let draftNotes = "";
+    let draftPast = "";
+    try {
+      const draft = JSON.parse(
+        localStorage.getItem("hms_consultation_draft") ?? "{}"
+      );
+      draftNotes = draft.consultationNotes ?? "";
+      draftPast = draft.pastHistory ?? "";
+    } catch {
+      /* Malformed draft - fall back to the encounter. */
+    }
+
+    if (draftNotes) {
+      setConsultationNotes(draftNotes);
+      setPastHistory(draftPast);
+      return;
+    }
+
+    const rawNotes = encounter?.clinical_notes ?? "";
+    const markerIndex = rawNotes.indexOf(PAST_HISTORY_MARKER);
+    if (markerIndex === -1) {
+      setConsultationNotes(rawNotes);
+      setPastHistory("");
+    } else {
+      setConsultationNotes(rawNotes.slice(0, markerIndex).trim());
+      setPastHistory(
+        rawNotes.slice(markerIndex + PAST_HISTORY_MARKER.length).trim()
+      );
+    }
+  }, [encounter?.encounter_no]);
+
+  /* ============================================================
      LOAD INVESTIGATION OPTIONS (lab_test_master table)
      Populates the Investigations / Scans checkboxes from the
      backend GET /lab-test-master API.
@@ -1082,7 +1181,6 @@ const Consultation: React.FC = () => {
   const [fallbackVisitType, setFallbackVisitType] = useState("");
 
   useEffect(() => {
-    if (consultationState?.visit_type) return;
     const appointmentId = encounter?.appointment_id;
     if (!appointmentId) return;
     let cancelled = false;
@@ -1090,8 +1188,12 @@ const Consultation: React.FC = () => {
       .getOne(appointmentId)
       .then((response) => {
         if (cancelled) return;
-        const value = response.data?.data?.Patient_visit_type ?? "";
-        setFallbackVisitType(value);
+        if (!consultationState?.visit_type) {
+          setFallbackVisitType(
+            response.data?.data?.Patient_visit_type ?? ""
+          );
+        }
+        setReasonOfVisit(response.data?.data?.reason_for_visit ?? "");
       })
       .catch((error) => {
         console.error("Failed to load appointment visit type:", error);
@@ -1201,6 +1303,34 @@ const Consultation: React.FC = () => {
   };
 
   /* ============================================================
+     REASON OF VISIT QUICK SUGGESTIONS
+     Appends a suggestion chip value to the typed Reason of Visit
+     free text, comma-separated, without duplicating an existing
+     value.
+  ============================================================ */
+
+  const addReasonOfVisitSuggestion = (suggestion: string) => {
+    setReasonOfVisit((prev) => {
+      const existing = prev
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (existing.includes(suggestion)) return prev;
+      return existing.length
+        ? `${prev.trim().replace(/,\s*$/, "")}, ${suggestion}`
+        : suggestion;
+    });
+  };
+
+  const addOtherReasonOfVisit = () => {
+    const value = otherReasonName.trim();
+    if (!value) return;
+    addReasonOfVisitSuggestion(value);
+    setOtherReasonName("");
+    setOtherReasonExpanded(false);
+  };
+
+  /* ============================================================
      INVESTIGATION
   ============================================================ */
 
@@ -1210,6 +1340,35 @@ const Consultation: React.FC = () => {
         ? prev.filter((item) => item !== name)
         : [...prev, name]
     );
+  };
+
+  /* Adds a user-typed custom investigation (Others...) as a checkbox
+     option in the grid. If the typed name matches a real lab test it
+     just checks that test; otherwise it registers a custom option. */
+
+  const addOtherInvestigation = () => {
+    const value = otherInvestigationName.trim();
+    if (!value) return;
+    if (investigations.includes(value)) {
+      toggleInvestigation(value);
+    } else if (!customInvestigations.includes(value)) {
+      setCustomInvestigations((prev) => [...prev, value]);
+      setSelectedInvestigations((prev) =>
+        prev.includes(value) ? prev : [...prev, value]
+      );
+    }
+    setOtherInvestigationName("");
+    setOtherInvestigationExpanded(false);
+  };
+
+  /* Unchecking a custom investigation removes both its checkbox option
+     and its selection. */
+
+  const toggleCustomInvestigation = (name: string) => {
+    setSelectedInvestigations((prev) =>
+      prev.filter((item) => item !== name)
+    );
+    setCustomInvestigations((prev) => prev.filter((item) => item !== name));
   };
 
   /* ============================================================
@@ -1229,6 +1388,7 @@ const Consultation: React.FC = () => {
       patient: patientName,
       patientId: patientDisplayId,
       consultationNotes,
+      pastHistory,
       medications,
       investigations: selectedInvestigations,
     };
@@ -1273,12 +1433,50 @@ const Consultation: React.FC = () => {
     try {
       setProceeding(true);
 
-      const payload: { clinical_notes?: string } = {};
-      if (consultationNotes.trim()) {
-        payload.clinical_notes = consultationNotes;
+      const payload: {
+        clinical_notes?: string;
+        symptoms?: string;
+        chief_complaint?: string;
+      } = {};
+
+      /* Consultation Notes + Past History are combined into the single
+         clinical_notes column, separated by the [Past History] marker so
+         they can be split back on load. */
+      const combinedNotes = [
+        consultationNotes.trim(),
+        ...(pastHistory.trim()
+          ? [`${PAST_HISTORY_MARKER}\n${pastHistory.trim()}`]
+          : []),
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      if (combinedNotes) {
+        payload.clinical_notes = combinedNotes;
+      }
+      if (historyOfPresentIllness.trim()) {
+        payload.symptoms = historyOfPresentIllness;
+      }
+      if (chiefComplaint.trim() || patientHistory.trim()) {
+        payload.chief_complaint = chiefComplaint.trim() || patientHistory.trim();
       }
 
       await encounterApi.update(encounter.encounter_no, payload);
+
+      /* Reason of Visit lives on the linked appointment, not the
+         encounter, so it must be persisted there separately. */
+      if (encounter.appointment_id && reasonOfVisit.trim()) {
+        try {
+          await appointmentApi.update(encounter.appointment_id, {
+            reason_for_visit: reasonOfVisit,
+          });
+        } catch (appointmentError: any) {
+          console.error(
+            "Failed to save reason for visit:",
+            appointmentError?.response?.data?.message ??
+              appointmentError?.message
+          );
+        }
+      }
 
       showToast("Consultation saved");
 
@@ -2070,20 +2268,118 @@ const Consultation: React.FC = () => {
                         className="h-40 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-300"
                       />
 
-                      {/* CHIEF COMPLAINT */}
+                      {/* CHIEF COMPLAINT (free text) + REASON OF VISIT +
+                          QUICK SUGGESTIONS. Styled like the Symptoms /
+                          Allergies sections in ClinicalDetailsSection
+                          (uppercase tracked label + white bordered
+                          container). */}
 
                       <div className="flex flex-col gap-2">
 
-                        <label className="text-xs font-bold leading-4 text-slate-500">
-                          Chief Complaint
-                        </label>
+                        <div className="flex flex-col gap-1">
 
-                        <textarea
-                          readOnly
-                          value={encounter?.chief_complaint ?? ""}
-                          placeholder="Not recorded"
-                          className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
-                        />
+                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                            Chief Complaint
+                          </div>
+
+                          <textarea
+                            value={chiefComplaint}
+                            onChange={(event) =>
+                              setChiefComplaint(event.target.value)
+                            }
+                            placeholder="Type the chief complaint..."
+                            className="min-h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-1.5 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                          />
+
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+
+                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                            Reason of Visit
+                          </div>
+
+                          <textarea
+                            value={reasonOfVisit}
+                            onChange={(event) =>
+                              setReasonOfVisit(event.target.value)
+                            }
+                            placeholder="Type the reason of visit..."
+                            className="min-h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-1.5 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                          />
+
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+
+                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                            Quick Suggestions
+                          </div>
+
+<div className="flex min-h-[38px] w-full flex-wrap items-start gap-1.5 rounded-md border border-slate-200 bg-white p-1.5">
+                            {REASON_OF_VISIT_SUGGESTIONS.map((suggestion) => (
+                              <button
+                                type="button"
+                                key={suggestion}
+                                onClick={() =>
+                                  addReasonOfVisitSuggestion(suggestion)
+                                }
+                                className="flex h-[26px] items-center rounded border border-blue-100 bg-blue-50 px-[9px] py-[3px] text-xs leading-4 text-blue-700 transition hover:bg-blue-100"
+                              >
+                                {suggestion}
+                              </button>
+                            ))}
+
+                            {!otherReasonExpanded && (
+                              <button
+                                type="button"
+                                onClick={() => setOtherReasonExpanded(true)}
+                                className="flex h-[26px] items-center rounded border border-slate-200 bg-slate-50 px-[9px] py-[3px] text-xs leading-4 text-slate-500 transition hover:bg-slate-100"
+                              >
+                                Others...
+                              </button>
+                            )}
+                          </div>
+
+                          {otherReasonExpanded && (
+                            <div className="flex w-full items-center gap-2">
+                              <input
+                                type="text"
+                                value={otherReasonName}
+                                onChange={(event) =>
+                                  setOtherReasonName(event.target.value)
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    addOtherReasonOfVisit();
+                                  }
+                                }}
+                                placeholder="Enter other reason"
+                                className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-600 outline-none focus:border-slate-400"
+                              />
+                              <button
+                                type="button"
+                                onClick={addOtherReasonOfVisit}
+                                disabled={!otherReasonName.trim()}
+                                className="h-7 shrink-0 rounded-md border border-blue-600 bg-white px-3 text-xs font-semibold leading-4 text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Add
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOtherReasonName("");
+                                  setOtherReasonExpanded(false);
+                                }}
+                                className="h-7 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-500 transition hover:bg-slate-50"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
+
+                        </div>
 
                       </div>
 
@@ -2107,8 +2403,10 @@ const Consultation: React.FC = () => {
 
                       {encounter ? (
                         <ClinicalDetailsSection
+                          ref={clinicalDetailsRef}
                           patientId={consultationState?.patientId}
                           encounterNo={encounter.encounter_no}
+                          onSaveStateChange={setClinicalSaveState}
                         />
                       ) : (
                         !encounterError && (
@@ -2125,16 +2423,16 @@ const Consultation: React.FC = () => {
                 </section>
 
                 {/* =================================================
-                    PATIENT HISTORY
+                    PERSONAL HISTORY
                 ================================================= */}
 
                 <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
 
                   <div className="text-lg font-bold leading-7 text-slate-800">
-                    Patient History
+                    Personal History
                   </div>
 
-                  {/* PATIENT HISTORY GRID */}
+                  {/* PERSONAL HISTORY GRID */}
 
                   <div className="grid w-full grid-cols-2 gap-x-6 gap-y-4 pt-2">
 
@@ -2146,11 +2444,46 @@ const Consultation: React.FC = () => {
                         Immunization
                       </label>
 
-                      <textarea
-                        readOnly
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
-                      />
+                      <div className="relative h-[38px]">
+
+                        <select
+                          className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none"
+                          defaultValue=""
+                        >
+
+                          <option value="" disabled>
+                            Select
+                          </option>
+
+                          <option value="None">None</option>
+                          <option value="BCG">BCG</option>
+                          <option value="Hepatitis A">Hepatitis A</option>
+                          <option value="Hepatitis B">Hepatitis B</option>
+                          <option value="Polio (OPV / IPV)">Polio (OPV / IPV)</option>
+                          <option value="DPT / DTaP">DPT / DTaP</option>
+                          <option value="MMR">MMR</option>
+                          <option value="Typhoid">Typhoid</option>
+                          <option value="Tetanus (TT)">Tetanus (TT)</option>
+                          <option value="Pneumococcal">Pneumococcal</option>
+                          <option value="Rotavirus">Rotavirus</option>
+                          <option value="Varicella (Chickenpox)">Varicella (Chickenpox)</option>
+                          <option value="HPV">HPV</option>
+                          <option value="Influenza (Flu)">Influenza (Flu)</option>
+                          <option value="COVID-19">COVID-19</option>
+
+                        </select>
+
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="#94a3b8"
+                          strokeWidth="1.8"
+                          className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+
+                      </div>
 
                     </div>
 
@@ -2247,10 +2580,12 @@ const Consultation: React.FC = () => {
                       </label>
 
                       <textarea
-                        readOnly
-                        value={encounter?.chief_complaint ?? ""}
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                        value={patientHistory}
+                        onChange={(event) =>
+                          setPatientHistory(event.target.value)
+                        }
+                        placeholder="Type the patient's history..."
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
                       />
 
                     </div>
@@ -2273,18 +2608,21 @@ const Consultation: React.FC = () => {
 
                   <div className="grid w-full grid-cols-2 gap-x-6 gap-y-4 pt-2">
 
-                    {/* PERSONAL HISTORY (HABITS) */}
+                    {/* HISTORY OF PRESENT ILLNESS (HOPI) */}
 
                     <div className="flex flex-col gap-2">
 
                       <label className="text-xs font-bold leading-4 text-slate-500">
-                        Personal History (Habits)
+                        History of Present Illness(HOPI)
                       </label>
 
                       <textarea
-                        readOnly
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                        value={historyOfPresentIllness}
+                        onChange={(event) =>
+                          setHistoryOfPresentIllness(event.target.value)
+                        }
+                        placeholder="Type the history of present illness..."
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
                       />
 
                     </div>
@@ -2298,9 +2636,12 @@ const Consultation: React.FC = () => {
                       </label>
 
                       <textarea
-                        readOnly
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                        value={pastHistory}
+                        onChange={(event) =>
+                          setPastHistory(event.target.value)
+                        }
+                        placeholder="Type the patient's past history..."
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
                       />
 
                     </div>
@@ -2318,6 +2659,58 @@ const Consultation: React.FC = () => {
                         placeholder="Not recorded"
                         className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
                       />
+
+                    </div>
+
+                    {/* SAVE CLINICAL DETAILS (next to Reports) */}
+
+                    <div className="flex flex-col justify-end gap-2">
+
+                      <button
+                        type="button"
+                        onClick={() => clinicalDetailsRef.current?.handleSave()}
+                        disabled={clinicalSaveState.disabled}
+                        className="flex h-9 w-fit items-center justify-center gap-2 rounded-lg border-0 bg-blue-700 px-[25px] py-[9px] text-sm font-bold leading-5 text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                      >
+                        {clinicalSaveState.saving && (
+                          <svg
+                            className="h-4 w-4 animate-spin text-white"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                          >
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            />
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            />
+                          </svg>
+                        )}
+                        {clinicalSaveState.saving
+                          ? "Saving..."
+                          : "Save Clinical Details"}
+                      </button>
+
+                      {clinicalSaveState.saveError && (
+                        <div className="text-xs font-medium leading-4 text-red-600">
+                          {clinicalSaveState.saveError}
+                        </div>
+                      )}
+
+                      {clinicalSaveState.saveSuccess &&
+                        !clinicalSaveState.saveError && (
+                          <div className="text-xs font-medium leading-4 text-green-600">
+                            Clinical details saved successfully.
+                          </div>
+                        )}
 
                     </div>
 
@@ -2349,16 +2742,21 @@ const Consultation: React.FC = () => {
                     </div>
                   )}
 
-                  {!labTestsLoading && !labTestsError && investigations.length === 0 && (
+                  {!labTestsLoading && !labTestsError &&
+                    investigations.length === 0 &&
+                    customInvestigations.length === 0 && (
                     <div className="flex items-center gap-2 text-sm leading-5 text-slate-500">
                       No lab tests available.
                     </div>
                   )}
 
-                  {!labTestsLoading && !labTestsError && investigations.length > 0 && (
+                  {!labTestsLoading && !labTestsError &&
+                    (investigations.length > 0 ||
+                      customInvestigations.length > 0) && (
                   <div className="grid w-full grid-cols-3 gap-y-3">
 
-                    {investigations.map((investigation) => (
+                    {[...investigations, ...customInvestigations].map(
+                      (investigation) => (
 
                       <label
                         key={investigation}
@@ -2371,7 +2769,9 @@ const Consultation: React.FC = () => {
                             investigation
                           )}
                           onChange={() =>
-                            toggleInvestigation(investigation)
+                            customInvestigations.includes(investigation)
+                              ? toggleCustomInvestigation(investigation)
+                              : toggleInvestigation(investigation)
                           }
                           className="h-4 w-4 shrink-0 cursor-pointer appearance-none rounded border border-slate-300 bg-white checked:border-blue-600 checked:bg-blue-600"
                         />
@@ -2382,9 +2782,65 @@ const Consultation: React.FC = () => {
 
                       </label>
 
-                    ))}
+                    )
+                    )}
 
                   </div>
+                  )}
+
+                  {!labTestsLoading && !labTestsError && (
+                    <div className="flex w-full flex-col gap-1.5">
+                      <div className="flex w-full flex-wrap items-start gap-1.5">
+                        {!otherInvestigationExpanded && (
+                          <button
+                            type="button"
+                            onClick={() => setOtherInvestigationExpanded(true)}
+                            className="flex h-[26px] items-center rounded border border-slate-200 bg-slate-50 px-[9px] py-[3px] text-xs leading-4 text-slate-500 transition hover:bg-slate-100"
+                          >
+                            Others...
+                          </button>
+                        )}
+                      </div>
+
+                      {otherInvestigationExpanded && (
+                        <div className="flex w-full items-center gap-2">
+                          <input
+                            type="text"
+                            value={otherInvestigationName}
+                            onChange={(event) =>
+                              setOtherInvestigationName(event.target.value)
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                addOtherInvestigation();
+                              }
+                            }}
+                            placeholder="Enter other investigation"
+                            className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-600 outline-none focus:border-slate-400"
+                          />
+                          <button
+                            type="button"
+                            onClick={addOtherInvestigation}
+                            disabled={!otherInvestigationName.trim()}
+                            className="h-7 shrink-0 rounded-md border border-blue-600 bg-white px-3 text-xs font-semibold leading-4 text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Add
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOtherInvestigationName("");
+                              setOtherInvestigationExpanded(false);
+                            }}
+                            className="h-7 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-500 transition hover:bg-slate-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+
+                    </div>
                   )}
 
                   {selectedInvestigations.length > 0 && (
@@ -3252,6 +3708,11 @@ const LabReview: React.FC<{
 ============================================================ */
 
 type FormData = {
+  preDiagnosis: string;
+  natureOfDiagnosis: string;
+  laterality: string;
+  bodySite: string;
+  survivor: string;
   type: string;
   subType: string;
   histomorphology: string;
@@ -3346,6 +3807,11 @@ const Diagnosis: React.FC<{
   const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const [formData, setFormData] = useState<FormData>({
+    preDiagnosis: "",
+    natureOfDiagnosis: "",
+    laterality: "",
+    bodySite: "",
+    survivor: "",
     type: "",
     subType: "",
     histomorphology: "",
@@ -3842,6 +4308,56 @@ const Diagnosis: React.FC<{
       >
         {/* Two Column Fields */}
         <div className="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-2">
+          {/* Pre Diagnosis */}
+          <div>
+            <label
+              htmlFor="preDiagnosis"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Pre Diagnosis
+            </label>
+
+            <div className="relative">
+              <input
+                id="preDiagnosis"
+                name="preDiagnosis"
+                type="text"
+                value={formData.preDiagnosis}
+                onChange={handleChange}
+                placeholder="Type the pre diagnosis..."
+                className="block w-full rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              />
+            </div>
+          </div>
+
+          {/* Nature of Diagnosis */}
+          <div>
+            <label
+              htmlFor="natureOfDiagnosis"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Nature of Diagnosis
+            </label>
+
+            <div className="relative">
+              <select
+                id="natureOfDiagnosis"
+                name="natureOfDiagnosis"
+                value={formData.natureOfDiagnosis}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Nature of Diagnosis
+                </option>
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
           {/* Cancer Type */}
           <div>
             <label
@@ -3870,6 +4386,97 @@ const Diagnosis: React.FC<{
                       {cancerType.cancer_type}
                     </option>
                   ))}
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Laterality */}
+          <div>
+            <label
+              htmlFor="laterality"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Laterality
+            </label>
+
+            <div className="relative">
+              <select
+                id="laterality"
+                name="laterality"
+                value={formData.laterality}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Laterality
+                </option>
+                <option value="Left">Left</option>
+                <option value="Right">Right</option>
+                <option value="Bilateral">Bilateral</option>
+                <option value="Midline">Midline</option>
+                <option value="Not Applicable">Not Applicable</option>
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Body Site */}
+          <div>
+            <label
+              htmlFor="bodySite"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Body Site
+            </label>
+
+            <div className="relative">
+              <select
+                id="bodySite"
+                name="bodySite"
+                value={formData.bodySite}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Body Site
+                </option>
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Survivor */}
+          <div>
+            <label
+              htmlFor="survivor"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Survivor
+            </label>
+
+            <div className="relative">
+              <select
+                id="survivor"
+                name="survivor"
+                value={formData.survivor}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Survivor
+                </option>
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
               </select>
 
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
