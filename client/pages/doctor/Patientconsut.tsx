@@ -229,6 +229,19 @@ const REASON_OF_VISIT_SUGGESTIONS = [
    can be split back apart when the encounter is loaded again. */
 const PAST_HISTORY_MARKER = "[Past History]";
 
+/* Treatment types selectable under the Past History section. Picking a
+   type reveals the date / brief note / treatment response fields. */
+const TREATMENT_TYPES = [
+  "Chemotherapy",
+  "Radiotherapy",
+  "Surgery",
+  "Immunotherapy",
+  "Targeted Therapy",
+  "Hormone Therapy",
+  "Bone Marrow Transplant",
+  "Other",
+];
+
 const StepCheckLogo = ({ active = false }: { active?: boolean }) => (
   <svg
     className="h-6 w-6"
@@ -817,6 +830,20 @@ const Consultation: React.FC = () => {
 
   const [patientHistory, setPatientHistory] = useState("");
   const [pastHistory, setPastHistory] = useState("");
+
+  const [pastHistoryExpanded, setPastHistoryExpanded] = useState(false);
+  const [pastHistoryTreatmentType, setPastHistoryTreatmentType] = useState("");
+  const [pastHistoryTreatmentDate, setPastHistoryTreatmentDate] = useState("");
+  const [pastHistoryTreatmentNote, setPastHistoryTreatmentNote] = useState("");
+  const [pastHistoryTreatmentResponse, setPastHistoryTreatmentResponse] =
+    useState("");
+
+  const [reportsExpanded, setReportsExpanded] = useState(false);
+  const [reportsTest, setReportsTest] = useState("");
+  const [reportsTestDate, setReportsTestDate] = useState("");
+  const [reportsTestResult, setReportsTestResult] = useState("");
+  const [reportsTestImpression, setReportsTestImpression] = useState("");
+  const [reportsText, setReportsText] = useState("");
 
   const [chiefComplaint, setChiefComplaint] = useState("");
   const [reasonOfVisit, setReasonOfVisit] = useState("");
@@ -2631,9 +2658,123 @@ const Consultation: React.FC = () => {
 
                     <div className="flex flex-col gap-2">
 
-                      <label className="text-xs font-bold leading-4 text-slate-500">
+                      <button
+                        type="button"
+                        onClick={() => setPastHistoryExpanded((prev) => !prev)}
+                        className="flex w-fit items-center gap-1.5 text-xs font-bold leading-4 text-slate-500 transition hover:text-slate-700"
+                      >
+                        <svg
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          className={`h-3.5 w-3.5 transition-transform ${
+                            pastHistoryExpanded ? "rotate-90" : ""
+                          }`}
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
                         Past History
-                      </label>
+                      </button>
+
+                      {pastHistoryExpanded && (
+                        <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+
+                          {/* TREATMENT TYPE */}
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                              Treatment Type
+                            </label>
+
+                            <div className="relative">
+                              <select
+                                value={pastHistoryTreatmentType}
+                                onChange={(event) =>
+                                  setPastHistoryTreatmentType(
+                                    event.target.value
+                                  )
+                                }
+                                className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                              >
+                                <option value="" disabled>
+                                  Select Treatment
+                                </option>
+                                {TREATMENT_TYPES.map((treatment) => (
+                                  <option key={treatment} value={treatment}>
+                                    {treatment}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="#94a3b8"
+                                strokeWidth="1.8"
+                                className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
+                              >
+                                <path d="m6 9 6 6 6-6" />
+                              </svg>
+                            </div>
+                          </div>
+
+                          {/* DATE / BRIEF NOTE / TREATMENT RESPONSE */}
+                          {pastHistoryTreatmentType && (
+                            <>
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Date
+                                </label>
+                                <input
+                                  type="date"
+                                  value={pastHistoryTreatmentDate}
+                                  onChange={(event) =>
+                                    setPastHistoryTreatmentDate(
+                                      event.target.value
+                                    )
+                                  }
+                                  className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Enter Brief Note
+                                </label>
+                                <textarea
+                                  value={pastHistoryTreatmentNote}
+                                  onChange={(event) =>
+                                    setPastHistoryTreatmentNote(
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="Type a brief note..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Treatment Response
+                                </label>
+                                <textarea
+                                  value={pastHistoryTreatmentResponse}
+                                  onChange={(event) =>
+                                    setPastHistoryTreatmentResponse(
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="Type the treatment response..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+                            </>
+                          )}
+
+                        </div>
+                      )}
 
                       <textarea
                         value={pastHistory}
@@ -2650,14 +2791,124 @@ const Consultation: React.FC = () => {
 
                     <div className="flex flex-col gap-2">
 
-                      <label className="text-xs font-bold leading-4 text-slate-500">
+                      <button
+                        type="button"
+                        onClick={() => setReportsExpanded((prev) => !prev)}
+                        className="flex w-fit items-center gap-1.5 text-xs font-bold leading-4 text-slate-500 transition hover:text-slate-700"
+                      >
+                        <svg
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          className={`h-3.5 w-3.5 transition-transform ${
+                            reportsExpanded ? "rotate-90" : ""
+                          }`}
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
                         Reports (Previous)
-                      </label>
+                      </button>
+
+                      {reportsExpanded && (
+                        <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+
+                          {/* SELECT TEST */}
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                              Select Test
+                            </label>
+
+                            <div className="relative">
+                              <select
+                                value={reportsTest}
+                                onChange={(event) =>
+                                  setReportsTest(event.target.value)
+                                }
+                                className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                              >
+                                <option value="" disabled>
+                                  Select Test
+                                </option>
+                                {labTests.map((test) => (
+                                  <option
+                                    key={test.lab_test_id}
+                                    value={test.lab_test_id}
+                                  >
+                                    {test.test_name}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="#94a3b8"
+                                strokeWidth="1.8"
+                                className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
+                              >
+                                <path d="m6 9 6 6 6-6" />
+                              </svg>
+                            </div>
+                          </div>
+
+                          {/* DATE / RESULT / IMPRESSION */}
+                          {reportsTest && (
+                            <>
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Date
+                                </label>
+                                <input
+                                  type="date"
+                                  value={reportsTestDate}
+                                  onChange={(event) =>
+                                    setReportsTestDate(event.target.value)
+                                  }
+                                  className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Enter Result
+                                </label>
+                                <textarea
+                                  value={reportsTestResult}
+                                  onChange={(event) =>
+                                    setReportsTestResult(event.target.value)
+                                  }
+                                  placeholder="Type the result..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Enter Impression
+                                </label>
+                                <textarea
+                                  value={reportsTestImpression}
+                                  onChange={(event) =>
+                                    setReportsTestImpression(event.target.value)
+                                  }
+                                  placeholder="Type the impression..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+                            </>
+                          )}
+
+                        </div>
+                      )}
 
                       <textarea
-                        readOnly
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                        value={reportsText}
+                        onChange={(event) => setReportsText(event.target.value)}
+                        placeholder="Type previous reports..."
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
                       />
 
                     </div>
@@ -3710,6 +3961,8 @@ const LabReview: React.FC<{
 type FormData = {
   preDiagnosis: string;
   natureOfDiagnosis: string;
+  molecularTesting: string;
+  diseaseStatus: string;
   laterality: string;
   bodySite: string;
   survivor: string;
@@ -3809,6 +4062,8 @@ const Diagnosis: React.FC<{
   const [formData, setFormData] = useState<FormData>({
     preDiagnosis: "",
     natureOfDiagnosis: "",
+    molecularTesting: "",
+    diseaseStatus: "",
     laterality: "",
     bodySite: "",
     survivor: "",
@@ -4350,6 +4605,62 @@ const Diagnosis: React.FC<{
                 <option value="">
                   Select Nature of Diagnosis
                 </option>
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Molecular Testing */}
+          <div>
+            <label
+              htmlFor="molecularTesting"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Molecular Testing
+            </label>
+
+            <div className="relative">
+              <input
+                id="molecularTesting"
+                name="molecularTesting"
+                type="text"
+                value={formData.molecularTesting}
+                onChange={handleChange}
+                placeholder="Type molecular testing..."
+                className="block w-full rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              />
+            </div>
+          </div>
+
+          {/* Disease Status */}
+          <div>
+            <label
+              htmlFor="diseaseStatus"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Disease Status
+            </label>
+
+            <div className="relative">
+              <select
+                id="diseaseStatus"
+                name="diseaseStatus"
+                value={formData.diseaseStatus}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Disease Status
+                </option>
+                <option value="Newly Diagnosed">Newly Diagnosed</option>
+                <option value="In Remission">In Remission</option>
+                <option value="Recurrence">Recurrence</option>
+                <option value="Progressive">Progressive</option>
+                <option value="Stable">Stable</option>
+                <option value="Metastatic">Metastatic</option>
               </select>
 
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
@@ -5900,6 +6211,7 @@ const ChemotherapyOrder: React.FC<{
   const [protocolName, setProtocolName] = useState("");
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState("");
+  const [discussion, setDiscussion] = useState("");
 
   const [drugs, setDrugs] = useState<Drug[]>([]);
   const [premedicationDrugs, setPremedicationDrugs] = useState<Drug[]>(
@@ -6283,11 +6595,16 @@ const ChemotherapyOrder: React.FC<{
         drugs?: Drug[];
         premedicationDrugs?: Drug[];
         supportiveDrugs?: Drug[];
+        discussion?: string;
       };
 
       if (data.cycleDay) {
         updateCycleDay(data.cycleDay);
         userTouched.current.cycleDay = true;
+      }
+
+      if (data.discussion) {
+        setDiscussion(data.discussion);
       }
 
       if (data.startDate) {
@@ -6334,6 +6651,7 @@ const ChemotherapyOrder: React.FC<{
         supportiveDrugs: userTouched.current.supportive
           ? supportiveDrugs
           : [],
+        discussion,
       })
     );
   }, [
@@ -6342,6 +6660,7 @@ const ChemotherapyOrder: React.FC<{
     drugs,
     premedicationDrugs,
     supportiveDrugs,
+    discussion,
     orderDraftKey,
     resolvedPatientId,
   ]);
@@ -7596,8 +7915,9 @@ const ChemotherapyOrder: React.FC<{
                     );
                   })}
                 </tbody>
-              </table>
-            </div>
+</table>
+             </div>
+
           </div>
         ) : activeTab === "Premedication" ? (
           <div className="p-8">
@@ -8089,6 +8409,18 @@ const ChemotherapyOrder: React.FC<{
             </div>
           </div>
         )}
+
+        <div className="mt-6 flex flex-col gap-4 rounded-lg border border-gray-200 p-6">
+          <div className="text-base font-semibold text-gray-900">
+            Discussion
+          </div>
+          <textarea
+            value={discussion}
+            onChange={(event) => setDiscussion(event.target.value)}
+            placeholder="Type the discussion..."
+            className="h-28 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm leading-5 text-gray-700 outline-none focus:border-blue-500"
+          />
+        </div>
       </div>
     </div>
   );
