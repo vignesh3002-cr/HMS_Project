@@ -1,4 +1,4 @@
-import React, {
+﻿import React, {
   useEffect,
   useRef,
   useState,
@@ -70,38 +70,6 @@ const parseDateValue = (value?: string | null): Date | null => {
   }
   const parsed = new Date(trimmed);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
-
-/* ============================================================
-   SHARED DOCTOR AVATAR HOOK
-   Fetches the logged-in doctor's avatar and caches it in localStorage.
-   Shared across Consultation and all step subcomponents.
-   ============================================================ */
-const useDoctorAvatar = () => {
-  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
-  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
-
-  useEffect(() => {
-    let mounted = true;
-    employeeApi
-      .getMe()
-      .then((res) => {
-        if (!mounted) return;
-        const url = res.data?.data?.employee?.employee_photo_URL || "";
-        setUserAvatarUrl(url);
-        if (url) localStorage.setItem("user_photo", url);
-        else localStorage.removeItem("user_photo");
-        setAvatarLoading(false);
-      })
-      .catch(() => {
-        if (mounted) setAvatarLoading(false);
-      });
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  return { userAvatarUrl, avatarLoading };
 };
 
 /* ============================================================
@@ -810,46 +778,14 @@ const createChemotherapyPlanForPatient = async (
   }
 };
 
-const DoctorProfileMenu = () => {
-  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
-  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
-
-  useEffect(() => {
-    let mounted = true;
-    employeeApi.getMe().then(res => {
-      if (!mounted) return;
-      const url = res.data?.data?.employee?.employee_photo_URL || "";
-      setUserAvatarUrl(url);
-      if (url) localStorage.setItem("user_photo", url);
-      else localStorage.removeItem("user_photo");
-      setAvatarLoading(false);
-    }).catch(() => {
-      if (mounted) setAvatarLoading(false);
-    });
-    return () => { mounted = false; };
-  }, []);
-
-  const user = getUser();
-  return (
-    <UserProfileDropdown
-      userName={user?.username || "Doctor"}
-      userSubtext={user?.role || "Doctor"}
-      userAvatar={userAvatarUrl || undefined}
-      avatarLoading={avatarLoading}
-      onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-      profilePath="/doctor/profile"
-      notificationsPath="/doctor/notifications"
-    />
-  );
-};
-
 const Consultation: React.FC = () => {
   /* ============================================================
      STATE
   ============================================================ */
 
   const [toast, setToast] = useState<ToastMessage>("");
-  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const [consultationNotes, setConsultationNotes] = useState("");
 
@@ -870,6 +806,14 @@ const Consultation: React.FC = () => {
   const [showLabReview, setShowLabReview] = useState(false);
   const [activeStep, setActiveStep] = useState("CONSULTATION");
   const [proceeding, setProceeding] = useState(false);
+  const [tabsHovered, setTabsHovered] = useState(false);
+  const tabsScrollRef = useRef<HTMLDivElement>(null);
+
+  const slideTabs = (direction: 1 | -1) => {
+    const el = tabsScrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: direction * 298.66, behavior: "smooth" });
+  };
 
   const STEP_ORDER = [
     "CONSULTATION",
@@ -942,6 +886,27 @@ const Consultation: React.FC = () => {
     }
     return value;
   };
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchAvatar = () => {
+      employeeApi
+        .getMe()
+        .then((res) => {
+          if (!mounted) return;
+          const url = res.data?.data?.employee?.employee_photo_URL || "";
+          setUserAvatarUrl(url);
+          if (url) localStorage.setItem("user_photo", url);
+          else localStorage.removeItem("user_photo");
+          setAvatarLoading(false);
+        })
+        .catch(() => {
+          if (mounted) setAvatarLoading(false);
+        });
+    };
+    fetchAvatar();
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     const patientId = consultationState?.patientId;
@@ -1128,15 +1093,8 @@ const Consultation: React.FC = () => {
       .getOne(appointmentId)
       .then((response) => {
         if (cancelled) return;
-        const apptData = response.data?.data;
-        const value = apptData?.Patient_visit_type ?? "";
+        const value = response.data?.data?.Patient_visit_type ?? "";
         setFallbackVisitType(value);
-        if (apptData?.chemo_fitness) {
-          setChemoFitness(apptData.chemo_fitness as "PENDING" | "FIT" | "UNFIT");
-          if (apptData.chemo_unfit_reason) {
-            setChemoUnfitReason(apptData.chemo_unfit_reason);
-          }
-        }
       })
       .catch((error) => {
         console.error("Failed to load appointment visit type:", error);
@@ -1150,91 +1108,6 @@ const Consultation: React.FC = () => {
     consultationState?.visit_type || fallbackVisitType || "";
 
   const consultedBy = consultationState?.consultedBy || "";
-
-  /* ============================================================
-     CHEMOTHERAPY FITNESS ASSESSMENT (Doctor Clinical Decision)
-  ============================================================ */
-  const activeApptId = consultationState?.appointmentId || encounter?.appointment_id || "";
-  const [chemoFitness, setChemoFitness] = useState<"PENDING" | "FIT" | "UNFIT">(() => {
-    if (!activeApptId) return "PENDING";
-    const saved = localStorage.getItem(`hms_chemo_fitness_${activeApptId}`);
-    return (saved as "PENDING" | "FIT" | "UNFIT") || "PENDING";
-  });
-  const [chemoUnfitReason, setChemoUnfitReason] = useState<string>(() => {
-    if (!activeApptId) return "";
-    return localStorage.getItem(`hms_chemo_unfit_reason_${activeApptId}`) || "";
-  });
-  const [chemoUnfitNotes, setChemoUnfitNotes] = useState<string>("");
-  const [showUnfitModal, setShowUnfitModal] = useState(false);
-  const [selectedUnfitOption, setSelectedUnfitOption] = useState("Low ANC / Neutropenia");
-  const [customUnfitReason, setCustomUnfitReason] = useState("");
-
-  const UNFIT_REASON_OPTIONS = [
-    "Low ANC / Neutropenia",
-    "Low Platelets / Thrombocytopenia",
-    "Elevated Creatinine / Renal Impairment",
-    "Abnormal LFT / Hepatic Impairment",
-    "Active Infection / Fever",
-    "Poor Performance Status / ECOG Drop",
-    "Patient Exhaustion / Severe Toxicity",
-    "Others",
-  ];
-
-  const handleMarkChemoFit = async () => {
-    setChemoFitness("FIT");
-    setChemoUnfitReason("");
-    if (activeApptId) {
-      localStorage.setItem(`hms_chemo_fitness_${activeApptId}`, "FIT");
-      localStorage.removeItem(`hms_chemo_unfit_reason_${activeApptId}`);
-      appointmentApi.updateChemoFitness(activeApptId, { fitness: "FIT" }).catch(() => {});
-    }
-    showToast("Patient marked FIT for Chemotherapy Daycare.");
-    try {
-      await API.post("/audit/log", {
-        action_type: "CHEMO_FITNESS_EVALUATION",
-        status: "FIT",
-        appointment_id: activeApptId,
-        patient_id: consultationState?.patientId || patientDisplayId,
-      }).catch(() => {});
-    } catch {}
-  };
-
-  const handleConfirmUnfit = async () => {
-    const finalReason = selectedUnfitOption === "Others" ? (customUnfitReason.trim() || "Others") : selectedUnfitOption;
-    setChemoFitness("UNFIT");
-    setChemoUnfitReason(finalReason);
-    if (activeApptId) {
-      localStorage.setItem(`hms_chemo_fitness_${activeApptId}`, "UNFIT");
-      localStorage.setItem(`hms_chemo_unfit_reason_${activeApptId}`, finalReason);
-      if (chemoUnfitNotes) {
-        localStorage.setItem(`hms_chemo_unfit_notes_${activeApptId}`, chemoUnfitNotes);
-      }
-      appointmentApi
-        .updateChemoFitness(activeApptId, {
-          fitness: "UNFIT",
-          reason: finalReason,
-          notes: chemoUnfitNotes,
-        })
-        .catch(() => {});
-    }
-    // Append to consultation notes automatically so the doctor has it documented
-    setConsultationNotes((prev) => {
-      const deferralText = `\n[CHEMOTHERAPY DEFERRED FOR TODAY - UNFIT]\nReason: ${finalReason}${chemoUnfitNotes ? `\nClinical Notes: ${chemoUnfitNotes}` : ""}\nPlan: Defer chemotherapy cycle. Conducted OPD consultation and supportive care.\n`;
-      return prev ? `${prev}\n${deferralText}` : deferralText;
-    });
-    setShowUnfitModal(false);
-    showToast("Chemotherapy cancelled for today. OPD Consultation remains active.");
-    try {
-      await API.post("/audit/log", {
-        action_type: "CHEMO_FITNESS_UNFIT",
-        status: "UNFIT",
-        appointment_id: activeApptId,
-        patient_id: consultationState?.patientId || patientDisplayId,
-        reason: finalReason,
-        notes: chemoUnfitNotes,
-      }).catch(() => {});
-    } catch {}
-  };
 
   /* ============================================================
      LATEST VITALS (from the active encounter record)
@@ -1826,19 +1699,251 @@ const Consultation: React.FC = () => {
 
                 {/* USER */}
 
-                <DoctorProfileMenu />
+                <UserProfileDropdown
+                  userName={getUser()?.username || "Doctor"}
+                  userSubtext={getUser()?.role || "Doctor"}
+                  userAvatar={userAvatarUrl || undefined}
+                  avatarLoading={avatarLoading}
+                  onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+                  profilePath="/doctor/profile"
+                  notificationsPath="/doctor/notifications"
+                />
 
               </div>
 
             </header>
 
             {/* ==================================================
+                PATIENT HEADER
+            ================================================== */}
+
+            <section className="w-full bg-slate-50">
+
+              <div className="flex w-full flex-col gap-5">
+
+                <section className="flex w-full flex-col gap-5 bg-white p-5">
+
+                  <div className="flex w-full items-center gap-4">
+
+                    <img
+                      src={patientPhoto}
+                      alt={patientName}
+                      className="h-20 w-20 shrink-0 rounded-full border-4 border-white object-cover shadow-sm"
+                    />
+
+                    <div className="min-w-0 flex-1">
+
+                      <div className="mb-1 flex min-w-0 items-center space-x-2">
+
+                        <h2 className="truncate text-xl font-bold leading-7 text-[#1e293b]">
+                          {patientName}
+                        </h2>
+
+                        <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-[#64748b]">
+                          {patientDisplayId}
+                        </span>
+
+                      </div>
+
+                      <div className="flex min-w-0 items-center space-x-2 text-sm leading-5 text-[#64748b]">
+
+                        <span className="truncate">{patientAgeSex}</span>
+
+                        <span className="h-1 w-1 shrink-0 rounded-full bg-slate-300" />
+
+                        <span className="shrink-0 font-semibold text-[#1d4ed8]">
+                          —
+                        </span>
+
+                      </div>
+
+                    </div>
+
+                   {/* PHONE + EMAIL (vertical stack) */}
+
+                    <div className="flex flex-col gap-1">
+
+                      <div className="flex items-center gap-2">
+
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        className="h-4 w-4 shrink-0 text-slate-400"
+                      >
+                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                      </svg>
+
+                      <div className="flex flex-col">
+
+                        <div className="text-[10px] font-bold leading-[15px] tracking-[0.5px] text-slate-400">
+                          PHONE
+                        </div>
+
+                        <div className="whitespace-nowrap text-sm font-medium leading-5 text-slate-700">
+                          {patientPhone}
+                        </div>
+
+                      </div>
+
+                    </div>
+
+                      {/* EMAIL */}
+
+                      <div className="flex items-center gap-2">
+
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        className="h-4 w-4 shrink-0 text-slate-400"
+                      >
+                        <rect
+                          x="3"
+                          y="5"
+                          width="18"
+                          height="14"
+                          rx="2"
+                        />
+
+                        <path d="m3 7 9 6 9-6" />
+                      </svg>
+
+                      <div className="flex flex-col">
+
+                        <div className="text-[10px] font-bold leading-[15px] tracking-[0.5px] text-slate-400">
+                          EMAIL
+                        </div>
+
+<div className="whitespace-normal break-all text-sm font-medium leading-5 text-slate-700">
+                        {patientEmail}
+                      </div>
+
+                      </div>
+
+                    </div>
+
+                    </div>
+
+                    {/* MEASUREMENTS */}
+
+                    <div className="grid grid-cols-4 gap-x-6 gap-y-3">
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          HEIGHT
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.height}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          WEIGHT
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.weight}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          BSA
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.bsa}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          BMI
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.bmi}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          BP
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.bp}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          PULSE
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.pulse}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          TEMP
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.temp}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                          SPO2
+                        </div>
+                        <div className="text-sm font-bold leading-5 text-slate-800">
+                          {measurements.spo2}
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* PROFILE */}
+
+                    <button
+                      onClick={() => {
+                        const pid = consultationState?.patientId;
+                        if (pid) {
+                          localStorage.setItem("hms_last_viewed_patient_id", pid);
+                        }
+                        navigate("/doctor/patient-details", {
+                          state: { patientId: pid },
+                        });
+                      }}
+                      className="ml-auto h-9 rounded-md border border-blue-600 bg-white px-4 text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
+                    >
+                      View Full Profile
+                    </button>
+
+                  </div>
+
+                </section>
+
+              </div>
+
+            </section>
+
+            {/* ==================================================
                 STEPS
             ================================================== */}
 
-            <div className="z-20 h-[88px] w-full shrink-0 overflow-hidden bg-white">
+            <div
+              onMouseEnter={() => setTabsHovered(true)}
+              onMouseLeave={() => setTabsHovered(false)}
+              className="relative z-20 h-[88px] w-full shrink-0 overflow-hidden bg-white"
+            >
 
-              <div className="hide-scrollbar ml-0 flex h-[88.5px] w-full overflow-x-auto">
+              <div
+                ref={tabsScrollRef}
+                className="hide-scrollbar ml-0 flex h-[88.5px] w-full overflow-x-auto"
+              >
 
                 {steps.map((step, index) => (
 
@@ -1888,13 +1993,61 @@ const Consultation: React.FC = () => {
 
               </div>
 
+              {/* FLOATING BACK / NEXT ARROWS (near tabs, hover only) */}
+
+              <div className={`pointer-events-none absolute left-2 top-1/2 z-30 -translate-y-1/2 transition-opacity duration-200 ${tabsHovered ? "pointer-events-auto opacity-100" : "opacity-0"}`}>
+
+                <button
+                  onClick={() => slideTabs(-1)}
+                  aria-label="Go back"
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-lg transition hover:bg-slate-50"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-5 w-5"
+                  >
+                    <path d="M19 12H5" />
+                    <path d="m12 19-7-7 7-7" />
+                  </svg>
+                </button>
+
+              </div>
+
+              <div className={`pointer-events-none absolute right-2 top-1/2 z-30 -translate-y-1/2 transition-opacity duration-200 ${tabsHovered ? "pointer-events-auto opacity-100" : "opacity-0"}`}>
+
+                <button
+                  onClick={() => slideTabs(1)}
+                  aria-label="Go to next tab"
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-lg transition hover:bg-slate-50"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-5 w-5"
+                  >
+                    <path d="M5 12h14" />
+                    <path d="m12 5 7 7-7 7" />
+                  </svg>
+                </button>
+
+              </div>
+
             </div>
 
             {/* ==================================================
-                CONTENT
+                const tabs
             ================================================== */}
 
-            <section className="w-full bg-slate-50 px-[22px] py-7">
+            <section className="w-full bg-slate-50 px-[22px] pb-7">
 
               <div className="flex w-full flex-col gap-5">
 
@@ -1953,13 +2106,9 @@ const Consultation: React.FC = () => {
                     encounterNo={encounter?.encounter_no}
                   />
                 ) : (
-                  <>
-                    {/* =============================================
-                    PATIENT LATEST VITALS
-                ============================================ */}
-
-              
-
+                  <div
+                      className="relative flex w-full flex-col gap-5"
+                    >
                     {/* =================================================
                     CONSULTATION SUMMARY
                 ================================================= */}
@@ -2152,6 +2301,23 @@ const Consultation: React.FC = () => {
                         className="h-40 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-300"
                       />
 
+                      {/* CHIEF COMPLAINT */}
+
+                      <div className="flex flex-col gap-2">
+
+                        <label className="text-xs font-bold leading-4 text-slate-500">
+                          Chief Complaint
+                        </label>
+
+                        <textarea
+                          readOnly
+                          value={encounter?.chief_complaint ?? ""}
+                          placeholder="Not recorded"
+                          className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                        />
+
+                      </div>
+
                     </div>
 
                     {/* CLINICAL */}
@@ -2190,233 +2356,205 @@ const Consultation: React.FC = () => {
                 </section>
 
                 {/* =================================================
-                    CHEMOTHERAPY FITNESS ASSESSMENT (Doctor Clinical Decision)
+                    PATIENT HISTORY
                 ================================================= */}
-                <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                    <div className="flex flex-col gap-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg font-bold leading-7 text-slate-800">
-                          Chemotherapy Fitness Assessment
-                        </span>
-                        <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700 border border-blue-200">
-                          Visit Type: {visitType || "Outpatient / Daycare"}
-                        </span>
-                      </div>
-                      <p className="text-xs leading-5 text-slate-500">
-                        Doctor clinical decision for daycare chemotherapy administration. If marked Unfit, chemotherapy is cancelled/deferred, while the outpatient (OP) consultation remains active.
-                      </p>
-                    </div>
 
-                    <div className="flex items-center gap-2">
-                      {chemoFitness === "FIT" && (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800 border border-emerald-300">
-                          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                          FIT FOR CHEMOTHERAPY
-                        </span>
-                      )}
-                      {chemoFitness === "UNFIT" && (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-800 border border-rose-300">
-                          <span className="h-2 w-2 rounded-full bg-rose-500" />
-                          CHEMO CANCELLED (UNFIT)
-                        </span>
-                      )}
-                      {chemoFitness === "PENDING" && (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800 border border-amber-300">
-                          <span className="h-2 w-2 rounded-full bg-amber-500" />
-                          EVALUATION PENDING
-                        </span>
-                      )}
-                    </div>
+                <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
+
+                  <div className="text-lg font-bold leading-7 text-slate-800">
+                    Patient History
                   </div>
 
-                  {/* Actions & Status details */}
-                  <div className="flex flex-col gap-4">
-                    {chemoFitness === "UNFIT" && (
-                      <div className="rounded-lg border border-rose-200 bg-rose-50/80 p-4">
-                        <div className="flex items-start gap-3">
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-700 font-bold text-base">
-                            ✕
-                          </div>
-                          <div className="flex-1 space-y-1">
-                            <div className="text-sm font-bold text-rose-900">
-                              Chemotherapy Cancelled / Deferred for Today
-                            </div>
-                            <div className="text-xs font-medium text-rose-800">
-                              <span className="font-semibold">Reason:</span> {chemoUnfitReason || "Not specified"}
-                            </div>
-                            {chemoUnfitNotes && (
-                              <div className="text-xs text-rose-700">
-                                <span className="font-semibold">Supportive / Deferral Plan:</span> {chemoUnfitNotes}
-                              </div>
-                            )}
-                            <div className="mt-2 rounded bg-white/70 p-2 text-xs text-rose-900 border border-rose-200/60">
-                              💡 <strong>Outpatient (OP) consultation remains active:</strong> Clinical notes, supportive medications, and diagnostic investigations can still be completed and billed normally.
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                  {/* PATIENT HISTORY GRID */}
 
-                    {chemoFitness === "FIT" && (
-                      <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-4">
-                        <div className="flex items-start gap-3">
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 font-bold text-base">
-                            ✓
-                          </div>
-                          <div className="flex-1 space-y-1">
-                            <div className="text-sm font-bold text-emerald-900">
-                              Patient Cleared for Chemotherapy
-                            </div>
-                            <div className="text-xs text-emerald-800">
-                              Patient meets clinical tolerance criteria. Cleared for Daycare bed admission and chemotherapy protocol administration.
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                  <div className="grid w-full grid-cols-2 gap-x-6 gap-y-4 pt-2">
 
-                    <div className="flex flex-wrap items-center gap-3 pt-1">
-                      <button
-                        type="button"
-                        onClick={handleMarkChemoFit}
-                        className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors ${
-                          chemoFitness === "FIT"
-                            ? "bg-emerald-700 text-white ring-2 ring-emerald-400 ring-offset-1"
-                            : "bg-emerald-600 text-white hover:bg-emerald-700"
-                        }`}
-                      >
-                        <span>✓</span>
-                        Mark Fit — Clear for Chemo
-                      </button>
+                    {/* IMMUNIZATION */}
 
-                      <button
-                        type="button"
-                        onClick={() => setShowUnfitModal(true)}
-                        className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors ${
-                          chemoFitness === "UNFIT"
-                            ? "bg-rose-700 text-white ring-2 ring-rose-400 ring-offset-1"
-                            : "bg-rose-600 text-white hover:bg-rose-700"
-                        }`}
-                      >
-                        <span>✕</span>
-                        Mark Unfit — Cancel Chemo (OPD Only)
-                      </button>
+                    <div className="flex flex-col gap-2">
 
-                      {chemoFitness !== "PENDING" && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setChemoFitness("PENDING");
-                            setChemoUnfitReason("");
-                            setChemoUnfitNotes("");
-                            if (activeApptId) {
-                              localStorage.removeItem(`hms_chemo_fitness_${activeApptId}`);
-                              localStorage.removeItem(`hms_chemo_unfit_reason_${activeApptId}`);
-                              localStorage.removeItem(`hms_chemo_unfit_notes_${activeApptId}`);
-                              appointmentApi.updateChemoFitness(activeApptId, { fitness: "PENDING" }).catch(() => {});
-                            }
-                            showToast("Chemotherapy fitness status reset to Pending.");
-                          }}
-                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 transition-colors"
+                      <label className="text-xs font-bold leading-4 text-slate-500">
+                        Immunization
+                      </label>
+
+                      <textarea
+                        readOnly
+                        placeholder="Not recorded"
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                      />
+
+                    </div>
+
+                    {/* DRUG CONSUMPTION */}
+
+                    <div className="flex flex-col gap-2">
+
+                      <label className="text-xs font-bold leading-4 text-slate-500">
+                        Drug Consumption
+                      </label>
+
+                      <div className="relative h-[38px]">
+
+                        <select
+                          className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none"
+                          defaultValue=""
                         >
-                          Reset Decision
-                        </button>
-                      )}
+
+                          <option value="" disabled>
+                            Select 
+                          </option>
+
+                          <option value="Beedi">Beedi</option>
+                          <option value="BeetelNuts">BeetelNuts</option>
+                          <option value="Chewable">Chewable</option>
+                          <option value="Cigaratte">Cigaratte</option>
+                          <option value="Dissolvable">Dissolvable</option>
+                          <option value="Paan">Paan</option>
+                          <option value="Snuff">Snuff</option>
+                          <option value="Alcohol">Alcohol</option>
+                          <option value="Snus /Hans/Cool lip">Snus /Hans/Cool lip</option>
+
+                        </select>
+
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="#94a3b8"
+                          strokeWidth="1.8"
+                          className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+
+                      </div>
+
                     </div>
+
+                    {/* DIET TYPE */}
+
+                    <div className="flex flex-col gap-2">
+
+                      <label className="text-xs font-bold leading-4 text-slate-500">
+                        Diet Type
+                      </label>
+
+                      <div className="relative h-[38px]">
+
+                        <select
+                          className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none"
+                          defaultValue=""
+                        >
+
+                          <option value="" disabled>
+                           Select 
+                          </option>
+
+                          <option value="Vegetarian">Vegetarian</option>
+                          <option value="Non-vegetarian">Non-vegetarian</option>
+                          <option value="Jain">Jain</option>
+
+                        </select>
+
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="#94a3b8"
+                          strokeWidth="1.8"
+                          className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+
+                      </div>
+
+                    </div>
+
+                    {/* PATIENT HISTORY (REASON OF VISIT) */}
+
+                    <div className="flex flex-col gap-2">
+
+                      <label className="text-xs font-bold leading-4 text-slate-500">
+                        Patient History (Reason of Visit)
+                      </label>
+
+                      <textarea
+                        readOnly
+                        value={encounter?.chief_complaint ?? ""}
+                        placeholder="Not recorded"
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                      />
+
+                    </div>
+
                   </div>
+
                 </section>
 
                 {/* =================================================
-                    CHEMOTHERAPY UNFIT REASON MODAL
+                    PATIENT DETAILS
                 ================================================= */}
-                {showUnfitModal && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-                    <div
-                      className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl space-y-4"
-                      role="dialog"
-                      aria-modal="true"
-                    >
-                      <div className="border-b border-slate-100 pb-3">
-                        <h3 className="text-lg font-bold text-slate-900">
-                          Mark Patient Unfit for Chemotherapy
-                        </h3>
-                        <p className="text-xs text-slate-500 mt-1">
-                          Chemotherapy administration will be cancelled/deferred for today. The OPD consultation visit remains active.
-                        </p>
-                      </div>
 
-                      <div className="space-y-3">
-                        <div>
-                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                            Primary Reason for Deferral <span className="text-rose-600">*</span>
-                          </label>
-                          <select
-                            value={selectedUnfitOption}
-                            onChange={(e) => setSelectedUnfitOption(e.target.value)}
-                            className="w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm font-medium text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          >
-                            {UNFIT_REASON_OPTIONS.map((opt) => (
-                              <option key={opt} value={opt}>
-                                {opt}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
 
-                        {selectedUnfitOption === "Others" && (
-                          <div>
-                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                              Custom Reason <span className="text-rose-600">*</span>
-                            </label>
-                            <input
-                              type="text"
-                              value={customUnfitReason}
-                              onChange={(e) => setCustomUnfitReason(e.target.value)}
-                              placeholder="e.g., Uncontrolled hypertension, severe mucositis..."
-                              className="w-full rounded-lg border border-slate-300 p-2.5 text-sm font-medium text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                            />
-                          </div>
-                        )}
-
-                        <div>
-                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                            Clinical Deferral Notes & Supportive Care (Optional)
-                          </label>
-                          <textarea
-                            rows={3}
-                            value={chemoUnfitNotes}
-                            onChange={(e) => setChemoUnfitNotes(e.target.value)}
-                            placeholder="e.g., Prescribe Filgrastim 300mcg OD for 3 days. Re-check CBC on Monday. Continue OPD consultation..."
-                            className="w-full rounded-lg border border-slate-300 p-2.5 text-xs text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          />
-                        </div>
-
-                        <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
-                          <strong>Note:</strong> Selecting this will cancel the Daycare chemo session for today. The patient's visit will remain as an Outpatient (OP) consultation, and notes will be preserved.
-                        </div>
-                      </div>
-
-                      <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
-                        <button
-                          type="button"
-                          onClick={() => setShowUnfitModal(false)}
-                          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleConfirmUnfit}
-                          disabled={selectedUnfitOption === "Others" && !customUnfitReason.trim()}
-                          className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-50 transition-colors shadow-sm"
-                        >
-                          Confirm Chemo Cancellation
-                        </button>
-                      </div>
-                    </div>
+                  <div className="text-lg font-bold leading-7 text-slate-800">
+                    Patient Details
                   </div>
-                )}
+
+                  {/* PATIENT DETAILS GRID */}
+
+                  <div className="grid w-full grid-cols-2 gap-x-6 gap-y-4 pt-2">
+
+                    {/* PERSONAL HISTORY (HABITS) */}
+
+                    <div className="flex flex-col gap-2">
+
+                      <label className="text-xs font-bold leading-4 text-slate-500">
+                        Personal History (Habits)
+                      </label>
+
+                      <textarea
+                        readOnly
+                        placeholder="Not recorded"
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                      />
+
+                    </div>
+
+                    {/* PAST HISTORY */}
+
+                    <div className="flex flex-col gap-2">
+
+                      <label className="text-xs font-bold leading-4 text-slate-500">
+                        Past History
+                      </label>
+
+                      <textarea
+                        readOnly
+                        placeholder="Not recorded"
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                      />
+
+                    </div>
+
+                    {/* REPORTS (PREVIOUS) */}
+
+                    <div className="flex flex-col gap-2">
+
+                      <label className="text-xs font-bold leading-4 text-slate-500">
+                        Reports (Previous)
+                      </label>
+
+                      <textarea
+                        readOnly
+                        placeholder="Not recorded"
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                      />
+
+                    </div>
+
+                  </div>
+
+                </section>
 
                 {/* =================================================
                     INVESTIGATIONS
@@ -2632,9 +2770,9 @@ const Consultation: React.FC = () => {
 
                   </div>
 
-                </div>
+                  </div>
 
-                  </>
+                  </div>
                 )}
 
               </div>
@@ -2789,7 +2927,9 @@ const LabReview: React.FC<{
   onOrdered,
   onNext,
 }) => {
-  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
   const [observations, setObservations] = useState("");
   const [notifications, setNotifications] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -3236,7 +3376,15 @@ const LabReview: React.FC<{
             )}
           </div>
 
-          <DoctorProfileMenu />
+          <UserProfileDropdown
+            userName={getUser()?.username || "Doctor"}
+            userSubtext={getUser()?.role || "Doctor"}
+            userAvatar={userAvatarUrl || undefined}
+            avatarLoading={avatarLoading}
+            onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+            profilePath="/doctor/profile"
+            notificationsPath="/doctor/notifications"
+          />
         </div>
       </header>
 
@@ -3424,7 +3572,9 @@ const Diagnosis: React.FC<{
   const statePatientId =
     (location.state as ConsultationState | null)?.patientId ?? "";
   const resolvedPatientId = patientId || statePatientId;
-  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
+
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const [formData, setFormData] = useState<FormData>({
     type: "",
@@ -4057,7 +4207,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
             </div>
           </div>
 
-          {/* Grade 
+          {/* Grade */}
           <div>
             <label
               htmlFor="grade"
@@ -4091,7 +4241,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                 <ChevronDownIcon />
               </div>
             </div>
-          </div>*/}
+          </div>
 
           {/* T Stage */}
           <div>
@@ -4316,7 +4466,15 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
           <div className="flex items-center gap-4 sm:gap-6">
             <BellNotificationButton size="md" />
 
-            <DoctorProfileMenu />
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
           </div>
         </header>
 
@@ -4502,7 +4660,9 @@ const DischargeMedication: React.FC<{
 }) => {
   const resolvedPatientId = patientId || "";
   const navigate = useNavigate();
-  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
+
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const [medications, setMedications] = useState<DischargeMedicationItem[]>(
     []
@@ -5106,7 +5266,15 @@ if (embedded) {
             </button>
 
             {/* User */}
-            <DoctorProfileMenu />
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
           </div>
         </header>
 
@@ -5340,12 +5508,14 @@ const ChemotherapyOrder: React.FC<{
   patientId?: string;
   onNext?: () => void;
 }> = ({ embedded = false, patientId, onNext }) => {
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
   const location = useLocation();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
-  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
 
   const [cycleDay, setCycleDay] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -7582,10 +7752,18 @@ const ChemotherapyOrder: React.FC<{
             <span className="absolute right-0 top-0 block h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
           </button>
 
-            {/* User */}
-            <DoctorProfileMenu />
-          </div>
-        </header>
+          {/* User */}
+          <UserProfileDropdown
+            userName={getUser()?.username || "Doctor"}
+            userSubtext={getUser()?.role || "Doctor"}
+            userAvatar={userAvatarUrl || undefined}
+            avatarLoading={avatarLoading}
+            onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+            profilePath="/doctor/profile"
+            notificationsPath="/doctor/notifications"
+          />
+        </div>
+      </header>
 
       {/* ================= MAIN ================= */}
       <main className="flex min-h-[calc(100vh-73px)] flex-grow justify-center p-8">
@@ -7695,7 +7873,9 @@ const FollowUp: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
-  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
   const [activeStep, setActiveStep] = useState<FollowUpStep>(1);
   const [nextVisitDate, setNextVisitDate] = useState("");
   const [nextCycle, setNextCycle] = useState("");
@@ -8415,20 +8595,28 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
           <div className="flex items-center space-x-6">
 
             {/* Notification */}
-              <button
-                type="button"
-                className="relative text-gray-400 transition-colors hover:text-gray-600"
-                aria-label="Notifications"
-              >
-                <BellIcon />
+            <button
+              type="button"
+              className="relative text-gray-400 transition-colors hover:text-gray-600"
+              aria-label="Notifications"
+            >
+              <BellIcon />
 
-                <span className="absolute right-0 top-0 h-2 w-2 rounded-full border border-white bg-red-500" />
-              </button>
+              <span className="absolute right-0 top-0 h-2 w-2 rounded-full border border-white bg-red-500" />
+            </button>
 
-              {/* User */}
-              <DoctorProfileMenu />
-            </div>
-          </header>
+            {/* User */}
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
+          </div>
+        </header>
 
         {/* =======================================================
             SCROLLABLE CONTENT
@@ -8581,25 +8769,14 @@ const TreatmentPlan: React.FC<{
   appointmentId?: string;
   encounterNo?: string;
 }> = ({ embedded = false, patientId, measurements, onNext, appointmentId, encounterNo }) => {
-  const navigate = useNavigate();
   const location = useLocation();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
 
-  const handleBack = () => {
-    window.history.back();
-  };
-
-  const handleViewProfile = () => {
-    if (!resolvedPatientId) return;
-    navigate("/doctor/patient-details", {
-      state: { patientId: resolvedPatientId },
-    });
-  };
-
-  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const [treatmentIntent, setTreatmentIntent] =
     useState("");
@@ -8846,6 +9023,14 @@ const TreatmentPlan: React.FC<{
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleBack = () => {
+    window.history.back();
+  };
+
+  const handleViewProfile = () => {
+    console.log("View Full Profile clicked");
   };
 
   /* =========================================================
@@ -9545,7 +9730,15 @@ const TreatmentPlan: React.FC<{
               <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500" />
             </button>
 
-            <DoctorProfileMenu />
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
           </div>
         </header>
 
@@ -9785,7 +9978,9 @@ const Summary: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
-  const { userAvatarUrl, avatarLoading } = useDoctorAvatar();
+
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const [nextVisitDate, setNextVisitDate] = useState(() =>
     resolvedPatientId
@@ -10923,7 +11118,15 @@ const Summary: React.FC<{
             </button>
 
             {/* User */}
-            <DoctorProfileMenu />
+            <UserProfileDropdown
+              userName={getUser()?.username || "Doctor"}
+              userSubtext={getUser()?.role || "Doctor"}
+              userAvatar={userAvatarUrl || undefined}
+              avatarLoading={avatarLoading}
+              onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
+              profilePath="/doctor/profile"
+              notificationsPath="/doctor/notifications"
+            />
           </div>
         </header>
 
