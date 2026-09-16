@@ -11,6 +11,7 @@ import { clearAccountActivity } from "@/utils/accountActivity";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
 import { usePermission } from "@/context/PermissionContext";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
+import { BellNotification } from "@/components/hms/BellNotification";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -437,6 +438,8 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
 
             {/* RIGHT */}
             <div className="flex items-center gap-4">
+              {/* BELL NOTIFICATION */}
+              <BellNotification />
               {/* PROFILE DROPDOWN */}
               <UserProfileDropdown
                 userName={userData.username || "HMS"}

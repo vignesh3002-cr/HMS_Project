@@ -43,6 +43,7 @@ export function AppointmentActionMenu({
   const normalizedStatus = status.toLowerCase().replace(/_/g, " ").trim();
   const isCancelled = normalizedStatus === "cancelled";
   const isCompleted = normalizedStatus === "completed";
+  const isNoShow = normalizedStatus === "no show";
   const isScheduled = normalizedStatus === "scheduled";
   
   // Check if appointment date is today (local)
@@ -93,7 +94,7 @@ export function AppointmentActionMenu({
               View Appointment
             </DropdownMenuItem>
           )}
-          {can("appointment.update") && !isCancelled && !isCompleted && (
+          {can("appointment.update") && !isCancelled && !isCompleted && !isNoShow && (
             <DropdownMenuItem
               onSelect={() => onEdit()}
               className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-[#374151] focus:bg-[#F2F4F6]"
@@ -125,7 +126,7 @@ export function AppointmentActionMenu({
               Vitals
             </DropdownMenuItem>
           )}
-          {can("appointment.cancel") && !isCancelled && !isCompleted && (
+          {can("appointment.cancel") && !isCancelled && !isCompleted && !isNoShow && (
             <DropdownMenuItem
               onSelect={() => onCancel()}
               className="flex w-full cursor-pointer px-3 py-2 text-xs font-semibold text-left text-red-600 focus:bg-red-50"

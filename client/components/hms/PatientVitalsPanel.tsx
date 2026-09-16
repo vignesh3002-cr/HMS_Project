@@ -91,6 +91,7 @@ function buildTiles(r: EncounterRecord): VitalTileData[] {
   const sugar = num(r.blood_sugar);
   const weight = num(r.weight);
   const height = num(r.height);
+  const pain = num(r.pain_score);
 
   return [
     {
@@ -162,6 +163,14 @@ function buildTiles(r: EncounterRecord): VitalTileData[] {
       tone: "accent",
       valueText: height !== null ? String(height) : "—",
       unit: "cm",
+    },
+    {
+      key: "pain",
+      label: "Pain Score",
+      icon: Activity,
+      tone: "purple",
+      valueText: pain !== null ? String(pain) : "—",
+      unit: "/10",
     },
   ];
 }

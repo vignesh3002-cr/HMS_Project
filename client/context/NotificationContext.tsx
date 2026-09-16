@@ -21,7 +21,7 @@ import {
   appointmentApi,
 } from "@/api/appointment.api";
 import { getActiveBranchId } from "@/api/axios";
-import { getUser } from "@/utils/token";
+import { getUser, getToken } from "@/utils/token";
 import { getAccountActivity, type AccountActivity } from "@/utils/accountActivity";
 
 const DISMISSED_NOTIFICATIONS_KEY = "hms_dismissed_notifications_global";
@@ -484,7 +484,7 @@ function doctorNotificationToItem(notif: DoctorNotificationItem): NotificationIt
   const role: NotificationRole = notifType === "BOOKING" ? "booking" : "checkin";
   const action: NotificationAction = "CREATE";
   const title = notifType === "BOOKING" ? "New Appointment Booked" : "Patient Checked In";
-  const message = `${patientName} - ${notifType === "BOOKING" ? "Booked" : "Checked in"} for ${notif.appointment_history?.appointment_date} at ${notif.appointment_history?.appointment_time}`;
+  const message = `${patientName} - ${notifType === "BOOKING" ? "Booked" : "Checked in"} for ${notif.appointment_history?.appointment_date}`;
   const createdAt = new Date(notif.created_at).getTime();
   return {
     id: `doctor-${notif.notification_id}`,
@@ -596,6 +596,11 @@ export function NotificationProvider({ children, employeeId }: NotificationProvi
   }, []);
 
   const fetchNotifications = useCallback(async () => {
+    const token = getToken();
+    if (!token) {
+      setIsLoading(false);
+      return;
+    }
     setError(null);
     const registerFailureCycle = (err?: any) => {
       consecutiveFailuresRef.current += 1;
