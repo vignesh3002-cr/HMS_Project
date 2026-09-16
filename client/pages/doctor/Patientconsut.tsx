@@ -205,25 +205,6 @@ interface ConsultationState {
   visit_type?: string;
 }
 
-/* Quick-select chips for the Reason of Visit free-text box. Clicking a
-   chip appends the value to the typed reason (comma-separated). */
-const REASON_OF_VISIT_SUGGESTIONS = [
-  "Fever",
-  "Pain",
-  "Cough",
-  "Headache",
-  "Fatigue",
-  "Weight loss",
-  "Breathing difficulty",
-  "Nausea / Vomiting",
-  "Body ache",
-  "Weakness",
-  "Bleeding",
-  "Lump / Swelling",
-  "Follow-up review",
-  "Chemotherapy",
-];
-
 /* Past History shares the encounter's clinical_notes column with
    Consultation Notes. This marker separates the two sections so they
    can be split back apart when the encounter is loaded again. */
@@ -848,8 +829,7 @@ const Consultation: React.FC = () => {
   const [chiefComplaint, setChiefComplaint] = useState("");
   const [reasonOfVisit, setReasonOfVisit] = useState("");
 
-  const [otherReasonExpanded, setOtherReasonExpanded] = useState(false);
-  const [otherReasonName, setOtherReasonName] = useState("");
+  
 
   const [otherInvestigationExpanded, setOtherInvestigationExpanded] =
     useState(false);
@@ -1341,34 +1321,6 @@ const Consultation: React.FC = () => {
           : medication
       )
     );
-  };
-
-  /* ============================================================
-     REASON OF VISIT QUICK SUGGESTIONS
-     Appends a suggestion chip value to the typed Reason of Visit
-     free text, comma-separated, without duplicating an existing
-     value.
-  ============================================================ */
-
-  const addReasonOfVisitSuggestion = (suggestion: string) => {
-    setReasonOfVisit((prev) => {
-      const existing = prev
-        .split(",")
-        .map((part) => part.trim())
-        .filter(Boolean);
-      if (existing.includes(suggestion)) return prev;
-      return existing.length
-        ? `${prev.trim().replace(/,\s*$/, "")}, ${suggestion}`
-        : suggestion;
-    });
-  };
-
-  const addOtherReasonOfVisit = () => {
-    const value = otherReasonName.trim();
-    if (!value) return;
-    addReasonOfVisitSuggestion(value);
-    setOtherReasonName("");
-    setOtherReasonExpanded(false);
   };
 
   /* ============================================================
@@ -2309,11 +2261,10 @@ const Consultation: React.FC = () => {
                         className="h-40 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-300"
                       />
 
-                      {/* CHIEF COMPLAINT (free text) + REASON OF VISIT +
-                          QUICK SUGGESTIONS. Styled like the Symptoms /
-                          Allergies sections in ClinicalDetailsSection
-                          (uppercase tracked label + white bordered
-                          container). */}
+                      {/* CHIEF COMPLAINT (free text) + REASON OF VISIT.
+                          Styled like the Symptoms / Allergies sections in
+                          ClinicalDetailsSection (uppercase tracked label +
+                          white bordered container). */}
 
                       <div className="flex flex-col gap-2">
 
@@ -2351,78 +2302,7 @@ const Consultation: React.FC = () => {
 
                         </div>
 
-                        <div className="flex flex-col gap-1">
-
-                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                            Quick Suggestions
-                          </div>
-
-<div className="flex min-h-[38px] w-full flex-wrap items-start gap-1.5 rounded-md border border-slate-200 bg-white p-1.5">
-                            {REASON_OF_VISIT_SUGGESTIONS.map((suggestion) => (
-                              <button
-                                type="button"
-                                key={suggestion}
-                                onClick={() =>
-                                  addReasonOfVisitSuggestion(suggestion)
-                                }
-                                className="flex h-[26px] items-center rounded border border-blue-100 bg-blue-50 px-[9px] py-[3px] text-xs leading-4 text-blue-700 transition hover:bg-blue-100"
-                              >
-                                {suggestion}
-                              </button>
-                            ))}
-
-                            {!otherReasonExpanded && (
-                              <button
-                                type="button"
-                                onClick={() => setOtherReasonExpanded(true)}
-                                className="flex h-[26px] items-center rounded border border-slate-200 bg-slate-50 px-[9px] py-[3px] text-xs leading-4 text-slate-500 transition hover:bg-slate-100"
-                              >
-                                Others...
-                              </button>
-                            )}
-                          </div>
-
-                          {otherReasonExpanded && (
-                            <div className="flex w-full items-center gap-2">
-                              <input
-                                type="text"
-                                value={otherReasonName}
-                                onChange={(event) =>
-                                  setOtherReasonName(event.target.value)
-                                }
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") {
-                                    event.preventDefault();
-                                    addOtherReasonOfVisit();
-                                  }
-                                }}
-                                placeholder="Enter other reason"
-                                className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-600 outline-none focus:border-slate-400"
-                              />
-                              <button
-                                type="button"
-                                onClick={addOtherReasonOfVisit}
-                                disabled={!otherReasonName.trim()}
-                                className="h-7 shrink-0 rounded-md border border-blue-600 bg-white px-3 text-xs font-semibold leading-4 text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                Add
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOtherReasonName("");
-                                  setOtherReasonExpanded(false);
-                                }}
-                                className="h-7 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-500 transition hover:bg-slate-50"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          )}
-
                         </div>
-
-                      </div>
 
                     </div>
 
@@ -2685,7 +2565,7 @@ const Consultation: React.FC = () => {
                     Systemic Examination
                   </div>
 
-                  <div className="grid w-full grid-cols-2 gap-x-6 gap-y-4 pt-2">
+                  <div className="grid w-full grid-cols-1 gap-x-5 gap-y-6 pt-2 sm:grid-cols-2 lg:grid-cols-4">
 
                     {[
                       { label: "CNS", value: systemicCns, onChange: setSystemicCns },
@@ -2697,11 +2577,12 @@ const Consultation: React.FC = () => {
                         <label className="text-xs font-bold leading-4 text-slate-500">
                           {item.label}
                         </label>
-                        <textarea
+                        <input
+                          type="text"
                           value={item.value}
                           onChange={(event) => item.onChange(event.target.value)}
                           placeholder={`Type ${item.label.toLowerCase()} findings...`}
-                          className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
+className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
                         />
                       </div>
                     ))}
@@ -2781,6 +2662,8 @@ const Consultation: React.FC = () => {
                         onClick={() => setPastHistoryExpanded((prev) => !prev)}
                         className="flex w-fit items-center gap-1.5 text-xs font-bold leading-4 text-slate-500 transition hover:text-slate-700"
                       >
+                        Past History
+
                         <svg
                           viewBox="0 0 20 20"
                           fill="currentColor"
@@ -2794,7 +2677,6 @@ const Consultation: React.FC = () => {
                             clipRule="evenodd"
                           />
                         </svg>
-                        Past History
                       </button>
 
                       {pastHistoryExpanded && (
@@ -2914,6 +2796,8 @@ const Consultation: React.FC = () => {
                         onClick={() => setReportsExpanded((prev) => !prev)}
                         className="flex w-fit items-center gap-1.5 text-xs font-bold leading-4 text-slate-500 transition hover:text-slate-700"
                       >
+                        Reports (Previous)
+
                         <svg
                           viewBox="0 0 20 20"
                           fill="currentColor"
@@ -2927,7 +2811,6 @@ const Consultation: React.FC = () => {
                             clipRule="evenodd"
                           />
                         </svg>
-                        Reports (Previous)
                       </button>
 
                       {reportsExpanded && (
@@ -4679,8 +4562,8 @@ const Diagnosis: React.FC<{
         }}
         className="space-y-8"
       >
-        {/* Two Column Fields */}
-        <div className="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-2">
+        {/* Four Column Fields */}
+        <div className="grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
           {/* Pre Diagnosis */}
           <div>
             <label
@@ -4728,28 +4611,6 @@ const Diagnosis: React.FC<{
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
                 <ChevronDownIcon />
               </div>
-            </div>
-          </div>
-
-          {/* Molecular Testing */}
-          <div>
-            <label
-              htmlFor="molecularTesting"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
-              Molecular Testing
-            </label>
-
-            <div className="relative">
-              <input
-                id="molecularTesting"
-                name="molecularTesting"
-                type="text"
-                value={formData.molecularTesting}
-                onChange={handleChange}
-                placeholder="Type molecular testing..."
-                className="block w-full rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-              />
             </div>
           </div>
 
@@ -4876,36 +4737,6 @@ const Diagnosis: React.FC<{
                 <option value="">
                   Select Body Site
                 </option>
-              </select>
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                <ChevronDownIcon />
-              </div>
-            </div>
-          </div>
-
-          {/* Survivor */}
-          <div>
-            <label
-              htmlFor="survivor"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
-              Survivor
-            </label>
-
-            <div className="relative">
-              <select
-                id="survivor"
-                name="survivor"
-                value={formData.survivor}
-                onChange={handleChange}
-                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-              >
-                <option value="">
-                  Select Survivor
-                </option>
-                <option value="Yes">Yes</option>
-                <option value="No">No</option>
               </select>
 
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
@@ -5158,7 +4989,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
 
           {/* Metastasis Sites - shown when M stage is M1+ */}
           {formData.mStage.trim().toUpperCase().startsWith("M1") && (
-            <div className="lg:col-span-2">
+            <div className="col-span-full">
               <label className="mb-2 block text-sm font-semibold text-gray-600">
                 Metastasis Sites
               </label>
@@ -5174,6 +5005,68 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
               />
             </div>
           )}
+
+          {/* Molecular Testing */}
+          <div>
+            <label
+              htmlFor="molecularTesting"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Molecular Testing
+            </label>
+
+            <div className="relative">
+              <input
+                id="molecularTesting"
+                name="molecularTesting"
+                type="text"
+                value={formData.molecularTesting}
+                onChange={handleChange}
+                placeholder="Type molecular testing..."
+                className="block w-full rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              />
+            </div>
+          </div>
+
+          {/* Survivor */}
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-gray-600">
+              Survivor
+            </label>
+
+            <div className="flex h-[38px] items-center gap-4 rounded-md border border-gray-300 bg-white px-3">
+              <label className="flex items-center gap-1.5 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  name="survivor"
+                  checked={formData.survivor === "Yes"}
+                  onChange={() =>
+                    setFormData((previous) => ({
+                      ...previous,
+                      survivor: formData.survivor === "Yes" ? "" : "Yes",
+                    }))
+                  }
+                  className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                />
+                Yes
+              </label>
+              <label className="flex items-center gap-1.5 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  name="survivor"
+                  checked={formData.survivor === "No"}
+                  onChange={() =>
+                    setFormData((previous) => ({
+                      ...previous,
+                      survivor: formData.survivor === "No" ? "" : "No",
+                    }))
+                  }
+                  className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                />
+                No
+              </label>
+            </div>
+          </div>
 
           {/* ICD Code */}
           <div>
