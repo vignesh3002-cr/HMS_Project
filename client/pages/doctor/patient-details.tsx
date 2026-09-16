@@ -23,8 +23,14 @@ import {
 import { computeBsa } from "../../utils/vitals";
 import { generatePrescriptionPdf, type PrescriptionData } from "../../utils/prescriptionPdf";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
-import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
-import { employeeApi } from "../../api/employee.api";
+import {
+  type PatientDocumentItem,
+  loadPatientDocuments,
+  savePatientDocument,
+  deletePatientDocument,
+  downloadDocument,
+  downloadAllDocuments,
+} from "../../utils/patientDocuments";
 
 interface ConsultationState {
   patientId?: string;
@@ -41,6 +47,7 @@ type SummaryPlanItem = {
   protocol_dose: number | null;
   protocol_dose_unit: string | null;
   calculated_dose?: number | string | null;
+  calculated_dose_unit?: string | null;
   formulation: string | null;
   dilution_volume: string | null;
   administration_route: string | null;
@@ -164,41 +171,6 @@ const MedicationPortal: React.FC<{
   const [activeTab, setActiveTab] = useState<Tab>("Medications");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showDischargeDashboard, setShowDischargeDashboard] = useState(false);
-  const [liveProtocolName, setLiveProtocolName] = useState<string | null>(
-    () => (patientId ? localStorage.getItem(`hms_selected_protocol_name_${patientId}`) : null)
-  );
-  const [liveCancerType, setLiveCancerType] = useState<string | null>(
-    () => {
-      try {
-        const raw = localStorage.getItem("hms_diagnosis_selection");
-        return raw ? (JSON.parse(raw) as { cancer_type?: string })?.cancer_type ?? null : null;
-      } catch {
-        return null;
-      }
-    }
-  );
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.patientId === patientId) {
-        setLiveProtocolName(detail.protocolName || null);
-      }
-    };
-    window.addEventListener("protocol-changed", handler);
-    return () => window.removeEventListener("protocol-changed", handler);
-  }, [patientId]);
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.patientId === patientId) {
-        setLiveCancerType(detail.cancerType || null);
-      }
-    };
-    window.addEventListener("cancer-type-changed", handler);
-    return () => window.removeEventListener("cancer-type-changed", handler);
-  }, [patientId]);
 
   /* Move to the next tab in the tabs array with a single click. */
   const goNextTab = () => {
@@ -315,7 +287,14 @@ const MedicationPortal: React.FC<{
             <button onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-slate-500 lg:hidden">
               <i className="fa-solid fa-bars" />
             </button>
-          
+            <button
+              type="button"
+              onClick={goNextTab}
+              className="flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-100"
+            >
+              Next
+              <i className="fa-solid fa-arrow-right text-xs" />
+            </button>
            
           </div>
           <div className="flex items-center gap-5">
@@ -343,7 +322,7 @@ const MedicationPortal: React.FC<{
             <div className="text-sm text-[#64748b] flex items-center space-x-3">
 <span>{patientAgeSex}</span>
             <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-<span className="text-[#1d4ed8] font-semibold">{[liveCancerType || plan?.cancer_subtype || plan?.cancer_type, plan?.cancer_stage].filter(Boolean).join(" ") || "—"}</span>
+<span className="text-[#1d4ed8] font-semibold">{[plan?.cancer_subtype || plan?.cancer_type, plan?.cancer_stage].filter(Boolean).join(" ") || "—"}</span>
             </div>
             </div>
             </div>
@@ -393,7 +372,7 @@ const MedicationPortal: React.FC<{
             <div className="pl-8">
             <div className="bg-blue-50/50 border border-blue-100 rounded-[12px] p-4 w-[220px]">
             <div className="text-[10px] font-bold text-[#1d4ed8] uppercase tracking-wider mb-1.5">INTENT: {plan?.treatment_intent || "—"}</div>
-            <div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">{liveProtocolName || plan?.regimen_name || "—"}</div>
+            <div className="text-[15px] font-bold text-[#1d4ed8] mb-2.5">{plan?.regimen_name || "—"}</div>
             <div className="flex items-center text-xs text-[#64748b] font-medium">
             <span className={`w-2 h-2 rounded-full mr-2 ${plan ? "bg-[#10b981]" : "bg-slate-300"}`}></span> {plan?.treatment_status || "No Plan"}
                     </div>
@@ -632,7 +611,7 @@ const MedicationPortal: React.FC<{
                 </div>
               </>
             ) : activeTab === "History" ? (
-              <HistoryDashboard embedded patientId={patientId} />
+              <HistoryDashboard embedded patientId={patientId} initialPlan={plan} />
             ) : activeTab === "Notes & Documents" ? (
               <PatientNotesDocuments embedded patientId={patientId} />
             ) : (
@@ -1002,6 +981,7 @@ interface ChemoCycleDetail
     ChemotherapyCycleRecord,
     "chemotherapy_vitals" | "chemotherapy_adverse_event"
   > {
+  cycle_day?: number | null;
   planned_date?: string | null;
   actual_date?: string | null;
   next_cycle_date?: string | null;
@@ -1010,6 +990,8 @@ interface ChemoCycleDetail
   remarks?: string | null;
   chemotherapy_vitals?: ChemoVitalsEntry[];
   chemotherapy_adverse_event?: ChemoAdverseEventEntry[];
+  chemotherapy_administration?: any[];
+  [key: string]: any;
 }
 
 const loadCycleDetail = async (
@@ -1019,6 +1001,38 @@ const loadCycleDetail = async (
     `/chemotherapy/cycles/${encodeURIComponent(cycleId)}`
   );
   return response.data?.data ?? null;
+};
+
+const loadCyclesForPlan = async (
+  planId: string
+): Promise<ChemoCycleDetail[]> => {
+  try {
+    const response = await API.get<{ success: boolean; data: ChemoCycleDetail[] }>(
+      `/chemotherapy/plans/${encodeURIComponent(planId)}/cycles`
+    );
+    return response.data?.data ?? [];
+  } catch (err) {
+    console.warn(`loadCyclesForPlan failed for plan ${planId}:`, err);
+    return [];
+  }
+};
+
+const loadAllPlansForPatient = async (
+  patientId: string
+): Promise<SummaryPlan[]> => {
+  try {
+    const response = await API.get<{ success: boolean; data: any }>(
+      "/chemotherapy/plans",
+      { params: { patient_id: patientId, limit: 50 } }
+    );
+    const data = response.data?.data;
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.rows)) return data.rows;
+    return [];
+  } catch (err) {
+    console.warn(`loadAllPlansForPatient failed for ${patientId}:`, err);
+    return [];
+  }
 };
 
 /* ============================================================
@@ -1386,14 +1400,11 @@ function useLatestPatientVitals(
 }
 
 function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
-  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
-  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
   const [activeTab, setActiveTab] = useState("Order Summary");
   const [selectedDay, setSelectedDay] = useState("Day 1");
   const [selectedCycle] = useState(1);
   const [showMedicationPortal, setShowMedicationPortal] = useState(false);
   const [showDischargePortal, setShowDischargePortal] = useState(false);
-  const [protocolVersion, setProtocolVersion] = useState(0);
 
   const [savedPlan, setSavedPlan] = useState<SummaryPlan | null>(null);
   const [planNotice, setPlanNotice] = useState("");
@@ -1427,28 +1438,25 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   >([]);
 
   const location = useLocation();
+  const navigate = useNavigate();
   const consultationState = location.state as ConsultationState | null;
-  const { selectedBranchId } = useBranchFilter();
-
-  /* When the doctor reassigns a protocol in the Treatment Plan step,
-     re-fetch the saved plan so Order Summary reflects the new protocol
-     immediately. */
+  const searchPatientId = new URLSearchParams(location.search).get('patientId');
+  const resolvedPatientId = consultationState?.patientId || searchPatientId || localStorage.getItem('hms_last_patient_id') || '';
   useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (!detail?.patientId || detail.patientId === consultationState?.patientId) {
-        setProtocolVersion((v) => v + 1);
+    if (resolvedPatientId) {
+      localStorage.setItem('hms_last_patient_id', resolvedPatientId);
+      if (!searchPatientId) {
+        navigate(`${location.pathname}?patientId=${resolvedPatientId}`, { replace: true });
       }
-    };
-    window.addEventListener("protocol-changed", handler);
-    return () => window.removeEventListener("protocol-changed", handler);
-  }, [consultationState?.patientId]);
+    }
+  }, [resolvedPatientId, searchPatientId, location.pathname, navigate]);
+  const { selectedBranchId } = useBranchFilter();
 
   /* Latest vitals (encounter + chemo merged) for the header strip.
      Re-runs when the branch selection changes so scoped fallbacks and
      the chemo chain pick up the new x-branch-id header. */
   const { vitalEntries, scopeHint } = useLatestPatientVitals(
-    consultationState?.patientId,
+    resolvedPatientId,
     selectedBranchId
   );
   const summaryHeaderVitals = (label: string) =>
@@ -1461,28 +1469,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   const [labItemsError, setLabItemsError] = useState("");
 
   useEffect(() => {
-    let mounted = true;
-    const fetchAvatar = () => {
-      employeeApi
-        .getMe()
-        .then((res) => {
-          if (!mounted) return;
-          const url = res.data?.data?.employee?.employee_photo_URL || "";
-          setUserAvatarUrl(url);
-          if (url) localStorage.setItem("user_photo", url);
-          else localStorage.removeItem("user_photo");
-          setAvatarLoading(false);
-        })
-        .catch(() => {
-          if (mounted) setAvatarLoading(false);
-        });
-    };
-    fetchAvatar();
-    return () => { mounted = false; };
-  }, []);
-
-  useEffect(() => {
-    const pid = consultationState?.patientId;
+    const pid = resolvedPatientId;
     if (!pid) return;
     let cancelled = false;
     setLabItemsLoading(true);
@@ -1504,7 +1491,12 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
       )
         .then((results) => {
           if (cancelled) return;
-          fetchAllAndFilter(results.filter(Boolean) as LabOrderItemRecord[]);
+          const items = results.filter(Boolean) as LabOrderItemRecord[];
+          if (items.length > 0) {
+            setLabItems(items);
+            return;
+          }
+          fetchAllAndFilter();
         })
         .catch(() => { fetchAllAndFilter(); })
         .finally(() => { if (!cancelled) setLabItemsLoading(false); });
@@ -1512,10 +1504,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
       fetchAllAndFilter();
     }
 
-    /* Lab Validation shows ALL reports for this patient regardless of
-       ordered date (past, present, future). The freshly ordered items
-       from this visit are merged in on top so nothing is hidden. */
-    function fetchAllAndFilter(preferred: LabOrderItemRecord[] = []) {
+    function fetchAllAndFilter() {
       labOrderItemApi
         .getAll()
         .then((response) => {
@@ -1524,16 +1513,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
           const forPatient = allItems.filter(
             (item) => item.lab_order?.patient_history?.patient_id === pid
           );
-          const merged = [
-            ...preferred,
-            ...forPatient.filter(
-              (item) =>
-                !preferred.some(
-                  (p) => p.lab_order_item_id === item.lab_order_item_id
-                )
-            ),
-          ];
-          setLabItems(merged);
+          setLabItems(forPatient);
         })
         .catch((error: any) => {
           if (!cancelled) {
@@ -1550,10 +1530,10 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     }
 
     return () => { cancelled = true; };
-  }, [consultationState?.patientId]);
+  }, [resolvedPatientId]);
 
   useEffect(() => {
-    const patientId = consultationState?.patientId;
+    const patientId = resolvedPatientId;
     if (!patientId) return;
     let cancelled = false;
     patientApi
@@ -1568,10 +1548,10 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [consultationState?.patientId]);
+  }, [resolvedPatientId]);
 
   useEffect(() => {
-    const patientId = consultationState?.patientId;
+    const patientId = resolvedPatientId;
     if (!patientId) return;
     let cancelled = false;
 
@@ -1605,7 +1585,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [consultationState?.patientId, activeTab, selectedBranchId, protocolVersion]);
+  }, [resolvedPatientId, activeTab, selectedBranchId]);
 
   // Pre-fetch doctor-described medications for all cycles
   useEffect(() => {
@@ -1638,14 +1618,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   }, [savedPlan?.chemotherapy_plan_id, selectedBranchId]);
 
   useEffect(() => {
-    /* Prefer the freshly-selected protocol from localStorage (doctor
-       may have changed it in Treatment Plan but not saved the plan yet)
-       over the backend plan's source_protocol_id. */
-    const pid = consultationState?.patientId;
-    const localProtocolId = pid
-      ? localStorage.getItem(`hms_selected_protocol_id_${pid}`)
-      : null;
-    const protocolId = localProtocolId || savedPlan?.source_protocol_id;
+    const protocolId = savedPlan?.source_protocol_id;
     if (!protocolId) {
       setRegimenProtocol(null);
       setRegimenError("");
@@ -1673,7 +1646,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [savedPlan?.source_protocol_id, protocolVersion, consultationState?.patientId]);
+  }, [savedPlan?.source_protocol_id]);
 
   useEffect(() => {
     const planId = savedPlan?.chemotherapy_plan_id;
@@ -1719,7 +1692,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   }, [selectedCycle, savedPlan?.chemotherapy_cycle, cycleMedicationsMap]);
 
   useEffect(() => {
-    const patientId = consultationState?.patientId;
+    const patientId = resolvedPatientId;
     if (!patientId) return;
     let cancelled = false;
 
@@ -1841,10 +1814,10 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [consultationState?.patientId, selectedBranchId]);
+  }, [resolvedPatientId, selectedBranchId]);
 
   useEffect(() => {
-    const patientId = consultationState?.patientId;
+    const patientId = resolvedPatientId;
     if (!patientId) return;
     let cancelled = false;
     API.get<{ success: boolean; data: PatientAllergyRecord[] }>(
@@ -1861,10 +1834,10 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [consultationState?.patientId]);
+  }, [resolvedPatientId]);
 
   useEffect(() => {
-    const patientId = consultationState?.patientId;
+    const patientId = resolvedPatientId;
     if (!patientId) {
       setAdminInstructions([]);
       return;
@@ -1876,7 +1849,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     } catch {
       setAdminInstructions([]);
     }
-  }, [consultationState?.patientId]);
+  }, [resolvedPatientId]);
 
   const patientName = patient
     ? [
@@ -1896,23 +1869,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 
   const patientDisplayId = patient?.patient_id || "";
 
-  const recentCancerTypeFromStorage = (() => {
-    try {
-      const raw = localStorage.getItem("hms_diagnosis_selection");
-      return raw
-        ? (JSON.parse(raw) as { cancer_type?: string; subtype_name?: string })
-        : null;
-    } catch {
-      return null;
-    }
-  })();
-
-  const recentProtocolFromStorage = consultationState?.patientId
-    ? localStorage.getItem(`hms_selected_protocol_name_${consultationState.patientId}`)
-    : null;
-
   const recentCancerType =
-    recentCancerTypeFromStorage?.cancer_type ||
     [savedPlan?.cancer_type, savedPlan?.cancer_subtype]
       .filter(Boolean)
       .join(" ");
@@ -1921,13 +1878,13 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 
   const recentDiagnosis =
     [
-      recentCancerTypeFromStorage?.cancer_type || savedPlan?.cancer_subtype || savedPlan?.cancer_type,
+      savedPlan?.cancer_subtype || savedPlan?.cancer_type,
       savedPlan?.cancer_stage,
     ]
       .filter(Boolean)
       .join(" ");
 
-  const recentTherapy = recentProtocolFromStorage || savedPlan?.regimen_name || "";
+  const recentTherapy = savedPlan?.regimen_name || "";
 
   const recentIntent = savedPlan?.treatment_intent || "";
 
@@ -1949,7 +1906,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     ).padStart(2, "0")}-${d.getFullYear()}`;
   };
 
-  const orderTherapy = recentTherapy || savedPlan?.regimen_name;
+  const orderTherapy = savedPlan?.regimen_name || recentTherapy;
   const orderIntent = savedPlan?.treatment_intent || recentIntent;
 
   const planCycles = (savedPlan?.chemotherapy_cycle ?? []).filter(
@@ -2142,8 +2099,8 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
   } = useDischargeMedicines(savedPlan?.source_protocol_id || "");
 
   const diagnosisOrderEntries = buildOrderEntries([
-    ["Cancer Type", recentCancerTypeFromStorage?.cancer_type || osd?.cancer_types?.cancer_type || savedPlan?.cancer_type],
-    ["Subtype", recentCancerTypeFromStorage?.subtype_name || osd?.cancer_subtypes?.subtype_name || savedPlan?.cancer_subtype],
+    ["Cancer Type", osd?.cancer_types?.cancer_type ?? savedPlan?.cancer_type],
+    ["Subtype", osd?.cancer_subtypes?.subtype_name ?? savedPlan?.cancer_subtype],
     ["Clinical Stage", osd?.clinical_stage ?? savedPlan?.cancer_stage],
     ["Staging System", osd?.staging_system],
     ["T Stage", osd?.t_stage],
@@ -2205,7 +2162,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
         patientPhoto={patientPhoto}
         patientAgeSex={patientAgeSex}
         patientDisplayId={patientDisplayId}
-        patientId={consultationState?.patientId || ""}
+        patientId={resolvedPatientId}
         plan={savedPlan}
         allergies={patientAllergies}
         selectedCycle={selectedCycle}
@@ -2218,7 +2175,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     return (
       <DischargeDetailsPortal
         onBack={() => setShowDischargePortal(false)}
-        patientId={consultationState?.patientId || ""}
+        patientId={resolvedPatientId}
       />
     );
   }
@@ -2247,15 +2204,12 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </div>
 <div className="flex items-center space-x-6">
 <BellNotificationButton size="md" />
-<UserProfileDropdown
-  userName={getUser()?.username || "Doctor"}
-  userSubtext={getUser()?.role || "Doctor"}
-  userAvatar={userAvatarUrl || undefined}
-  avatarLoading={avatarLoading}
-  onLogout={() => { localStorage.clear(); window.location.href = '/login'; }}
-  profilePath="/doctor/profile"
-  notificationsPath="/doctor/notifications"
-/>
+<div className="flex items-center space-x-3 cursor-pointer pl-6 border-l border-[#e2e8f0]">
+<span className="text-sm font-bold text-[#1d4ed8]">HMS</span>
+<div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white">
+<i className="fa-solid fa-user text-sm"></i>
+</div>
+</div>
 </div>
 </header>
 {/* END: Top Header */}
@@ -2379,9 +2333,9 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 </div>
 {/* END: Tabs */}
 {activeTab === "History" ? (
-<HistoryDashboard embedded patientId={consultationState?.patientId} />
+<HistoryDashboard embedded patientId={resolvedPatientId} initialPlan={savedPlan} />
 ) : activeTab === "Notes & Documents" ? (
-<PatientNotesDocuments embedded patientId={consultationState?.patientId} />
+<PatientNotesDocuments embedded patientId={resolvedPatientId} />
 ) : (
 <>
 {planNotice && (
@@ -2392,7 +2346,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 {/* BEGIN: Recent Details Sections (fetched for the selected patient) */}
 {diagnosisOrderEntries.length > 0 && (
 <section className="mb-6 overflow-hidden rounded-[16px] shadow-sm border border-[#e2e8f0] bg-white">
-  <SectionHeader icon="fa-solid fa-file-medical" title={`Diagnosis & Staging — ${[recentCancerTypeFromStorage?.cancer_type || osd?.cancer_types?.cancer_type, recentCancerTypeFromStorage?.subtype_name || osd?.cancer_subtypes?.subtype_name].filter(Boolean).join(" — ") || orderTherapy || "—"}`} badge={osd?.clinical_stage || savedPlan?.cancer_stage || "—"} />
+  <SectionHeader icon="fa-solid fa-file-medical" title={`Diagnosis & Staging — ${[osd?.cancer_types?.cancer_type, osd?.cancer_subtypes?.subtype_name].filter(Boolean).join(" — ") || orderTherapy || "—"}`} badge={osd?.clinical_stage || savedPlan?.cancer_stage || "—"} />
   {renderOrderEntryGrid(diagnosisOrderEntries)}
 </section>
 )}
@@ -2934,9 +2888,12 @@ orderDischargeMeds.map((item, index) => (
 const HistoryDashboard: React.FC<{
   embedded?: boolean;
   patientId?: string;
-}> = ({ embedded = false, patientId }) => {
-  const [plan, setPlan] = useState<SummaryPlan | null>(null);
+  initialPlan?: SummaryPlan | null;
+}> = ({ embedded = false, patientId: propPatientId, initialPlan }) => {
+  const patientId = propPatientId || '';
+  const [plan, setPlan] = useState<SummaryPlan | null>(initialPlan ?? null);
   const [cycleDetails, setCycleDetails] = useState<ChemoCycleDetail[]>([]);
+  const [regimenProtocol, setRegimenProtocol] = useState<any>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
   const [prescriptions, setPrescriptions] = useState<any[]>([]);
@@ -2945,77 +2902,66 @@ const HistoryDashboard: React.FC<{
   const [selectedPrescription, setSelectedPrescription] = useState<any | null>(null);
   const [prescriptionIndex, setPrescriptionIndex] = useState<number | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const { vitals: patientVitals } = useLatestPatientVitals(patientId);
+  const [timelineViewMode, setTimelineViewMode] = useState<"one-by-one" | "list">("one-by-one");
+  const [activeCycleIndex, setActiveCycleIndex] = useState<number>(0);
+  const timelineScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const protocolId = plan?.source_protocol_id;
+    if (!protocolId) {
+      setRegimenProtocol(null);
+      return;
+    }
+    let cancelled = false;
+    API.get(`/chemotherapy/regimen-protocols/${encodeURIComponent(protocolId)}`)
+      .then((res) => {
+        if (!cancelled) {
+          setRegimenProtocol(res.data?.data ?? null);
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to load regimen protocol in HistoryDashboard:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [plan?.source_protocol_id]);
 
 
   /* Real treatment history for THIS selected patient:
       latest chemo plan (GET /chemotherapy/plans?patient_id=) plus
       each cycle's recorded vitals + adverse events
       (GET /chemotherapy/cycles/:id). */
-  const buildPrescriptionData = (p: any) => {
+  const buildPrescriptionData = (p: any): any => {
     return {
       prescription_id: p.prescription_id,
       prescription_date: p.prescription_date,
       advice: p.advice,
-      visit_type: p.visit_type,
-      chief_complaint: p.chief_complaint,
-      clinical_notes: p.clinical_notes,
-      followup_date: p.followup_date,
-      prescription_status: p.prescription_status,
-      branch_name: p.branch?.branch_name,
-      department_name: p.department_master?.department_name,
-      patient_vitals: p.patient_vitals || null,
-      patient_allergies: p.patient_allergies || null,
-      patient_symptoms: (p.patient_symptoms || []).map((s:any) => ({
-        symptom: s.symptom_master?.symptom_name || s.symptomMaster?.symptom_name || s.symptom_name || s.symptom || '',
-        severity: s.severity || s.status || '',
-        notes: s.notes || s.clinical_notes || s.remarks || '',
-        symptom_master: s.symptom_master || s.symptomMaster || null,
-      })),
       patient_history: {
         patient_first_name: p.patient_history?.patient_bio_data?.patient_first_name || '',
         patient_last_name: p.patient_history?.patient_bio_data?.patient_last_name || '',
         patient_id: p.patient_history?.patient_bio_data?.patient_id || '',
         patient_display_id: p.patient_history?.patient_bio_data?.patient_id || '',
-        patient_mobile: p.patient_history?.patient_bio_data?.patient_primary_mobile || '',
-        visit_date: p.patient_history?.visit_date || '',
-        patient_dob: p.patient_history?.patient_bio_data?.patient_dob || p.patient_history?.patient_bio_data?.date_of_birth || '',
-        age: p.patient_history?.patient_bio_data?.age ?? p.patient_history?.patient_bio_data?.patient_age,
-        patient_gender: p.patient_history?.patient_bio_data?.patient_gender || p.patient_history?.patient_bio_data?.gender,
       },
       employees: {
         first_name: p.employees?.first_name || '',
         last_name: p.employees?.last_name || '',
         specialization: p.employees?.specialization || '',
       },
-      diagnosis: {
-        diagnosis_name: p.diagnosis?.diagnosis_name || '',
-        icd10_code: p.diagnosis?.icd_code || '',
-      },
-      prescription_items: (() => {
-        const items = p.prescription_items || p.chemotherapy_plan_items || [];
-        return items.map((it: any) => {
-          const medicineName = it.medicine_name || it.medicine_master?.medicine_name || it.medicine?.medicine_name || it.medicine_id || '';
-          const dosage = it.dosage ?? it.protocol_dose ?? it.calculated_dose ?? '';
-          const unit = it.unit ?? it.protocol_dose_unit ?? '';
-          const frequency = it.frequency ?? (it.administration_day ? `Day ${it.administration_day}` : '');
-          const instruction = it.instruction ?? it.remarks ?? '';
-          const drugRole = (it.drug_role || it.drug_type || '').toString().toUpperCase().trim() || '';
-          return {
-            medicine_name: medicineName,
-            medicine_master: it.medicine_master || it.medicine,
-            dosage,
-            dose: it.dose ?? it.protocol_dose,
-            unit,
-            route: it.route ?? it.administration_route,
-            administration_route: it.administration_route || it.route,
-            frequency,
-            instruction,
-            remarks: it.remarks,
-            cycle_day: it.cycle_day,
-            drug_role: drugRole,
-          };
-        });
-      })(),
+      patient_vitals: null,
+      patient_allergies: null,
+      patient_symptoms: null,
+      prescription_items: (p.prescription_items || []).map((it: any) => ({
+        medicine_name: it.medicine_master?.medicine_name || '',
+        medicine_master: it.medicine_master,
+        dosage: it.dosage,
+        unit: it.unit,
+        route: it.route,
+        frequency: it.frequency,
+        instruction: it.instruction,
+        drug_role: it.drug_role,
+      })),
     };
   };
 
@@ -3056,13 +3002,7 @@ const HistoryDashboard: React.FC<{
               try {
                 const symRes = await API.get(`/clinical-details/encounters/${enc.encounter_no}`);
                 const complete = symRes.data?.data || {};
-                const rawSymptoms = complete.symptoms || symRes.data?.data?.symptoms || [];
-                symptoms = rawSymptoms.map((s:any) => ({
-                  symptom: s.symptom_master?.symptom_name || s.symptomMaster?.symptom_name || s.symptom_name || s.symptom || '',
-                  severity: s.severity || s.status || '',
-                  notes: s.notes || s.clinical_notes || s.remarks || '',
-                  symptom_master: s.symptom_master || s.symptomMaster || null,
-                }));
+                symptoms = complete.symptoms || symRes.data?.data?.symptoms || [];
               } catch {}
             }
           }
@@ -3071,9 +3011,9 @@ const HistoryDashboard: React.FC<{
         }
       }
       const data = buildPrescriptionData(p);
-      data.patient_vitals = vitals || data.patient_vitals;
-      data.patient_allergies = allergies || data.patient_allergies;
-      data.patient_symptoms = (symptoms && symptoms.length > 0) ? symptoms : data.patient_symptoms;
+      data.patient_vitals = vitals;
+      data.patient_allergies = allergies;
+      data.patient_symptoms = symptoms;
       const { url } = await generatePrescriptionPdf(data as any);
       setSelectedPrescription(p);
       setPrescriptionIndex(index);
@@ -3091,7 +3031,8 @@ const HistoryDashboard: React.FC<{
   };
 
   useEffect(() => {
-    if (!patientId) {
+    const resolvedPid = patientId || propPatientId || localStorage.getItem("hms_last_patient_id") || "";
+    if (!resolvedPid) {
       setPlan(null);
       setCycleDetails([]);
       setHistoryError(
@@ -3102,38 +3043,120 @@ const HistoryDashboard: React.FC<{
     let cancelled = false;
     setHistoryLoading(true);
     setHistoryError("");
-    loadLatestChemoPlan(patientId)
-      .then(async (loaded) => {
-        if (cancelled) return;
-        setPlan(loaded);
-        const cycles = (loaded?.chemotherapy_cycle ?? []).filter(
-          (cycle) => cycle.chemotherapy_cycle_id
+
+    const fetchChemoHistory = async () => {
+      try {
+        // 1. Fetch latest chemotherapy plan and all patient plans
+        let activePlan: SummaryPlan | null = null;
+        try {
+          activePlan = await loadLatestChemoPlan(resolvedPid);
+        } catch (err) {
+          console.warn("loadLatestChemoPlan failed, trying all plans listing", err);
+        }
+
+        const patientPlans = await loadAllPlansForPatient(resolvedPid);
+        if (!activePlan && patientPlans.length > 0) {
+          activePlan = patientPlans[0];
+        }
+        if (!activePlan && initialPlan) {
+          activePlan = initialPlan;
+        }
+
+        // 2. Fetch all recorded chemotherapy cycles from backend
+        const allCycles: ChemoCycleDetail[] = [];
+        const planIds = new Set<string>();
+        if (activePlan?.chemotherapy_plan_id) {
+          planIds.add(activePlan.chemotherapy_plan_id);
+        }
+        if (initialPlan?.chemotherapy_plan_id) {
+          planIds.add(initialPlan.chemotherapy_plan_id);
+        }
+        patientPlans.forEach((p) => {
+          if (p?.chemotherapy_plan_id) planIds.add(p.chemotherapy_plan_id);
+        });
+
+        for (const pid of planIds) {
+          const cycles = await loadCyclesForPlan(pid);
+          if (cycles.length > 0) {
+            allCycles.push(...cycles);
+          }
+        }
+
+        // Also fetch individual cycle details for any cycles referenced in activePlan or initialPlan
+        const fetchedIds = new Set(allCycles.map((c) => c.chemotherapy_cycle_id).filter(Boolean));
+        const combinedRefCycles = [
+          ...(activePlan?.chemotherapy_cycle ?? []),
+          ...(initialPlan?.chemotherapy_cycle ?? []),
+        ];
+        const extraCycles = combinedRefCycles.filter(
+          (c) => c.chemotherapy_cycle_id && !fetchedIds.has(c.chemotherapy_cycle_id)
         );
-        const details = await Promise.all(
-          cycles.map((cycle) =>
-            loadCycleDetail(cycle.chemotherapy_cycle_id as string).catch(
-              () => null
-            )
-          )
-        );
-        if (!cancelled) {
-          setCycleDetails(
-            details.filter(
-              (detail): detail is ChemoCycleDetail => detail !== null
+
+        if (extraCycles.length > 0) {
+          const loadedExtra = await Promise.all(
+            extraCycles.map((c) =>
+              loadCycleDetail(c.chemotherapy_cycle_id as string).catch(() => null)
             )
           );
+          allCycles.push(...loadedExtra.filter((d): d is ChemoCycleDetail => d !== null));
         }
-      })
-      .catch(() => {
-        if (!cancelled) setHistoryError("Failed to load treatment history.");
-      })
-      .finally(() => {
-        if (!cancelled) setHistoryLoading(false);
-      });
+
+        // Deduplicate cycles by cycle ID or cycle number
+        const dedupedMap = new Map<string, ChemoCycleDetail>();
+        allCycles.forEach((c) => {
+          const key = c.chemotherapy_cycle_id || `cycle-${c.cycle_number}`;
+          if (!dedupedMap.has(key)) {
+            dedupedMap.set(key, c);
+          }
+        });
+        const finalCycles = Array.from(dedupedMap.values()).sort(
+          (a, b) => (a.cycle_number ?? 0) - (b.cycle_number ?? 0)
+        );
+
+        if (cancelled) return;
+
+        // 3. Update plan with fully fetched cycle records
+        if (activePlan) {
+          const formattedCycles = finalCycles.map((c) => ({
+            chemotherapy_cycle_id: c.chemotherapy_cycle_id,
+            cycle_number: c.cycle_number,
+            cycle_day: c.cycle_day,
+            planned_date: c.planned_date,
+            actual_date: c.actual_date,
+            next_cycle_date: c.next_cycle_date,
+            cycle_status: c.cycle_status,
+            completion_status: c.completion_status,
+            remarks: c.remarks,
+          }));
+
+          setPlan({
+            ...activePlan,
+            chemotherapy_cycle:
+              formattedCycles.length > 0
+                ? formattedCycles
+                : activePlan.chemotherapy_cycle ?? [],
+          });
+        } else {
+          setPlan(null);
+        }
+
+        setCycleDetails(finalCycles);
+      } catch (err: any) {
+        if (!cancelled) {
+          setHistoryError(err?.message || "Failed to load treatment history.");
+        }
+      } finally {
+        if (!cancelled) {
+          setHistoryLoading(false);
+        }
+      }
+    };
+
+    fetchChemoHistory();
     return () => {
       cancelled = true;
     };
-  }, [patientId]);
+  }, [patientId, initialPlan]);
 
   useEffect(() => {
     if (!patientId) {
@@ -3185,70 +3208,124 @@ const HistoryDashboard: React.FC<{
       b.cycle_number - a.cycle_number
   );
 
-  /* Timeline entries straight from the saved cycles. */
-  const timelineItems = planCyclesSorted.map((cycle, index) => {
-    const start = fmtHistoryDate(cycle.planned_date);
-    const end =
-      fmtHistoryDate(cycle.actual_date) || fmtHistoryDate(cycle.next_cycle_date);
-    const status = (cycle.cycle_status ?? "PLANNED").toUpperCase();
-    return {
-      cycle: `CYCLE ${String(cycle.cycle_number).padStart(2, "0")}${
-        index === 0 && status === "COMPLETED" ? " (LATEST)" : ""
-      }`,
-      date: end && start !== end ? `${start} - ${end}` : start,
-      description:
-        cycle.remarks?.trim() ||
-        `Status: ${status}${
-          cycle.completion_status
-            ? ` · Completion: ${cycle.completion_status}`
-            : ""
-        }`,
-      final: index === 0,
-      status,
-    };
-  });
+  const currentCycleInfo = (() => {
+    if (!plan?.treatment_start_date || !plan?.cycle_interval_days) return null;
+    const start = new Date(plan.treatment_start_date);
+    if (Number.isNaN(start.getTime())) return null;
+    const interval = plan.cycle_interval_days || 1;
+    const planned = plan.planned_cycles || 1;
+    const daysElapsed = Math.floor(
+      (Date.now() - start.getTime()) / 86400000,
+    );
+    let cycle = daysElapsed < 0 ? 1 : Math.floor(daysElapsed / interval) + 1;
+    if (planned > 0 && cycle > planned) cycle = planned;
+    const d = new Date(start);
+    d.setDate(d.getDate() + (cycle - 1) * interval);
+    return { cycle, date: fmtHistoryDate(d.toISOString()) };
+  })();
 
   /* Cycle-history table rows: agent/dose come from the plan's
-     PRIMARY items; outcome is the real cycle_status. */
+     PRIMARY items (or all items if not tagged); outcome is the real cycle_status. */
   const primaryPlanItems = (plan?.chemotherapy_plan_items ?? []).filter(
     (item) => (item.drug_role ?? "").toUpperCase() === "PRIMARY"
   );
-  const cycleHistoryRows = planCyclesSorted
-    .slice()
-    .reverse()
-    .map((cycle) => {
-      const detail = cycleDetails.find(
-        (entry) =>
-          entry.chemotherapy_cycle_id === cycle.chemotherapy_cycle_id
-      );
-      const status = (
-        detail?.cycle_status ??
-        cycle.cycle_status ??
-        "PLANNED"
-      ).toUpperCase();
-      return {
-        cycle: `CYCLE ${String(cycle.cycle_number).padStart(2, "0")}`,
-        dates: [
-          fmtHistoryDate(cycle.planned_date),
-          fmtHistoryDate(cycle.actual_date) ||
-            fmtHistoryDate(cycle.next_cycle_date),
-        ]
+  const relevantPlanItems =
+    primaryPlanItems.length > 0
+      ? primaryPlanItems
+      : (plan?.chemotherapy_plan_items ?? []);
+
+  const cyclesToDisplay =
+    planCyclesSorted.length > 0
+      ? [...planCyclesSorted].sort((a, b) => a.cycle_number - b.cycle_number)
+      : plan?.planned_cycles
+      ? Array.from({ length: plan.planned_cycles }, (_, idx) => {
+          const cNum = idx + 1;
+          const interval = plan?.cycle_interval_days || 21;
+          const start = plan?.treatment_start_date ? new Date(plan.treatment_start_date) : null;
+          let pDate: string | null = null;
+          if (start && !Number.isNaN(start.getTime())) {
+            const d = new Date(start);
+            d.setDate(start.getDate() + idx * interval);
+            pDate = d.toISOString();
+          }
+          return {
+            chemotherapy_cycle_id: undefined,
+            cycle_number: cNum,
+            cycle_day: 1,
+            planned_date: pDate,
+            actual_date: null,
+            next_cycle_date: null,
+            cycle_status: "PLANNED",
+            completion_status: "PENDING",
+            remarks: null,
+          };
+        })
+      : [];
+
+  const cycleHistoryRows = cyclesToDisplay.map((cycle) => {
+    const detail = cycleDetails.find(
+      (entry) =>
+        (entry.chemotherapy_cycle_id &&
+          entry.chemotherapy_cycle_id === cycle.chemotherapy_cycle_id) ||
+        entry.cycle_number === cycle.cycle_number
+    );
+    const status = (
+      detail?.cycle_status ??
+      cycle.cycle_status ??
+      "PLANNED"
+    ).toUpperCase();
+
+    const plannedDoseStr =
+      relevantPlanItems
+        .map((item) => {
+          const dose = item.protocol_dose ?? item.calculated_dose;
+          if (!dose) return null;
+          const name = item.medicine_master?.medicine_name;
+          const unit = item.protocol_dose_unit || item.calculated_dose_unit || "";
+          return relevantPlanItems.length > 1 && name
+            ? `${name}: ${dose} ${unit}`.trim()
+            : `${dose} ${unit}`.trim();
+        })
+        .filter(Boolean)
+        .join("; ") ||
+      (relevantPlanItems[0]?.protocol_dose != null
+        ? `${relevantPlanItems[0].protocol_dose} ${
+            relevantPlanItems[0].protocol_dose_unit ?? ""
+          }`.trim()
+        : "—");
+
+    const administeredDoseStr = (detail?.chemotherapy_administration ?? [])
+      .map((adm: any) => {
+        if (adm.administered_dose == null) return null;
+        return `${adm.administered_dose} ${adm.administered_dose_unit ?? ""}`.trim();
+      })
+      .filter(Boolean)
+      .join("; ");
+
+    const actualDoseStr =
+      administeredDoseStr || relevantPlanItems[0]?.calculated_dose || "—";
+
+    return {
+      cycle: `CYCLE ${String(cycle.cycle_number).padStart(2, "0")}`,
+      dates: [
+        fmtHistoryDate(detail?.planned_date || cycle.planned_date),
+        fmtHistoryDate(detail?.actual_date || cycle.actual_date) ||
+          fmtHistoryDate(detail?.next_cycle_date || cycle.next_cycle_date),
+      ]
+        .filter(Boolean)
+        .join(" - "),
+      agent:
+        relevantPlanItems
+          .map((item) => item.medicine_master?.medicine_name)
           .filter(Boolean)
-          .join(" - "),
-        agent:
-          primaryPlanItems
-            .map((item) => item.medicine_master?.medicine_name)
-            .filter(Boolean)
-            .join(", ") || "—",
-        plannedDose: primaryPlanItems[0]?.protocol_dose != null
-          ? `${primaryPlanItems[0].protocol_dose} ${
-              primaryPlanItems[0].protocol_dose_unit ?? ""
-            }`.trim()
-          : "—",
-        actualDose: primaryPlanItems[0]?.calculated_dose ?? "—",
-        status,
-      };
-    });
+          .join(", ") ||
+        plan?.regimen_name ||
+        "—",
+      plannedDose: plannedDoseStr,
+      actualDose: actualDoseStr,
+      status,
+    };
+  });
 
   /* Medication history rows from the plan's saved items. */
   const medicationRows = (plan?.chemotherapy_plan_items ?? []).map((item) => ({
@@ -3338,15 +3415,353 @@ const HistoryDashboard: React.FC<{
         weightTrend.length
       : null;
 
+  const fmtTimelineDate = (value?: string | Date | null): string => {
+    if (!value) return "";
+    const d = typeof value === "string" ? new Date(value) : value;
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  };
+
   const historyTimelineRange = (() => {
     const dates = planCyclesSorted
-      .map((cycle) => cycle.planned_date)
+      .map((cycle) => cycle.actual_date || cycle.planned_date)
       .filter(Boolean)
       .sort();
-    if (dates.length === 0) return "";
-    const first = fmtHistoryDate(dates[0]);
-    const last = fmtHistoryDate(dates[dates.length - 1]);
-    return first === last ? first : `${first} - ${last}`;
+
+    if (dates.length > 0) {
+      const first = fmtTimelineDate(dates[0]);
+      const last = fmtTimelineDate(dates[dates.length - 1]);
+      return first === last ? first : `${first} - ${last}`;
+    }
+
+    if (plan?.treatment_start_date) {
+      const d = new Date(plan.treatment_start_date);
+      if (!Number.isNaN(d.getTime())) {
+        const startMonthYear = d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+        if ((plan?.treatment_status ?? "").toUpperCase() === "COMPLETED" && plan?.expected_end_date) {
+          const endD = new Date(plan.expected_end_date);
+          const endMonthYear = !Number.isNaN(endD.getTime())
+            ? endD.toLocaleDateString("en-GB", { month: "short", year: "numeric" })
+            : "";
+          return endMonthYear ? `${startMonthYear} - ${endMonthYear}` : `${startMonthYear} - Present`;
+        }
+        return `${startMonthYear} - Present`;
+      }
+    }
+
+    return "No treatment dates recorded";
+  })();
+
+  /* Timeline entries straight from the patient's plan and saved cycles with clear status categories.
+     If a cycle spans multiple days, each day is rendered as its own distinct card
+     (e.g., CYCLE 01 DAY 01, CYCLE 01 DAY 02) to provide complete clarity. */
+  const timelineItems = (() => {
+    if (!plan && planCyclesSorted.length === 0 && !currentCycleInfo) {
+      return [];
+    }
+
+    const isPlanCompleted =
+      (plan?.treatment_status ?? "").toUpperCase() === "COMPLETED" ||
+      (plan?.planned_cycles != null &&
+        plan?.completed_cycles != null &&
+        plan.completed_cycles >= plan.planned_cycles);
+
+    const inProgressCycle = planCyclesSorted.find(
+      (c) => (c.cycle_status ?? "").toUpperCase() === "IN_PROGRESS"
+    );
+    const activeCycleNum = isPlanCompleted
+      ? null
+      : inProgressCycle
+      ? inProgressCycle.cycle_number
+      : currentCycleInfo?.cycle ?? (plan?.completed_cycles ? plan.completed_cycles + 1 : 1);
+
+    const maxRecordedCycle = planCyclesSorted.reduce(
+      (max, c) => Math.max(max, c.cycle_number || 0),
+      0
+    );
+
+    const totalCycles = Math.max(
+      plan?.planned_cycles || (maxRecordedCycle > 0 ? maxRecordedCycle : 6),
+      plan?.completed_cycles || 0,
+      maxRecordedCycle,
+      activeCycleNum || 0,
+      1
+    );
+
+    const interval = plan?.cycle_interval_days || 21;
+    const startDate = plan?.treatment_start_date ? new Date(plan.treatment_start_date) : null;
+
+    const existingMap = new Map();
+    const existingDayMap = new Map();
+    planCyclesSorted.forEach((c) => {
+      if (c.cycle_number != null) {
+        existingMap.set(c.cycle_number, c);
+        const dayKey = `${c.cycle_number}-${c.cycle_day ?? 1}`;
+        if (!existingDayMap.has(dayKey)) {
+          existingDayMap.set(dayKey, c);
+        }
+      }
+    });
+
+    const getDaysForCycle = (cNum: number): number[] => {
+      const set = new Set<number>();
+      const explicitDays = Number(regimenProtocol?.no_of_days);
+      if (Number.isFinite(explicitDays) && explicitDays > 0) {
+        for (let d = 1; d <= explicitDays; d++) set.add(d);
+      }
+      (regimenProtocol?.chemotherapy_regimen_protocol_days ?? []).forEach((d: any) => {
+        const num = Number(d.day_number);
+        if (Number.isFinite(num) && num > 0) set.add(num);
+      });
+      (regimenProtocol?.chemotherapy_regimen_protocol_items ?? []).forEach((item: any) => {
+        const num = Number(item.administration_day ?? item.cycle_day);
+        if (Number.isFinite(num) && num > 0) set.add(num);
+      });
+      (plan?.chemotherapy_plan_items ?? []).forEach((item) => {
+        const num = Number(item.administration_day ?? item.cycle_day);
+        if (Number.isFinite(num) && num > 0) set.add(num);
+      });
+      const matchingCycles = planCyclesSorted.filter((c) => c.cycle_number === cNum);
+      matchingCycles.forEach((c) => {
+        if (c.cycle_day != null && Number(c.cycle_day) > 0) set.add(Number(c.cycle_day));
+        (c.chemotherapy_administration ?? []).forEach((adm: any) => {
+          if (adm.administration_day != null && Number(adm.administration_day) > 0) {
+            set.add(Number(adm.administration_day));
+          }
+        });
+      });
+      const sorted = Array.from(set).sort((a, b) => a - b);
+      return sorted.length > 0 ? sorted : [1];
+    };
+
+    const items: Array<{
+      id: string;
+      cycle: string;
+      date: string;
+      description: string;
+      final: boolean;
+      status: string;
+      category: "COMPLETED" | "CURRENT" | "UPCOMING";
+      cycleNumber: number;
+      dayNumber: number;
+    }> = [];
+
+    // Reverse order from totalCycles down to Cycle 1 (Cycle 6 at top, Cycle 1 at bottom)
+    for (let cNum = totalCycles; cNum >= 1; cNum--) {
+      const existing = existingMap.get(cNum);
+      const detail = existing
+        ? cycleDetails.find((d) => d.chemotherapy_cycle_id === existing.chemotherapy_cycle_id)
+        : null;
+
+      const isCompleted =
+        isPlanCompleted ||
+        (existing && (existing.cycle_status ?? "").toUpperCase() === "COMPLETED") ||
+        (plan?.completed_cycles != null && cNum <= plan.completed_cycles) ||
+        (activeCycleNum != null && cNum < activeCycleNum);
+
+      const isCurrent =
+        !isCompleted &&
+        Boolean(
+          (existing && (existing.cycle_status ?? "").toUpperCase() === "IN_PROGRESS") ||
+            (activeCycleNum && cNum === activeCycleNum)
+        );
+
+      const cycleDaysAsc = getDaysForCycle(cNum);
+      const hasManyDays = cycleDaysAsc.length > 1;
+      const isFinalCycle = cNum === totalCycles;
+      const maxCycleDay = cycleDaysAsc[cycleDaysAsc.length - 1];
+      // Highest day on top and lowest day of the cycle at bottom
+      const cycleDaysDescending = [...cycleDaysAsc].sort((a, b) => b - a);
+
+      for (const dNum of cycleDaysDescending) {
+        const isFinalDay = dNum === maxCycleDay;
+        const isFinalCard = isFinalCycle && isFinalDay;
+
+        const specificCycleDay = existingDayMap.get(`${cNum}-${dNum}`);
+        const specificDetail = specificCycleDay
+          ? cycleDetails.find((d) => d.chemotherapy_cycle_id === specificCycleDay.chemotherapy_cycle_id)
+          : null;
+
+        // Determine category for this day
+        let dayCategory: "COMPLETED" | "CURRENT" | "UPCOMING" = "UPCOMING";
+        if (
+          isCompleted ||
+          (specificCycleDay && (specificCycleDay.cycle_status ?? "").toUpperCase() === "COMPLETED")
+        ) {
+          dayCategory = "COMPLETED";
+        } else if (activeCycleNum != null && cNum > activeCycleNum) {
+          dayCategory = "UPCOMING";
+        } else if (isCurrent) {
+          const dayAdmin = (detail?.chemotherapy_administration ?? existing?.chemotherapy_administration ?? []).find(
+            (adm: any) => Number(adm.administration_day) === dNum
+          );
+          if (dayAdmin && (dayAdmin.administration_status === "Completed" || dayAdmin.infusion_completed)) {
+            dayCategory = "COMPLETED";
+          } else if (currentCycleInfo?.day != null && hasManyDays) {
+            if (dNum < currentCycleInfo.day) {
+              dayCategory = "COMPLETED";
+            } else if (dNum === currentCycleInfo.day) {
+              dayCategory = "CURRENT";
+            } else {
+              dayCategory = "UPCOMING";
+            }
+          } else {
+            dayCategory = dNum === 1 || !hasManyDays ? "CURRENT" : "UPCOMING";
+          }
+        } else {
+          dayCategory = "UPCOMING";
+        }
+
+        // Dynamic real date for this day
+        let dayDateStr = "";
+        if (specificCycleDay?.actual_date || specificCycleDay?.planned_date) {
+          const act = fmtTimelineDate(specificDetail?.actual_date || specificCycleDay.actual_date);
+          const pln = fmtTimelineDate(specificDetail?.planned_date || specificCycleDay.planned_date);
+          if (act && pln && act !== pln) {
+            dayDateStr = `${pln} - ${act}`;
+          } else {
+            dayDateStr = act || pln || "";
+          }
+        }
+
+        if (!dayDateStr) {
+          const dayAdmin = (detail?.chemotherapy_administration ?? existing?.chemotherapy_administration ?? []).find(
+            (adm: any) => Number(adm.administration_day) === dNum
+          );
+          if (dayAdmin?.administration_date) {
+            dayDateStr = fmtTimelineDate(dayAdmin.administration_date);
+          }
+        }
+
+        if (!dayDateStr && (detail?.actual_date || existing?.actual_date || detail?.planned_date || existing?.planned_date)) {
+          const baseDateVal = detail?.actual_date || existing?.actual_date || detail?.planned_date || existing?.planned_date;
+          const baseDate = new Date(baseDateVal as string);
+          if (!Number.isNaN(baseDate.getTime())) {
+            if (dNum === 1 || !hasManyDays) {
+              const plannedStr = fmtTimelineDate(detail?.planned_date || existing?.planned_date);
+              const actualStr = fmtTimelineDate(detail?.actual_date || existing?.actual_date);
+              if (plannedStr && actualStr && plannedStr !== actualStr) {
+                dayDateStr = `${plannedStr} - ${actualStr}`;
+              } else {
+                dayDateStr = actualStr || plannedStr || fmtTimelineDate(baseDate);
+              }
+            } else {
+              const offsetDate = new Date(baseDate);
+              offsetDate.setDate(offsetDate.getDate() + (dNum - 1));
+              dayDateStr = fmtTimelineDate(offsetDate);
+            }
+          }
+        }
+
+        if (!dayDateStr && startDate && !Number.isNaN(startDate.getTime())) {
+          const d = new Date(startDate);
+          d.setDate(startDate.getDate() + (cNum - 1) * interval + (dNum - 1));
+          dayDateStr = fmtTimelineDate(d);
+        }
+
+        // Title: CYCLE 01 DAY 01, CYCLE 01 DAY 02 if multi-day, else CYCLE 01
+        let cycleTitle = hasManyDays
+          ? `CYCLE ${String(cNum).padStart(2, "0")} DAY ${String(dNum).padStart(2, "0")}`
+          : `CYCLE ${String(cNum).padStart(2, "0")}`;
+
+        if (isFinalCard) {
+          cycleTitle += " (FINAL)";
+        }
+
+        // Dynamic description from drugs scheduled for this day, remarks, or adverse events
+        const dayMedicines = (plan?.chemotherapy_plan_items ?? [])
+          .filter((item) => {
+            if (!hasManyDays) return true;
+            const itemDay = Number(item.administration_day ?? item.cycle_day ?? 1);
+            return itemDay === dNum;
+          })
+          .map((item) => item.medicine_master?.medicine_name)
+          .filter(Boolean);
+
+        let description = "";
+        if (dayMedicines.length > 0) {
+          description = `Administered: ${dayMedicines.join(", ")}.`;
+        }
+
+        const remarksText =
+          specificDetail?.remarks ||
+          detail?.remarks ||
+          specificCycleDay?.remarks ||
+          existing?.remarks;
+        if (remarksText?.trim()) {
+          description = description
+            ? `${description} ${remarksText.trim()}`
+            : remarksText.trim();
+        }
+
+        if (!description) {
+          const adverseEvents =
+            specificDetail?.chemotherapy_adverse_event ??
+            detail?.chemotherapy_adverse_event ??
+            existing?.chemotherapy_adverse_event ??
+            [];
+          if (adverseEvents.length > 0) {
+            const names = adverseEvents
+              .map((ae) => {
+                const grade = ae.ctcae_grade || ae.reaction_grade || ae.severity;
+                return `${ae.adverse_event_name || "Adverse event"}${
+                  grade ? ` (Grade ${grade})` : ""
+                }`;
+              })
+              .join(", ");
+            description = `Adverse events: ${names}.`;
+          }
+        }
+
+        if (!description) {
+          const dayLabel = hasManyDays
+            ? `Day ${String(dNum).padStart(2, "0")}`
+            : "Cycle";
+          if (dayCategory === "CURRENT") {
+            description = plan?.regimen_name
+              ? `${dayLabel} in progress per ${plan.regimen_name} protocol.`
+              : `${dayLabel} in progress as scheduled.`;
+          } else if (dayCategory === "COMPLETED") {
+            const comp =
+              specificDetail?.completion_status ||
+              detail?.completion_status ||
+              existing?.completion_status;
+            description = comp
+              ? `${dayLabel} completed (${comp.replace(/_/g, " ")}).`
+              : isFinalCard
+              ? "Protocol completed. All planned cycles successfully administered."
+              : `${dayLabel} completed as scheduled.`;
+          } else {
+            description = hasManyDays
+              ? `Scheduled for Day ${String(dNum).padStart(2, "0")} administration per protocol.`
+              : "Scheduled per treatment protocol.";
+          }
+        }
+
+        const status = (
+          specificCycleDay?.cycle_status ||
+          (dayCategory === "COMPLETED"
+            ? "COMPLETED"
+            : dayCategory === "CURRENT"
+            ? "IN_PROGRESS"
+            : "SCHEDULED")
+        ).toUpperCase();
+
+        items.push({
+          id: `cycle-${cNum}-day-${dNum}`,
+          cycle: cycleTitle,
+          date: dayDateStr,
+          description,
+          final: isFinalCard,
+          status,
+          category: dayCategory,
+          cycleNumber: cNum,
+          dayNumber: dNum,
+        });
+      }
+    }
+
+    return items;
   })();
 
   /* =========================================================
@@ -3377,7 +3792,7 @@ const HistoryDashboard: React.FC<{
       <div className="p-6 grid lg:grid-cols-3 gap-6 bg-slate-50/50">
         {/* LEFT */}
         <div className="lg:col-span-2">
-          <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+          <div id="treatment-timeline-section" className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-2">
                 <i className="fa-solid fa-chart-line text-blue-600" />
@@ -3393,9 +3808,12 @@ const HistoryDashboard: React.FC<{
             </div>
 
             {/* Timeline */}
-            <div className="relative pl-4 space-y-6">
+            <div className="relative pl-4 space-y-4 max-h-[560px] overflow-y-auto pr-2" style={{ scrollbarWidth: "thin", scrollbarColor: "#2563eb #f1f5f9" }}>
               {timelineItems.length > 0 && (
-                <div className="absolute left-[21px] top-4 bottom-4 w-px bg-gray-200" />
+                <div
+                  aria-hidden="true"
+                  className="absolute left-[21px] top-4 bottom-4 w-px bg-gray-200"
+                />
               )}
 
               {timelineItems.length === 0 ? (
@@ -3404,52 +3822,104 @@ const HistoryDashboard: React.FC<{
                   Treatment Plan and record cycles to build the timeline.
                 </div>
               ) : (
-                timelineItems.map((item) => (
-                  <div
-                    key={item.cycle}
-                    className="relative flex items-start"
-                  >
-                    <div className={`absolute left-[-4px] top-3 w-5 h-5 rounded-full flex items-center justify-center ring-4 ring-white z-10 ${
-                      item.status === "COMPLETED"
-                        ? "bg-blue-600"
-                        : "bg-slate-400"
-                    }`}>
-                      <i className={`fa-solid ${
-                        item.status === "COMPLETED"
-                          ? "fa-check text-white text-[10px]"
-                          : "fa-clock text-white text-[10px]"
-                      }`} />
-                    </div>
+                timelineItems.map((item) => {
+                  const isCompleted = item.category === "COMPLETED";
+                  const isCurrent = item.category === "CURRENT";
+                  const isUpcoming = item.category === "UPCOMING";
 
+                  return (
                     <div
-                      className={`ml-8 w-full rounded-lg p-4 transition hover:shadow-md ${
-                        item.final
-                          ? "bg-blue-50/40 border border-blue-100"
-                          : "bg-white border border-gray-200"
-                      }`}
+                      key={item.id}
+                      className="relative flex items-start"
                     >
-                      <div className="flex justify-between items-start mb-2">
-                        <h3
-                          className={`font-bold text-sm ${
-                            item.final
-                              ? "text-blue-700"
-                              : "text-gray-800"
-                          }`}
-                        >
-                          {item.cycle}
-                        </h3>
-
-                        <span className="text-sm text-gray-500">
-                          {item.date || "—"}
-                        </span>
+                      {/* Node circle on the vertical line with status colors */}
+                      <div
+                        className={`absolute left-[11px] top-3.5 w-5 h-5 rounded-full flex items-center justify-center ring-4 z-10 shadow-sm ${
+                          isCompleted
+                            ? "bg-emerald-600 ring-white"
+                            : isCurrent
+                            ? "bg-blue-600 ring-blue-100"
+                            : "bg-slate-300 ring-white"
+                        }`}
+                      >
+                        {isCompleted ? (
+                          <i className="fa-solid fa-check text-white text-[10px]" />
+                        ) : isCurrent ? (
+                          <i className="fa-solid fa-play text-white text-[9px] ml-0.5" />
+                        ) : (
+                          <i className="fa-regular fa-calendar text-slate-600 text-[10px]" />
+                        )}
                       </div>
 
-                      <p className="text-sm text-gray-700">
-                        {item.description}
-                      </p>
+                      {/* Clean timeline card matching design with green/blue/grey colors */}
+                      <div
+                        className={`ml-8 w-full rounded-xl p-4 transition hover:shadow-sm ${
+                          isCompleted
+                            ? "bg-white border border-emerald-200"
+                            : isCurrent
+                            ? "bg-blue-50/60 border border-blue-200"
+                            : "bg-slate-50/60 border border-dashed border-slate-200"
+                        }`}
+                      >
+                        <div className="flex justify-between items-center mb-1.5 flex-wrap gap-2">
+                          <div className="flex items-center gap-2">
+                            <h3
+                              className={`font-bold text-sm ${
+                                isCompleted
+                                  ? "text-emerald-900"
+                                  : isCurrent
+                                  ? "text-blue-700"
+                                  : "text-slate-600"
+                              }`}
+                            >
+                              {item.cycle}
+                            </h3>
+
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${
+                                isCompleted
+                                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                  : isCurrent
+                                  ? "bg-blue-100 text-blue-700 border-blue-200"
+                                  : "bg-slate-100 text-slate-500 border-slate-200"
+                              }`}
+                            >
+                              {isCompleted
+                                ? "Completed"
+                                : isCurrent
+                                ? "Current"
+                                : "Upcoming"}
+                            </span>
+                          </div>
+
+                          <span
+                            className={`text-xs sm:text-sm font-medium ${
+                              isCurrent
+                                ? "text-blue-600 font-semibold"
+                                : isCompleted
+                                ? "text-gray-500"
+                                : "text-slate-400"
+                            }`}
+                          >
+                            {item.date || "—"}
+                          </span>
+                        </div>
+
+                        <p
+                          className={`text-xs sm:text-sm leading-relaxed ${
+                            isCompleted
+                              ? "text-gray-600"
+                              : isCurrent
+                              ? "text-gray-700 font-medium"
+                              : "text-slate-500"
+                          }`}
+                        >
+                          {item.description}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -3574,47 +4044,47 @@ const HistoryDashboard: React.FC<{
                           </button>
                         </div>
                       </div>
-                    <div className="flex items-center justify-center gap-3">
-                      <button
-                        type="button"
-                        className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
-                        disabled={prescriptionIndex === null || prescriptionIndex <= 0}
-                        onClick={() => {
-                          if (prescriptionIndex !== null && prescriptionIndex > 0) {
-                            const newIdx = prescriptionIndex - 1;
-                            openPrescriptionPdf(prescriptions[newIdx], newIdx);
-                          }
-                        }}
-                      >
-                        Previous
-                      </button>
-                      <span className="text-[10px] text-gray-600">
-                        {prescriptions.length > 0 && prescriptionIndex !== null ? `${prescriptionIndex + 1} / ${prescriptions.length}` : '0 / 0'}
-                      </span>
-                      <button
-                        type="button"
-                        className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
-                        disabled={prescriptionIndex === null || prescriptionIndex >= prescriptions.length - 1}
-                        onClick={() => {
-                          if (prescriptionIndex !== null && prescriptionIndex < prescriptions.length - 1) {
-                            const newIdx = prescriptionIndex + 1;
-                            openPrescriptionPdf(prescriptions[newIdx], newIdx);
-                          }
-                        }}
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+                      <div className="flex items-center justify-center gap-3">
+                        <button
+                          type="button"
+                          className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                          disabled={prescriptionIndex === null || prescriptionIndex <= 0}
+                          onClick={() => {
+                            if (prescriptionIndex !== null && prescriptionIndex > 0) {
+                              const newIdx = prescriptionIndex - 1;
+                              openPrescriptionPdf(prescriptions[newIdx], newIdx);
+                            }
+                          }}
+                        >
+                          Previous
+                        </button>
+                        <span className="text-[10px] text-gray-600">
+                          {prescriptions.length > 0 && prescriptionIndex !== null ? `${prescriptionIndex + 1} / ${prescriptions.length}` : '0 / 0'}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                          disabled={prescriptionIndex === null || prescriptionIndex >= prescriptions.length - 1}
+                          onClick={() => {
+                            if (prescriptionIndex !== null && prescriptionIndex < prescriptions.length - 1) {
+                              const newIdx = prescriptionIndex + 1;
+                              openPrescriptionPdf(prescriptions[newIdx], newIdx);
+                            }
+                          }}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
       {/* CHEMOTHERAPY CYCLE HISTORY */}
-      <section className="px-6 pb-6">
+      <section id="chemotherapy-cycle-history" className="px-6 pb-6">
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
           <div className="flex justify-between items-center p-5 border-b border-gray-200 bg-gray-50/50">
             <h2 className="text-lg font-bold text-gray-900">
@@ -3623,6 +4093,9 @@ const HistoryDashboard: React.FC<{
 
             <button
               type="button"
+              onClick={() => {
+                document.getElementById("treatment-timeline-section")?.scrollIntoView({ behavior: "smooth" });
+              }}
               className="text-sm text-blue-600 font-bold hover:underline"
             >
               View Protocol Details
@@ -4015,6 +4488,7 @@ function DischargeDetailsPortal({
 }) {
   const [showHistory, setShowHistory] = useState(false);
   const [showNotesDocs, setShowNotesDocs] = useState(false);
+  const [showOrderSummary, setShowOrderSummary] = useState(false);
   const [planPreview, setPlanPreview] = useState<ChemoPlanPreview | null>(null);
   const [stagingDetail, setStagingDetail] =
     useState<StagingDetailRecord | null>(null);
@@ -4121,21 +4595,11 @@ function DischargeDetailsPortal({
     .filter(Boolean)
     .join(", ");
 
-  const orderSummaryDiagnosis = (() => {
-    let fromStorage: string | null = null;
-    try {
-      const raw = localStorage.getItem("hms_diagnosis_selection");
-      if (raw) {
-        const parsed = JSON.parse(raw) as { cancer_type?: string; subtype_name?: string };
-        fromStorage = [parsed.cancer_type, parsed.subtype_name].filter(Boolean).join(" — ") || null;
-      }
-    } catch { /* ignore */ }
-    return fromStorage || (planPreview
-      ? [planPreview.cancer_type, planPreview.cancer_subtype]
-          .filter(Boolean)
-          .join(" — ")
-      : "");
-  })();
+  const orderSummaryDiagnosis = planPreview
+    ? [planPreview.cancer_type, planPreview.cancer_subtype]
+        .filter(Boolean)
+        .join(" — ")
+    : "";
 
   /* Every non-empty saved field, ready to render. */
   const fmtDate = (value?: string | null) => {
@@ -4369,7 +4833,6 @@ function DischargeDetailsPortal({
     vitalEntries.find(([key]) => key === label)?.[1] || "—";
 
   const intentTherapy =
-    (patientId ? localStorage.getItem(`hms_selected_protocol_name_${patientId}`) : null) ||
     dischargePlan?.regimen_name ||
     planPreview?.matching_protocols?.[0]?.regimen_name ||
     planPreview?.suggested_therapy ||
@@ -4607,9 +5070,9 @@ function DischargeDetailsPortal({
 <div className="border-b border-[#e2e8f0] mb-6">
 <nav className="flex space-x-8">
 {tabs.map((tab) => {
-const isActive = showNotesDocs ? tab === "Notes & Documents" : showHistory ? tab === "History" : tab === "Discharge";
+const isActive = showNotesDocs ? tab === "Notes & Documents" : showHistory ? tab === "History" : showOrderSummary ? tab === "Order Summary" : tab === "Discharge";
 return (
-<button key={tab} type="button" onClick={() => { if (tab === "History") { setShowHistory(true); setShowNotesDocs(false); return; } if (tab === "Notes & Documents") { setShowNotesDocs(true); setShowHistory(false); return; } if (tab === "Order Summary") { onBack?.(); return; } setShowHistory(false); setShowNotesDocs(false); if (tab !== "Discharge") { onBack?.(); } }} className={`px-1 py-3 border-b-2 text-sm font-medium transition-colors ${isActive ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
+<button key={tab} type="button" onClick={() => { if (tab === "History") { setShowHistory(true); setShowNotesDocs(false); setShowOrderSummary(false); return; } if (tab === "Notes & Documents") { setShowNotesDocs(true); setShowHistory(false); setShowOrderSummary(false); return; } if (tab === "Order Summary") { setShowHistory(false); setShowNotesDocs(false); setShowOrderSummary(true); return; } setShowHistory(false); setShowNotesDocs(false); setShowOrderSummary(false); if (tab !== "Discharge") { onBack?.(); } }} className={`px-1 py-3 border-b-2 text-sm font-medium transition-colors ${isActive ? "border-[#1d4ed8] text-[#1d4ed8] font-semibold" : "border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-slate-300"}`}>
 {tab}
 </button>
 );
@@ -4632,9 +5095,57 @@ return (
               MAIN GRID
           ====================================================== */}
           {showHistory ? (
-            <HistoryDashboard embedded patientId={patientId} />
+            <HistoryDashboard embedded patientId={patientId} initialPlan={dischargePlan} />
           ) : showNotesDocs ? (
             <PatientNotesDocuments embedded patientId={patientId} />
+          ) : showOrderSummary ? (
+          /* =================================================
+              ORDER SUMMARY - ALL recent details of the selected
+              patient fetched from the backend
+          ================================================== */
+          <div className="space-y-6">
+            {planPreviewLoading && (
+              <div className="flex items-center rounded-[12px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+                <i className="fa-solid fa-circle-notch fa-spin mr-2"></i> Loading recent details…
+              </div>
+            )}
+            {!planPreviewLoading && planPreviewError && (
+              <div className="flex items-center rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                <i className="fa-solid fa-triangle-exclamation mr-2"></i> {planPreviewError}
+              </div>
+            )}
+            {!planPreviewLoading && (planPreview || stagingDetail) && (
+              <>
+                <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <SectionHeader icon="fa-solid fa-file-medical" title={`Diagnosis & Staging — ${orderSummaryDiagnosis || "—"}`} badge={stagingDetail?.clinical_stage || planPreview?.clinical_stage || "—"} />
+                  {diagnosisEntries.length > 0 ? renderEntryGrid(diagnosisEntries) : (
+                    <p className="px-6 py-6 text-sm text-slate-400">No diagnosis fields saved yet.</p>
+                  )}
+                </section>
+
+                {derivedEntries.length > 0 && (
+                  <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <SectionHeader icon="fa-solid fa-wand-magic-sparkles" title="Auto-Derived Classification" badge="Derived Fields" badgeClass="bg-purple-100 text-purple-700" />
+                    {renderEntryGrid(derivedEntries)}
+                  </section>
+                )}
+
+                {ihc && ihcEntries.length > 0 && (
+                  <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <SectionHeader icon="fa-solid fa-microscope" title={`IHC Results${ihc.ihc_id ? ` — ${ihc.ihc_id}` : ""}`} badge={`${ihcEntries.length} Values`} badgeClass="bg-cyan-100 text-cyan-700" />
+                    {renderEntryGrid(ihcEntries)}
+                  </section>
+                )}
+
+                {mol && molecularEntries.length > 0 && (
+                  <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <SectionHeader icon="fa-solid fa-dna" title={`Molecular Results${mol.mol_id ? ` — ${mol.mol_id}` : ""}`} badge={`${molecularEntries.length} Values`} badgeClass="bg-emerald-100 text-emerald-700" />
+                    {renderEntryGrid(molecularEntries)}
+                  </section>
+                )}
+              </>
+            )}
+          </div>
           ) : (
           <div className="grid gap-6 xl:grid-cols-3">
             {/* ===================================================
@@ -4978,6 +5489,239 @@ return (
     untouched)
 ============================================================ */
 
+interface ClinicalNoteRecord {
+  id: string;
+  encounterNo?: string;
+  title: string;
+  dateTime: string;
+  encounter: string;
+  doctor: string;
+  department: string;
+  branch: string;
+  chiefComplaint: string;
+  clinicalAssessment: string[];
+  examination: string[];
+  diagnosis: string;
+  treatmentPlan: string[];
+  medications: string;
+  investigations: string[];
+  followUp: string;
+  status: "Completed" | "In Progress" | "Draft";
+  createdBy: string;
+}
+
+const INITIAL_CLINICAL_NOTES: ClinicalNoteRecord[] = [];
+
+function mapEncounterToClinicalNote(
+  enc: EncounterRecord,
+  index: number,
+  totalEncounters: number,
+  plan: SummaryPlan | null,
+  prescriptionsList: any[] = [],
+  labOrdersList: any[] = []
+): ClinicalNoteRecord {
+  const rawDate = enc.encounter_ts || enc.created_at || enc.appointment?.appointment_date;
+  let formattedDateTime = "—";
+  if (rawDate) {
+    const d = new Date(rawDate);
+    if (!Number.isNaN(d.getTime())) {
+      const timeStr = enc.appointment?.appointment_time || d.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
+      formattedDateTime = `${d.toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })}, ${timeStr}`;
+    }
+  }
+
+  const docName = [enc.employees?.first_name, enc.employees?.last_name].filter(Boolean).join(" ");
+  const doctor = docName
+    ? (docName.toLowerCase().startsWith("dr") ? docName : `Dr. ${docName}`)
+    : (plan?.doctor_name ? (plan.doctor_name.toLowerCase().startsWith("dr") ? plan.doctor_name : `Dr. ${plan.doctor_name}`) : "Attending Doctor");
+
+  const department = enc.department_master?.department_name || enc.employees?.specialization || (plan ? "Oncology" : "General OPD");
+  const branch = enc.branch?.branch_name || "Main Branch";
+
+  const rawStatus = (enc.status || "").toUpperCase();
+  const status: "Completed" | "In Progress" | "Draft" =
+    rawStatus === "CLOSED" || rawStatus === "COMPLETED" || rawStatus === "DONE"
+      ? "Completed"
+      : rawStatus === "OPEN" || rawStatus === "IN_PROGRESS" || rawStatus === "IN_CONSULTATION" || rawStatus === "CHECKED_IN"
+      ? "In Progress"
+      : "Completed";
+
+  const cycleNum = totalEncounters - index;
+  const encounterType = enc.encounter_type && enc.encounter_type !== "OPD"
+    ? enc.encounter_type
+    : (plan ? "Chemotherapy Follow-up" : "Outpatient Consultation");
+
+  let chiefComplaint = enc.chief_complaint?.trim();
+  if (!chiefComplaint) {
+    chiefComplaint = plan
+      ? `Patient presents for Cycle ${cycleNum > 0 ? cycleNum : 1} chemotherapy evaluation.`
+      : "Patient presents for routine clinical follow-up and evaluation.";
+  }
+
+  const assessmentItems: string[] = [];
+  if (enc.clinical_notes?.trim()) {
+    assessmentItems.push(...enc.clinical_notes.split("\n").map((s) => s.trim()).filter(Boolean));
+  }
+  if (assessmentItems.length === 0) {
+    assessmentItems.push("Clinical assessment completed. Patient stable.");
+  }
+
+  const vitalsParts: string[] = [];
+  if (enc.systolic_bp && enc.diastolic_bp) vitalsParts.push(`BP: ${enc.systolic_bp}/${enc.diastolic_bp} mmHg`);
+  if (enc.pulse) vitalsParts.push(`Pulse: ${enc.pulse} bpm`);
+  if (enc.temperature) vitalsParts.push(`Temp: ${enc.temperature}°F`);
+  if (enc.spo2) vitalsParts.push(`SpO2: ${enc.spo2}%`);
+  if (enc.respiratory_rate) vitalsParts.push(`RR: ${enc.respiratory_rate}/min`);
+  if (enc.blood_sugar) vitalsParts.push(`Blood Sugar: ${enc.blood_sugar} mg/dL`);
+
+  if (vitalsParts.length > 0) {
+    assessmentItems.push(`Vitals recorded: ${vitalsParts.join(", ")}.`);
+  }
+
+  const examItems: string[] = [];
+  if ((enc as any).physical_examination?.trim()) {
+    examItems.push(...(enc as any).physical_examination.split("\n").map((s: string) => s.trim()).filter(Boolean));
+  } else {
+    examItems.push("General physical condition stable.");
+  }
+  if (enc.pain_score != null) {
+    examItems.push(`Pain score: ${enc.pain_score}/10.`);
+  }
+  if (enc.weight || enc.height) {
+    const wt = enc.weight ? `Weight: ${enc.weight} kg` : "";
+    const ht = enc.height ? `Height: ${enc.height} cm` : "";
+    const bmi = enc.BMI ? `BMI: ${enc.BMI}` : "";
+    const physicalStr = [wt, ht, bmi].filter(Boolean).join(", ");
+    if (physicalStr) examItems.push(`Physical metrics: ${physicalStr}.`);
+  }
+
+  const diagnosis = enc.diagnosis_text || (plan?.cancer_type
+    ? `${plan.cancer_type} – ongoing treatment.`
+    : "Clinical evaluation - diagnosis pending.");
+
+  const planItems: string[] = [];
+  const matchingRx = prescriptionsList.find((rx: any) =>
+    (rx.encounter_no && rx.encounter_no === enc.encounter_no) ||
+    (rx.prescription_date && enc.encounter_ts && rx.prescription_date.slice(0, 10) === enc.encounter_ts.slice(0, 10))
+  );
+
+  if (matchingRx?.prescription_items?.length) {
+    for (const item of matchingRx.prescription_items) {
+      const medName = item.medicine_name || item.medicine_master?.medicine_name || item.drug_name;
+      const dose = [item.dosage || item.dose, item.unit].filter(Boolean).join(" ");
+      const route = item.route || item.administration_route || "";
+      if (medName) {
+        planItems.push(`${[medName, dose, route].filter(Boolean).join(" ")} prescribed.`);
+      }
+    }
+  } else if (plan?.chemotherapy_plan_items?.length) {
+    for (const item of plan.chemotherapy_plan_items) {
+      const medName = item.medicine_master?.medicine_name || item.drug_role;
+      if (medName) {
+        const dose = [item.calculated_dose ?? item.protocol_dose, item.calculated_dose_unit ?? item.protocol_dose_unit].filter(Boolean).join(" ");
+        const route = item.administration_route ? item.administration_route : "";
+        planItems.push(`${[medName, dose, route].filter(Boolean).join(" ")} administered.`);
+      }
+    }
+  }
+
+  if (enc.advice?.trim()) {
+    planItems.push(...enc.advice.split("\n").map((s) => s.trim()).filter(Boolean));
+  } else if (plan) {
+    planItems.push("Continue planned chemotherapy protocol.");
+    planItems.push("Monitor for adverse reactions.");
+  } else if (planItems.length === 0) {
+    planItems.push("Continue prescribed care protocol and clinical monitoring.");
+  }
+  planItems.push("Follow-up as scheduled.");
+
+  let medications = "";
+  if (matchingRx?.prescription_items?.length) {
+    medications = matchingRx.prescription_items
+      .map((item: any) => {
+        const medName = item.medicine_name || item.medicine_master?.medicine_name || item.drug_name;
+        const dose = [item.dosage || item.dose, item.unit].filter(Boolean).join(" ");
+        const route = item.route || "";
+        return [medName, dose, route].filter(Boolean).join(" ");
+      })
+      .filter(Boolean)
+      .join(", ");
+  } else if (plan?.chemotherapy_plan_items?.length) {
+    medications = plan.chemotherapy_plan_items
+      .map((item) => {
+        const medName = item.medicine_master?.medicine_name || item.drug_role;
+        const dose = [item.calculated_dose ?? item.protocol_dose, item.calculated_dose_unit ?? item.protocol_dose_unit].filter(Boolean).join(" ");
+        const route = item.administration_route || "";
+        return [medName, dose, route].filter(Boolean).join(" ").trim();
+      })
+      .filter(Boolean)
+      .join(", ");
+  }
+  if (!medications) {
+    medications = "None recorded for this visit.";
+  }
+
+  const invItems: string[] = [];
+  const matchingLabs = labOrdersList.filter((order: any) =>
+    (order.encounter_no && order.encounter_no === enc.encounter_no) ||
+    (order.patient_id === enc.patient_id)
+  );
+  if (matchingLabs.length > 0 && matchingLabs[0]?.lab_order_items?.length) {
+    const testNames = matchingLabs[0].lab_order_items
+      .map((it: any) => it.test_name || it.test_master?.test_name)
+      .filter(Boolean);
+    if (testNames.length > 0) {
+      invItems.push(`${testNames.join(", ")} ordered/reviewed.`);
+      invItems.push("Results acceptable for treatment.");
+    }
+  }
+  if (invItems.length === 0) {
+    invItems.push("No laboratory investigations ordered for this encounter.");
+  }
+
+  let followUp = "";
+  if (enc.follow_up_date) {
+    const fd = new Date(enc.follow_up_date);
+    if (!Number.isNaN(fd.getTime())) {
+      followUp = `Next visit scheduled for ${fd.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}.`;
+    }
+  }
+  if (!followUp) {
+    followUp = plan
+      ? "Next chemotherapy cycle as per treatment plan."
+      : "Next routine follow-up as scheduled.";
+  }
+
+  return {
+    id: enc.encounter_id ? String(enc.encounter_id) : `enc-${enc.encounter_no || index}`,
+    encounterNo: enc.encounter_no,
+    title: index === 0 ? "RECENT CLINICAL NOTE" : "CLINICAL NOTE",
+    dateTime: formattedDateTime,
+    encounter: encounterType,
+    doctor,
+    department,
+    branch,
+    chiefComplaint,
+    clinicalAssessment: assessmentItems,
+    examination: examItems,
+    diagnosis,
+    treatmentPlan: planItems,
+    medications,
+    investigations: invItems,
+    followUp,
+    status,
+    createdBy: doctor,
+  };
+}
+
 const PatientNotesDocuments: React.FC<{
   embedded?: boolean;
   patientId?: string;
@@ -4987,34 +5731,79 @@ const PatientNotesDocuments: React.FC<{
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [clinicalNotes, setClinicalNotes] = useState<ClinicalNoteRecord[]>(INITIAL_CLINICAL_NOTES);
+  const [currentNoteIndex, setCurrentNoteIndex] = useState(0);
+  const [isLoadingNotes, setIsLoadingNotes] = useState(false);
+  const [notesActivities, setNotesActivities] = useState<
+    { title: string; description: string; time: string; dot: string }[]
+  >([]);
+  const [isEditNoteModalOpen, setIsEditNoteModalOpen] = useState(false);
+  const [editingNote, setEditingNote] = useState<{
+    id: string;
+    encounterNo?: string;
+    title: string;
+    dateTime: string;
+    encounter: string;
+    doctor: string;
+    department: string;
+    branch: string;
+    chiefComplaint: string;
+    clinicalAssessment: string;
+    examination: string;
+    diagnosis: string;
+    treatmentPlan: string;
+    medications: string;
+    investigations: string;
+    followUp: string;
+    status: "Completed" | "In Progress" | "Draft";
+    createdBy: string;
+  } | null>(null);
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const [editSuccessMsg, setEditSuccessMsg] = useState<string | null>(null);
+  const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
+
   const [notesPlan, setNotesPlan] = useState<SummaryPlan | null>(null);
   const [notesAllergies, setNotesAllergies] = useState<PatientAllergyRecord[]>(
     []
   );
-  const documents: {
-    name: string;
-    info: string;
-    icon: string;
-    color: string;
-    hover: string;
-  }[] = [];
+  const [documents, setDocuments] = useState<PatientDocumentItem[]>([]);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const [docSuccessMsg, setDocSuccessMsg] = useState<string | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<PatientDocumentItem | null>(null);
 
-  /* Real data for the selected patient: saved plan (prescription
-     counts) + recorded allergies (Important Flags). */
+  /* Load stored patient documents from IndexedDB */
+  useEffect(() => {
+    if (!patientId) {
+      setDocuments([]);
+      return;
+    }
+    let cancelled = false;
+    loadPatientDocuments(patientId)
+      .then((items) => {
+        if (!cancelled) setDocuments(items);
+      })
+      .catch((err) => {
+        console.warn("Failed to load patient documents:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
+
+  /* Fetch real encounters, chemo plan, allergies, and prescriptions for the selected patient */
   useEffect(() => {
     if (!patientId) {
       setNotesPlan(null);
       setNotesAllergies([]);
+      setClinicalNotes(INITIAL_CLINICAL_NOTES);
+      setNotesActivities([]);
       return;
     }
     let cancelled = false;
-    loadLatestChemoPlan(patientId)
-      .then((loaded) => {
-        if (!cancelled) setNotesPlan(loaded);
-      })
-      .catch(() => {
-        if (!cancelled) setNotesPlan(null);
-      });
+    setIsLoadingNotes(true);
+
+    // 1. Allergies
     API.get<{ success: boolean; data: PatientAllergyRecord[] }>(
       `/clinical-details/patients/${patientId}/allergies`
     )
@@ -5024,6 +5813,102 @@ const PatientNotesDocuments: React.FC<{
       .catch(() => {
         if (!cancelled) setNotesAllergies([]);
       });
+
+    // 2. Fetch encounters & build clinical notes for every visited encounter
+    const fetchEncountersAndBuildNotes = async () => {
+      let loadedPlan: SummaryPlan | null = null;
+      try {
+        loadedPlan = await loadLatestChemoPlan(patientId);
+        if (!cancelled) setNotesPlan(loadedPlan);
+      } catch {
+        if (!cancelled) setNotesPlan(null);
+      }
+
+      let rawEncounters: EncounterRecord[] = [];
+      try {
+        const resp = await encounterApi.getLatest(patientId, 50);
+        rawEncounters = resp.data?.data?.encounters ?? [];
+      } catch (err) {
+        console.warn("getLatest encounters failed, trying getAll", err);
+      }
+
+      if (rawEncounters.length === 0) {
+        try {
+          const resp = await encounterApi.getAll({ patientId, limit: 50 });
+          rawEncounters = resp.data?.data?.encounters ?? [];
+        } catch (err) {
+          console.warn("getAll encounters fallback failed", err);
+        }
+      }
+
+      if (rawEncounters.length === 0) {
+        try {
+          const resp = await API.get<{ data?: { encounters?: EncounterRecord[] }; encounters?: EncounterRecord[] }>(
+            "/encounters/latest",
+            { params: { patientId, limit: 50 } }
+          );
+          rawEncounters = resp.data?.data?.encounters || resp.data?.encounters || [];
+        } catch {}
+      }
+
+      let prescriptionsList: any[] = [];
+      try {
+        const rxRes = await API.get(`/prescriptions/patient/${patientId}`);
+        prescriptionsList = rxRes.data?.data?.prescriptions || rxRes.data?.data || [];
+      } catch {}
+
+      let labOrdersList: any[] = [];
+      try {
+        const labRes = await API.get('/lab-order');
+        labOrdersList = (labRes.data?.data || []).filter((lo: any) => lo.patient_id === patientId);
+      } catch {}
+
+      if (cancelled) return;
+
+      if (rawEncounters.length > 0) {
+        // Sort encounters newest first
+        rawEncounters.sort((a, b) => {
+          const timeA = new Date(a.encounter_ts || a.created_at || 0).getTime();
+          const timeB = new Date(b.encounter_ts || b.created_at || 0).getTime();
+          return timeB - timeA;
+        });
+
+        const generatedNotes = rawEncounters.map((enc, idx) =>
+          mapEncounterToClinicalNote(
+            enc,
+            idx,
+            rawEncounters.length,
+            loadedPlan,
+            prescriptionsList,
+            labOrdersList
+          )
+        );
+        setClinicalNotes(generatedNotes);
+        setCurrentNoteIndex(0);
+
+        const builtActivities = rawEncounters.slice(0, 5).map((enc, i) => {
+          const doc = enc.employees?.first_name ? `Dr. ${enc.employees.first_name}` : (loadedPlan?.doctor_name ? (loadedPlan.doctor_name.toLowerCase().startsWith("dr") ? loadedPlan.doctor_name : `Dr. ${loadedPlan.doctor_name}`) : "Doctor");
+          const encType = enc.encounter_type && enc.encounter_type !== "OPD" ? enc.encounter_type : (loadedPlan ? "Chemo Follow-up" : "Consultation");
+          const dateStr = enc.encounter_ts ? new Date(enc.encounter_ts).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "RECENT";
+          return {
+            title: encType,
+            description: `${doc} completed clinical evaluation`,
+            time: dateStr.toUpperCase(),
+            dot: i === 0 ? "bg-blue-500" : "bg-slate-400",
+          };
+        });
+        setNotesActivities(builtActivities);
+      } else {
+        setClinicalNotes([]);
+        setCurrentNoteIndex(0);
+        setNotesActivities([]);
+      }
+
+      setIsLoadingNotes(false);
+    };
+
+    fetchEncountersAndBuildNotes();
+
     return () => {
       cancelled = true;
     };
@@ -5031,37 +5916,164 @@ const PatientNotesDocuments: React.FC<{
 
   /* Live counts derived from fetched records (no hardcoded values). */
   const prescriptionsCount = (notesPlan?.chemotherapy_plan_items ?? []).length;
-  const activities: {
-    title: string;
-    description: string;
-    time: string;
-    dot: string;
-  }[] = [];
+  const activities = notesActivities;
+
+  const handleFileUpload = async (files: FileList | File[] | null) => {
+    if (!files || files.length === 0) return;
+    setIsUploadingDoc(true);
+    const targetPatientId = patientId || "unknown";
+
+    const newItems: PatientDocumentItem[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (!file) continue;
+      try {
+        const savedDoc = await savePatientDocument(targetPatientId, file);
+        newItems.push(savedDoc);
+      } catch (err) {
+        console.error("Failed to save document:", file.name, err);
+      }
+    }
+
+    if (newItems.length > 0) {
+      setDocuments((prev) => [...newItems, ...prev]);
+      setSelectedFile(files[0]);
+      setDocSuccessMsg(
+        `${newItems.length === 1 ? `"${newItems[0].name}"` : `${newItems.length} documents`} uploaded to Document Library!`
+      );
+      setTimeout(() => setDocSuccessMsg(null), 4000);
+    }
+    setIsUploadingDoc(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
 
   const handleFileChange = (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
-    const file = event.target.files?.[0];
-
-    if (file) {
-      setSelectedFile(file);
-    }
+    handleFileUpload(event.target.files);
   };
 
   const handleSelectFiles = () => {
     fileInputRef.current?.click();
   };
 
-  const handleDownload = (name: string) => {
-    console.log(`Downloading: ${name}`);
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(true);
   };
 
-  const handleView = (name: string) => {
-    console.log(`Viewing: ${name}`);
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(false);
   };
 
-  const handleAddNote = () => {
-    console.log("Add Note clicked");
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(false);
+    if (e.dataTransfer?.files?.length) {
+      handleFileUpload(e.dataTransfer.files);
+    }
+  };
+
+  const handleDownload = (doc: PatientDocumentItem) => {
+    downloadDocument(doc);
+  };
+
+  const handleView = (doc: PatientDocumentItem) => {
+    setPreviewDoc(doc);
+  };
+
+  const handleDeleteDoc = async (docId: string, docName: string) => {
+    if (window.confirm(`Are you sure you want to remove "${docName}" from Document Library?`)) {
+      await deletePatientDocument(docId);
+      setDocuments((prev) => prev.filter((d) => d.id !== docId));
+      if (previewDoc?.id === docId) {
+        setPreviewDoc(null);
+      }
+    }
+  };
+
+  const handleEditNote = (note: ClinicalNoteRecord) => {
+    setEditingNote({
+      id: note.id,
+      encounterNo: note.encounterNo,
+      title: note.title,
+      dateTime: note.dateTime,
+      encounter: note.encounter,
+      doctor: note.doctor,
+      department: note.department,
+      branch: note.branch,
+      chiefComplaint: note.chiefComplaint,
+      clinicalAssessment: (note.clinicalAssessment || []).join("\n"),
+      examination: (note.examination || []).join("\n"),
+      diagnosis: note.diagnosis,
+      treatmentPlan: (note.treatmentPlan || []).join("\n"),
+      medications: note.medications,
+      investigations: (note.investigations || []).join("\n"),
+      followUp: note.followUp,
+      status: note.status,
+      createdBy: note.createdBy,
+    });
+    setIsEditNoteModalOpen(true);
+  };
+
+  const handleSaveEditedNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingNote) return;
+
+    setIsSavingNote(true);
+
+    const updatedRecord: Partial<ClinicalNoteRecord> = {
+      chiefComplaint: editingNote.chiefComplaint,
+      clinicalAssessment: editingNote.clinicalAssessment
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      examination: editingNote.examination
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      diagnosis: editingNote.diagnosis,
+      treatmentPlan: editingNote.treatmentPlan
+        .split("\n")
+        .map((s) => s.trim().replace(/^[•\-\*]\s*/, ""))
+        .filter(Boolean),
+      medications: editingNote.medications,
+      investigations: editingNote.investigations
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      followUp: editingNote.followUp,
+      status: editingNote.status,
+    };
+
+    setClinicalNotes((prev) =>
+      prev.map((n) => (n.id === editingNote.id ? { ...n, ...updatedRecord } : n))
+    );
+
+    if (editingNote.encounterNo) {
+      try {
+        await encounterApi.update(editingNote.encounterNo, {
+          chief_complaint: editingNote.chiefComplaint,
+          clinical_notes: editingNote.clinicalAssessment,
+          diagnosis_text: editingNote.diagnosis,
+          advice: editingNote.treatmentPlan,
+        });
+      } catch (err) {
+        console.warn("Could not persist encounter update to backend:", err);
+      }
+    }
+
+    setIsSavingNote(false);
+    setIsEditNoteModalOpen(false);
+    setEditingNote(null);
+    setEditSuccessMsg("Clinical note updated successfully!");
+    setTimeout(() => setEditSuccessMsg(null), 3000);
   };
 
   const handleSave = () => {
@@ -5071,6 +6083,12 @@ const PatientNotesDocuments: React.FC<{
   /* =========================================================
      CONTENT (TAB NAVIGATION + TWO COLUMN LAYOUT)
   ========================================================= */
+
+  const safeNoteIndex = Math.min(
+    Math.max(0, currentNoteIndex),
+    Math.max(0, clinicalNotes.length - 1)
+  );
+  const activeNote = clinicalNotes[safeNoteIndex];
 
   const content = (
     <>
@@ -5129,7 +6147,7 @@ const PatientNotesDocuments: React.FC<{
                   Total Notes
                 </p>
                 <p className="text-xl font-bold text-slate-900">
-                  0
+                  {clinicalNotes.length}
                 </p>
               </div>
             </div>
@@ -5189,32 +6207,437 @@ const PatientNotesDocuments: React.FC<{
           <section className="mb-8 rounded-xl border border-slate-200 bg-white shadow-sm">
 
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-200 p-5">
-              <h3 className="text-lg font-semibold text-slate-900">
-                Recent Clinical Notes
-              </h3>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
+              <div className="flex items-center gap-3">
+                <h3 className="text-lg font-semibold text-slate-900">
+                  Recent Clinical Notes
+                </h3>
+                <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-[#0052cc]">
+                  {clinicalNotes.length} {clinicalNotes.length === 1 ? "Note" : "Notes"}
+                </span>
+              </div>
 
-              <button
-                type="button"
-                onClick={handleAddNote}
-                className="flex items-center rounded-md bg-[#0052cc] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-              >
-                <i className="fa-solid fa-plus mr-2" />
-                Add Note
-              </button>
+              <div className="flex items-center gap-3">
+                {clinicalNotes.length > 1 && (
+                  <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+                    <button
+                      type="button"
+                      disabled={safeNoteIndex === 0}
+                      onClick={() => setCurrentNoteIndex((prev) => Math.max(0, prev - 1))}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-white text-slate-700 shadow-sm transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                      title="Previous note (newer visit)"
+                    >
+                      <i className="fa-solid fa-chevron-left text-xs" />
+                    </button>
+                    <span className="px-2 text-xs font-semibold text-slate-600">
+                      {safeNoteIndex + 1} / {clinicalNotes.length}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={safeNoteIndex === clinicalNotes.length - 1}
+                      onClick={() => setCurrentNoteIndex((prev) => Math.min(clinicalNotes.length - 1, prev + 1))}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-white text-slate-700 shadow-sm transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                      title="Next note (older visit)"
+                    >
+                      <i className="fa-solid fa-chevron-right text-xs" />
+                    </button>
+                  </div>
+                )}
+
+                {activeNote && (
+                  <button
+                    type="button"
+                    onClick={() => handleEditNote(activeNote)}
+                    className="flex items-center rounded-md bg-[#0052cc] px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700 shadow-sm"
+                  >
+                    <i className="fa-solid fa-pen-to-square mr-1.5" />
+                    Edit Note
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* Timeline */}
-            <div className="p-6">
-              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
-                <i className="fa-regular fa-file-lines mb-2 text-2xl text-slate-300" />
-                <p className="text-sm font-medium text-slate-500">
-                  No clinical notes recorded for this patient yet.
-                </p>
-                <p className="mt-1 text-xs text-slate-400">
-                  Notes added from consultations will appear here.
-                </p>
+            {/* Edit Success Notification */}
+            {editSuccessMsg && (
+              <div className="mx-6 mt-3 flex items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-800 animate-in fade-in">
+                <div className="flex items-center gap-2">
+                  <i className="fa-solid fa-circle-check text-emerald-600 text-sm" />
+                  <span>{editSuccessMsg}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditSuccessMsg(null)}
+                  className="text-emerald-600 hover:text-emerald-800"
+                >
+                  <i className="fa-solid fa-xmark text-xs" />
+                </button>
               </div>
+            )}
+
+            {/* Navigation Bar (when 2+ notes exist) */}
+            {clinicalNotes.length > 1 && (
+              <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 via-blue-50/20 to-slate-50 px-5 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  {/* Left: Quick jump visit pills */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                      Visits:
+                    </span>
+                    <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 max-w-[500px]">
+                      {clinicalNotes.map((n, idx) => {
+                        const isSelected = idx === safeNoteIndex;
+                        return (
+                          <button
+                            key={n.id || idx}
+                            type="button"
+                            onClick={() => setCurrentNoteIndex(idx)}
+                            className={`group flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                              isSelected
+                                ? "bg-[#0052cc] text-white shadow-sm ring-2 ring-[#0052cc]/30"
+                                : "border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-100"
+                            }`}
+                            title={`Jump to Note ${idx + 1}: ${n.encounter} (${n.dateTime})`}
+                          >
+                            <span className="font-bold">
+                              {idx === 0 ? "Latest Visit" : `Visit #${clinicalNotes.length - idx}`}
+                            </span>
+                            {n.encounterNo && (
+                              <span
+                                className={`rounded px-1 text-[10px] ${
+                                  isSelected ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                                }`}
+                              >
+                                #{n.encounterNo}
+                              </span>
+                            )}
+                            <span
+                              className={`text-[11px] ${
+                                isSelected ? "text-blue-100" : "text-slate-400 group-hover:text-slate-500"
+                              }`}
+                            >
+                              • {n.dateTime.split(",")[0]}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Right: Prev / Next Buttons */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={safeNoteIndex === 0}
+                      onClick={() => setCurrentNoteIndex((prev) => Math.max(0, prev - 1))}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <i className="fa-solid fa-arrow-left text-[11px]" />
+                      Previous Note
+                    </button>
+                    <button
+                      type="button"
+                      disabled={safeNoteIndex === clinicalNotes.length - 1}
+                      onClick={() => setCurrentNoteIndex((prev) => Math.min(clinicalNotes.length - 1, prev + 1))}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Next Note
+                      <i className="fa-solid fa-arrow-right text-[11px]" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Content: Single Clinical Note Card */}
+            <div className="p-6">
+              {isLoadingNotes ? (
+                <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                  <i className="fa-solid fa-circle-notch fa-spin mb-3 text-3xl text-[#0052cc]" />
+                  <p className="text-sm font-medium">Loading clinical notes for patient encounters...</p>
+                </div>
+              ) : clinicalNotes.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                  <i className="fa-regular fa-file-lines mb-2 text-2xl text-slate-300" />
+                  <p className="text-sm font-medium text-slate-500">
+                    No clinical notes recorded for this patient yet.
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Notes added from consultations will appear here.
+                  </p>
+                </div>
+              ) : activeNote ? (
+                <div className="space-y-5">
+                  <div
+                    key={activeNote.id}
+                    className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all hover:shadow"
+                  >
+                    {/* Note Card Header */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-blue-50/60 via-slate-50 to-white px-5 py-3.5">
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0052cc] text-white shadow-sm">
+                          <i className="fa-solid fa-notes-medical text-sm" />
+                        </span>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-[#0052cc]">
+                              {safeNoteIndex === 0 ? "RECENT CLINICAL NOTE" : "CLINICAL NOTE"}
+                            </span>
+                            {safeNoteIndex === 0 && (
+                              <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-800">
+                                Latest Visit
+                              </span>
+                            )}
+                            {activeNote.encounterNo && (
+                              <span className="inline-flex items-center rounded bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                                #{activeNote.encounterNo}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <span className="font-semibold text-slate-800">{activeNote.encounter}</span>
+                            <span>•</span>
+                            <span>{activeNote.dateTime}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
+                          <i className="fa-solid fa-circle-check text-[10px]" />
+                          {activeNote.status}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleEditNote(activeNote)}
+                          className="inline-flex items-center gap-1.5 rounded-md border border-[#0052cc]/30 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-[#0052cc] transition-colors hover:bg-[#0052cc] hover:text-white"
+                          title="Edit Clinical Note"
+                        >
+                          <i className="fa-solid fa-pen-to-square" />
+                          Edit Note
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handlePrintNote(activeNote)}
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                          title="Print Note"
+                        >
+                          <i className="fa-solid fa-print" />
+                          Print
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const noteHeader = `${safeNoteIndex === 0 ? "RECENT CLINICAL NOTE" : "CLINICAL NOTE"}${activeNote.encounterNo ? ` (#${activeNote.encounterNo})` : ""}`;
+                            const textToCopy = `${noteHeader}\n\nDate & Time: ${activeNote.dateTime}\nEncounter: ${activeNote.encounter}\nDoctor: ${activeNote.doctor}\nDepartment: ${activeNote.department}\nBranch: ${activeNote.branch}\n\nChief Complaint\n${activeNote.chiefComplaint}\n\nClinical Assessment\n${activeNote.clinicalAssessment.join("\n")}\n\nExamination\n${activeNote.examination.join("\n")}\n\nDiagnosis\n${activeNote.diagnosis}\n\nTreatment / Plan\n${activeNote.treatmentPlan.map((p) => `• ${p}`).join("\n")}\n\nMedications\n${activeNote.medications}\n\nInvestigations\n${activeNote.investigations.join("\n")}\n\nFollow-up\n${activeNote.followUp}\n\nStatus: ${activeNote.status}\nCreated by: ${activeNote.createdBy}`;
+                            navigator.clipboard?.writeText(textToCopy);
+                            setCopiedNoteId(activeNote.id);
+                            setTimeout(() => setCopiedNoteId(null), 2000);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                          title="Copy Note Text"
+                        >
+                          <i className={`fa-solid ${copiedNoteId === activeNote.id ? "fa-check text-emerald-600" : "fa-copy"}`} />
+                          {copiedNoteId === activeNote.id ? "Copied" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Meta Grid */}
+                    <div className="grid grid-cols-2 gap-3 border-b border-slate-100 bg-slate-50/70 px-5 py-3 sm:grid-cols-3 lg:grid-cols-5 text-xs">
+                      <div>
+                        <p className="text-[11px] font-medium text-slate-500">Date & Time</p>
+                        <p className="mt-0.5 font-semibold text-slate-800">{activeNote.dateTime}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-medium text-slate-500">Encounter</p>
+                        <p className="mt-0.5 font-semibold text-slate-800">{activeNote.encounter}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-medium text-slate-500">Doctor</p>
+                        <p className="mt-0.5 font-semibold text-slate-800">{activeNote.doctor}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-medium text-slate-500">Department</p>
+                        <p className="mt-0.5 font-semibold text-slate-800">{activeNote.department}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-medium text-slate-500">Branch</p>
+                        <p className="mt-0.5 font-semibold text-slate-800">{activeNote.branch}</p>
+                      </div>
+                    </div>
+
+                    {/* Note Content Sections */}
+                    <div className="space-y-4 p-5 text-sm">
+                      {/* Chief Complaint */}
+                      <div>
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                          Chief Complaint
+                        </h4>
+                        <p className="mt-1 font-medium text-slate-800">
+                          {activeNote.chiefComplaint}
+                        </p>
+                      </div>
+
+                      {/* Clinical Assessment & Examination */}
+                      <div className="grid gap-4 md:grid-cols-2 rounded-lg bg-slate-50/60 p-3.5 border border-slate-100">
+                        <div>
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Clinical Assessment
+                          </h4>
+                          <div className="mt-1 space-y-1 text-slate-700">
+                            {activeNote.clinicalAssessment.map((item, idx) => (
+                              <p key={idx}>{item}</p>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Examination
+                          </h4>
+                          <div className="mt-1 space-y-1 text-slate-700">
+                            {activeNote.examination.map((item, idx) => (
+                              <p key={idx}>{item}</p>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Diagnosis */}
+                      <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-[#0052cc]">
+                          Diagnosis
+                        </h4>
+                        <p className="mt-1 font-semibold text-slate-900">
+                          {activeNote.diagnosis}
+                        </p>
+                      </div>
+
+                      {/* Treatment / Plan */}
+                      <div className="rounded-lg border border-slate-200 bg-white p-3.5">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                          Treatment / Plan
+                        </h4>
+                        <ul className="mt-1.5 space-y-1 text-slate-700">
+                          {activeNote.treatmentPlan.map((item, idx) => (
+                            <li key={idx} className="flex items-start gap-2">
+                              <span className="text-[#0052cc] font-bold">•</span>
+                              <span>{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      {/* Medications & Investigations */}
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3.5">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Medications
+                          </h4>
+                          <p className="mt-1 font-semibold text-slate-900">
+                            {activeNote.medications}
+                          </p>
+                        </div>
+
+                        <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3.5">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Investigations
+                          </h4>
+                          <div className="mt-1 space-y-1 text-slate-700">
+                            {activeNote.investigations.map((item, idx) => (
+                              <p key={idx}>{item}</p>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Follow-up */}
+                      <div className="rounded-lg border border-emerald-100 bg-emerald-50/30 p-3">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-800">
+                          Follow-up
+                        </h4>
+                        <p className="mt-1 font-medium text-slate-800">
+                          {activeNote.followUp}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Card Footer: Status & Created By */}
+                    <div className="flex flex-wrap items-center justify-between border-t border-slate-100 bg-slate-50 px-5 py-3 text-xs text-slate-500">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-slate-700">Status:</span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                          <i className="fa-solid fa-check text-[10px]" />
+                          {activeNote.status}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 font-medium text-slate-700">
+                        <span>Created by:</span>
+                        <span className="font-bold text-[#0052cc]">{activeNote.createdBy}</span>
+                        <span className="ml-1 inline-flex items-center rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
+                          <i className="fa-solid fa-signature mr-1" />
+                          E-Signed
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bottom Navigation Bar */}
+                  {clinicalNotes.length > 1 && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs">
+                      <button
+                        type="button"
+                        disabled={safeNoteIndex === 0}
+                        onClick={() => {
+                          setCurrentNoteIndex((prev) => Math.max(0, prev - 1));
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 shadow-sm transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <i className="fa-solid fa-chevron-left text-[10px]" />
+                        Previous Note
+                        {safeNoteIndex > 0 && (
+                          <span className="text-slate-400">
+                            ({clinicalNotes[safeNoteIndex - 1].dateTime.split(",")[0]})
+                          </span>
+                        )}
+                      </button>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500">
+                          Showing note <strong>{safeNoteIndex + 1}</strong> of <strong>{clinicalNotes.length}</strong>
+                        </span>
+                        {safeNoteIndex === 0 ? (
+                          <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-800">
+                            Latest Encounter
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                            Historical Visit
+                          </span>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={safeNoteIndex === clinicalNotes.length - 1}
+                        onClick={() => {
+                          setCurrentNoteIndex((prev) => Math.min(clinicalNotes.length - 1, prev + 1));
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 shadow-sm transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Next Note
+                        {safeNoteIndex < clinicalNotes.length - 1 && (
+                          <span className="text-slate-400">
+                            ({clinicalNotes[safeNoteIndex + 1].dateTime.split(",")[0]})
+                          </span>
+                        )}
+                        <i className="fa-solid fa-chevron-right text-[10px]" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
           </section>
 
@@ -5246,16 +6669,18 @@ const PatientNotesDocuments: React.FC<{
               ) : (
                 documents.map((document) => (
                 <div
-                  key={document.name}
-                  className={`group relative rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors ${document.hover}`}
+                  key={document.id}
+                  className={`group relative rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:shadow-md ${document.hover}`}
                 >
-                  {/* More */}
+                  {/* Delete button */}
                   <button
                     type="button"
-                    className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
-                    aria-label={`More options for ${document.name}`}
+                    onClick={() => handleDeleteDoc(document.id, document.name)}
+                    className="absolute right-3 top-3 text-slate-300 hover:text-red-500 transition-colors"
+                    title={`Delete ${document.name}`}
+                    aria-label={`Delete ${document.name}`}
                   >
-                    <i className="fa-solid fa-ellipsis-vertical" />
+                    <i className="fa-solid fa-trash-can text-sm" />
                   </button>
 
                   {/* Icon */}
@@ -5266,7 +6691,10 @@ const PatientNotesDocuments: React.FC<{
                   </div>
 
                   {/* Name */}
-                  <h4 className="mb-1 truncate text-sm font-bold text-slate-900">
+                  <h4
+                    className="mb-1 truncate text-sm font-bold text-slate-900"
+                    title={document.name}
+                  >
                     {document.name}
                   </h4>
 
@@ -5279,21 +6707,19 @@ const PatientNotesDocuments: React.FC<{
                   <div className="flex space-x-2">
                     <button
                       type="button"
-                      onClick={() =>
-                        handleView(document.name)
-                      }
-                      className="flex-1 rounded bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100"
+                      onClick={() => handleView(document)}
+                      className="flex-1 rounded bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-100 flex items-center justify-center gap-1.5"
                     >
+                      <i className="fa-regular fa-eye text-xs" />
                       View
                     </button>
 
                     <button
                       type="button"
-                      onClick={() =>
-                        handleDownload(document.name)
-                      }
-                      className="flex-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                      onClick={() => handleDownload(document)}
+                      className="flex-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 flex items-center justify-center gap-1.5"
                     >
+                      <i className="fa-solid fa-download text-xs" />
                       Download
                     </button>
                   </div>
@@ -5389,42 +6815,56 @@ const PatientNotesDocuments: React.FC<{
           ================================================== */}
           <div
             onClick={handleSelectFiles}
-            className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/50 p-6 text-center transition-colors hover:bg-blue-50"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 text-center transition-all ${
+              isDraggingFile
+                ? "border-blue-500 bg-blue-100/70 shadow-md ring-2 ring-blue-400"
+                : "border-blue-300 bg-blue-50/50 hover:bg-blue-50"
+            }`}
           >
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-xl text-blue-600">
-              <i className="fa-solid fa-file-arrow-up" />
+            <div
+              className={`mb-3 flex h-12 w-12 items-center justify-center rounded-full text-xl transition-transform ${
+                isDraggingFile ? "scale-110 bg-blue-600 text-white" : "bg-blue-100 text-blue-600"
+              }`}
+            >
+              <i className={`fa-solid ${isUploadingDoc ? "fa-spinner fa-spin" : "fa-file-arrow-up"}`} />
             </div>
 
             <h4 className="mb-1 text-base font-bold text-slate-900">
-              Upload Document
+              {isUploadingDoc ? "Uploading..." : "Upload Document"}
             </h4>
 
             <p className="mb-4 px-4 text-xs text-slate-500">
-              Drag & Drop or click to browse files (PDF, JPG, PNG)
+              Drag & Drop or click to browse files (PDF, JPG, PNG, DOCX)
             </p>
 
             <button
               type="button"
+              disabled={isUploadingDoc}
               onClick={(event) => {
                 event.stopPropagation();
                 handleSelectFiles();
               }}
-              className="rounded-md border border-blue-600 bg-white px-6 py-2 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50"
+              className="rounded-md border border-blue-600 bg-white px-6 py-2 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50"
             >
-              Select Files
+              {isUploadingDoc ? "Uploading..." : "Select Files"}
             </button>
 
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
+              multiple
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,.txt"
               className="hidden"
               onChange={handleFileChange}
             />
 
-            {selectedFile && (
-              <p className="mt-3 max-w-full truncate text-xs font-medium text-green-600">
-                Selected: {selectedFile.name}
+            {docSuccessMsg && (
+              <p className="mt-3 max-w-full rounded bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 border border-emerald-200">
+                <i className="fa-solid fa-circle-check mr-1.5" />
+                {docSuccessMsg}
               </p>
             )}
           </div>
@@ -5545,6 +6985,293 @@ const PatientNotesDocuments: React.FC<{
           </section>
         </aside>
       </div>
+
+      {/* ===================================================
+          EDIT CLINICAL NOTE MODAL
+      ==================================================== */}
+      {isEditNoteModalOpen && editingNote && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0052cc] text-white shadow-sm">
+                  <i className="fa-solid fa-pen-to-square text-sm" />
+                </span>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Edit Clinical Note
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {editingNote.encounterNo ? `#${editingNote.encounterNo} • ` : ""}{editingNote.encounter} • {editingNote.dateTime}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isSavingNote}
+                onClick={() => {
+                  setIsEditNoteModalOpen(false);
+                  setEditingNote(null);
+                }}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition-colors disabled:opacity-50"
+              >
+                <i className="fa-solid fa-xmark text-lg" />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleSaveEditedNote} className="flex flex-1 flex-col overflow-y-auto p-6 space-y-4 text-xs">
+              {/* Meta information row */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-500">Encounter</label>
+                  <p className="font-semibold text-slate-800 text-xs truncate" title={editingNote.encounter}>{editingNote.encounter}</p>
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-500">Doctor</label>
+                  <p className="font-semibold text-slate-800 text-xs truncate" title={editingNote.doctor}>{editingNote.doctor}</p>
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-500">Department</label>
+                  <p className="font-semibold text-slate-800 text-xs truncate" title={editingNote.department}>{editingNote.department}</p>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-bold uppercase text-slate-500">Status</label>
+                  <select
+                    value={editingNote.status}
+                    onChange={(e) => setEditingNote({ ...editingNote, status: e.target.value as any })}
+                    className="w-full rounded border border-slate-300 px-2 py-1 text-xs focus:border-[#0052cc] focus:outline-none bg-white font-medium"
+                  >
+                    <option value="Completed">Completed</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Draft">Draft</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block font-semibold text-slate-700">Chief Complaint</label>
+                <input
+                  type="text"
+                  required
+                  value={editingNote.chiefComplaint}
+                  onChange={(e) => setEditingNote({ ...editingNote, chiefComplaint: e.target.value })}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-[#0052cc] focus:outline-none"
+                  placeholder="Chief complaint"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-700">Clinical Assessment (1 per line)</label>
+                  <textarea
+                    rows={3}
+                    value={editingNote.clinicalAssessment}
+                    onChange={(e) => setEditingNote({ ...editingNote, clinicalAssessment: e.target.value })}
+                    className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:border-[#0052cc] focus:outline-none"
+                    placeholder="Clinical assessment items"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-700">Examination (1 per line)</label>
+                  <textarea
+                    rows={3}
+                    value={editingNote.examination}
+                    onChange={(e) => setEditingNote({ ...editingNote, examination: e.target.value })}
+                    className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:border-[#0052cc] focus:outline-none"
+                    placeholder="Physical examination notes"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block font-semibold text-slate-700">Diagnosis</label>
+                <input
+                  type="text"
+                  value={editingNote.diagnosis}
+                  onChange={(e) => setEditingNote({ ...editingNote, diagnosis: e.target.value })}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-[#0052cc] focus:outline-none"
+                  placeholder="Primary clinical diagnosis"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block font-semibold text-slate-700">Treatment / Plan (1 item per line)</label>
+                <textarea
+                  rows={3}
+                  value={editingNote.treatmentPlan}
+                  onChange={(e) => setEditingNote({ ...editingNote, treatmentPlan: e.target.value })}
+                  className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:border-[#0052cc] focus:outline-none"
+                  placeholder="Treatment plan items"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-700">Medications</label>
+                  <input
+                    type="text"
+                    value={editingNote.medications}
+                    onChange={(e) => setEditingNote({ ...editingNote, medications: e.target.value })}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-[#0052cc] focus:outline-none"
+                    placeholder="Prescribed medications"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-700">Investigations (1 per line)</label>
+                  <input
+                    type="text"
+                    value={editingNote.investigations}
+                    onChange={(e) => setEditingNote({ ...editingNote, investigations: e.target.value })}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-[#0052cc] focus:outline-none"
+                    placeholder="Lab tests and investigations"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block font-semibold text-slate-700">Follow-up</label>
+                <input
+                  type="text"
+                  value={editingNote.followUp}
+                  onChange={(e) => setEditingNote({ ...editingNote, followUp: e.target.value })}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-[#0052cc] focus:outline-none"
+                  placeholder="Follow-up instructions"
+                />
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-200">
+                <button
+                  type="button"
+                  disabled={isSavingNote}
+                  onClick={() => {
+                    setIsEditNoteModalOpen(false);
+                    setEditingNote(null);
+                  }}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingNote}
+                  className="flex items-center gap-1.5 rounded-lg bg-[#0052cc] px-5 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700 shadow-sm disabled:opacity-50"
+                >
+                  {isSavingNote ? (
+                    <>
+                      <i className="fa-solid fa-circle-notch fa-spin text-xs" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <i className="fa-solid fa-check" />
+                      Save Changes
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =======================================================
+          DOCUMENT PREVIEW MODAL
+      ======================================================== */}
+      {previewDoc && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={() => setPreviewDoc(null)}
+        >
+          <div
+            className="relative flex max-h-[90vh] w-full max-w-4xl flex-col rounded-2xl bg-white shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+              <div className="flex items-center space-x-3 overflow-hidden">
+                <div className={`text-2xl ${previewDoc.color}`}>
+                  <i className={`fa-solid ${previewDoc.icon}`} />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="truncate text-base font-bold text-slate-900" title={previewDoc.name}>
+                    {previewDoc.name}
+                  </h3>
+                  <p className="text-xs text-slate-500">{previewDoc.info}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => window.open(previewDoc.url, "_blank")}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                  title="Open in new window"
+                >
+                  <i className="fa-solid fa-up-right-from-square text-xs" />
+                  Open in New Tab
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownload(previewDoc)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+                  title="Download file"
+                >
+                  <i className="fa-solid fa-download text-xs" />
+                  Download
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewDoc(null)}
+                  className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                  aria-label="Close preview"
+                >
+                  <i className="fa-solid fa-xmark text-base" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-auto bg-slate-100 p-4 min-h-[300px] flex items-center justify-center">
+              {previewDoc.type.includes("pdf") || previewDoc.name.toLowerCase().endsWith(".pdf") ? (
+                <iframe
+                  src={previewDoc.url}
+                  className="h-[70vh] w-full rounded-lg border border-slate-200 bg-white"
+                  title={previewDoc.name}
+                />
+              ) : previewDoc.type.startsWith("image/") ||
+                /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(previewDoc.name) ? (
+                <img
+                  src={previewDoc.url}
+                  alt={previewDoc.name}
+                  className="max-h-[70vh] max-w-full rounded-lg object-contain shadow-sm"
+                />
+              ) : (
+                <div className="py-12 text-center">
+                  <div className={`mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-sm text-3xl ${previewDoc.color}`}>
+                    <i className={`fa-solid ${previewDoc.icon}`} />
+                  </div>
+                  <h4 className="text-base font-semibold text-slate-900 mb-1">{previewDoc.name}</h4>
+                  <p className="text-xs text-slate-500 mb-4">{previewDoc.info}</p>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto mb-5">
+                    Direct in-browser preview is not supported for this file type. Click below to download and view it locally.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleDownload(previewDoc)}
+                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    <i className="fa-solid fa-download" />
+                    Download File
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 
@@ -5614,8 +7341,9 @@ const PatientNotesDocuments: React.FC<{
             {/* Download All */}
             <button
               type="button"
-              onClick={() => console.log("Download All")}
-              className="flex items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+              disabled={documents.length === 0}
+              onClick={() => downloadAllDocuments(documents)}
+              className="flex items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <i className="fa-solid fa-download mr-2" />
               Download All
