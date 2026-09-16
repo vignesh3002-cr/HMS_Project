@@ -223,6 +223,21 @@ const TREATMENT_TYPES = [
   "Other",
 ];
 
+/* Molecular tests selectable under the Diagnosis > Molecular Testing
+   section. Picking a test reveals the note / date fields. */
+const MOLECULAR_TESTS = [
+  "PCR / RT-PCR",
+  "NGS (Next-Generation Sequencing)",
+  "FISH",
+  "ISH / CISH",
+  "IHC",
+  "Liquid biopsy / ctDNA",
+  "Gene-expression profiling",
+  "MSI / MMR testing",
+  "TMB testing",
+  "BRCA1/BRCA2 and HRR testing",
+];
+
 const StepCheckLogo = ({ active = false }: { active?: boolean }) => (
   <svg
     className="h-6 w-6"
@@ -3963,6 +3978,8 @@ type FormData = {
   preDiagnosis: string;
   natureOfDiagnosis: string;
   molecularTesting: string;
+  molecularTestingNote: string;
+  molecularTestingDate: string;
   diseaseStatus: string;
   laterality: string;
   bodySite: string;
@@ -4064,6 +4081,8 @@ const Diagnosis: React.FC<{
     preDiagnosis: "",
     natureOfDiagnosis: "",
     molecularTesting: "",
+    molecularTestingNote: "",
+    molecularTestingDate: "",
     diseaseStatus: "",
     laterality: "",
     bodySite: "",
@@ -5016,17 +5035,70 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
             </label>
 
             <div className="relative">
-              <input
+              <select
                 id="molecularTesting"
                 name="molecularTesting"
-                type="text"
                 value={formData.molecularTesting}
                 onChange={handleChange}
-                placeholder="Type molecular testing..."
-                className="block w-full rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-              />
+                className="block w-full appearance-none rounded-md border border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Molecular Testing
+                </option>
+
+                {MOLECULAR_TESTS.map((test) => (
+                  <option key={test} value={test}>
+                    {test}
+                  </option>
+                ))}
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
             </div>
           </div>
+
+          {formData.molecularTesting && (
+            <>
+              <div>
+                <label
+                  htmlFor="molecularTestingNote"
+                  className="mb-2 block text-sm font-semibold text-gray-600"
+                >
+                  Enter Note
+                </label>
+
+                <input
+                  id="molecularTestingNote"
+                  name="molecularTestingNote"
+                  type="text"
+                  value={formData.molecularTestingNote}
+                  onChange={handleChange}
+                  placeholder="Type a note..."
+                  className="block w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="molecularTestingDate"
+                  className="mb-2 block text-sm font-semibold text-gray-600"
+                >
+                  Select Date
+                </label>
+
+                <input
+                  id="molecularTestingDate"
+                  name="molecularTestingDate"
+                  type="date"
+                  value={formData.molecularTestingDate}
+                  onChange={handleChange}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+                />
+              </div>
+            </>
+          )}
 
           {/* Survivor */}
           <div>
@@ -11402,67 +11474,100 @@ const Summary: React.FC<{
                 No chemotherapy plan found for this patient yet.
               </div>
             )}
-            <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Cancer Type
-                </p>
-                <p className="text-sm text-slate-500">
-                  {cancerType}
-                </p>
+            <div className="flex flex-col gap-10 lg:flex-row">
+              <div className="flex flex-1 flex-col gap-6">
+                <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Cancer Type
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      {cancerType}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Stage
+                    </p>
+
+                    <p className="flex items-center gap-2 text-sm text-slate-500">
+                      {stage}
+                      <span className="text-slate-400"></span>
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Context
+                    </p>
+
+                    <p className="text-sm text-slate-500">{context}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Protocol
+                    </p>
+
+                    <p className="flex items-center gap-2 text-sm text-slate-500">
+                      {protocol}
+                      <span className="text-slate-400"></span>
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Duration
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {duration}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Current
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {current}
+                    </p>
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Stage
+              {/* Vitals box - same vitals as shown in the patient header */}
+              <aside className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-5 lg:w-72">
+                <p className="mb-3 text-sm font-semibold text-slate-900">
+                  Vitals
                 </p>
 
-                <p className="flex items-center gap-2 text-sm text-slate-500">
-                  {stage}
-                  <span className="text-slate-400"></span>
-                </p>
-              </div>
-
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Context
-                </p>
-
-                <p className="text-sm text-slate-500">{context}</p>
-              </div>
-
-              <div />
-
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Protocol
-                </p>
-
-                <p className="flex items-center gap-2 text-sm text-slate-500">
-                  {protocol}
-                  <span className="text-slate-400"></span>
-                </p>
-              </div>
-
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Duration
-                </p>
-
-                <p className="text-sm text-slate-500">
-                  {duration}
-                </p>
-              </div>
-
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Current
-                </p>
-
-                <p className="text-sm text-slate-500">
-                  {current}
-                </p>
-              </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  {[
+                    { label: "HEIGHT", value: measurements.height },
+                    { label: "WEIGHT", value: measurements.weight },
+                    { label: "BSA", value: measurements.bsa },
+                    { label: "BMI", value: measurements.bmi },
+                    { label: "BP", value: measurements.bp },
+                    { label: "PULSE", value: measurements.pulse },
+                    { label: "TEMP", value: measurements.temp },
+                    { label: "SPO2", value: measurements.spo2 },
+                  ].map((item) => (
+                    <div key={item.label} className="flex flex-col">
+                      <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                        {item.label}
+                      </div>
+                      <div className="truncate text-sm font-bold leading-5 text-slate-800">
+                        {item.value || "—"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </aside>
             </div>
           </section>
 
