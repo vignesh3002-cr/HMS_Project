@@ -26,6 +26,9 @@ import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
 import { getUser } from "@/utils/token";
 
+import { useCriticalPatients } from "@/hooks/useCriticalPatients";
+import { CriticalDot, CriticalCorner, CriticalWrapper } from "@/components/hms/CriticalPatientIndicator";
+
 const navItems = [
   {
     label: "Dashboard",
@@ -703,6 +706,18 @@ export default function Dashboard() {
   useEffect(() => {
     setIsAppointmentsLoading(appointmentsQuery.isLoading || appointmentsQuery.isFetching);
   }, [appointmentsQuery.isLoading, appointmentsQuery.isFetching]);
+
+  const appointmentPatientIds = useMemo(() => {
+    if (!realAppointments) return [];
+    const ids = (realAppointments as any[]).map((r) => r.patientId).filter(Boolean);
+    return [...new Set(ids)];
+  }, [realAppointments]);
+
+
+
+  const { getCriticalInfo } = useCriticalPatients(
+    appointmentPatientIds.map((id) => ({ patientId: id }))
+  );
 
   useEffect(() => {
     if (!appointmentsQuery.error) return;
@@ -1625,12 +1640,16 @@ export default function Dashboard() {
               <HmsTable
                 scrollable={false}
                 columns={activeTab === "appointments" ? [
-                  { key: "patientName", label: "Patient Name", render: (r: any) => (
-                    <div className="flex items-center gap-2">
+                  { key: "patientName", label: "Patient Name", render: (r: any) => {
+                    const crit = getCriticalInfo(r.patientId);
+                    return (
+                    <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+                      <CriticalCorner reasons={crit.reasons} />
                       <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.avatarBg, color: r.avatarColor }}>{r.avatar}</div>
-                      <div><div className="hms-name-text">{r.patientName}</div><div className="hms-id-text">{r.patientId}</div></div>
-                    </div>
-                  )},
+                      <div><div className="hms-name-text">{r.patientName}</div><div className="hms-id-text flex items-center">{r.patientId}<CriticalDot reasons={crit.reasons} /></div></div>
+                    </CriticalWrapper>
+                    );
+                  }},
                   { key: "appointmentNo", label: "Appointment No", render: (r: any) => (
                     <span className="px-3 py-1 rounded-[20px] hms-content-text inline-block" style={{ background: "#EEF2FF", color: "#4F46E5" }}>{r.appointmentNo}</span>
                   )},
@@ -1745,6 +1764,11 @@ export default function Dashboard() {
                 rowsPerPageOptions={[5, 10, 20]}
                 emptyMessage={`No ${activeTab} found matching the current filters.`}
                 rowKey={(r) => String((r as any).id)}
+                rowClassName={(r: any) => {
+                  if (activeTab !== "appointments") return "";
+                  const crit = getCriticalInfo(r.patientId);
+                  return crit.isCritical ? "relative" : "";
+                }}
               />
             )}
             </div>

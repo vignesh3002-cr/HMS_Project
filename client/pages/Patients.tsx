@@ -28,6 +28,9 @@ import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { getDepartmentColors } from "@/components/hms/DepartmentBadge";
+
+import { useCriticalPatients } from "@/hooks/useCriticalPatients";
+import { CriticalCorner, CriticalDot, CriticalWrapper } from "@/components/hms/CriticalPatientIndicator";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
 
@@ -303,6 +306,19 @@ export default function PatientsManagement() {
   useEffect(() => {
     fetchPatients();
   }, [fetchPatients]);
+
+
+
+  const patientAgeData = useMemo(() => {
+    if (!realPatients) return [];
+    return realPatients.map((p) => ({
+      patientId: p.patient_id,
+      age: p.patient_age,
+      dob: p.patient_dob,
+    }));
+  }, [realPatients]);
+
+  const { getCriticalInfo } = useCriticalPatients(patientAgeData);
 
   // Assigned Doctor (list view) — derived from the same branch's appointment
   // history, not from GET /patients (which has no doctor join). Purely
@@ -697,12 +713,16 @@ export default function PatientsManagement() {
             ) : viewMode === "list" ? (
               <HmsTable
                 columns={[
-                  { key: "name", label: "Name", render: (r: any) => (
-                    <div className="flex items-center gap-2">
+                  { key: "name", label: "Name", render: (r: any) => {
+                    const crit = getCriticalInfo(String(r.id));
+                    return (
+                    <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+                      <CriticalCorner reasons={crit.reasons} />
                       <Avatar text={String(r.name)[0]} color={String(r.patientAvatarColor ?? "#00488D")} bg={String(r.patientAvatarBg ?? "#D6E3FF")} />
-                      <div><div className="hms-name-text">{String(r.name)}</div><div className="hms-id-text">{String(r.id)}</div></div>
-                    </div>
-                  )},
+                      <div><div className="hms-name-text">{String(r.name)}</div><div className="hms-id-text flex items-center">{String(r.id)}<CriticalDot reasons={crit.reasons} /></div></div>
+                    </CriticalWrapper>
+                    );
+                  }},
                   { key: "age/gender", label: "Age/Gender", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.age} / {String(r.gender)}</span> },
                   { key: "mobile", label: "Mobile", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{String(r.mobile)}</span> },
                   { key: "diagnose", label: "Diagnose", render: (r: any) => (
@@ -755,22 +775,29 @@ export default function PatientsManagement() {
                 rowsPerPageOptions={[5, 10, 20]}
                 emptyMessage="No patients found matching the current filters."
                 rowKey={(r: any, i: number) => String(r.id) + i}
+                rowClassName={(r: any) => {
+                  const crit = getCriticalInfo(String(r.id));
+                  return crit.isCritical ? "relative" : "";
+                }}
               />
             ) : (
               <>
               <div className="flex-1 p-5 hide-scrollbar max-h-[450px]">
                 {displayCards.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {displayCards.map((patient: any) => (
-                      <div
+                    {displayCards.map((patient: any) => {
+                      const crit = getCriticalInfo(String(patient.id));
+                      return (
+                      <CriticalWrapper
                         key={patient.id}
-                        className="relative flex items-start gap-4 p-4 border border-[#E5E7EB] rounded-xl hover:shadow-md hover:border-[#D6E3FF] transition-all duration-200 group"
+                        className="flex items-start gap-4 p-4 border border-[#E5E7EB] rounded-xl hover:shadow-md hover:border-[#D6E3FF] transition-all duration-200 group"
                       >
+                        <CriticalCorner reasons={crit.reasons} />
                         <PatientPhoto photo={patient.photo} name={patient.name} />
 
                         <div className="flex-1 min-w-0">
                           <p className="hms-name-text truncate">{patient.name}</p>
-                          <p className="hms-id-text">{patient.id}</p>
+                          <p className="hms-id-text flex items-center">{patient.id}<CriticalDot reasons={crit.reasons} /></p>
                           <p className="hms-content-text text-[#191C1E] mt-1">
                             {patient.age}/{patient.gender}
                           </p>
@@ -792,8 +819,9 @@ export default function PatientsManagement() {
                         >
                           <CalendarCheck className="w-3.5 h-3.5 text-[#00488D]" />
                         </button>
-                      </div>
-                    ))}
+                      </CriticalWrapper>
+                      );
+                    })}
                     {infiniteScroll && (
                       <div ref={sentinelRef} className="col-span-full flex justify-center py-4">
                         {visibleCount < filteredData.length ? (

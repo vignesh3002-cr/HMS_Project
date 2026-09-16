@@ -21,13 +21,14 @@ import {
   type PatientRecord,
 } from "../../api/patient.api";
 import {
-encounterApi,
+ encounterApi,
   type EncounterRecord,
 } from "../../api/encounter.api";
 import {
   labTestMasterApi,
   type LabTestMasterRecord,
 } from "../../api/labTestMaster.api";
+import { useCriticalPatients } from "../../hooks/useCriticalPatients";
 import {
   labOrderApi,
   labOrderItemApi,
@@ -863,6 +864,16 @@ const Consultation: React.FC = () => {
   const [encounterError, setEncounterError] = useState("");
   const [recentEncounters, setRecentEncounters] = useState<EncounterRecord[]>([]);
 
+  const patientAgeData = useMemo(() => {
+    if (!patient) return [];
+    return [{ patientId: patient.patient_id || "", age: patient.patient_age, dob: patient.patient_dob }];
+  }, [patient]);
+  const { getCriticalInfo } = useCriticalPatients(patientAgeData);
+  const patientCriticalInfo = useMemo(() => {
+    if (!patient) return { isCritical: false, reasons: [] as string[] };
+    return getCriticalInfo(patient.patient_id || "");
+  }, [patient, getCriticalInfo]);
+
   const formatDateDMY = (value?: string | null) => {
     if (!value) return "";
     const date = new Date(value);
@@ -1427,13 +1438,13 @@ const Consultation: React.FC = () => {
               SIDEBAR
           ==================================================== */}
 
-          <aside className="relative z-10 w-[280px] shrink-0 border-r border-slate-200 bg-white">
+          <aside className={`relative z-10 w-[280px] shrink-0 border-r border-slate-200 bg-white${patientCriticalInfo.isCritical ? " border-t-4 border-t-red-500" : ""}`}>
 
             {/* PATIENT HEADER */}
 
             <div className="flex h-[248px] w-full flex-col items-center border-b border-slate-50 px-6 pt-6">
 
-              <div className="h-24 w-24 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
+              <div className={`relative h-24 w-24 overflow-hidden rounded-full border-2 bg-slate-100 ${patientCriticalInfo.isCritical ? "border-red-500 animate-pulse" : "border-slate-200"}`}>
 
                 <img
                   src={patientPhoto}
@@ -1441,18 +1452,32 @@ const Consultation: React.FC = () => {
                   className="h-full w-full object-cover"
                 />
 
+                {patientCriticalInfo.isCritical && (
+                  <span className="absolute -right-0.5 -top-0.5 h-4 w-4 rounded-full border-2 border-white bg-red-500" />
+                )}
+
               </div>
 
-              <div className="w-full pt-4 text-center text-xl font-bold leading-7 text-slate-800">
-                {patientName}
+              <div className="flex w-full items-center justify-center gap-2 pt-4">
+                <div className="text-center text-xl font-bold leading-7 text-slate-800">
+                  {patientName}
+                </div>
+                {patientCriticalInfo.isCritical && (
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-500 animate-pulse" />
+                )}
               </div>
 
               <div className="w-full pb-2 text-center text-sm leading-5 text-slate-500">
                 {patientAgeSex}
               </div>
 
-              <div className="h-6 rounded bg-slate-100 px-3 py-1 text-xs font-semibold leading-4 text-slate-600">
-                {patientDisplayId}
+              <div className="flex items-center gap-2">
+                <div className="h-6 rounded bg-slate-100 px-3 py-1 text-xs font-semibold leading-4 text-slate-600">
+                  {patientDisplayId}
+                </div>
+                {patientCriticalInfo.isCritical && (
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
+                )}
               </div>
 
               <div className="w-full pt-4 text-center text-sm font-bold leading-5 tracking-[-0.35px] text-blue-700">
