@@ -13,6 +13,7 @@ import { employeeApi } from "../../api/employee.api";
 import { appointmentApi } from "../../api/appointment.api";
 import { getUser } from "../../utils/token";
 import { computeBmi, computeBsa } from "../../utils/vitals";
+import { clinicalDetailsApi } from "../../api/clinicalDetails.api";
 import {
   doctorDashboardApi,
 } from "../../api/doctorDashboard.api";
@@ -10799,6 +10800,113 @@ const Summary: React.FC<{
   const [dischargeProtocolId, setDischargeProtocolId] = useState("");
   const [patientName, setPatientName] = useState("");
 
+  const [summaryAllergies, setSummaryAllergies] = useState<string[]>([]);
+  const [summarySymptoms, setSummarySymptoms] = useState<string[]>([]);
+  const [summaryReasonForVisit, setSummaryReasonForVisit] = useState("");
+  const [summaryDiscussion, setSummaryDiscussion] = useState("");
+  const [summaryHopi, setSummaryHopi] = useState("");
+  const [summaryClinicalFindings, setSummaryClinicalFindings] = useState("");
+
+  useEffect(() => {
+    if (!appointmentId) return;
+    let cancelled = false;
+    appointmentApi
+      .getOne(appointmentId)
+      .then((response) => {
+        if (cancelled) return;
+        setSummaryReasonForVisit(
+          response.data?.data?.reason_for_visit ?? ""
+        );
+      })
+      .catch((error) => {
+        console.error("Failed to load reason for visit:", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [appointmentId]);
+
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        if (encounterNo) {
+          const response = await clinicalDetailsApi.getEncounterClinicalDetails(
+            encounterNo
+          );
+          if (cancelled) return;
+          const data = response.data?.data;
+          setSummaryAllergies(
+            (data?.allergies ?? []).map((allergy) => allergy.substanceName)
+          );
+          setSummarySymptoms(
+            (data?.symptoms ?? []).map((symptom) => symptom.symptomName)
+          );
+          return;
+        }
+      } catch {
+        // Fall through to the patient-level allergies lookup below.
+      }
+      try {
+        const allergyResponse = await API.get<{
+          success: boolean;
+          data: Array<{
+            allergy_master?: { substance_name?: string | null } | null;
+            substance_name?: string | null;
+            substanceName?: string | null;
+          }>;
+        }>(`/clinical-details/patients/${resolvedPatientId}/allergies`);
+        if (cancelled) return;
+        const rows = allergyResponse.data?.data ?? [];
+        setSummaryAllergies(
+          rows.map(
+            (item) =>
+              item.substanceName ||
+              item.allergy_master?.substance_name ||
+              item.substance_name ||
+              ""
+          ).filter(Boolean)
+        );
+      } catch {
+        // Leave allergies/symptoms empty when unavailable.
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId, encounterNo]);
+
+  useEffect(() => {
+    if (!encounterNo && !appointmentId) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = encounterNo
+          ? await encounterApi.getByNumber(encounterNo)
+          : await encounterApi.getByAppointment(appointmentId!);
+        if (cancelled) return;
+        const enc = response.data?.data;
+        const rawNotes = enc?.clinical_notes ?? "";
+        const markerIndex = rawNotes.indexOf(PAST_HISTORY_MARKER);
+        setSummaryDiscussion(
+          markerIndex !== -1
+            ? rawNotes.slice(0, markerIndex).trim()
+            : rawNotes.trim()
+        );
+        setSummaryHopi(enc?.symptoms ?? "");
+        setSummaryClinicalFindings(enc?.chief_complaint ?? "");
+      } catch (error) {
+        console.error("Failed to load summary consultation details:", error);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [encounterNo, appointmentId]);
+
   useEffect(() => {
     if (!resolvedPatientId) return;
     let cancelled = false;
@@ -11535,6 +11643,74 @@ const Summary: React.FC<{
 
                     <p className="text-sm text-slate-500">
                       {current}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Allergies
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryAllergies.length > 0
+                        ? summaryAllergies.join(", ")
+                        : "No allergies recorded"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Symptoms
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summarySymptoms.length > 0
+                        ? summarySymptoms.join(", ")
+                        : "No symptoms recorded"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Reason for Visit
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryReasonForVisit || "No reason recorded"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Discussion
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryDiscussion || "No discussion recorded"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      HOPI
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryHopi || "No HOPI recorded"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Clinical findings
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryClinicalFindings || "No clinical findings recorded"}
                     </p>
                   </div>
                 </div>
