@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   useEffect,
   useRef,
   useState,
@@ -1435,248 +1435,6 @@ const Consultation: React.FC = () => {
         <div className="relative flex w-full border border-slate-200 bg-slate-50">
 
           {/* ====================================================
-              SIDEBAR
-          ==================================================== */}
-
-          <aside className={`relative z-10 w-[280px] shrink-0 border-r border-slate-200 bg-white${patientCriticalInfo.isCritical ? " border-t-4 border-t-red-500" : ""}`}>
-
-            {/* PATIENT HEADER */}
-
-            <div className="flex h-[248px] w-full flex-col items-center border-b border-slate-50 px-6 pt-6">
-
-              <div className={`relative h-24 w-24 overflow-hidden rounded-full border-2 bg-slate-100 ${patientCriticalInfo.isCritical ? "border-red-500 animate-pulse" : "border-slate-200"}`}>
-
-                <img
-                  src={patientPhoto}
-                  alt={patientName}
-                  className="h-full w-full object-cover"
-                />
-
-                {patientCriticalInfo.isCritical && (
-                  <span className="absolute -right-0.5 -top-0.5 h-4 w-4 rounded-full border-2 border-white bg-red-500" />
-                )}
-
-              </div>
-
-              <div className="flex w-full items-center justify-center gap-2 pt-4">
-                <div className="text-center text-xl font-bold leading-7 text-slate-800">
-                  {patientName}
-                </div>
-                {patientCriticalInfo.isCritical && (
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-500 animate-pulse" />
-                )}
-              </div>
-
-              <div className="w-full pb-2 text-center text-sm leading-5 text-slate-500">
-                {patientAgeSex}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="h-6 rounded bg-slate-100 px-3 py-1 text-xs font-semibold leading-4 text-slate-600">
-                  {patientDisplayId}
-                </div>
-                {patientCriticalInfo.isCritical && (
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
-                )}
-              </div>
-
-              <div className="w-full pt-4 text-center text-sm font-bold leading-5 tracking-[-0.35px] text-blue-700">
-                {""}
-              </div>
-
-            </div>
-
-            {/* PATIENT DETAILS */}
-
-            <div className="flex w-full flex-col gap-4 p-6">
-
-              {/* PHONE */}
-
-              <div className="flex w-full items-start gap-3">
-
-                <div className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center text-slate-400">
-
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    className="h-4 w-4"
-                  >
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-                  </svg>
-
-                </div>
-
-                <div className="flex flex-col">
-
-                  <div className="text-[10px] font-bold leading-[15px] tracking-[0.5px] text-slate-400">
-                    PHONE
-                  </div>
-
-                  <div className="whitespace-nowrap text-sm font-medium leading-5 text-slate-700">
-                    {patientPhone}
-                  </div>
-
-                </div>
-
-              </div>
-
-              {/* EMAIL */}
-
-              <div className="flex w-full items-start gap-3">
-
-                <div className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center text-slate-400">
-
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    className="h-4 w-4"
-                  >
-                    <rect
-                      x="3"
-                      y="5"
-                      width="18"
-                      height="14"
-                      rx="2"
-                    />
-
-                    <path d="m3 7 9 6 9-6" />
-                  </svg>
-
-                </div>
-
-                <div className="flex flex-col">
-
-                  <div className="text-[10px] font-bold leading-[15px] tracking-[0.5px] text-slate-400">
-                    EMAIL
-                  </div>
-
-                  <div className="whitespace-nowrap text-sm font-medium leading-5 text-slate-700">
-                    {patientEmail}
-                  </div>
-
-                </div>
-
-              </div>
-
-              {/* MEASUREMENTS */}
-
-              <div className="grid w-full grid-cols-2 gap-x-4 gap-y-4 pt-2">
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    HEIGHT
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.height}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    WEIGHT
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.weight}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    BSA
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.bsa}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    BMI
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.bmi}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    BP
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.bp}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    PULSE
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.pulse}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    TEMP
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.temp}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    SPO2
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.spo2}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    PAIN SCORE
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.painScore}
-                  </div>
-                </div>
-
-              </div>
-
-              {/* PROFILE */}
-
-              <button
-                onClick={() => {
-                  const pid = consultationState?.patientId;
-                  if (pid) {
-                    localStorage.setItem("hms_last_viewed_patient_id", pid);
-                  }
-                  navigate("/doctor/patient-details", {
-                    state: { patientId: pid },
-                  });
-                }}
-                className="h-9 w-full rounded-md border border-blue-600 bg-white text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
-              >
-                View Full Profile {/* Working */}
-              </button>
-
-            </div>
-
-            {/* FOOTER */}
-
-            <div className="absolute bottom-0 left-0 right-0 flex h-[50px] items-center justify-center border-t border-slate-100 text-xs leading-4 text-slate-400">
-              Registered on {registeredOn}
-            </div>
-
-          </aside>
-
-          {/* ====================================================
               MAIN
           ==================================================== */}
 
@@ -1750,11 +1508,16 @@ const Consultation: React.FC = () => {
 
                   <div className="flex w-full items-center gap-4">
 
-                    <img
-                      src={patientPhoto}
-                      alt={patientName}
-                      className="h-20 w-20 shrink-0 rounded-full border-4 border-white object-cover shadow-sm"
-                    />
+                    <div className="relative shrink-0">
+                      <img
+                        src={patientPhoto}
+                        alt={patientName}
+                        className={`h-20 w-20 rounded-full border-4 object-cover shadow-sm ${patientCriticalInfo.isCritical ? "border-red-500 animate-pulse" : "border-white"}`}
+                      />
+                      {patientCriticalInfo.isCritical && (
+                        <span className="absolute -right-0.5 -top-0.5 h-3.5 w-3.5 rounded-full border-2 border-white bg-red-500" />
+                      )}
+                    </div>
 
                     <div className="min-w-0 flex-1">
 
@@ -1763,6 +1526,9 @@ const Consultation: React.FC = () => {
                         <h2 className="truncate text-xl font-bold leading-7 text-[#1e293b]">
                           {patientName}
                         </h2>
+                        {patientCriticalInfo.isCritical && (
+                          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-500 animate-pulse" />
+                        )}
 
                         <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-[#64748b]">
                           {patientDisplayId}
@@ -1927,6 +1693,17 @@ const Consultation: React.FC = () => {
                           {measurements.spo2}
                         </div>
                       </div>
+
+                      {measurements.painScore && measurements.painScore !== "—" && (
+                        <div className="flex flex-col">
+                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                            PAIN SCORE
+                          </div>
+                          <div className="text-sm font-bold leading-5 text-slate-800">
+                            {measurements.painScore}
+                          </div>
+                        </div>
+                      )}
 
                     </div>
 
