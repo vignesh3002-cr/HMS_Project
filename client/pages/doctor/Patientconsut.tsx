@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   useEffect,
   useRef,
   useState,
@@ -22,13 +22,14 @@ import {
   type PatientRecord,
 } from "../../api/patient.api";
 import {
-encounterApi,
+ encounterApi,
   type EncounterRecord,
 } from "../../api/encounter.api";
 import {
   labTestMasterApi,
   type LabTestMasterRecord,
 } from "../../api/labTestMaster.api";
+import { useCriticalPatients } from "../../hooks/useCriticalPatients";
 import {
   labOrderApi,
   labOrderItemApi,
@@ -298,6 +299,7 @@ interface MeasurementValues {
   pulse: string;
   temp: string;
   spo2: string;
+  painScore: string;
 }
 
 const vitalNum = (
@@ -334,6 +336,7 @@ const buildMeasurements = (
   const pulse = getField("pulse");
   const temp = getField("temperature");
   const spo2 = getField("spo2");
+  const painScore = getField("pain_score");
   const bmiStored = getField("BMI");
 
   const bsaValue = computeBsa(height, weight);
@@ -356,6 +359,7 @@ const buildMeasurements = (
     pulse: pulse !== null ? `${pulse} bpm` : "",
     temp: temp !== null ? `${temp} °C` : "",
     spo2: spo2 !== null ? `${spo2}%` : "",
+    painScore: painScore !== null ? `${painScore}/10` : "",
   };
 };
 
@@ -948,6 +952,16 @@ const Consultation: React.FC = () => {
   const [encounter, setEncounter] = useState<EncounterRecord | null>(null);
   const [encounterError, setEncounterError] = useState("");
   const [recentEncounters, setRecentEncounters] = useState<EncounterRecord[]>([]);
+
+  const patientAgeData = useMemo(() => {
+    if (!patient) return [];
+    return [{ patientId: patient.patient_id || "", age: patient.patient_age, dob: patient.patient_dob }];
+  }, [patient]);
+  const { getCriticalInfo } = useCriticalPatients(patientAgeData);
+  const patientCriticalInfo = useMemo(() => {
+    if (!patient) return { isCritical: false, reasons: [] as string[] };
+    return getCriticalInfo(patient.patient_id || "");
+  }, [patient, getCriticalInfo]);
 
   const formatDateDMY = (value?: string | null) => {
     if (!value) return "";
@@ -1701,11 +1715,16 @@ const Consultation: React.FC = () => {
 
                   <div className="flex w-full items-center gap-4">
 
-                    <img
-                      src={patientPhoto}
-                      alt={patientName}
-                      className="h-20 w-20 shrink-0 rounded-full border-4 border-white object-cover shadow-sm"
-                    />
+                    <div className="relative shrink-0">
+                      <img
+                        src={patientPhoto}
+                        alt={patientName}
+                        className={`h-20 w-20 rounded-full border-4 object-cover shadow-sm ${patientCriticalInfo.isCritical ? "border-red-500 animate-pulse" : "border-white"}`}
+                      />
+                      {patientCriticalInfo.isCritical && (
+                        <span className="absolute -right-0.5 -top-0.5 h-3.5 w-3.5 rounded-full border-2 border-white bg-red-500" />
+                      )}
+                    </div>
 
                     <div className="min-w-0 flex-1">
 
@@ -1714,6 +1733,9 @@ const Consultation: React.FC = () => {
                         <h2 className="truncate text-xl font-bold leading-7 text-[#1e293b]">
                           {patientName}
                         </h2>
+                        {patientCriticalInfo.isCritical && (
+                          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-500 animate-pulse" />
+                        )}
 
                         <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-[#64748b]">
                           {patientDisplayId}
@@ -1878,6 +1900,17 @@ const Consultation: React.FC = () => {
                           {measurements.spo2}
                         </div>
                       </div>
+
+                      {measurements.painScore && measurements.painScore !== "—" && (
+                        <div className="flex flex-col">
+                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                            PAIN SCORE
+                          </div>
+                          <div className="text-sm font-bold leading-5 text-slate-800">
+                            {measurements.painScore}
+                          </div>
+                        </div>
+                      )}
 
                     </div>
 

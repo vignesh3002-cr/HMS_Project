@@ -3,6 +3,17 @@ import { Bell, X, Check } from "lucide-react";
 import { useNotifications } from "@/context/NotificationContext";
 import { cn } from "@/lib/utils";
 
+function timeAgo(timestamp: number) {
+  const diffSec = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (diffSec < 60) return "Just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} min ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
+}
+
 interface BellNotificationButtonProps {
   className?: string;
   size?: "sm" | "md" | "lg";
@@ -12,8 +23,14 @@ export function BellNotificationButton({ className = "", size = "md" }: BellNoti
   const { notifications, unreadCount, isLoading, error, markAllAsRead, clearAll, removeNotification, refetch } =
     useNotifications();
   const [isOpen, setIsOpen] = useState(false);
+  const [tick, setTick] = useState(0);
   const popoverRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const interval = setInterval(() => setTick((t) => t + 1), 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   const sizeClasses = {
     sm: "h-8 w-8",
@@ -135,7 +152,7 @@ export function BellNotificationButton({ className = "", size = "md" }: BellNoti
 
             <div className="flex shrink-0 items-center gap-2">
               <span className="text-[11px] font-medium leading-[14px] text-[#434656]">
-                {item.time}
+                {timeAgo(item.createdAt)}
               </span>
 
               {unread && (
@@ -175,9 +192,12 @@ export function BellNotificationButton({ className = "", size = "md" }: BellNoti
       >
         <Bell className={iconSizes[size]} />
         {unreadCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#e53e3e] px-1 text-[10px] font-bold leading-none text-white">
-            {unreadCount > 99 ? "99+" : unreadCount > 9 ? "9+" : unreadCount}
-          </span>
+          <>
+            <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-[#e53e3e] ring-2 ring-white animate-pulse" />
+            <span className="absolute -top-0.5 -right-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#e53e3e] px-1 text-[10px] font-bold leading-none text-white">
+              {unreadCount > 99 ? "99+" : unreadCount > 9 ? "9+" : unreadCount}
+            </span>
+          </>
         )}
       </button>
 
