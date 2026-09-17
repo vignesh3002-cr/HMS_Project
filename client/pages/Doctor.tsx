@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import CalendarPicker from "@/components/hms/Calender";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
@@ -26,6 +26,7 @@ import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { DepartmentPill, DepartmentAvatarText } from "@/components/hms/DepartmentBadge";
 import { DoctorBranchDisplay } from "@/components/hms/DoctorBranchDisplay";
+import AvailableSlotsPopover from "@/components/hms/AvailableSlotsPopover";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
@@ -54,7 +55,7 @@ function getSlotBand(percentage: number) {
   return { color: "#16A34A", label: "Available" };
 }
  
-function SlotProgress({ booked, total, loading }: { booked: number; total: number; loading?: boolean }) {
+const SlotProgress = memo(function SlotProgress({ booked, total, loading }: { booked: number; total: number; loading?: boolean }) {
   if (loading) {
     return (
       <div className="min-w-[140px]">
@@ -89,7 +90,7 @@ function SlotProgress({ booked, total, loading }: { booked: number; total: numbe
       </div>
     </div>
   );
-}
+});
  
 // Three-dot card menu (grid only)
 function CardMenu({ onView, onEdit, onDelete, onTransfer, onRestore, deactivated }: { onView: () => void; onEdit: () => void; onDelete: () => void; onTransfer: () => void; onRestore: () => void; deactivated?: boolean }) {
@@ -263,6 +264,7 @@ export default function Doctor() {
 
   // Per-doctor slot booking summary for the selected date (list view progress bar)
   const [slotSummaries, setSlotSummaries] = useState<Record<string, { total: number; booked: number }>>({});
+  const [slotTimes, setSlotTimes] = useState<Record<string, Array<{branchId:string; branchName:string; times:string[]}>>>({});
 
   // Mapped doctor rows -- shared by the filter field options below and the
   // search/filter step, so both work off the exact same real data.
@@ -382,6 +384,41 @@ useEffect(() => {
 
         if (signal.cancelled) return;
         setSlotSummaries((prev) => ({ ...prev, ...Object.fromEntries(batchEntries) }));
+
+        // Also fetch available slot times for popover
+        const timesEntries = await Promise.all(
+          batch.map(async (doc) => {
+            try {
+              const branchIds = doc.branches?.map(b => b.branch_id).filter(Boolean) || [];
+              if (branchIds.length === 0) return [doc.employee_id, []] as const;
+              const branchData = await Promise.all(
+                branchIds.map(async (branchId) => {
+                  try {
+                    const res = await appointmentApi.getAvailableSlots(doc.employee_id, branchId, dateStr, { includePast: false });
+                    const slots = res.data?.data?.slots ?? [];
+                    const branchName = doc.branches?.find(b => b.branch_id === branchId)?.branch_name || branchId;
+                    const availableTimes = slots.filter((s: any) => s.is_available).map((s: any) => {
+                      const [h, m] = s.time.split(':');
+                      const hour = parseInt(h, 10);
+                      const ampm = hour >= 12 ? 'PM' : 'AM';
+                      const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+                      const timeLabel = `${String(hour12).padStart(2,'0')}:${m} ${ampm}`;
+                      return timeLabel;
+                    });
+                    return { branchId, branchName, times: availableTimes };
+                  } catch {
+                    return { branchId, branchName: branchId, times: [] };
+                  }
+                })
+              );
+              return [doc.employee_id, branchData.filter(b => b.times.length > 0)] as const;
+            } catch {
+              return [doc.employee_id, []] as const;
+            }
+          })
+        );
+        if (signal.cancelled) return;
+        setSlotTimes((prev) => ({ ...prev, ...Object.fromEntries(timesEntries) }));
       }
     },
     [],
@@ -399,6 +436,7 @@ useEffect(() => {
     // selected date/doctor set, instead of briefly showing the previous
     // date's stale counts while the fresh fetch is in flight.
     setSlotSummaries({});
+    setSlotTimes({});
 
     if (activeDoctors.length === 0) return () => { signal.cancelled = true; };
     fetchSlotSummaries(activeDoctors, selectedDate, signal);
@@ -768,7 +806,33 @@ useEffect(() => {
                       return <SlotProgress booked={0} total={0} />;
                     }
                     const summary = slotSummaries[String(r.id)];
-                    return <SlotProgress booked={summary?.booked ?? 0} total={summary?.total ?? 0} loading={!summary} />;
+                    const booked = summary?.booked ?? 0;
+                    const total = summary?.total ?? 0;
+                    const loading = !summary;
+                    const branchesSlots = slotTimes[String(r.id)] ?? [];
+                    const totalSlots = branchesSlots.reduce((sum, b) => sum + b.times.length, 0);
+                    const trigger = (
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <SlotProgress booked={booked} total={total} loading={loading} />
+                      </div>
+                    );
+                    const firstBranch = r.branches?.[0];
+                    const branchId = firstBranch?.branch_id || "";
+                    const dateStr = format(selectedDate, "yyyy-MM-dd");
+                    const emp = realDoctors?.find((e: any) => e.employee_id === r.id);
+                    const departmentId = emp?.department_id || emp?.department_master?.department_id || "";
+                    return (
+                      <AvailableSlotsPopover
+                        doctorName={r.name}
+                        doctorId={String(r.id)}
+                        branch={r.branch}
+                        branchId={branchId}
+                        departmentId={departmentId}
+                        date={dateStr}
+                        branchesSlots={branchesSlots}
+                        trigger={trigger}
+                      />
+                    );
                   }},
                   { key: "status", label: "Status", sortable: true, render: (r: any) => (
                     <StatusBadge status={String(r.status)} />

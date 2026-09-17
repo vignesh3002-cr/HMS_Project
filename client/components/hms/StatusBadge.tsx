@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
@@ -77,7 +78,7 @@ function toTitleCase(str: string): string {
     .join(" ");
 }
 
-export function StatusBadge({ children, status, tone }: StatusBadgeProps) {
+export const StatusBadge = memo(function StatusBadge({ children, status, tone }: StatusBadgeProps) {
   const resolvedTone = resolveTone(status, tone);
   const { container, dot } = toneClasses[resolvedTone];
   const normalized = normalizeStatusKey(status);
@@ -89,4 +90,4 @@ export function StatusBadge({ children, status, tone }: StatusBadgeProps) {
       {label}
     </span>
   );
-}
+});

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 interface DoctorBranchDisplayProps {
@@ -10,7 +11,7 @@ interface DoctorBranchDisplayProps {
   showScheduleIndicator?: boolean;
 }
 
-export function DoctorBranchDisplay({ branches, showScheduleIndicator = false }: DoctorBranchDisplayProps) {
+export const DoctorBranchDisplay = memo(function DoctorBranchDisplay({ branches, showScheduleIndicator = false }: DoctorBranchDisplayProps) {
   const list = branches ?? [];
 
   if (list.length === 0) {
@@ -52,4 +53,4 @@ export function DoctorBranchDisplay({ branches, showScheduleIndicator = false }:
       </TooltipContent>
     </Tooltip>
   );
-}
+});
