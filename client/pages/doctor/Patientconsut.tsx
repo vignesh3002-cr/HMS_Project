@@ -1015,15 +1015,12 @@ const Consultation: React.FC = () => {
 
   const [patientHistory, setPatientHistory] = useState("");
   const [pastHistory, setPastHistory] = useState("");
-
-  const [pastHistoryExpanded, setPastHistoryExpanded] = useState(false);
   const [pastHistoryTreatmentType, setPastHistoryTreatmentType] = useState("");
   const [pastHistoryTreatmentDate, setPastHistoryTreatmentDate] = useState("");
   const [pastHistoryTreatmentNote, setPastHistoryTreatmentNote] = useState("");
   const [pastHistoryTreatmentResponse, setPastHistoryTreatmentResponse] =
     useState("");
 
-  const [reportsExpanded, setReportsExpanded] = useState(false);
   const [reportsTest, setReportsTest] = useState("");
   const [reportsTestDate, setReportsTestDate] = useState("");
   const [reportsTestResult, setReportsTestResult] = useState("");
@@ -1897,7 +1894,7 @@ const Consultation: React.FC = () => {
 
                 <section className="flex w-full flex-col gap-5 bg-white p-5">
 
-                  <div className="flex w-full items-center gap-4">
+                  <div className="flex w-full items-center justify-between gap-4">
 
                     <div className="relative shrink-0">
                       <img
@@ -1910,7 +1907,7 @@ const Consultation: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0">
 
                       <div className="mb-1 flex min-w-0 items-center space-x-2">
 
@@ -2011,7 +2008,7 @@ const Consultation: React.FC = () => {
 
                     {/* MEASUREMENTS */}
 
-                    <div className="grid grid-cols-4 gap-x-6 gap-y-3">
+                    <div className="grid grid-cols-5 gap-x-6 gap-y-3">
 
                       <div className="flex flex-col">
                         <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
@@ -2110,7 +2107,7 @@ const Consultation: React.FC = () => {
                           state: { patientId: pid },
                         });
                       }}
-                      className="ml-auto h-9 rounded-md border border-blue-600 bg-white px-4 text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
+                      className="h-9 rounded-md border border-blue-600 bg-white px-4 text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
                     >
                       View Full Profile
                     </button>
@@ -2865,7 +2862,11 @@ className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-
 
                   {/* PATIENT DETAILS GRID */}
 
-                  <div className="grid w-full grid-cols-2 gap-x-6 gap-y-4 pt-2">
+                  <div className="grid w-full grid-cols-2 gap-x-6 pt-2">
+
+                    {/* LEFT COLUMN: HOPI + REPORTS */}
+
+                    <div className="flex w-full flex-col gap-4">
 
                     {/* HISTORY OF PRESENT ILLNESS (HOPI) */}
 
@@ -2886,34 +2887,128 @@ className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-
 
                     </div>
 
+                    {/* REPORTS (PREVIOUS) */}
+
+                    <div className="flex flex-col gap-2">
+
+                      <label className="text-xs font-bold leading-4 text-slate-500">
+                        Reports (Previous)
+                      </label>
+
+                      <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+
+                          {/* SELECT TEST */}
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                              Select Test
+                            </label>
+
+                            <div className="relative">
+                              <select
+                                value={reportsTest}
+                                onChange={(event) =>
+                                  setReportsTest(event.target.value)
+                                }
+                                className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                              >
+                                <option value="" disabled>
+                                  Select Test
+                                </option>
+                                {labTests.map((test) => (
+                                  <option
+                                    key={test.lab_test_id}
+                                    value={test.lab_test_id}
+                                  >
+                                    {test.test_name}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="#94a3b8"
+                                strokeWidth="1.8"
+                                className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
+                              >
+                                <path d="m6 9 6 6 6-6" />
+                              </svg>
+                            </div>
+                          </div>
+
+                          {/* DATE / RESULT / IMPRESSION */}
+                          {reportsTest && (
+                            <>
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Date
+                                </label>
+                                <input
+                                  type="date"
+                                  value={reportsTestDate}
+                                  onChange={(event) =>
+                                    setReportsTestDate(event.target.value)
+                                  }
+                                  className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Enter Result
+                                </label>
+                                <textarea
+                                  value={reportsTestResult}
+                                  onChange={(event) =>
+                                    setReportsTestResult(event.target.value)
+                                  }
+                                  placeholder="Type the result..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Enter Impression
+                                </label>
+                                <textarea
+                                  value={reportsTestImpression}
+                                  onChange={(event) =>
+                                    setReportsTestImpression(event.target.value)
+                                  }
+                                  placeholder="Type the impression..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+                            </>
+                          )}
+
+                        </div>
+
+                      <textarea
+                        value={reportsText}
+                        onChange={(event) => setReportsText(event.target.value)}
+                        placeholder="Type previous reports..."
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
+                      />
+
+                    </div>
+
+                    </div>
+
+                    {/* RIGHT COLUMN: PAST HISTORY + SAVE */}
+
+                    <div className="flex w-full flex-col gap-4">
+
                     {/* PAST HISTORY */}
 
                     <div className="flex flex-col gap-2">
 
-                      <button
-                        type="button"
-                        onClick={() => setPastHistoryExpanded((prev) => !prev)}
-                        className="flex w-fit items-center gap-1.5 text-xs font-bold leading-4 text-slate-500 transition hover:text-slate-700"
-                      >
+                      <label className="text-xs font-bold leading-4 text-slate-500">
                         Past History
+                      </label>
 
-                        <svg
-                          viewBox="0 0 20 20"
-                          fill="currentColor"
-                          className={`h-3.5 w-3.5 transition-transform ${
-                            pastHistoryExpanded ? "rotate-90" : ""
-                          }`}
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      </button>
-
-                      {pastHistoryExpanded && (
-                        <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
 
                           {/* TREATMENT TYPE */}
                           <div className="flex flex-col gap-1.5">
@@ -3007,7 +3102,6 @@ className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-
                           )}
 
                         </div>
-                      )}
 
                       <textarea
                         value={pastHistory}
@@ -3015,133 +3109,6 @@ className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-
                           setPastHistory(event.target.value)
                         }
                         placeholder="Type the patient's past history..."
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
-                      />
-
-                    </div>
-
-                    {/* REPORTS (PREVIOUS) */}
-
-                    <div className="flex flex-col gap-2">
-
-                      <button
-                        type="button"
-                        onClick={() => setReportsExpanded((prev) => !prev)}
-                        className="flex w-fit items-center gap-1.5 text-xs font-bold leading-4 text-slate-500 transition hover:text-slate-700"
-                      >
-                        Reports (Previous)
-
-                        <svg
-                          viewBox="0 0 20 20"
-                          fill="currentColor"
-                          className={`h-3.5 w-3.5 transition-transform ${
-                            reportsExpanded ? "rotate-90" : ""
-                          }`}
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      </button>
-
-                      {reportsExpanded && (
-                        <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-
-                          {/* SELECT TEST */}
-                          <div className="flex flex-col gap-1.5">
-                            <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                              Select Test
-                            </label>
-
-                            <div className="relative">
-                              <select
-                                value={reportsTest}
-                                onChange={(event) =>
-                                  setReportsTest(event.target.value)
-                                }
-                                className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-                              >
-                                <option value="" disabled>
-                                  Select Test
-                                </option>
-                                {labTests.map((test) => (
-                                  <option
-                                    key={test.lab_test_id}
-                                    value={test.lab_test_id}
-                                  >
-                                    {test.test_name}
-                                  </option>
-                                ))}
-                              </select>
-
-                              <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="#94a3b8"
-                                strokeWidth="1.8"
-                                className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
-                              >
-                                <path d="m6 9 6 6 6-6" />
-                              </svg>
-                            </div>
-                          </div>
-
-                          {/* DATE / RESULT / IMPRESSION */}
-                          {reportsTest && (
-                            <>
-                              <div className="flex flex-col gap-1.5">
-                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                                  Date
-                                </label>
-                                <input
-                                  type="date"
-                                  value={reportsTestDate}
-                                  onChange={(event) =>
-                                    setReportsTestDate(event.target.value)
-                                  }
-                                  className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-                                />
-                              </div>
-
-                              <div className="flex flex-col gap-1.5">
-                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                                  Enter Result
-                                </label>
-                                <textarea
-                                  value={reportsTestResult}
-                                  onChange={(event) =>
-                                    setReportsTestResult(event.target.value)
-                                  }
-                                  placeholder="Type the result..."
-                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-                                />
-                              </div>
-
-                              <div className="flex flex-col gap-1.5">
-                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                                  Enter Impression
-                                </label>
-                                <textarea
-                                  value={reportsTestImpression}
-                                  onChange={(event) =>
-                                    setReportsTestImpression(event.target.value)
-                                  }
-                                  placeholder="Type the impression..."
-                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-                                />
-                              </div>
-                            </>
-                          )}
-
-                        </div>
-                      )}
-
-                      <textarea
-                        value={reportsText}
-                        onChange={(event) => setReportsText(event.target.value)}
-                        placeholder="Type previous reports..."
                         className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
                       />
 
@@ -3196,6 +3163,8 @@ className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-
                             Clinical details saved successfully.
                           </div>
                         )}
+
+                    </div>
 
                     </div>
 
@@ -4342,6 +4311,20 @@ const Diagnosis: React.FC<{
   const [subtypes, setSubtypes] = useState<CancerSubtypeItem[]>([]);
   const [diagnosisCatalogReady, setDiagnosisCatalogReady] = useState(false);
 
+  /* Multi-select Cancer Type field. The full selection is kept for
+     documentation; the first entry drives the dependent fields
+     (Histopathology, staging) exactly like the old single select. */
+  const [selectedCancerTypes, setSelectedCancerTypes] = useState<string[]>([]);
+
+  useEffect(() => {
+    setSelectedCancerTypes((previous) => {
+      if (!formData.type) return previous;
+      return previous.includes(formData.type)
+        ? previous
+        : [...previous, formData.type];
+    });
+  }, [formData.type]);
+
   /* Sync the diagnosis selection (cancer_type_id + subtype_id +
      diagnosis_id) to localStorage so downstream steps (Treatment Plan)
      can read the IDs to query regimen protocols from the backend. */
@@ -4674,16 +4657,20 @@ const Diagnosis: React.FC<{
     }));
   };
 
-  const handleTypeChange = (value: string) => {
+  const handleTypesChange = (values: string[]) => {
+    setSelectedCancerTypes(values);
+
+    /* Reload the dependent fields off the first selected type. */
+    const primaryType = values[0] ?? "";
     setFormData((previous) => ({
       ...previous,
-      type: value,
+      type: primaryType,
       subType: "",
       icdCode: "",
     }));
 
     const cancerType = cancerTypes.find(
-      (item) => item.cancer_type === value
+      (item) => item.cancer_type === primaryType
     );
 
     if (cancerType) {
@@ -4928,38 +4915,19 @@ const Diagnosis: React.FC<{
 
           {/* Cancer Type */}
           <div>
-            <label
-              htmlFor="type"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
+            <label className="mb-2 block text-sm font-semibold text-gray-600">
               Cancer Type
             </label>
 
-            <div className="relative">
-              <select
-                id="type"
-                name="type"
-                value={formData.type}
-                onChange={(event) =>
-                  handleTypeChange(event.target.value)
-                }
-                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-              >
-                {cancerTypes.length > 0 &&
-                  cancerTypes.map((cancerType) => (
-                    <option
-                      key={cancerType.cancer_type_id}
-                      value={cancerType.cancer_type}
-                    >
-                      {cancerType.cancer_type}
-                    </option>
-                  ))}
-              </select>
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                <ChevronDownIcon />
-              </div>
-            </div>
+            <MultiSelectDropdown
+              options={cancerTypes.map((cancerType) => ({
+                label: cancerType.cancer_type,
+                value: cancerType.cancer_type,
+              }))}
+              value={selectedCancerTypes}
+              onValueChange={handleTypesChange}
+              placeholder="Select Cancer Type"
+            />
           </div>
 
           {/* Laterality */}
