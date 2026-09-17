@@ -1,4 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useClinicalDetails } from "@/hooks/useClinicalDetails";
 
@@ -34,6 +41,23 @@ interface ClinicalDetailsSectionProps {
   patientId?: string;
   encounterNo?: string | null;
   consultationNotes?: string;
+  onSaveStateChange?: (state: {
+    saving: boolean;
+    disabled: boolean;
+    saveError: string | null;
+    saveSuccess: boolean;
+  }) => void;
+}
+
+export interface ClinicalDetailsSectionSaveState {
+  saving: boolean;
+  disabled: boolean;
+  saveError: string | null;
+  saveSuccess: boolean;
+}
+
+export interface ClinicalDetailsSectionHandle {
+  handleSave: () => void;
 }
 
 const ChevronDownIcon = () => (
@@ -71,11 +95,13 @@ const Spinner = () => (
   </svg>
 );
 
-export function ClinicalDetailsSection({
-  patientId,
-  encounterNo,
-  consultationNotes,
-}: ClinicalDetailsSectionProps) {
+export const ClinicalDetailsSection = forwardRef<
+  ClinicalDetailsSectionHandle,
+  ClinicalDetailsSectionProps
+>(function ClinicalDetailsSection(
+  { patientId, encounterNo,consultationNotes, onSaveStateChange },
+  ref,
+) {
   const { toast } = useToast();
 
   const {
@@ -481,6 +507,21 @@ export function ClinicalDetailsSection({
     }
     prevSaveSuccess.current = saveSuccess;
   }, [saveSuccess, toast]);
+
+  /* ============================================================
+     Expose the save action so the parent (Patientconsut) can
+     invoke it from the "Save Clinical Details" button rendered
+     next to the "Reports (Previous)" field, and report the live
+     save state (saving/disabled/messages) up so that button can
+     re-render with it (a ref alone would never trigger re-renders).
+  ============================================================ */
+  useImperativeHandle(ref, () => ({
+    handleSave,
+  }));
+
+  useEffect(() => {
+    onSaveStateChange?.({ saving, disabled, saveError, saveSuccess });
+  }, [saving, disabled, saveError, saveSuccess, onSaveStateChange]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -909,30 +950,6 @@ export function ClinicalDetailsSection({
         )}
       </div>
 
-      {/* SAVE */}
-      <div className="flex w-full flex-col gap-2 pt-1">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={disabled}
-          className="flex h-9 w-fit items-center justify-center gap-2 rounded-lg border-0 bg-blue-700 px-[25px] py-[9px] text-sm font-bold leading-5 text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-        >
-          {saving && <Spinner />}
-          {saving ? "Saving..." : "Save Clinical Details"}
-        </button>
-
-        {saveError && (
-          <div className="text-xs font-medium leading-4 text-red-600">
-            {saveError}
-          </div>
-        )}
-
-        {saveSuccess && !saveError && (
-          <div className="text-xs font-medium leading-4 text-green-600">
-            Clinical details saved successfully.
-          </div>
-        )}
-      </div>
     </div>
   );
-}
+});

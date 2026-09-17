@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Check,
   Loader2,
+  FlaskConical,
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
 import { getDepartmentColors } from "@/components/hms/DepartmentBadge";
@@ -27,6 +28,9 @@ import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
 import { getUser } from "@/utils/token";
+
+import { useCriticalPatients } from "@/hooks/useCriticalPatients";
+import { CriticalWrapper, CriticalCorner, CriticalDot } from "@/components/hms/CriticalPatientIndicator";
 import { AppointmentActionMenu } from "@/components/hms/AppointmentActionMenu";
 
 import DayView from "./Day view";
@@ -49,6 +53,7 @@ interface Appointment {
   doctor: string;
   doctorId: string;
   doctorInitial: string;
+  visitType?: string;
   date: string;
   time: string;
   sortDate: number;
@@ -125,7 +130,9 @@ function formatAppointmentTimeConditional(record: Appointment): string {
 
 function mapAppointmentRecord(record: AppointmentRecord, index: number): Appointment {
   const patientName = formatPatientName(record.patient_bio_data);
-  const doctorName = formatDoctorName(record.employees);
+  const isLab = (record.Patient_visit_type || record.patient_visit_type || record.reason_for_visit || "").toLowerCase().includes("lab");
+  const hasDoctor = Boolean(record.employees && record.employee_id && record.employee_id !== "—");
+  const doctorName = (!isLab && hasDoctor) ? formatDoctorName(record.employees) : "—";
   const deptName = record.department_master?.department_name ?? record.department ?? null;
   const { bg: deptBg, text: deptColor } = getDepartmentColors(deptName);
 
@@ -146,8 +153,9 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
     avatarBg: deptBg,
     branch: record.branch?.branch_name ?? "—",
     doctor: doctorName,
-    doctorId: record.employee_id ?? "—",
+    doctorId: (!isLab && hasDoctor && record.employee_id) ? record.employee_id : "—",
     doctorInitial: getInitials(doctorName),
+    visitType: record.Patient_visit_type || record.patient_visit_type || "",
     date: formatAppointmentDate(record.appointment_date),
     time: formatAppointmentTime(record.appointment_time),
     sortDate,
@@ -165,6 +173,16 @@ const AppointmentSchedule: React.FC = () => {
   
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
+
+  const appointmentPatientIds = useMemo(() => {
+    return [...new Set(appointments.map((a) => a.patientId).filter(Boolean))];
+  }, [appointments]);
+
+
+
+  const { getCriticalInfo } = useCriticalPatients(
+    appointmentPatientIds.map((id) => ({ patientId: id }))
+  );
 
   // Date selection
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -350,6 +368,7 @@ const AppointmentSchedule: React.FC = () => {
     "date",
     "doctor",
     "doctorId",
+    "visitType",
     "status",
   ];
 
@@ -428,8 +447,9 @@ const AppointmentSchedule: React.FC = () => {
           { header: "Patient", cell: (r: Appointment) => r.patient },
           { header: "Patient ID", cell: (r: Appointment) => r.patientId },
           { header: "Branch", cell: (r: Appointment) => r.branch },
-          { header: "Doctor", cell: (r: Appointment) => r.doctor },
+          { header: "Doctor", cell: (r: Appointment) => r.visitType?.toLowerCase().includes("lab") ? "Direct Lab Visit" : r.doctor },
           { header: "Doctor ID", cell: (r: Appointment) => r.doctorId },
+          { header: "Visit Type", cell: (r: Appointment) => r.visitType || "—" },
           { header: "Date", cell: (r: Appointment) => r.date },
           { header: "Time", cell: (r: Appointment) => r.time },
           { header: "Status", cell: (r: Appointment) => r.status },
@@ -668,18 +688,47 @@ const AppointmentSchedule: React.FC = () => {
                   { key: "tokenId", label: "TokenId", className: "!whitespace-normal", render: (r: Appointment) => (
                     <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.tokenId}</span>
                   )},
-                  { key: "patient", label: "Patient", className: "!whitespace-normal", render: (r: Appointment) => (
-                    <div className="flex items-center gap-2">
+                  { key: "patient", label: "Patient", className: "!whitespace-normal", render: (r: Appointment) => {
+                    const crit = getCriticalInfo(r.patientId);
+                    return (
+                    <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+                      <CriticalCorner reasons={crit.reasons} />
                       <div className="w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0" style={{ backgroundColor: r.avatarBg, color: r.avatarColor }}>{r.patientInitial}</div>
-                      <div><div className="hms-name-text capitalize">{r.patient}</div><div className="hms-id-text">{r.patientId}</div></div>
-                    </div>
-                  )},
+                      <div><div className="hms-name-text capitalize">{r.patient}</div><div className="hms-id-text flex items-center">{r.patientId}<CriticalDot reasons={crit.reasons} /></div></div>
+                    </CriticalWrapper>
+                    );
+                  }},
                   { key: "branch", label: "Branch", className: "!whitespace-normal", render: (r: Appointment) => <span className="hms-content-text text-[#191C1E]">{r.branch}</span> },
                   { key: "doctor", label: "Doctor", className: "!whitespace-normal", render: (r: Appointment) => (
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0" style={{ backgroundColor: r.avatarBg, color: r.avatarColor }}>{r.doctorInitial}</div>
-                      <div><div className="hms-name-text capitalize">{r.doctor}</div><div className="hms-id-text">{r.doctorId}</div></div>
-                    </div>
+                    r.visitType?.toLowerCase().includes("lab") ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-full">
+                        <FlaskConical className="h-3.5 w-3.5" /> Direct Lab Visit
+                      </span>
+                    ) : !r.doctor || r.doctor === "—" || r.doctor === "Unassigned" ? (
+                      <span className="text-gray-400 font-semibold pl-2">—</span>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0" style={{ backgroundColor: r.avatarBg, color: r.avatarColor }}>{r.doctorInitial}</div>
+                        <div><div className="hms-name-text capitalize">{r.doctor}</div><div className="hms-id-text">{r.doctorId}</div></div>
+                      </div>
+                    )
+                  )},
+                  { key: "visitType", label: "Visit Type", className: "!whitespace-normal", render: (r: Appointment) => (
+                    r.visitType ? (
+                      <span
+                        className={`inline-block w-fit text-[11px] font-semibold px-2.5 py-0.5 rounded-full border ${
+                          r.visitType.toLowerCase().includes("chemo")
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            : r.visitType.toLowerCase().includes("lab")
+                            ? "bg-purple-50 text-purple-700 border-purple-200"
+                            : "bg-blue-50 text-blue-700 border-blue-200"
+                        }`}
+                      >
+                        {r.visitType}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 font-medium text-xs">—</span>
+                    )
                   )},
                   { key: "date", label: "Appointment Date", className: "!whitespace-normal", render: (r: Appointment) => (
                     <div className="hms-content-text text-[#191C1E] leading-4"><div>{r.date}</div><div className="text-[11px] font-medium text-[#8C8D8F] mt-1">{formatAppointmentTimeConditional(r)}</div></div>
@@ -717,6 +766,10 @@ const AppointmentSchedule: React.FC = () => {
                 rowsPerPageOptions={[5, 10, 20]}
                 emptyMessage="No appointments found matching the current filters."
                 rowKey={(r: Appointment, i: number) => r.id + i}
+                rowClassName={(r: Appointment) => {
+                  const crit = getCriticalInfo(r.patientId);
+                  return crit.isCritical ? "relative" : "";
+                }}
               />
             )}
           </div>

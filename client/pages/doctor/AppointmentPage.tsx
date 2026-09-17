@@ -27,6 +27,9 @@ import { getUser } from "../../utils/token";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
+import { useCriticalPatients } from "@/hooks/useCriticalPatients";
+import { CriticalCorner, CriticalDot, CriticalWrapper } from "@/components/hms/CriticalPatientIndicator";
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -166,14 +169,8 @@ function isBeforeToday(dateStr: string): boolean {
   return apptDate < today;
 }
 
-function toPatient(a: AppointmentRecord): Patient | null {
+function toPatient(a: AppointmentRecord): Patient {
   const effectiveStatus = a.status ?? "";
-  const isCancelled = effectiveStatus === "CANCELLED";
-  const apptDate = a.appointment_date;
-
-  const allowedStatuses = new Set(["SCHEDULED", "RESCHEDULED", "CANCELLED"]);
-  if (!allowedStatuses.has(effectiveStatus)) return null;
-  if (isCancelled && !isBeforeToday(apptDate)) return null;
   const bio = a.patient_bio_data;
   const gender = bio?.patient_gender
     ? bio.patient_gender.charAt(0).toUpperCase() +
@@ -236,7 +233,7 @@ interface ToolbarProps {
   onViewChange: (view: "grid" | "list") => void;
   search: string;
   onSearchChange: (value: string) => void;
-  selectedDateKey: string | null;
+  selectedDateKey: string;
   onShiftDate: (days: number) => void;
   onJumpToToday: () => void;
   statusFilter: string;
@@ -389,15 +386,13 @@ function AppointmentToolbar({
                 : "bg-white"
             }`}
           >
-            {selectedDateKey
-              ? (() => {
-                  const [y, m, d] = selectedDateKey.split("-").map(Number);
-                  return new Date(y, m - 1, d).toLocaleDateString("en-GB", {
-                    day: "2-digit",
-                    month: "short",
-                  });
-                })()
-              : "All dates"}
+            {(() => {
+              const [y, m, d] = selectedDateKey.split("-").map(Number);
+              return new Date(y, m - 1, d).toLocaleDateString("en-GB", {
+                day: "2-digit",
+                month: "short",
+              });
+            })()}
           </button>
 
           <button
@@ -670,13 +665,16 @@ function PatientCard({
   onCancelRequest,
   onReschedule,
   onBookFollowUp,
-}: { patient: Patient } & PatientActionProps) {
+  getCriticalInfo,
+}: { patient: Patient; getCriticalInfo: (id: string) => import("@/components/hms/CriticalPatientIndicator").CriticalInfo } & PatientActionProps) {
   const canCheckIn = CHECKIN_STATUSES.includes(patient.originalStatus);
   const canProceed = PROCEED_STATUSES.includes(patient.originalStatus);
   const isBusy = actionBusyId === patient.id;
+  const crit = getCriticalInfo(patient.patientId);
 
   return (
-    <div className="relative flex items-start gap-4 p-4 border border-[#E5E7EB] rounded-xl hover:shadow-md hover:border-[#D6E3FF] transition-all duration-200 group">
+    <CriticalWrapper className="flex items-start gap-4 p-4 border border-[#E5E7EB] rounded-xl hover:shadow-md hover:border-[#D6E3FF] transition-all duration-200 group" reasons={crit.reasons}>
+      <CriticalCorner reasons={crit.reasons} />
       <div className="w-16 h-16 rounded-full overflow-hidden bg-[#E5E7EB] flex items-center justify-center flex-shrink-0">
         {patient.avatarUrl ? (
           <img src={patient.avatarUrl} alt={patient.name} className="w-full h-full object-cover" />
@@ -687,7 +685,7 @@ function PatientCard({
 
       <div className="flex-1 min-w-0">
         <p className="hms-name-text truncate">{patient.name}</p>
-        <p className="hms-id-text">{patient.patientCode}</p>
+        <p className="hms-id-text flex items-center">{patient.patientCode}<CriticalDot reasons={crit.reasons} /></p>
         <p className="hms-content-text text-[#191C1E] mt-1">
           {patient.age !== undefined ? `${patient.age}/${patient.gender}` : patient.gender}
         </p>
@@ -739,7 +737,7 @@ function PatientCard({
           )}
         </div>
       )}
-    </div>
+    </CriticalWrapper>
   );
 }
 
@@ -769,15 +767,15 @@ export default function AppointmentPage() {
     }
   };
 
-  // Optional date filter — seeded from ?date=YYYY-MM-DD
+  // Date filter — seeded from ?date=YYYY-MM-DD, defaults to today
   const [searchParams] = useSearchParams();
-  const [selectedDateKey, setSelectedDateKey] = useState<string | null>(() => {
+  const [selectedDateKey, setSelectedDateKey] = useState<string>(() => {
     const raw = searchParams.get("date");
-    return raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+    return raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : todayIso();
   });
   const [dateFilterOpen, setDateFilterOpen] = useState(false);
 
-  const handleSelectDate = (key: string | null) => {
+  const handleSelectDate = (key: string) => {
     setSelectedDateKey(key);
     setPage(1);
   };
@@ -786,6 +784,18 @@ export default function AppointmentPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [loadErrorMsg, setLoadErrorMsg] = useState("");
+
+
+
+  const patientAgeData = useMemo(() => {
+    return patients.map((p) => ({
+      patientId: p.patientId,
+      age: p.age,
+      dob: null as string | null,
+    }));
+  }, [patients]);
+
+  const { getCriticalInfo } = useCriticalPatients(patientAgeData);
 
   const [targetDoctorId, setTargetDoctorId] = useState<string | null>(null);
   const [ownEmployeeIds, setOwnEmployeeIds] = useState<string[]>([]);
@@ -906,7 +916,7 @@ export default function AppointmentPage() {
   const fetchAbortRef = useRef<AbortController | null>(null);
 
   const fetchAppointments = useCallback(async () => {
-    if (!resolved) return;
+    if (!resolved || ownEmployeeIds.length === 0) return;
 
     fetchAbortRef.current?.abort();
     const controller = new AbortController();
@@ -927,7 +937,7 @@ export default function AppointmentPage() {
         const first = await appointmentApi.getAll({
           branchId,
           employeeId,
-          date: selectedDateKey ?? undefined,
+          date: selectedDateKey,
           page: 1,
           limit: 100,
         }, { signal: controller.signal });
@@ -940,7 +950,7 @@ export default function AppointmentPage() {
               .getAll({
                 branchId,
                 employeeId,
-                date: selectedDateKey ?? undefined,
+                date: selectedDateKey,
                 page: index + 2,
                 limit: 100,
               }, { signal: controller.signal })
@@ -985,7 +995,7 @@ export default function AppointmentPage() {
           (y.appointment_date ?? "").localeCompare(x.appointment_date ?? ""),
         );
 
-      setPatients(ownAppointments.map(toPatient).filter((p): p is Patient => p !== null));
+      setPatients(ownAppointments.map(toPatient));
     } catch (err: any) {
       if (err?.name === "CanceledError" || err?.name === "AbortError") return;
       console.error(
@@ -1195,10 +1205,8 @@ export default function AppointmentPage() {
   const filtered = useMemo(() => {
     let result = patients;
 
-    // Date filter
-    if (selectedDateKey) {
-      result = result.filter((p) => p.appointmentDateRaw === selectedDateKey);
-    }
+    // Date is enforced server-side, no client filter needed
+    // if (result) result = result.filter((p) => p.appointmentDateRaw === selectedDateKey);
 
     // Search
     if (search) {
@@ -1286,17 +1294,21 @@ export default function AppointmentPage() {
         key: "name",
         label: "Name",
         sortable: true,
-        render: (r: any) => (
-          <div className="flex items-center gap-2">
+        render: (r: any) => {
+          const crit = getCriticalInfo(String(r.patientId));
+          return (
+          <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+            <CriticalCorner reasons={crit.reasons} />
             <div className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text bg-[#D6E3FF] text-[#00488D]">
               {String(r.name).charAt(0)}
             </div>
             <div>
               <div className="hms-name-text">{String(r.name)}</div>
-              <div className="hms-id-text">{String(r.patientCode)}</div>
+              <div className="hms-id-text flex items-center">{String(r.patientCode)}<CriticalDot reasons={crit.reasons} /></div>
             </div>
-          </div>
-        ),
+          </CriticalWrapper>
+          );
+        },
       },
       {
         key: "age",
@@ -1450,7 +1462,7 @@ export default function AppointmentPage() {
                 {/* Date nav */}
                 <div className="flex items-center">
                   <button
-                    onClick={() => handleSelectDate(selectedDateKey ? shiftIsoDay(selectedDateKey, -1) : todayIso())}
+                    onClick={() => handleSelectDate(shiftIsoDay(selectedDateKey, -1))}
                     className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
                   >
                     <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
@@ -1460,23 +1472,21 @@ export default function AppointmentPage() {
                   <Popover open={dateFilterOpen} onOpenChange={setDateFilterOpen}>
                     <PopoverTrigger asChild>
                       <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
-                        {selectedDateKey
-                          ? (() => {
-                              const d = isoToPickerDate(selectedDateKey);
-                              return isToday(d)
-                                ? "Today"
-                                : isYesterday(d)
-                                  ? "Yesterday"
-                                  : isTomorrow(d)
-                                    ? "Tomorrow"
-                                    : format(d, "dd/MM/yyyy");
-                            })()
-                          : "All dates"}
+                        {(() => {
+                          const d = isoToPickerDate(selectedDateKey);
+                          return isToday(d)
+                            ? "Today"
+                            : isYesterday(d)
+                              ? "Yesterday"
+                              : isTomorrow(d)
+                                ? "Tomorrow"
+                                : format(d, "dd/MM/yyyy");
+                        })()}
                       </button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
                       <CalendarPicker
-                        selected={selectedDateKey ? isoToPickerDate(selectedDateKey) : null}
+                        selected={isoToPickerDate(selectedDateKey)}
                         hideThemePicker
                         onSelect={(date) => {
                           if (date instanceof Date) {
@@ -1488,7 +1498,7 @@ export default function AppointmentPage() {
                     </PopoverContent>
                   </Popover>
                   <button
-                    onClick={() => handleSelectDate(selectedDateKey ? shiftIsoDay(selectedDateKey, 1) : todayIso())}
+                    onClick={() => handleSelectDate(shiftIsoDay(selectedDateKey, 1))}
                     className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
                   >
                     <svg width="6" height="10" viewBox="0 0 6 10" fill="none">
@@ -1548,17 +1558,17 @@ export default function AppointmentPage() {
                 onRowsPerPageChange={(val) => { setRowsPerPage(val); setPage(1); }}
                 rowsPerPageOptions={[5, 10, 20]}
                 emptyMessage={
-                  selectedDateKey
-                    ? `No appointments on ${isoToPickerDate(selectedDateKey).toLocaleDateString("en-GB", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                      })}${search ? ` matching "${search}"` : ""}. Clear the date filter to see all.`
-                    : search
-                    ? `No patients match "${search}".`
-                    : "No appointments found."
+                  `No appointments on ${isoToPickerDate(selectedDateKey).toLocaleDateString("en-GB", {
+                    day: "2-digit",
+                    month: "short",
+                    year: "numeric",
+                  })}${search ? ` matching "${search}"` : ""}.`
                 }
                 rowKey={(r: any, i: number) => String(r.id) + i}
+                rowClassName={(r: any) => {
+                  const crit = getCriticalInfo(String(r.patientId));
+                  return crit.isCritical ? "relative" : "";
+                }}
               />
             ) : (
               <>
@@ -1575,20 +1585,17 @@ export default function AppointmentPage() {
                           onCancelRequest={setCancelTarget}
                           onReschedule={handleReschedule}
                           onBookFollowUp={handleBookFollowUp}
+                          getCriticalInfo={getCriticalInfo}
                         />
                       ))}
                     </div>
-                  ) : (
+                   ) : (
                     <div className="flex items-center justify-center h-full py-16 text-center text-[#6B7280] text-sm">
-                      {selectedDateKey
-                        ? `No appointments on ${isoToPickerDate(selectedDateKey).toLocaleDateString("en-GB", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                          })}${search ? ` matching "${search}"` : ""}. Clear the date filter to see all.`
-                        : search
-                        ? `No patients match "${search}".`
-                        : "No appointments found."}
+                      {`No appointments on ${isoToPickerDate(selectedDateKey).toLocaleDateString("en-GB", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      })}${search ? ` matching "${search}"` : ""}.`}
                     </div>
                   )}
                 </div>

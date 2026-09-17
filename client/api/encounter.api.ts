@@ -22,6 +22,11 @@ export interface EncounterRecord {
   clinical_notes: string | null;
   advice: string | null;
   follow_up_date: string | null;
+  history_of_present_illness: string | null;
+  cns_examination: string | null;
+  cvs_examination: string | null;
+  per_abdomen_examination: string | null;
+  clinical_findings: string | null;
    height: number | null;
    weight: number | null;
    pulse: number | null;

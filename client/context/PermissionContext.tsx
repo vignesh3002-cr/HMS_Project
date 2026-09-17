@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import api from "@/api/axios";
+import { getToken } from "@/utils/token";
 
 interface PermissionContextType {
   permissions: string[];
@@ -20,6 +21,12 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   const fetchPermissions = async () => {
+    const token = getToken();
+    if (!token) {
+      setPermissions([]);
+      setLoading(false);
+      return;
+    }
     try {
       const res = await api.get("/permissions/my-permissions");
       if (res.data.success) {

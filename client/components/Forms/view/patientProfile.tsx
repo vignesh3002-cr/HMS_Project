@@ -33,6 +33,8 @@ import { useToast } from "@/hooks/use-toast";
 import { usePermission } from "@/context/PermissionContext";
 import { getUser } from "@/utils/token";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { useCriticalPatients } from "@/hooks/useCriticalPatients";
+import { CriticalDot } from "@/components/hms/CriticalPatientIndicator";
 
 const statusVariant: Record<string, "blue" | "green" | "rose" | "amber" | "purple" | "teal"> = {
   Schedule: "blue",
@@ -106,6 +108,13 @@ export default function PatientProfile() {
   // Bumped whenever an embedded action (e.g. vitals save) changes data so
   // PatientVitalsPanel remounts and re-fetches its encounters immediately.
   const [vitalsPanelVersion, setVitalsPanelVersion] = useState(0);
+
+  const patientAgeData = useMemo(() => {
+    if (!patient) return [];
+    return [{ patientId: patient.patient_id, age: Number(calculateAge(patient.patient_dob)) || 0, dob: patient.patient_dob }];
+  }, [patient]);
+
+  const { getCriticalInfo } = useCriticalPatients(patientAgeData);
 
   useEffect(() => {
     if (!id) return;
@@ -343,6 +352,7 @@ export default function PatientProfile() {
 
   const patientName = fullName(patient);
   const patientInitial = (patient.patient_first_name?.[0] ?? "?").toUpperCase();
+  const crit = getCriticalInfo(String(patient.patient_id));
 
   return (
     <div className="flex w-full font-[Manrope,sans-serif] bg-[#F7F9FB] min-h-screen">
@@ -366,14 +376,16 @@ export default function PatientProfile() {
             <div className="absolute top-0 right-0 w-1/3 h-full bg-slate-50 opacity-50 rounded-l-full transform translate-x-1/4 -translate-y-1/4 pointer-events-none" />
             <div className="relative z-10 flex flex-col items-start gap-6 p-4 md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-6">
-                  <AvatarUpload
-                    value={patient.patient_photo_url}
-                    onChange={() => {}}
-                    size={96}
-                    readOnly
-                  />
+                  <div className={crit.isCritical ? "[&>div>div:first-child]:shadow-[0_0_0_3px_#DC2626]" : ""}>
+                    <AvatarUpload
+                      value={patient.patient_photo_url}
+                      onChange={() => {}}
+                      size={96}
+                      readOnly
+                    />
+                  </div>
                   <div>
-                    <h1 className="text-2xl font-bold text-slate-900">{patientName}</h1>
+                    <h1 className="text-2xl font-bold text-slate-900 inline-flex items-center gap-2">{patientName}<CriticalDot reasons={crit.reasons} /></h1>
                     <p className="hms-id-text mt-0.5">#{patient.patient_id}</p>
                     <div className="flex flex-col gap-2 text-sm text-slate-600 sm:flex-row sm:items-center mt-2">
                       {(patient as any).current_address && (

@@ -65,7 +65,7 @@ interface AggregateSummary {
 }
 
 function emptyAggregate(): AggregateSummary {
-  return { total: 0, successful: 0, conflicts: 0, queued: 0, cancelled: 0, conflictCount: 0, conflicts: [] };
+  return { total: 0, successful: 0, queued: 0, cancelled: 0, conflictCount: 0, conflicts: [] };
 }
 
 export default function AffectedAppointmentsDialog({

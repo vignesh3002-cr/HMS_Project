@@ -2,6 +2,7 @@ import axios from "axios";
 
 const API = axios.create({
   baseURL: import.meta.env.VITE_BACKEND_URL,
+  withCredentials: true,
 });
 
 export interface LoginResponse {
@@ -15,21 +16,30 @@ export const login = async (
   rememberMe: boolean
 
 ): Promise<LoginResponse> => {
-  const res = await API.post("/auth/login", {
-    username,
-    password,
-    rememberMe
-  });
+  try {
+    const res = await API.post("/auth/login", {
+      username,
+      password,
+      rememberMe
+    });
 
-  if (!res.data.success) {
-    throw new Error(res.data.message);
+    if (!res.data.success) {
+      throw new Error(res.data.message);
+    }
+
+    const payload = res.data?.data ?? {};
+    const user = payload.user_details ?? payload.user ?? null;
+
+    return {
+      token: payload.token,
+      user,
+    };
+  } catch (error: any) {
+    const message =
+      error?.response?.data?.message ||
+      error?.response?.data?.error ||
+      error?.message ||
+      "Login failed";
+    throw new Error(message);
   }
-
-  const payload = res.data?.data ?? {};
-  const user = payload.user_details ?? payload.user ?? null;
-
-  return {
-    token: payload.token,
-    user,
-  };
 };
