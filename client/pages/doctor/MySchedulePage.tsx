@@ -202,6 +202,10 @@ function dateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function isPastDate(date: Date): boolean {
+  return dateKey(date) < dateKey(new Date());
+}
+
 // Shifts a "YYYY-MM-DD" string by N days using the local
 // calendar so results stay aligned with dateKey().
 function addIsoDays(isoDate: string, days: number): string {
@@ -649,6 +653,8 @@ function ChangeModal({
     return null;
   }
 
+  const isPast = isPastDate(date);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
       <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl">
@@ -684,9 +690,11 @@ function ChangeModal({
             <div className="grid grid-cols-3 gap-3">
               <button
                 type="button"
+                disabled={isPast}
                 onClick={() => setMode("ADD")}
                 className={`
                   rounded-xl border-2 px-3 py-3.5 text-center transition
+                  ${isPast ? "opacity-50 cursor-not-allowed" : ""}
                   ${
                     mode === "ADD"
                       ? "border-green-500 bg-green-50 text-green-700 shadow-sm"
@@ -702,9 +710,11 @@ function ChangeModal({
 
               <button
                 type="button"
+                disabled={isPast}
                 onClick={() => setMode("OVERRIDE")}
                 className={`
                   rounded-xl border-2 px-3 py-3.5 text-center transition
+                  ${isPast ? "opacity-50 cursor-not-allowed" : ""}
                   ${
                     mode === "OVERRIDE"
                       ? "border-blue-500 bg-blue-50 text-blue-700 shadow-sm"
@@ -720,9 +730,11 @@ function ChangeModal({
 
               <button
                 type="button"
+                disabled={isPast}
                 onClick={() => setMode("CANCEL")}
                 className={`
                   rounded-xl border-2 px-3 py-3.5 text-center transition
+                  ${isPast ? "opacity-50 cursor-not-allowed" : ""}
                   ${
                     mode === "CANCEL"
                       ? "border-red-500 bg-red-50 text-red-700 shadow-sm"
@@ -874,6 +886,7 @@ function ChangeModal({
 
             <button
               type="button"
+              disabled={isPast}
               onClick={onAdd}
               className={`
                 rounded-lg
@@ -883,11 +896,7 @@ function ChangeModal({
                 font-semibold
                 text-white
                 transition
-                ${
-                  mode === "CANCEL"
-                    ? "bg-red-600 hover:bg-red-700"
-                    : "bg-[#0b5394] hover:bg-blue-800"
-                }
+                ${isPast ? "bg-gray-400 cursor-not-allowed" : mode === "CANCEL" ? "bg-red-600 hover:bg-red-700" : "bg-[#0b5394] hover:bg-blue-800"}
               `}
             >
               {mode === "ADD"
@@ -1510,8 +1519,7 @@ export default function MySchedulePage() {
     const backendChanges =
       getChangesForDate(date);
 
-    const pending =
-      getPendingChangesForDate(date);
+    const pending = getPendingChangesForDate(date);
 
     /*
      * Pending changes should override
@@ -1709,6 +1717,11 @@ export default function MySchedulePage() {
     date: Date,
     defaultMode: DoctorScheduleChangeMode = "ADD"
   ) => {
+    if (isPastDate(date)) {
+      setError("Cannot modify schedule for past dates. Only today and future dates are allowed.");
+      return;
+    }
+
     setModalDate(date);
 
     setModalMode(defaultMode);
@@ -1766,6 +1779,11 @@ export default function MySchedulePage() {
 
   const addPendingChange = () => {
     if (!modalDate) return;
+
+    if (isPastDate(modalDate)) {
+      setError("Cannot modify schedule for past dates. Only today and future dates are allowed.");
+      return;
+    }
 
     if (!employeeId) {
       setError(
@@ -1932,6 +1950,12 @@ export default function MySchedulePage() {
   const removePendingChange = (
     id: string
   ) => {
+    const pending = pendingChanges.find(c => c.id === id);
+    if (pending && isPastDate(new Date(pending.change_date))) {
+      setError("Cannot modify schedule for past dates. Only today and future dates are allowed.");
+      return;
+    }
+
     setPendingChanges(
       (current) =>
         current.filter(
@@ -1951,6 +1975,12 @@ export default function MySchedulePage() {
     changeId: string
   ) => {
     if (saving) return;
+
+    const change = scheduleChanges.find(c => c.change_id === changeId);
+    if (change && isPastDate(new Date(change.change_date))) {
+      setError("Cannot modify schedule for past dates. Only today and future dates are allowed.");
+      return;
+    }
 
     try {
       setSaving(true);
@@ -2505,12 +2535,12 @@ export default function MySchedulePage() {
                               selectedDate
                             )
                           }
-                          className="
+                          disabled={isPastDate(selectedDate)}
+                          className={`
                             flex
                             items-center
                             gap-2
                             rounded-lg
-                            bg-[#0b5394]
                             px-4
                             py-2
                             text-sm
@@ -2518,9 +2548,8 @@ export default function MySchedulePage() {
                             text-white
                             shadow-sm
                             transition
-                            hover:bg-blue-800
-                            hover:shadow
-                          "
+                            ${isPastDate(selectedDate) ? "bg-gray-400 cursor-not-allowed" : "bg-[#0b5394] hover:bg-blue-800 hover:shadow"}
+                          `}
                         >
                           <Icon className="h-4 w-4">
                             <path d="M12 5v14" />
@@ -2836,6 +2865,8 @@ export default function MySchedulePage() {
                               new Date()
                             );
 
+                          const isPast = isPastDate(date);
+
                           const isSelected =
                             sameDate(
                               date,
@@ -3008,19 +3039,19 @@ export default function MySchedulePage() {
                                             <span className="absolute left-1.5 top-1.5 h-2 w-2 rounded-full bg-amber-500 shadow-sm" />
                                           )}
 
-                                          {slot.pending ||
-                                          slot.changeId ? (
-                                            <button
-                                              type="button"
-                                              title={
-                                                slot.pending
-                                                  ? "Remove unsaved change"
-                                                  : "Deactivate this change"
-                                              }
-                                              disabled={
-                                                !slot.pending &&
-                                                saving
-                                              }
+                                           {slot.pending ||
+                                           slot.changeId ? (
+                                             <button
+                                               type="button"
+                                               title={
+                                                 slot.pending
+                                                   ? "Remove unsaved change"
+                                                   : "Deactivate this change"
+                                               }
+                                               disabled={
+                                                 !slot.pending &&
+                                                 saving || isPast
+                                               }
                                               onClick={() =>
                                                 slot.pending
                                                   ? removePendingChange(
@@ -3064,7 +3095,8 @@ export default function MySchedulePage() {
                                         "ADD"
                                       )
                                     }
-                                    className="
+                                    disabled={isPast}
+                                    className={`
                                       flex
                                       h-[80px]
                                       w-full
@@ -3074,7 +3106,8 @@ export default function MySchedulePage() {
                                       border-b
                                       border-slate-200
                                       p-1
-                                    "
+                                      ${isPast ? "opacity-50 cursor-not-allowed" : ""}
+                                    `}
                                   >
                                     <span className="flex h-full w-full items-center justify-center rounded-[4px] border border-dashed border-slate-300 text-slate-400 transition hover:bg-slate-50">
                                       <Icon className="h-4 w-4">
@@ -3084,7 +3117,7 @@ export default function MySchedulePage() {
                                     </span>
                                   </button>
                                 </>
-                              ) : hasCancel ? (
+                               ) : hasCancel ? (
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -3092,7 +3125,8 @@ export default function MySchedulePage() {
                                       date
                                     )
                                   }
-                                  className="
+                                  disabled={isPast}
+                                  className={`
                                     flex
                                     h-[80px]
                                     w-full
@@ -3100,7 +3134,8 @@ export default function MySchedulePage() {
                                     items-center
                                     justify-center
                                     p-1
-                                  "
+                                    ${isPast ? "opacity-50 cursor-not-allowed" : ""}
+                                  `}
                                 >
                                   <span className="flex h-full w-full flex-col items-center justify-center rounded-[4px] border border-dashed border-red-200 bg-red-50 text-center">
                                     <span className="text-[10px] font-bold text-red-600">
@@ -3111,7 +3146,7 @@ export default function MySchedulePage() {
                                     </span>
                                   </span>
                                 </button>
-                              ) : (
+                               ) : (
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -3119,7 +3154,8 @@ export default function MySchedulePage() {
                                       date
                                     )
                                   }
-                                  className="
+                                  disabled={isPast}
+                                  className={`
                                     flex
                                     h-[80px]
                                     w-full
@@ -3127,7 +3163,8 @@ export default function MySchedulePage() {
                                     items-center
                                     justify-center
                                     p-1
-                                  "
+                                    ${isPast ? "opacity-50 cursor-not-allowed" : ""}
+                                  `}
                                 >
                                   <span className="flex h-full w-full flex-col items-center justify-center rounded-[4px] border border-dashed border-slate-300 font-medium text-slate-800 transition hover:bg-slate-50">
                                     <Icon className="mb-1 h-4 w-4 text-slate-400">

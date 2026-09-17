@@ -27,6 +27,9 @@ import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { useBranchFilter } from "@/context/BranchFilterContext";
 import { usePermission } from "@/context/PermissionContext";
 import { getUser } from "@/utils/token";
+
+import { useCriticalPatients } from "@/hooks/useCriticalPatients";
+import { CriticalWrapper, CriticalCorner, CriticalDot } from "@/components/hms/CriticalPatientIndicator";
 import { AppointmentActionMenu } from "@/components/hms/AppointmentActionMenu";
 
 import DayView from "./Day view";
@@ -168,6 +171,16 @@ const AppointmentSchedule: React.FC = () => {
   
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
+
+  const appointmentPatientIds = useMemo(() => {
+    return [...new Set(appointments.map((a) => a.patientId).filter(Boolean))];
+  }, [appointments]);
+
+
+
+  const { getCriticalInfo } = useCriticalPatients(
+    appointmentPatientIds.map((id) => ({ patientId: id }))
+  );
 
   // Date selection
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -673,12 +686,16 @@ const AppointmentSchedule: React.FC = () => {
                   { key: "tokenId", label: "TokenId", className: "!whitespace-normal", render: (r: Appointment) => (
                     <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.tokenId}</span>
                   )},
-                  { key: "patient", label: "Patient", className: "!whitespace-normal", render: (r: Appointment) => (
-                    <div className="flex items-center gap-2">
+                  { key: "patient", label: "Patient", className: "!whitespace-normal", render: (r: Appointment) => {
+                    const crit = getCriticalInfo(r.patientId);
+                    return (
+                    <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+                      <CriticalCorner reasons={crit.reasons} />
                       <div className="w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0" style={{ backgroundColor: r.avatarBg, color: r.avatarColor }}>{r.patientInitial}</div>
-                      <div><div className="hms-name-text capitalize">{r.patient}</div><div className="hms-id-text">{r.patientId}</div></div>
-                    </div>
-                  )},
+                      <div><div className="hms-name-text capitalize">{r.patient}</div><div className="hms-id-text flex items-center">{r.patientId}<CriticalDot reasons={crit.reasons} /></div></div>
+                    </CriticalWrapper>
+                    );
+                  }},
                   { key: "branch", label: "Branch", className: "!whitespace-normal", render: (r: Appointment) => <span className="hms-content-text text-[#191C1E]">{r.branch}</span> },
                   { key: "doctor", label: "Doctor", className: "!whitespace-normal", render: (r: Appointment) => (
                     !r.doctor || r.doctor === "—" || r.doctor === "Unassigned" ? (
@@ -743,6 +760,10 @@ const AppointmentSchedule: React.FC = () => {
                 rowsPerPageOptions={[5, 10, 20]}
                 emptyMessage="No appointments found matching the current filters."
                 rowKey={(r: Appointment, i: number) => r.id + i}
+                rowClassName={(r: Appointment) => {
+                  const crit = getCriticalInfo(r.patientId);
+                  return crit.isCritical ? "relative" : "";
+                }}
               />
             )}
           </div>

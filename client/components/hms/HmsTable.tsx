@@ -30,6 +30,7 @@ export interface HmsTableProps<T> {
 
   minWidth?: string;
   rowKey: (row: T, index: number) => string;
+  rowClassName?: (row: T) => string;
 }
 
 function RowsPerPageSelect({
@@ -209,6 +210,7 @@ scrollable = true,
 
   minWidth = "800px",
   rowKey,
+  rowClassName,
 }: HmsTableProps<T>) {
   return (
     <div className="flex flex-col">
@@ -251,7 +253,7 @@ scrollable = true,
               data.map((row, index) => (
                 <tr
                   key={rowKey(row, index)}
-                  className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F7F9FB] transition-colors group"
+                  className={`border-b border-[#E5E7EB] last:border-0 hover:bg-[#F7F9FB] transition-colors group${rowClassName ? " " + rowClassName(row) : ""}`}
                 >
                   {columns.map((column, colIdx) => (
                     <td
@@ -311,7 +313,7 @@ scrollable = true,
               data.map((row, index) => (
                 <tr
                   key={rowKey(row, index)}
-                  className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F7F9FB] transition-colors group"
+                  className={`border-b border-[#E5E7EB] last:border-0 hover:bg-[#F7F9FB] transition-colors group${rowClassName ? " " + rowClassName(row) : ""}`}
                 >
                   {columns.map((column, colIdx) => (
                     <td
