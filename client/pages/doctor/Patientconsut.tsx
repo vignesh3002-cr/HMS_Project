@@ -13,6 +13,7 @@ import { employeeApi } from "../../api/employee.api";
 import { appointmentApi } from "../../api/appointment.api";
 import { getUser } from "../../utils/token";
 import { computeBmi, computeBsa } from "../../utils/vitals";
+import { clinicalDetailsApi } from "../../api/clinicalDetails.api";
 import {
   doctorDashboardApi,
 } from "../../api/doctorDashboard.api";
@@ -35,7 +36,10 @@ import {
   type LabOrderItemRecord,
 } from "../../api/labOrder.api";
 import { Calendar } from "../../components/ui/calendar";
-import { ClinicalDetailsSection } from "../../components/hms/ClinicalDetailsSection";
+import {
+  ClinicalDetailsSection,
+  type ClinicalDetailsSectionHandle,
+} from "../../components/hms/ClinicalDetailsSection";
 import PatientVitalsPanel from "../../components/hms/PatientVitalsPanel";
 import {
   Popover,
@@ -202,6 +206,39 @@ interface ConsultationState {
   consultedBy?: string;
   visit_type?: string;
 }
+
+/* Past History shares the encounter's clinical_notes column with
+   Consultation Notes. This marker separates the two sections so they
+   can be split back apart when the encounter is loaded again. */
+const PAST_HISTORY_MARKER = "[Past History]";
+
+/* Treatment types selectable under the Past History section. Picking a
+   type reveals the date / brief note / treatment response fields. */
+const TREATMENT_TYPES = [
+  "Chemotherapy",
+  "Radiotherapy",
+  "Surgery",
+  "Immunotherapy",
+  "Targeted Therapy",
+  "Hormone Therapy",
+  "Bone Marrow Transplant",
+  "Other",
+];
+
+/* Molecular tests selectable under the Diagnosis > Molecular Testing
+   section. Picking a test reveals the note / date fields. */
+const MOLECULAR_TESTS = [
+  "PCR / RT-PCR",
+  "NGS (Next-Generation Sequencing)",
+  "FISH",
+  "ISH / CISH",
+  "IHC",
+  "Liquid biopsy / ctDNA",
+  "Gene-expression profiling",
+  "MSI / MMR testing",
+  "TMB testing",
+  "BRCA1/BRCA2 and HRR testing",
+];
 
 const StepCheckLogo = ({ active = false }: { active?: boolean }) => (
   <svg
@@ -790,6 +827,37 @@ const Consultation: React.FC = () => {
 
   const [consultationNotes, setConsultationNotes] = useState("");
 
+  const [historyOfPresentIllness, setHistoryOfPresentIllness] = useState("");
+
+  const [patientHistory, setPatientHistory] = useState("");
+  const [pastHistory, setPastHistory] = useState("");
+
+  const [pastHistoryExpanded, setPastHistoryExpanded] = useState(false);
+  const [pastHistoryTreatmentType, setPastHistoryTreatmentType] = useState("");
+  const [pastHistoryTreatmentDate, setPastHistoryTreatmentDate] = useState("");
+  const [pastHistoryTreatmentNote, setPastHistoryTreatmentNote] = useState("");
+  const [pastHistoryTreatmentResponse, setPastHistoryTreatmentResponse] =
+    useState("");
+
+  const [reportsExpanded, setReportsExpanded] = useState(false);
+  const [reportsTest, setReportsTest] = useState("");
+  const [reportsTestDate, setReportsTestDate] = useState("");
+  const [reportsTestResult, setReportsTestResult] = useState("");
+  const [reportsTestImpression, setReportsTestImpression] = useState("");
+  const [reportsText, setReportsText] = useState("");
+
+  const [chiefComplaint, setChiefComplaint] = useState("");
+  const [reasonOfVisit, setReasonOfVisit] = useState("");
+
+  
+
+  const [otherInvestigationExpanded, setOtherInvestigationExpanded] =
+    useState(false);
+  const [otherInvestigationName, setOtherInvestigationName] = useState("");
+  const [customInvestigations, setCustomInvestigations] = useState<string[]>(
+    []
+  );
+
   const [medications, setMedications] = useState<Medication[]>([]);
 
   const [selectedInvestigations, setSelectedInvestigations] = useState<
@@ -800,6 +868,20 @@ const Consultation: React.FC = () => {
     Record<string, string>
   >({});
 
+  const [generalExamIcterus, setGeneralExamIcterus] = useState(false);
+  const [generalExamPallor, setGeneralExamPallor] = useState(false);
+  const [generalExamClubbing, setGeneralExamClubbing] = useState(false);
+  const [generalExamCyanosis, setGeneralExamCyanosis] = useState(false);
+  const [generalExamOedema, setGeneralExamOedema] = useState(false);
+  const [generalExamLymphadenopathy, setGeneralExamLymphadenopathy] =
+    useState(false);
+
+  const [systemicCns, setSystemicCns] = useState("");
+  const [systemicCvs, setSystemicCvs] = useState("");
+  const [systemicRespiratory, setSystemicRespiratory] = useState("");
+  const [systemicPerAbdomen, setSystemicPerAbdomen] = useState("");
+  const [allVitalsNormal, setAllVitalsNormal] = useState(false);
+
   const [labTests, setLabTests] = useState<LabTestMasterRecord[]>([]);
   const [labTestsLoading, setLabTestsLoading] = useState(true);
   const [labTestsError, setLabTestsError] = useState("");
@@ -809,6 +891,13 @@ const Consultation: React.FC = () => {
   const [proceeding, setProceeding] = useState(false);
   const [tabsHovered, setTabsHovered] = useState(false);
   const tabsScrollRef = useRef<HTMLDivElement>(null);
+  const clinicalDetailsRef = useRef<ClinicalDetailsSectionHandle>(null);
+  const [clinicalSaveState, setClinicalSaveState] = useState<{
+    saving: boolean;
+    disabled: boolean;
+    saveError: string | null;
+    saveSuccess: boolean;
+  }>({ saving: false, disabled: true, saveError: null, saveSuccess: false });
 
   const slideTabs = (direction: 1 | -1) => {
     const el = tabsScrollRef.current;
@@ -1021,6 +1110,53 @@ const Consultation: React.FC = () => {
   }, [consultationState?.patientId, consultationState?.appointmentId]);
 
   /* ============================================================
+     SYNC HISTORY OF PRESENT ILLNESS FROM ACTIVE ENCOUNTER
+     Seed the free-text HOPI box with the encounter's saved
+     symptoms when the encounter loads. Only applied on load so
+     it never stomps in-progress typing after an update.
+   ============================================================ */
+
+  useEffect(() => {
+    setHistoryOfPresentIllness(encounter?.symptoms ?? "");
+    setChiefComplaint(encounter?.chief_complaint ?? "");
+    setPatientHistory(encounter?.chief_complaint ?? "");
+
+    /* Consultation Notes and Past History share the encounter's
+       clinical_notes column, separated by a [Past History] marker
+       (see proceedNext). A saved draft takes precedence over the
+       encounter so in-session work is never clobbered. */
+    let draftNotes = "";
+    let draftPast = "";
+    try {
+      const draft = JSON.parse(
+        localStorage.getItem("hms_consultation_draft") ?? "{}"
+      );
+      draftNotes = draft.consultationNotes ?? "";
+      draftPast = draft.pastHistory ?? "";
+    } catch {
+      /* Malformed draft - fall back to the encounter. */
+    }
+
+    if (draftNotes) {
+      setConsultationNotes(draftNotes);
+      setPastHistory(draftPast);
+      return;
+    }
+
+    const rawNotes = encounter?.clinical_notes ?? "";
+    const markerIndex = rawNotes.indexOf(PAST_HISTORY_MARKER);
+    if (markerIndex === -1) {
+      setConsultationNotes(rawNotes);
+      setPastHistory("");
+    } else {
+      setConsultationNotes(rawNotes.slice(0, markerIndex).trim());
+      setPastHistory(
+        rawNotes.slice(markerIndex + PAST_HISTORY_MARKER.length).trim()
+      );
+    }
+  }, [encounter?.encounter_no]);
+
+  /* ============================================================
      LOAD INVESTIGATION OPTIONS (lab_test_master table)
      Populates the Investigations / Scans checkboxes from the
      backend GET /lab-test-master API.
@@ -1096,7 +1232,6 @@ const Consultation: React.FC = () => {
   const [fallbackVisitType, setFallbackVisitType] = useState("");
 
   useEffect(() => {
-    if (consultationState?.visit_type) return;
     const appointmentId = encounter?.appointment_id;
     if (!appointmentId) return;
     let cancelled = false;
@@ -1104,8 +1239,12 @@ const Consultation: React.FC = () => {
       .getOne(appointmentId)
       .then((response) => {
         if (cancelled) return;
-        const value = response.data?.data?.Patient_visit_type ?? "";
-        setFallbackVisitType(value);
+        if (!consultationState?.visit_type) {
+          setFallbackVisitType(
+            response.data?.data?.Patient_visit_type ?? ""
+          );
+        }
+        setReasonOfVisit(response.data?.data?.reason_for_visit ?? "");
       })
       .catch((error) => {
         console.error("Failed to load appointment visit type:", error);
@@ -1226,6 +1365,35 @@ const Consultation: React.FC = () => {
     );
   };
 
+  /* Adds a user-typed custom investigation (Others...) as a checkbox
+     option in the grid. If the typed name matches a real lab test it
+     just checks that test; otherwise it registers a custom option. */
+
+  const addOtherInvestigation = () => {
+    const value = otherInvestigationName.trim();
+    if (!value) return;
+    if (investigations.includes(value)) {
+      toggleInvestigation(value);
+    } else if (!customInvestigations.includes(value)) {
+      setCustomInvestigations((prev) => [...prev, value]);
+      setSelectedInvestigations((prev) =>
+        prev.includes(value) ? prev : [...prev, value]
+      );
+    }
+    setOtherInvestigationName("");
+    setOtherInvestigationExpanded(false);
+  };
+
+  /* Unchecking a custom investigation removes both its checkbox option
+     and its selection. */
+
+  const toggleCustomInvestigation = (name: string) => {
+    setSelectedInvestigations((prev) =>
+      prev.filter((item) => item !== name)
+    );
+    setCustomInvestigations((prev) => prev.filter((item) => item !== name));
+  };
+
   /* ============================================================
      PRINT
   ============================================================ */
@@ -1243,6 +1411,7 @@ const Consultation: React.FC = () => {
       patient: patientName,
       patientId: patientDisplayId,
       consultationNotes,
+      pastHistory,
       medications,
       investigations: selectedInvestigations,
     };
@@ -1287,12 +1456,50 @@ const Consultation: React.FC = () => {
     try {
       setProceeding(true);
 
-      const payload: { clinical_notes?: string } = {};
-      if (consultationNotes.trim()) {
-        payload.clinical_notes = consultationNotes;
+      const payload: {
+        clinical_notes?: string;
+        symptoms?: string;
+        chief_complaint?: string;
+      } = {};
+
+      /* Consultation Notes + Past History are combined into the single
+         clinical_notes column, separated by the [Past History] marker so
+         they can be split back on load. */
+      const combinedNotes = [
+        consultationNotes.trim(),
+        ...(pastHistory.trim()
+          ? [`${PAST_HISTORY_MARKER}\n${pastHistory.trim()}`]
+          : []),
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      if (combinedNotes) {
+        payload.clinical_notes = combinedNotes;
+      }
+      if (historyOfPresentIllness.trim()) {
+        payload.symptoms = historyOfPresentIllness;
+      }
+      if (chiefComplaint.trim() || patientHistory.trim()) {
+        payload.chief_complaint = chiefComplaint.trim() || patientHistory.trim();
       }
 
       await encounterApi.update(encounter.encounter_no, payload);
+
+      /* Reason of Visit lives on the linked appointment, not the
+         encounter, so it must be persisted there separately. */
+      if (encounter.appointment_id && reasonOfVisit.trim()) {
+        try {
+          await appointmentApi.update(encounter.appointment_id, {
+            reason_for_visit: reasonOfVisit,
+          });
+        } catch (appointmentError: any) {
+          console.error(
+            "Failed to save reason for visit:",
+            appointmentError?.response?.data?.message ??
+              appointmentError?.message
+          );
+        }
+      }
 
       showToast("Consultation saved");
 
@@ -2103,22 +2310,48 @@ const Consultation: React.FC = () => {
                         className="h-40 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-300"
                       />
 
-                      {/* CHIEF COMPLAINT */}
+                      {/* CHIEF COMPLAINT (free text) + REASON OF VISIT.
+                          Styled like the Symptoms / Allergies sections in
+                          ClinicalDetailsSection (uppercase tracked label +
+                          white bordered container). */}
 
                       <div className="flex flex-col gap-2">
 
-                        <label className="text-xs font-bold leading-4 text-slate-500">
-                          Chief Complaint
-                        </label>
+                        <div className="flex flex-col gap-1">
 
-                        <textarea
-                          readOnly
-                          value={encounter?.chief_complaint ?? ""}
-                          placeholder="Not recorded"
-                          className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
-                        />
+                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                            Chief Complaint
+                          </div>
 
-                      </div>
+                          <textarea
+                            value={chiefComplaint}
+                            onChange={(event) =>
+                              setChiefComplaint(event.target.value)
+                            }
+                            placeholder="Type the chief complaint..."
+                            className="min-h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-1.5 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                          />
+
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+
+                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                            Reason of Visit
+                          </div>
+
+                          <textarea
+                            value={reasonOfVisit}
+                            onChange={(event) =>
+                              setReasonOfVisit(event.target.value)
+                            }
+                            placeholder="Type the reason of visit..."
+                            className="min-h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-1.5 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                          />
+
+                        </div>
+
+                        </div>
 
                     </div>
 
@@ -2140,8 +2373,10 @@ const Consultation: React.FC = () => {
 
                       {encounter ? (
                         <ClinicalDetailsSection
+                          ref={clinicalDetailsRef}
                           patientId={consultationState?.patientId}
                           encounterNo={encounter.encounter_no}
+                          onSaveStateChange={setClinicalSaveState}
                         />
                       ) : (
                         !encounterError && (
@@ -2158,16 +2393,16 @@ const Consultation: React.FC = () => {
                 </section>
 
                 {/* =================================================
-                    PATIENT HISTORY
+                    PERSONAL HISTORY
                 ================================================= */}
 
                 <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
 
                   <div className="text-lg font-bold leading-7 text-slate-800">
-                    Patient History
+                    Personal History
                   </div>
 
-                  {/* PATIENT HISTORY GRID */}
+                  {/* PERSONAL HISTORY GRID */}
 
                   <div className="grid w-full grid-cols-2 gap-x-6 gap-y-4 pt-2">
 
@@ -2179,11 +2414,46 @@ const Consultation: React.FC = () => {
                         Immunization
                       </label>
 
-                      <textarea
-                        readOnly
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
-                      />
+                      <div className="relative h-[38px]">
+
+                        <select
+                          className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none"
+                          defaultValue=""
+                        >
+
+                          <option value="" disabled>
+                            Select
+                          </option>
+
+                          <option value="None">None</option>
+                          <option value="BCG">BCG</option>
+                          <option value="Hepatitis A">Hepatitis A</option>
+                          <option value="Hepatitis B">Hepatitis B</option>
+                          <option value="Polio (OPV / IPV)">Polio (OPV / IPV)</option>
+                          <option value="DPT / DTaP">DPT / DTaP</option>
+                          <option value="MMR">MMR</option>
+                          <option value="Typhoid">Typhoid</option>
+                          <option value="Tetanus (TT)">Tetanus (TT)</option>
+                          <option value="Pneumococcal">Pneumococcal</option>
+                          <option value="Rotavirus">Rotavirus</option>
+                          <option value="Varicella (Chickenpox)">Varicella (Chickenpox)</option>
+                          <option value="HPV">HPV</option>
+                          <option value="Influenza (Flu)">Influenza (Flu)</option>
+                          <option value="COVID-19">COVID-19</option>
+
+                        </select>
+
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="#94a3b8"
+                          strokeWidth="1.8"
+                          className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+
+                      </div>
 
                     </div>
 
@@ -2280,14 +2550,121 @@ const Consultation: React.FC = () => {
                       </label>
 
                       <textarea
-                        readOnly
-                        value={encounter?.chief_complaint ?? ""}
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                        value={patientHistory}
+                        onChange={(event) =>
+                          setPatientHistory(event.target.value)
+                        }
+                        placeholder="Type the patient's history..."
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
                       />
 
                     </div>
 
+                  </div>
+
+                </section>
+
+                {/* =================================================
+                    GENERAL EXAMINATION
+                ================================================= */}
+
+                <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
+
+                  <div className="text-lg font-bold leading-7 text-slate-800">
+                    General Examination
+                  </div>
+
+                  <div className="grid w-full grid-cols-3 gap-x-6 gap-y-4 pt-2">
+
+                    {[
+                      { label: "Icterus", checked: generalExamIcterus, onChange: setGeneralExamIcterus },
+                      { label: "Pallor", checked: generalExamPallor, onChange: setGeneralExamPallor },
+                      { label: "Clubbing", checked: generalExamClubbing, onChange: setGeneralExamClubbing },
+                      { label: "Cyanosis", checked: generalExamCyanosis, onChange: setGeneralExamCyanosis },
+                      { label: "Oedema", checked: generalExamOedema, onChange: setGeneralExamOedema },
+                      { label: "Lymphadenopathy", checked: generalExamLymphadenopathy, onChange: setGeneralExamLymphadenopathy },
+                    ].map((item) => (
+                      <label
+                        key={item.label}
+                        className="flex items-center gap-3 cursor-pointer select-none"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={item.checked}
+                          onChange={(e) => item.onChange(e.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm font-medium text-slate-700">
+                          {item.label}
+                        </span>
+                      </label>
+                    ))}
+
+                  </div>
+
+                </section>
+
+                {/* =================================================
+                    SYSTEMIC EXAMINATION
+                ================================================= */}
+
+                <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
+
+                  <div className="text-lg font-bold leading-7 text-slate-800">
+                    Systemic Examination
+                  </div>
+
+                  <div className="grid w-full grid-cols-1 gap-x-5 gap-y-6 pt-2 sm:grid-cols-2 lg:grid-cols-4">
+
+                    {[
+                      { label: "CNS", value: systemicCns, onChange: setSystemicCns },
+                      { label: "CVS", value: systemicCvs, onChange: setSystemicCvs },
+                      { label: "Respiratory", value: systemicRespiratory, onChange: setSystemicRespiratory },
+                      { label: "Per Abdomen", value: systemicPerAbdomen, onChange: setSystemicPerAbdomen },
+                    ].map((item) => (
+                      <div key={item.label} className="flex flex-col gap-2">
+                        <label className="text-xs font-bold leading-4 text-slate-500">
+                          {item.label}
+                        </label>
+                        <input
+                          type="text"
+                          value={item.value}
+                          onChange={(event) => item.onChange(event.target.value)}
+                          placeholder={`Type ${item.label.toLowerCase()} findings...`}
+className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+                        />
+                      </div>
+                    ))}
+
+                  </div>
+
+                  <div className="flex items-center gap-4 pt-2">
+                    <label className="flex items-center gap-3 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={allVitalsNormal}
+                        onChange={(e) => setAllVitalsNormal(e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm font-medium text-slate-700">
+                        All Vitals Looks Normal?
+                      </span>
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const normalText = "Normal";
+                        setSystemicCns(normalText);
+                        setSystemicCvs(normalText);
+                        setSystemicRespiratory(normalText);
+                        setSystemicPerAbdomen(normalText);
+                        setAllVitalsNormal(true);
+                      }}
+                      className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
+                    >
+                      Apply Normal To All
+                    </button>
                   </div>
 
                 </section>
@@ -2306,18 +2683,21 @@ const Consultation: React.FC = () => {
 
                   <div className="grid w-full grid-cols-2 gap-x-6 gap-y-4 pt-2">
 
-                    {/* PERSONAL HISTORY (HABITS) */}
+                    {/* HISTORY OF PRESENT ILLNESS (HOPI) */}
 
                     <div className="flex flex-col gap-2">
 
                       <label className="text-xs font-bold leading-4 text-slate-500">
-                        Personal History (Habits)
+                        History of Present Illness(HOPI)
                       </label>
 
                       <textarea
-                        readOnly
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                        value={historyOfPresentIllness}
+                        onChange={(event) =>
+                          setHistoryOfPresentIllness(event.target.value)
+                        }
+                        placeholder="Type the history of present illness..."
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
                       />
 
                     </div>
@@ -2326,14 +2706,132 @@ const Consultation: React.FC = () => {
 
                     <div className="flex flex-col gap-2">
 
-                      <label className="text-xs font-bold leading-4 text-slate-500">
+                      <button
+                        type="button"
+                        onClick={() => setPastHistoryExpanded((prev) => !prev)}
+                        className="flex w-fit items-center gap-1.5 text-xs font-bold leading-4 text-slate-500 transition hover:text-slate-700"
+                      >
                         Past History
-                      </label>
+
+                        <svg
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          className={`h-3.5 w-3.5 transition-transform ${
+                            pastHistoryExpanded ? "rotate-90" : ""
+                          }`}
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      </button>
+
+                      {pastHistoryExpanded && (
+                        <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+
+                          {/* TREATMENT TYPE */}
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                              Treatment Type
+                            </label>
+
+                            <div className="relative">
+                              <select
+                                value={pastHistoryTreatmentType}
+                                onChange={(event) =>
+                                  setPastHistoryTreatmentType(
+                                    event.target.value
+                                  )
+                                }
+                                className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                              >
+                                <option value="" disabled>
+                                  Select Treatment
+                                </option>
+                                {TREATMENT_TYPES.map((treatment) => (
+                                  <option key={treatment} value={treatment}>
+                                    {treatment}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="#94a3b8"
+                                strokeWidth="1.8"
+                                className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
+                              >
+                                <path d="m6 9 6 6 6-6" />
+                              </svg>
+                            </div>
+                          </div>
+
+                          {/* DATE / BRIEF NOTE / TREATMENT RESPONSE */}
+                          {pastHistoryTreatmentType && (
+                            <>
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Date
+                                </label>
+                                <input
+                                  type="date"
+                                  value={pastHistoryTreatmentDate}
+                                  onChange={(event) =>
+                                    setPastHistoryTreatmentDate(
+                                      event.target.value
+                                    )
+                                  }
+                                  className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Enter Brief Note
+                                </label>
+                                <textarea
+                                  value={pastHistoryTreatmentNote}
+                                  onChange={(event) =>
+                                    setPastHistoryTreatmentNote(
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="Type a brief note..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Treatment Response
+                                </label>
+                                <textarea
+                                  value={pastHistoryTreatmentResponse}
+                                  onChange={(event) =>
+                                    setPastHistoryTreatmentResponse(
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="Type the treatment response..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+                            </>
+                          )}
+
+                        </div>
+                      )}
 
                       <textarea
-                        readOnly
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                        value={pastHistory}
+                        onChange={(event) =>
+                          setPastHistory(event.target.value)
+                        }
+                        placeholder="Type the patient's past history..."
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
                       />
 
                     </div>
@@ -2342,15 +2840,178 @@ const Consultation: React.FC = () => {
 
                     <div className="flex flex-col gap-2">
 
-                      <label className="text-xs font-bold leading-4 text-slate-500">
+                      <button
+                        type="button"
+                        onClick={() => setReportsExpanded((prev) => !prev)}
+                        className="flex w-fit items-center gap-1.5 text-xs font-bold leading-4 text-slate-500 transition hover:text-slate-700"
+                      >
                         Reports (Previous)
-                      </label>
+
+                        <svg
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          className={`h-3.5 w-3.5 transition-transform ${
+                            reportsExpanded ? "rotate-90" : ""
+                          }`}
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      </button>
+
+                      {reportsExpanded && (
+                        <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+
+                          {/* SELECT TEST */}
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                              Select Test
+                            </label>
+
+                            <div className="relative">
+                              <select
+                                value={reportsTest}
+                                onChange={(event) =>
+                                  setReportsTest(event.target.value)
+                                }
+                                className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                              >
+                                <option value="" disabled>
+                                  Select Test
+                                </option>
+                                {labTests.map((test) => (
+                                  <option
+                                    key={test.lab_test_id}
+                                    value={test.lab_test_id}
+                                  >
+                                    {test.test_name}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="#94a3b8"
+                                strokeWidth="1.8"
+                                className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
+                              >
+                                <path d="m6 9 6 6 6-6" />
+                              </svg>
+                            </div>
+                          </div>
+
+                          {/* DATE / RESULT / IMPRESSION */}
+                          {reportsTest && (
+                            <>
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Date
+                                </label>
+                                <input
+                                  type="date"
+                                  value={reportsTestDate}
+                                  onChange={(event) =>
+                                    setReportsTestDate(event.target.value)
+                                  }
+                                  className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Enter Result
+                                </label>
+                                <textarea
+                                  value={reportsTestResult}
+                                  onChange={(event) =>
+                                    setReportsTestResult(event.target.value)
+                                  }
+                                  placeholder="Type the result..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Enter Impression
+                                </label>
+                                <textarea
+                                  value={reportsTestImpression}
+                                  onChange={(event) =>
+                                    setReportsTestImpression(event.target.value)
+                                  }
+                                  placeholder="Type the impression..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+                            </>
+                          )}
+
+                        </div>
+                      )}
 
                       <textarea
-                        readOnly
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                        value={reportsText}
+                        onChange={(event) => setReportsText(event.target.value)}
+                        placeholder="Type previous reports..."
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
                       />
+
+                    </div>
+
+                    {/* SAVE CLINICAL DETAILS (next to Reports) */}
+
+                    <div className="flex flex-col justify-end gap-2">
+
+                      <button
+                        type="button"
+                        onClick={() => clinicalDetailsRef.current?.handleSave()}
+                        disabled={clinicalSaveState.disabled}
+                        className="flex h-9 w-fit items-center justify-center gap-2 rounded-lg border-0 bg-blue-700 px-[25px] py-[9px] text-sm font-bold leading-5 text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                      >
+                        {clinicalSaveState.saving && (
+                          <svg
+                            className="h-4 w-4 animate-spin text-white"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                          >
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            />
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            />
+                          </svg>
+                        )}
+                        {clinicalSaveState.saving
+                          ? "Saving..."
+                          : "Save Clinical Details"}
+                      </button>
+
+                      {clinicalSaveState.saveError && (
+                        <div className="text-xs font-medium leading-4 text-red-600">
+                          {clinicalSaveState.saveError}
+                        </div>
+                      )}
+
+                      {clinicalSaveState.saveSuccess &&
+                        !clinicalSaveState.saveError && (
+                          <div className="text-xs font-medium leading-4 text-green-600">
+                            Clinical details saved successfully.
+                          </div>
+                        )}
 
                     </div>
 
@@ -2382,16 +3043,21 @@ const Consultation: React.FC = () => {
                     </div>
                   )}
 
-                  {!labTestsLoading && !labTestsError && investigations.length === 0 && (
+                  {!labTestsLoading && !labTestsError &&
+                    investigations.length === 0 &&
+                    customInvestigations.length === 0 && (
                     <div className="flex items-center gap-2 text-sm leading-5 text-slate-500">
                       No lab tests available.
                     </div>
                   )}
 
-                  {!labTestsLoading && !labTestsError && investigations.length > 0 && (
+                  {!labTestsLoading && !labTestsError &&
+                    (investigations.length > 0 ||
+                      customInvestigations.length > 0) && (
                   <div className="grid w-full grid-cols-3 gap-y-3">
 
-                    {investigations.map((investigation) => (
+                    {[...investigations, ...customInvestigations].map(
+                      (investigation) => (
 
                       <label
                         key={investigation}
@@ -2404,7 +3070,9 @@ const Consultation: React.FC = () => {
                             investigation
                           )}
                           onChange={() =>
-                            toggleInvestigation(investigation)
+                            customInvestigations.includes(investigation)
+                              ? toggleCustomInvestigation(investigation)
+                              : toggleInvestigation(investigation)
                           }
                           className="h-4 w-4 shrink-0 cursor-pointer appearance-none rounded border border-slate-300 bg-white checked:border-blue-600 checked:bg-blue-600"
                         />
@@ -2415,9 +3083,65 @@ const Consultation: React.FC = () => {
 
                       </label>
 
-                    ))}
+                    )
+                    )}
 
                   </div>
+                  )}
+
+                  {!labTestsLoading && !labTestsError && (
+                    <div className="flex w-full flex-col gap-1.5">
+                      <div className="flex w-full flex-wrap items-start gap-1.5">
+                        {!otherInvestigationExpanded && (
+                          <button
+                            type="button"
+                            onClick={() => setOtherInvestigationExpanded(true)}
+                            className="flex h-[26px] items-center rounded border border-slate-200 bg-slate-50 px-[9px] py-[3px] text-xs leading-4 text-slate-500 transition hover:bg-slate-100"
+                          >
+                            Others...
+                          </button>
+                        )}
+                      </div>
+
+                      {otherInvestigationExpanded && (
+                        <div className="flex w-full items-center gap-2">
+                          <input
+                            type="text"
+                            value={otherInvestigationName}
+                            onChange={(event) =>
+                              setOtherInvestigationName(event.target.value)
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                addOtherInvestigation();
+                              }
+                            }}
+                            placeholder="Enter other investigation"
+                            className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-600 outline-none focus:border-slate-400"
+                          />
+                          <button
+                            type="button"
+                            onClick={addOtherInvestigation}
+                            disabled={!otherInvestigationName.trim()}
+                            className="h-7 shrink-0 rounded-md border border-blue-600 bg-white px-3 text-xs font-semibold leading-4 text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Add
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOtherInvestigationName("");
+                              setOtherInvestigationExpanded(false);
+                            }}
+                            className="h-7 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-500 transition hover:bg-slate-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+
+                    </div>
                   )}
 
                   {selectedInvestigations.length > 0 && (
@@ -3285,6 +4009,15 @@ const LabReview: React.FC<{
 ============================================================ */
 
 type FormData = {
+  preDiagnosis: string;
+  natureOfDiagnosis: string;
+  molecularTesting: string;
+  molecularTestingNote: string;
+  molecularTestingDate: string;
+  diseaseStatus: string;
+  laterality: string;
+  bodySite: string;
+  survivor: string;
   type: string;
   subType: string;
   histomorphology: string;
@@ -3379,6 +4112,15 @@ const Diagnosis: React.FC<{
   const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const [formData, setFormData] = useState<FormData>({
+    preDiagnosis: "",
+    natureOfDiagnosis: "",
+    molecularTesting: "",
+    molecularTestingNote: "",
+    molecularTestingDate: "",
+    diseaseStatus: "",
+    laterality: "",
+    bodySite: "",
+    survivor: "",
     type: "",
     subType: "",
     histomorphology: "",
@@ -3873,8 +4615,92 @@ const Diagnosis: React.FC<{
         }}
         className="space-y-8"
       >
-        {/* Two Column Fields */}
-        <div className="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-2">
+        {/* Four Column Fields */}
+        <div className="grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
+          {/* Pre Diagnosis */}
+          <div>
+            <label
+              htmlFor="preDiagnosis"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Pre Diagnosis
+            </label>
+
+            <div className="relative">
+              <input
+                id="preDiagnosis"
+                name="preDiagnosis"
+                type="text"
+                value={formData.preDiagnosis}
+                onChange={handleChange}
+                placeholder="Type the pre diagnosis..."
+                className="block w-full rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              />
+            </div>
+          </div>
+
+          {/* Nature of Diagnosis */}
+          <div>
+            <label
+              htmlFor="natureOfDiagnosis"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Nature of Diagnosis
+            </label>
+
+            <div className="relative">
+              <select
+                id="natureOfDiagnosis"
+                name="natureOfDiagnosis"
+                value={formData.natureOfDiagnosis}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Nature of Diagnosis
+                </option>
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Disease Status */}
+          <div>
+            <label
+              htmlFor="diseaseStatus"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Disease Status
+            </label>
+
+            <div className="relative">
+              <select
+                id="diseaseStatus"
+                name="diseaseStatus"
+                value={formData.diseaseStatus}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Disease Status
+                </option>
+                <option value="Newly Diagnosed">Newly Diagnosed</option>
+                <option value="In Remission">In Remission</option>
+                <option value="Recurrence">Recurrence</option>
+                <option value="Progressive">Progressive</option>
+                <option value="Stable">Stable</option>
+                <option value="Metastatic">Metastatic</option>
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
           {/* Cancer Type */}
           <div>
             <label
@@ -3903,6 +4729,67 @@ const Diagnosis: React.FC<{
                       {cancerType.cancer_type}
                     </option>
                   ))}
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Laterality */}
+          <div>
+            <label
+              htmlFor="laterality"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Laterality
+            </label>
+
+            <div className="relative">
+              <select
+                id="laterality"
+                name="laterality"
+                value={formData.laterality}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Laterality
+                </option>
+                <option value="Left">Left</option>
+                <option value="Right">Right</option>
+                <option value="Bilateral">Bilateral</option>
+                <option value="Midline">Midline</option>
+                <option value="Not Applicable">Not Applicable</option>
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Body Site */}
+          <div>
+            <label
+              htmlFor="bodySite"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Body Site
+            </label>
+
+            <div className="relative">
+              <select
+                id="bodySite"
+                name="bodySite"
+                value={formData.bodySite}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Body Site
+                </option>
               </select>
 
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
@@ -4155,7 +5042,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
 
           {/* Metastasis Sites - shown when M stage is M1+ */}
           {formData.mStage.trim().toUpperCase().startsWith("M1") && (
-            <div className="lg:col-span-2">
+            <div className="col-span-full">
               <label className="mb-2 block text-sm font-semibold text-gray-600">
                 Metastasis Sites
               </label>
@@ -4171,6 +5058,121 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
               />
             </div>
           )}
+
+          {/* Molecular Testing */}
+          <div>
+            <label
+              htmlFor="molecularTesting"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Molecular Testing
+            </label>
+
+            <div className="relative">
+              <select
+                id="molecularTesting"
+                name="molecularTesting"
+                value={formData.molecularTesting}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Molecular Testing
+                </option>
+
+                {MOLECULAR_TESTS.map((test) => (
+                  <option key={test} value={test}>
+                    {test}
+                  </option>
+                ))}
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {formData.molecularTesting && (
+            <>
+              <div>
+                <label
+                  htmlFor="molecularTestingNote"
+                  className="mb-2 block text-sm font-semibold text-gray-600"
+                >
+                  Enter Note
+                </label>
+
+                <input
+                  id="molecularTestingNote"
+                  name="molecularTestingNote"
+                  type="text"
+                  value={formData.molecularTestingNote}
+                  onChange={handleChange}
+                  placeholder="Type a note..."
+                  className="block w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="molecularTestingDate"
+                  className="mb-2 block text-sm font-semibold text-gray-600"
+                >
+                  Select Date
+                </label>
+
+                <input
+                  id="molecularTestingDate"
+                  name="molecularTestingDate"
+                  type="date"
+                  value={formData.molecularTestingDate}
+                  onChange={handleChange}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+                />
+              </div>
+            </>
+          )}
+
+          {/* Survivor */}
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-gray-600">
+              Survivor
+            </label>
+
+            <div className="flex h-[38px] items-center gap-4 rounded-md border border-gray-300 bg-white px-3">
+              <label className="flex items-center gap-1.5 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  name="survivor"
+                  checked={formData.survivor === "Yes"}
+                  onChange={() =>
+                    setFormData((previous) => ({
+                      ...previous,
+                      survivor: formData.survivor === "Yes" ? "" : "Yes",
+                    }))
+                  }
+                  className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                />
+                Yes
+              </label>
+              <label className="flex items-center gap-1.5 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  name="survivor"
+                  checked={formData.survivor === "No"}
+                  onChange={() =>
+                    setFormData((previous) => ({
+                      ...previous,
+                      survivor: formData.survivor === "No" ? "" : "No",
+                    }))
+                  }
+                  className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                />
+                No
+              </label>
+            </div>
+          </div>
 
           {/* ICD Code */}
           <div>
@@ -5326,6 +6328,7 @@ const ChemotherapyOrder: React.FC<{
   const [protocolName, setProtocolName] = useState("");
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState("");
+  const [discussion, setDiscussion] = useState("");
 
   const [drugs, setDrugs] = useState<Drug[]>([]);
   const [premedicationDrugs, setPremedicationDrugs] = useState<Drug[]>(
@@ -5709,11 +6712,16 @@ const ChemotherapyOrder: React.FC<{
         drugs?: Drug[];
         premedicationDrugs?: Drug[];
         supportiveDrugs?: Drug[];
+        discussion?: string;
       };
 
       if (data.cycleDay) {
         updateCycleDay(data.cycleDay);
         userTouched.current.cycleDay = true;
+      }
+
+      if (data.discussion) {
+        setDiscussion(data.discussion);
       }
 
       if (data.startDate) {
@@ -5760,6 +6768,7 @@ const ChemotherapyOrder: React.FC<{
         supportiveDrugs: userTouched.current.supportive
           ? supportiveDrugs
           : [],
+        discussion,
       })
     );
   }, [
@@ -5768,6 +6777,7 @@ const ChemotherapyOrder: React.FC<{
     drugs,
     premedicationDrugs,
     supportiveDrugs,
+    discussion,
     orderDraftKey,
     resolvedPatientId,
   ]);
@@ -7022,8 +8032,9 @@ const ChemotherapyOrder: React.FC<{
                     );
                   })}
                 </tbody>
-              </table>
-            </div>
+</table>
+             </div>
+
           </div>
         ) : activeTab === "Premedication" ? (
           <div className="p-8">
@@ -7515,6 +8526,18 @@ const ChemotherapyOrder: React.FC<{
             </div>
           </div>
         )}
+
+        <div className="mt-6 flex flex-col gap-4 rounded-lg border border-gray-200 p-6">
+          <div className="text-base font-semibold text-gray-900">
+            Discussion
+          </div>
+          <textarea
+            value={discussion}
+            onChange={(event) => setDiscussion(event.target.value)}
+            placeholder="Type the discussion..."
+            className="h-28 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm leading-5 text-gray-700 outline-none focus:border-blue-500"
+          />
+        </div>
       </div>
     </div>
   );
@@ -9810,6 +10833,113 @@ const Summary: React.FC<{
   const [dischargeProtocolId, setDischargeProtocolId] = useState("");
   const [patientName, setPatientName] = useState("");
 
+  const [summaryAllergies, setSummaryAllergies] = useState<string[]>([]);
+  const [summarySymptoms, setSummarySymptoms] = useState<string[]>([]);
+  const [summaryReasonForVisit, setSummaryReasonForVisit] = useState("");
+  const [summaryDiscussion, setSummaryDiscussion] = useState("");
+  const [summaryHopi, setSummaryHopi] = useState("");
+  const [summaryClinicalFindings, setSummaryClinicalFindings] = useState("");
+
+  useEffect(() => {
+    if (!appointmentId) return;
+    let cancelled = false;
+    appointmentApi
+      .getOne(appointmentId)
+      .then((response) => {
+        if (cancelled) return;
+        setSummaryReasonForVisit(
+          response.data?.data?.reason_for_visit ?? ""
+        );
+      })
+      .catch((error) => {
+        console.error("Failed to load reason for visit:", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [appointmentId]);
+
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        if (encounterNo) {
+          const response = await clinicalDetailsApi.getEncounterClinicalDetails(
+            encounterNo
+          );
+          if (cancelled) return;
+          const data = response.data?.data;
+          setSummaryAllergies(
+            (data?.allergies ?? []).map((allergy) => allergy.substanceName)
+          );
+          setSummarySymptoms(
+            (data?.symptoms ?? []).map((symptom) => symptom.symptomName)
+          );
+          return;
+        }
+      } catch {
+        // Fall through to the patient-level allergies lookup below.
+      }
+      try {
+        const allergyResponse = await API.get<{
+          success: boolean;
+          data: Array<{
+            allergy_master?: { substance_name?: string | null } | null;
+            substance_name?: string | null;
+            substanceName?: string | null;
+          }>;
+        }>(`/clinical-details/patients/${resolvedPatientId}/allergies`);
+        if (cancelled) return;
+        const rows = allergyResponse.data?.data ?? [];
+        setSummaryAllergies(
+          rows.map(
+            (item) =>
+              item.substanceName ||
+              item.allergy_master?.substance_name ||
+              item.substance_name ||
+              ""
+          ).filter(Boolean)
+        );
+      } catch {
+        // Leave allergies/symptoms empty when unavailable.
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId, encounterNo]);
+
+  useEffect(() => {
+    if (!encounterNo && !appointmentId) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = encounterNo
+          ? await encounterApi.getByNumber(encounterNo)
+          : await encounterApi.getByAppointment(appointmentId!);
+        if (cancelled) return;
+        const enc = response.data?.data;
+        const rawNotes = enc?.clinical_notes ?? "";
+        const markerIndex = rawNotes.indexOf(PAST_HISTORY_MARKER);
+        setSummaryDiscussion(
+          markerIndex !== -1
+            ? rawNotes.slice(0, markerIndex).trim()
+            : rawNotes.trim()
+        );
+        setSummaryHopi(enc?.symptoms ?? "");
+        setSummaryClinicalFindings(enc?.chief_complaint ?? "");
+      } catch (error) {
+        console.error("Failed to load summary consultation details:", error);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [encounterNo, appointmentId]);
+
   useEffect(() => {
     if (!resolvedPatientId) return;
     let cancelled = false;
@@ -10485,67 +11615,168 @@ const Summary: React.FC<{
                 No chemotherapy plan found for this patient yet.
               </div>
             )}
-            <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Cancer Type
-                </p>
-                <p className="text-sm text-slate-500">
-                  {cancerType}
-                </p>
+            <div className="flex flex-col gap-10 lg:flex-row">
+              <div className="flex flex-1 flex-col gap-6">
+                <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Cancer Type
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      {cancerType}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Stage
+                    </p>
+
+                    <p className="flex items-center gap-2 text-sm text-slate-500">
+                      {stage}
+                      <span className="text-slate-400"></span>
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Context
+                    </p>
+
+                    <p className="text-sm text-slate-500">{context}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Protocol
+                    </p>
+
+                    <p className="flex items-center gap-2 text-sm text-slate-500">
+                      {protocol}
+                      <span className="text-slate-400"></span>
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Duration
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {duration}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Current
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {current}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Allergies
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryAllergies.length > 0
+                        ? summaryAllergies.join(", ")
+                        : "No allergies recorded"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Symptoms
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summarySymptoms.length > 0
+                        ? summarySymptoms.join(", ")
+                        : "No symptoms recorded"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Reason for Visit
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryReasonForVisit || "No reason recorded"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Discussion
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryDiscussion || "No discussion recorded"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      HOPI
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryHopi || "No HOPI recorded"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Clinical findings
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryClinicalFindings || "No clinical findings recorded"}
+                    </p>
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Stage
+              {/* Vitals box - same vitals as shown in the patient header */}
+              <aside className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-5 lg:w-72">
+                <p className="mb-3 text-sm font-semibold text-slate-900">
+                  Vitals
                 </p>
 
-                <p className="flex items-center gap-2 text-sm text-slate-500">
-                  {stage}
-                  <span className="text-slate-400"></span>
-                </p>
-              </div>
-
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Context
-                </p>
-
-                <p className="text-sm text-slate-500">{context}</p>
-              </div>
-
-              <div />
-
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Protocol
-                </p>
-
-                <p className="flex items-center gap-2 text-sm text-slate-500">
-                  {protocol}
-                  <span className="text-slate-400"></span>
-                </p>
-              </div>
-
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Duration
-                </p>
-
-                <p className="text-sm text-slate-500">
-                  {duration}
-                </p>
-              </div>
-
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Current
-                </p>
-
-                <p className="text-sm text-slate-500">
-                  {current}
-                </p>
-              </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  {[
+                    { label: "HEIGHT", value: measurements.height },
+                    { label: "WEIGHT", value: measurements.weight },
+                    { label: "BSA", value: measurements.bsa },
+                    { label: "BMI", value: measurements.bmi },
+                    { label: "BP", value: measurements.bp },
+                    { label: "PULSE", value: measurements.pulse },
+                    { label: "TEMP", value: measurements.temp },
+                    { label: "SPO2", value: measurements.spo2 },
+                  ].map((item) => (
+                    <div key={item.label} className="flex flex-col">
+                      <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                        {item.label}
+                      </div>
+                      <div className="truncate text-sm font-bold leading-5 text-slate-800">
+                        {item.value || "—"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </aside>
             </div>
           </section>
 
