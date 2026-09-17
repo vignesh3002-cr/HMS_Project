@@ -33,6 +33,7 @@ interface ComorbiditySelection {
 interface ClinicalDetailsSectionProps {
   patientId?: string;
   encounterNo?: string | null;
+  consultationNotes?: string;
 }
 
 const ChevronDownIcon = () => (
@@ -73,6 +74,7 @@ const Spinner = () => (
 export function ClinicalDetailsSection({
   patientId,
   encounterNo,
+  consultationNotes,
 }: ClinicalDetailsSectionProps) {
   const { toast } = useToast();
 
@@ -448,6 +450,7 @@ export function ClinicalDetailsSection({
       })),
       comorbidities: comorbiditySelections.map((selection) => ({
         diagnosisId: selection.diagnosisId,
+        clinicalNotes: consultationNotes || undefined,
       })),
     });
   };

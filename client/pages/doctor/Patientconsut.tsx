@@ -2035,6 +2035,7 @@ const Consultation: React.FC = () => {
                         <ClinicalDetailsSection
                           patientId={consultationState?.patientId}
                           encounterNo={encounter.encounter_no}
+                          consultationNotes={consultationNotes}
                         />
                       ) : (
                         !encounterError && (
@@ -2421,6 +2422,9 @@ const LabReview: React.FC<{
   onOrdered,
   onNext,
 }) => {
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
   const [observations, setObservations] = useState("");
   const [notifications, setNotifications] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -3064,6 +3068,9 @@ const Diagnosis: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? "";
   const resolvedPatientId = patientId || statePatientId;
 
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
   const [formData, setFormData] = useState<FormData>({
     type: "",
     subType: "",
@@ -3278,23 +3285,47 @@ const Diagnosis: React.FC<{
         }
         setTnmStages(tnmOptions.sort());
 
-        const expandTnmRange = (token: string): string[] => {
-          const rangeMatch = token.match(/^([TNM])(\d+)([a-z])?-([a-z\d]+)$/i);
-          if (!rangeMatch) return [token];
-          const prefix = rangeMatch[1].toUpperCase();
-          const startNum = parseInt(rangeMatch[2], 10);
-          const startLetter = rangeMatch[3] || "";
-          const endStr = rangeMatch[4];
-          const results: string[] = [];
-          const endNum = parseInt(endStr, 10);
-          if (!startLetter && !isNaN(endNum)) {
-            for (let i = startNum; i <= endNum; i++) results.push(`${prefix}${i}`);
-          } else if (startLetter && endStr.length === 1) {
-            const startCode = startLetter.charCodeAt(0);
-            const endCode = endStr.charCodeAt(0);
-            for (let c = startCode; c <= endCode; c++) results.push(`${prefix}${startNum}${String.fromCharCode(c)}`);
+        const toCanonicalStageTokens = (token: string): string[] => {
+          const cleaned = token.replace(/^[,;:.()]+|[,;:.()]+$/g, "");
+          if (!cleaned) return [];
+
+          const special = cleaned.match(/^(Tis|[TN]x)$/i);
+          if (special) return [special[0].charAt(0).toUpperCase() + special[0].slice(1)];
+
+          const slashMatch = cleaned.match(/^([TNM]\d+)([a-z])((?:\/[a-z])+)$/i);
+          if (slashMatch) {
+            const base = slashMatch[1].charAt(0).toUpperCase() + slashMatch[1].slice(1);
+            const first = slashMatch[2].toLowerCase();
+            const rest = slashMatch[3]
+              .split("/")
+              .filter(Boolean)
+              .map((s) => s.toLowerCase());
+            return [base + first, ...rest.map((s) => base + s)];
           }
-          return results.length > 0 ? results : [token];
+
+          const dashMatch = cleaned.match(/^([TNM])(\d+)([a-z]?)-(\d+|[a-z])$/i);
+          if (dashMatch) {
+            const prefix = dashMatch[1].charAt(0).toUpperCase() + dashMatch[1].slice(1);
+            const startNum = parseInt(dashMatch[2], 10);
+            const startLetter = dashMatch[3] || "";
+            const endStr = dashMatch[4];
+            const endNum = parseInt(endStr, 10);
+            const results: string[] = [];
+            if (!startLetter && Number.isFinite(endNum)) {
+              for (let i = startNum; i <= endNum; i++) results.push(`${prefix}${i}`);
+            } else if (startLetter && endStr.length === 1) {
+              const startCode = startLetter.charCodeAt(0);
+              const endCode = endStr.charCodeAt(0);
+              for (let c = startCode; c <= endCode; c++) {
+                results.push(`${prefix}${startNum}${String.fromCharCode(c)}`);
+              }
+            }
+            return results;
+          }
+
+          const strict = cleaned.match(/^[TNM]\d+[a-z]*$/i);
+          if (strict) return [strict[0].charAt(0).toUpperCase() + strict[0].slice(1)];
+          return [];
         };
 
         const tSet = new Set<string>();
@@ -3303,9 +3334,11 @@ const Diagnosis: React.FC<{
         for (const option of tnmOptions) {
           const parts = option.split(/\s+/);
           for (const part of parts) {
-            if (/^T\d/i.test(part)) expandTnmRange(part).forEach((v) => tSet.add(v));
-            else if (/^N\d/i.test(part) || /^N[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => nSet.add(v));
-            else if (/^M\d/i.test(part) || /^M[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => mSet.add(v));
+            for (const value of toCanonicalStageTokens(part)) {
+              if (value.startsWith("T")) tSet.add(value);
+              else if (value.startsWith("N")) nSet.add(value);
+              else if (value.startsWith("M")) mSet.add(value);
+            }
           }
         }
         setTOptions([...tSet].sort());
@@ -4138,6 +4171,9 @@ const DischargeMedication: React.FC<{
 }) => {
   const resolvedPatientId = patientId || "";
   const navigate = useNavigate();
+
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const [medications, setMedications] = useState<DischargeMedicationItem[]>(
     []
@@ -4983,6 +5019,9 @@ const ChemotherapyOrder: React.FC<{
   patientId?: string;
   onNext?: () => void;
 }> = ({ embedded = false, patientId, onNext }) => {
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
   const location = useLocation();
   const statePatientId = (
     (location.state as ConsultationState | null)?.patientId ?? ""
@@ -7339,6 +7378,9 @@ const FollowUp: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
+
   const [activeStep, setActiveStep] = useState<FollowUpStep>(1);
   const [nextVisitDate, setNextVisitDate] = useState("");
   const [nextCycle, setNextCycle] = useState("");
@@ -8237,6 +8279,9 @@ const TreatmentPlan: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
+
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const [treatmentIntent, setTreatmentIntent] =
     useState("");
@@ -9415,6 +9460,9 @@ const Summary: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
+
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const [nextVisitDate, setNextVisitDate] = useState(() =>
     resolvedPatientId
