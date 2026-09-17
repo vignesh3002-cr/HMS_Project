@@ -2294,6 +2294,7 @@ const Consultation: React.FC = () => {
                     patientId={patientDisplayId}
                     appointmentId={consultationState?.appointmentId}
                     encounterNo={encounter?.encounter_no}
+                    measurements={measurements}
                   />
                 ) : (
                   <div
@@ -7281,7 +7282,15 @@ const ChemotherapyOrder: React.FC<{
     setPlanError("");
     setSavingPlan(true);
 
-    try {
+    let navigated = false;
+    const navigateNext = () => {
+      if (navigated) return;
+      navigated = true;
+      onNext?.();
+    };
+    const navigateTimer = setTimeout(navigateNext, 500);
+
+    const saveOrder = async () => {
       const planItems: Array<{
         medicine_id: string;
         drug_role: string;
@@ -7338,20 +7347,27 @@ const ChemotherapyOrder: React.FC<{
         ) ||
         toIsoDate(new Date().toISOString());
 
-      const { error } = await createChemotherapyPlanForPatient(
+      return createChemotherapyPlanForPatient(
         resolvedPatientId,
         planStartDate,
         planItems.length > 0 ? planItems : undefined,
         undefined
       );
+    };
+
+    try {
+      const { error } = await saveOrder();
 
       if (error) {
+        clearTimeout(navigateTimer);
         setPlanError(error);
         return;
       }
 
-      onNext?.();
+      clearTimeout(navigateTimer);
+      navigateNext();
     } catch (err: any) {
+      clearTimeout(navigateTimer);
       console.error("Failed to save chemotherapy order:", err);
       setPlanError(
         err?.response?.data?.message ||
@@ -11169,7 +11185,7 @@ const Summary: React.FC<{
   patientId,
   appointmentId,
   encounterNo,
-  measurements = { height: "", weight: "", bsa: "", bmi: "", bp: "", pulse: "", temp: "", spo2: "" },
+  measurements = { height: "", weight: "", bsa: "", bmi: "", bp: "", pulse: "", temp: "", spo2: "", painScore: "" },
 }) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -12139,6 +12155,7 @@ const Summary: React.FC<{
                     { label: "PULSE", value: measurements.pulse },
                     { label: "TEMP", value: measurements.temp },
                     { label: "SPO2", value: measurements.spo2 },
+                    { label: "PAIN", value: measurements.painScore },
                   ].map((item) => (
                     <div key={item.label} className="flex flex-col">
                       <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
