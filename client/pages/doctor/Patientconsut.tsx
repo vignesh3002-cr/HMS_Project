@@ -4196,6 +4196,10 @@ type CancerSubtypeItem = {
   icd10_subtype: string | null;
 };
 
+type CancerSubtypeOption = CancerSubtypeItem & {
+  cancerType: string;
+};
+
 type StagingReferenceItem = {
   stage_ref_id: string;
   cancer_type_id: string;
@@ -4308,12 +4312,13 @@ const Diagnosis: React.FC<{
   }, [formData, diagnosisDraftKey, resolvedPatientId]);
 
   const [cancerTypes, setCancerTypes] = useState<CancerTypeItem[]>([]);
-  const [subtypes, setSubtypes] = useState<CancerSubtypeItem[]>([]);
+  const [subtypes, setSubtypes] = useState<CancerSubtypeOption[]>([]);
   const [diagnosisCatalogReady, setDiagnosisCatalogReady] = useState(false);
 
   /* Multi-select Cancer Type field. The full selection is kept for
-     documentation; the first entry drives the dependent fields
-     (Histopathology, staging) exactly like the old single select. */
+     documentation and to source the Histopathology subtype options;
+     the first entry still drives the dependent fields (staging)
+     exactly like the old single select. */
   const [selectedCancerTypes, setSelectedCancerTypes] = useState<string[]>([]);
 
   useEffect(() => {
@@ -4414,21 +4419,47 @@ const Diagnosis: React.FC<{
     );
   };
 
-  const loadSubtypesForCancerType = (
-    cancerTypeId: string,
+  /* Load the subtype options for every selected cancer type and merge
+     them into the Histopathology dropdown. Each option remembers its
+     parent cancer type so the dropdown can show the mapping. */
+  const loadSubtypesForCancerTypes = (
+    selections: { cancerTypeId: string; cancerTypeName: string }[],
     autoSelectIcd = true
   ) => {
-    if (!cancerTypeId) return;
+    const ids = selections.filter(
+      (selection) => Boolean(selection.cancerTypeId)
+    );
     const requestId = ++diagnosisRequestRef.current;
-    setDiagnosisLoading(true);
     setDiagnosisError("");
 
-    API.get<{ success: boolean; data: CancerSubtypeItem[] }>(
-      `/oncology/reference/cancer-types/${cancerTypeId}/subtypes`
+    if (ids.length === 0) {
+      setSubtypes([]);
+      setDiagnosisLoading(false);
+      return;
+    }
+
+    setDiagnosisLoading(true);
+
+    Promise.all(
+      ids.map((selection) =>
+        API.get<{ success: boolean; data: CancerSubtypeItem[] }>(
+          `/oncology/reference/cancer-types/${selection.cancerTypeId}/subtypes`
+        )
+      )
     )
-      .then((response) => {
+      .then((responses) => {
         if (requestId !== diagnosisRequestRef.current) return;
-        const items = response.data.data;
+        const merged = new Map<string, CancerSubtypeOption>();
+        responses.forEach((response, index) => {
+          const cancerType = ids[index].cancerTypeName;
+          for (const item of response.data.data) {
+            const key = `${cancerType}|${item.subtype_name}`;
+            if (!merged.has(key)) {
+              merged.set(key, { ...item, cancerType });
+            }
+          }
+        });
+        const items = Array.from(merged.values());
         setSubtypes(items);
         const first = items[0];
         if (first && autoSelectIcd) {
@@ -4595,7 +4626,12 @@ const Diagnosis: React.FC<{
         if (matchedSavedType) {
           // Restoring a saved draft: reload options for the saved
           // type without overwriting the user's selections.
-          loadSubtypesForCancerType(matchedSavedType.cancer_type_id, false);
+          loadSubtypesForCancerTypes([
+            {
+              cancerTypeId: matchedSavedType.cancer_type_id,
+              cancerTypeName: matchedSavedType.cancer_type,
+            },
+          ], false);
           loadStagesForCancerType(matchedSavedType.cancer_type_id, false);
           return;
         }
@@ -4608,7 +4644,12 @@ const Diagnosis: React.FC<{
             type: previous.type || initial.cancer_type,
             icdCode: previous.icdCode || initial.icd10 || "",
           }));
-          loadSubtypesForCancerType(initial.cancer_type_id);
+          loadSubtypesForCancerTypes([
+            {
+              cancerTypeId: initial.cancer_type_id,
+              cancerTypeName: initial.cancer_type,
+            },
+          ]);
           loadStagesForCancerType(initial.cancer_type_id);
         }
       })
@@ -4669,12 +4710,25 @@ const Diagnosis: React.FC<{
       icdCode: "",
     }));
 
+    /* Histopathology shows the subtypes of every selected cancer type,
+       grouped under its parent cancer type. */
+    const selectedTypes = values
+      .map((name) => cancerTypes.find((item) => item.cancer_type === name))
+      .filter(
+        (item): item is CancerTypeItem =>
+          Boolean(item && item.cancer_type_id)
+      )
+      .map((item) => ({
+        cancerTypeId: item.cancer_type_id,
+        cancerTypeName: item.cancer_type,
+      }));
+    loadSubtypesForCancerTypes(selectedTypes);
+
     const cancerType = cancerTypes.find(
       (item) => item.cancer_type === primaryType
     );
 
     if (cancerType) {
-      loadSubtypesForCancerType(cancerType.cancer_type_id);
       loadStagesForCancerType(cancerType.cancer_type_id);
     }
   };
@@ -5012,13 +5066,24 @@ const Diagnosis: React.FC<{
                   {diagnosisLoading ? "Loading" : "Select Sub Type"}
                 </option>
 
-                {subtypes.map((subtype) => (
-                  <option
-                    key={subtype.subtype_id}
-                    value={subtype.subtype_name}
-                  >
-                    {subtype.subtype_name}
-                  </option>
+                {Array.from(
+                  subtypes.reduce((groups, subtype) => {
+                    const current = groups.get(subtype.cancerType) ?? [];
+                    current.push(subtype);
+                    groups.set(subtype.cancerType, current);
+                    return groups;
+                  }, new Map<string, CancerSubtypeOption[]>())
+                ).map(([cancerType, groupSubtypes]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {groupSubtypes.map((subtype) => (
+                      <option
+                        key={subtype.subtype_id}
+                        value={subtype.subtype_name}
+                      >
+                        {subtype.subtype_name}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
