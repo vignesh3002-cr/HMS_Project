@@ -4200,6 +4200,11 @@ type CancerSubtypeOption = CancerSubtypeItem & {
   cancerType: string;
 };
 
+type StageOption = {
+  value: string;
+  cancerType: string;
+};
+
 type StagingReferenceItem = {
   stage_ref_id: string;
   cancer_type_id: string;
@@ -4379,11 +4384,11 @@ const Diagnosis: React.FC<{
     }
   }, [formData.type, formData.subType, cancerTypes, subtypes, diagnosisCatalogReady, resolvedPatientId]);
 
-  const [stageLabels, setStageLabels] = useState<string[]>([]);
+  const [stageLabels, setStageLabels] = useState<StageOption[]>([]);
   const [tnmStages, setTnmStages] = useState<string[]>([]);
-  const [tOptions, setTOptions] = useState<string[]>([]);
-  const [nOptions, setNOptions] = useState<string[]>([]);
-  const [mOptions, setMOptions] = useState<string[]>([]);
+  const [tOptions, setTOptions] = useState<StageOption[]>([]);
+  const [nOptions, setNOptions] = useState<StageOption[]>([]);
+  const [mOptions, setMOptions] = useState<StageOption[]>([]);
   const [grades, setGrades] = useState<string[]>([]);
   const [metastasisSites, setMetastasisSites] = useState<string[]>([]);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
@@ -4484,11 +4489,14 @@ const Diagnosis: React.FC<{
       });
   };
 
-  const loadStagesForCancerType = (
-    cancerTypeId: string,
+  const loadStagesForCancerTypes = (
+    selections: {
+      cancerTypeId: string;
+      cancerTypeName: string;
+    }[],
     resetStageSelection = true
   ) => {
-    if (!cancerTypeId) return;
+    if (!selections.length) return;
     const requestId = ++stagingRequestRef.current;
     setDiagnosisLoading(true);
     setDiagnosisError("");
@@ -4499,83 +4507,139 @@ const Diagnosis: React.FC<{
     setGrades([]);
     setMetastasisSites([]);
 
-    API.get<{ success: boolean; data: StagingReferenceItem[] }>(
-      "/oncology/reference/staging",
-      { params: { cancer_type_id: cancerTypeId } }
+    Promise.all(
+      selections.map((selection) =>
+        API.get<{ success: boolean; data: StagingReferenceItem[] }>(
+          "/oncology/reference/staging",
+          { params: { cancer_type_id: selection.cancerTypeId } }
+        ).then((response) => ({
+          cancerTypeName: selection.cancerTypeName,
+          items: response.data.data,
+        }))
+      )
     )
-      .then((response) => {
+      .then((results) => {
         if (requestId !== stagingRequestRef.current) return;
-        const items = response.data.data;
-        setStageLabels(
-          items
-            .map((item) => item.stage_label)
-            .filter((label): label is string => Boolean(label))
-        );
-        const tnmOptions: string[] = [];
+
+        const seenStage = new Set<string>();
+        const seenTnm = new Set<string>();
+        const seenT = new Set<string>();
+        const seenN = new Set<string>();
+        const seenM = new Set<string>();
+        const seenGrade = new Set<string>();
+
+        const stageOptions: StageOption[] = [];
+        const tnmOptionsAggregated: string[] = [];
+        const tOptionsAggregated: StageOption[] = [];
+        const nOptionsAggregated: StageOption[] = [];
+        const mOptionsAggregated: StageOption[] = [];
         const gradeOptions: string[] = [];
-        for (const item of items) {
-          const criteria = (item.tnm_criteria ?? "")
-            .replace(/\([^)]*\)/g, " ")
-            .replace(/\s+/g, " ")
-            .replace(/\s*[-“]\s*$/g, "")
-            .trim();
-          if (criteria && /(\b[TNM]\d|\bAny\s+[TNM])/i.test(criteria)) {
-            if (!tnmOptions.includes(criteria)) tnmOptions.push(criteria);
-          }
-          const gradeSource = [
-            item.stage_label,
-            item.staging_system,
-            item.subtype_label,
-            item.tnm_criteria,
-            item.risk_criteria,
-          ]
-            .filter((value): value is string => Boolean(value))
-            .join(" ");
-          for (const match of gradeSource.matchAll(
-            /grade\s+group\s*[\d\-“]+|grade\s+[\d\-“]+/gi
-          )) {
-            const grade = match[0]
+
+        for (const result of results) {
+          const { cancerTypeName, items } = result;
+
+          const tnmOptions: string[] = [];
+          for (const item of items) {
+            const stageLabel = item.stage_label;
+            if (
+              stageLabel &&
+              !seenStage.has(`${cancerTypeName}|${stageLabel}`)
+            ) {
+              seenStage.add(`${cancerTypeName}|${stageLabel}`);
+              stageOptions.push({ value: stageLabel, cancerType: cancerTypeName });
+            }
+            const criteria = (item.tnm_criteria ?? "")
+              .replace(/\([^)]*\)/g, " ")
               .replace(/\s+/g, " ")
-              .replace(/\b\w/g, (c) => c.toUpperCase());
-            if (!gradeOptions.includes(grade)) gradeOptions.push(grade);
+              .replace(/\s*[-“]\s*$/g, "")
+              .trim();
+            if (criteria && /(\b[TNM]\d|\bAny\s+[TNM])/i.test(criteria)) {
+              if (!tnmOptions.includes(criteria)) tnmOptions.push(criteria);
+            }
+            const gradeSource = [
+              item.stage_label,
+              item.staging_system,
+              item.subtype_label,
+              item.tnm_criteria,
+              item.risk_criteria,
+            ]
+              .filter((value): value is string => Boolean(value))
+              .join(" ");
+            for (const match of gradeSource.matchAll(
+              /grade\s+group\s*[\d\-“]+|grade\s+[\d\-“]+/gi
+            )) {
+              const grade = match[0]
+                .replace(/\s+/g, " ")
+                .replace(/\b\w/g, (c) => c.toUpperCase());
+              if (!seenGrade.has(grade)) {
+                seenGrade.add(grade);
+                gradeOptions.push(grade);
+              }
+            }
+          }
+
+          for (const criteria of tnmOptions) {
+            if (!seenTnm.has(criteria)) {
+              seenTnm.add(criteria);
+              tnmOptionsAggregated.push(criteria);
+            }
+          }
+
+          const expandTnmRange = (token: string): string[] => {
+            const rangeMatch = token.match(/^([TNM])(\d+)([a-z])?-([a-z\d]+)$/i);
+            if (!rangeMatch) return [token];
+            const prefix = rangeMatch[1].toUpperCase();
+            const startNum = parseInt(rangeMatch[2], 10);
+            const startLetter = rangeMatch[3] || "";
+            const endStr = rangeMatch[4];
+            const results: string[] = [];
+            const endNum = parseInt(endStr, 10);
+            if (!startLetter && !isNaN(endNum)) {
+              for (let i = startNum; i <= endNum; i++) results.push(`${prefix}${i}`);
+            } else if (startLetter && endStr.length === 1) {
+              const startCode = startLetter.charCodeAt(0);
+              const endCode = endStr.charCodeAt(0);
+              for (let c = startCode; c <= endCode; c++) results.push(`${prefix}${startNum}${String.fromCharCode(c)}`);
+            }
+            return results.length > 0 ? results : [token];
+          };
+
+          const tSet = new Set<string>();
+          const nSet = new Set<string>();
+          const mSet = new Set<string>();
+          for (const option of tnmOptions) {
+            const parts = option.split(/\s+/);
+            for (const part of parts) {
+              if (/^T\d/i.test(part)) expandTnmRange(part).forEach((v) => tSet.add(v));
+              else if (/^N\d/i.test(part) || /^N[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => nSet.add(v));
+              else if (/^M\d/i.test(part) || /^M[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => mSet.add(v));
+            }
+          }
+          for (const value of [...tSet].sort()) {
+            if (!seenT.has(`${cancerTypeName}|${value}`)) {
+              seenT.add(`${cancerTypeName}|${value}`);
+              tOptionsAggregated.push({ value, cancerType: cancerTypeName });
+            }
+          }
+          for (const value of [...nSet].sort()) {
+            if (!seenN.has(`${cancerTypeName}|${value}`)) {
+              seenN.add(`${cancerTypeName}|${value}`);
+              nOptionsAggregated.push({ value, cancerType: cancerTypeName });
+            }
+          }
+          for (const value of [...mSet].sort()) {
+            if (!seenM.has(`${cancerTypeName}|${value}`)) {
+              seenM.add(`${cancerTypeName}|${value}`);
+              mOptionsAggregated.push({ value, cancerType: cancerTypeName });
+            }
           }
         }
-        setTnmStages(tnmOptions.sort());
 
-        const expandTnmRange = (token: string): string[] => {
-          const rangeMatch = token.match(/^([TNM])(\d+)([a-z])?-([a-z\d]+)$/i);
-          if (!rangeMatch) return [token];
-          const prefix = rangeMatch[1].toUpperCase();
-          const startNum = parseInt(rangeMatch[2], 10);
-          const startLetter = rangeMatch[3] || "";
-          const endStr = rangeMatch[4];
-          const results: string[] = [];
-          const endNum = parseInt(endStr, 10);
-          if (!startLetter && !isNaN(endNum)) {
-            for (let i = startNum; i <= endNum; i++) results.push(`${prefix}${i}`);
-          } else if (startLetter && endStr.length === 1) {
-            const startCode = startLetter.charCodeAt(0);
-            const endCode = endStr.charCodeAt(0);
-            for (let c = startCode; c <= endCode; c++) results.push(`${prefix}${startNum}${String.fromCharCode(c)}`);
-          }
-          return results.length > 0 ? results : [token];
-        };
-
-        const tSet = new Set<string>();
-        const nSet = new Set<string>();
-        const mSet = new Set<string>();
-        for (const option of tnmOptions) {
-          const parts = option.split(/\s+/);
-          for (const part of parts) {
-            if (/^T\d/i.test(part)) expandTnmRange(part).forEach((v) => tSet.add(v));
-            else if (/^N\d/i.test(part) || /^N[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => nSet.add(v));
-            else if (/^M\d/i.test(part) || /^M[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => mSet.add(v));
-          }
-        }
-        setTOptions([...tSet].sort());
-        setNOptions([...nSet].sort());
-        setMOptions([...mSet].sort());
-
+        setStageLabels(stageOptions);
+        setTnmStages(tnmOptionsAggregated.sort());
+        setTOptions(tOptionsAggregated);
+        setNOptions(nOptionsAggregated);
+        setMOptions(mOptionsAggregated);
         setGrades(gradeOptions.sort());
         if (!resetStageSelection) return;
         setFormData((previous) => ({
@@ -4632,7 +4696,12 @@ const Diagnosis: React.FC<{
               cancerTypeName: matchedSavedType.cancer_type,
             },
           ], false);
-          loadStagesForCancerType(matchedSavedType.cancer_type_id, false);
+          loadStagesForCancerTypes([
+            {
+              cancerTypeId: matchedSavedType.cancer_type_id,
+              cancerTypeName: matchedSavedType.cancer_type,
+            },
+          ], false);
           return;
         }
 
@@ -4650,7 +4719,12 @@ const Diagnosis: React.FC<{
               cancerTypeName: initial.cancer_type,
             },
           ]);
-          loadStagesForCancerType(initial.cancer_type_id);
+          loadStagesForCancerTypes([
+            {
+              cancerTypeId: initial.cancer_type_id,
+              cancerTypeName: initial.cancer_type,
+            },
+          ]);
         }
       })
       .catch((error) => {
@@ -4723,14 +4797,7 @@ const Diagnosis: React.FC<{
         cancerTypeName: item.cancer_type,
       }));
     loadSubtypesForCancerTypes(selectedTypes);
-
-    const cancerType = cancerTypes.find(
-      (item) => item.cancer_type === primaryType
-    );
-
-    if (cancerType) {
-      loadStagesForCancerType(cancerType.cancer_type_id);
-    }
+    loadStagesForCancerTypes(selectedTypes);
   };
 
   const handleNext = async () => {
@@ -5141,10 +5208,21 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                     : "Select Cancer Stage"}
                 </option>
 
-                {stageLabels.map((label) => (
-                  <option key={label} value={label}>
-                    {label}
-                  </option>
+                {Array.from(
+                  stageLabels.reduce((groups, option) => {
+                    const current = groups.get(option.cancerType) ?? [];
+                    current.push(option);
+                    groups.set(option.cancerType, current);
+                    return groups;
+                  }, new Map<string, StageOption[]>())
+                ).map(([cancerType, options]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {options.map((option) => (
+                      <option key={`${cancerType}-${option.value}`} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
@@ -5213,10 +5291,21 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                     : "Select T Stage"}
                 </option>
 
-                {tOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
+                {Array.from(
+                  tOptions.reduce((groups, option) => {
+                    const current = groups.get(option.cancerType) ?? [];
+                    current.push(option);
+                    groups.set(option.cancerType, current);
+                    return groups;
+                  }, new Map<string, StageOption[]>())
+                ).map(([cancerType, options]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {options.map((option) => (
+                      <option key={`${cancerType}-${option.value}`} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
@@ -5249,10 +5338,21 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                     : "Select N Stage"}
                 </option>
 
-                {nOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
+                {Array.from(
+                  nOptions.reduce((groups, option) => {
+                    const current = groups.get(option.cancerType) ?? [];
+                    current.push(option);
+                    groups.set(option.cancerType, current);
+                    return groups;
+                  }, new Map<string, StageOption[]>())
+                ).map(([cancerType, options]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {options.map((option) => (
+                      <option key={`${cancerType}-${option.value}`} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
@@ -5285,10 +5385,21 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                     : "Select M Stage"}
                 </option>
 
-                {mOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
+                {Array.from(
+                  mOptions.reduce((groups, option) => {
+                    const current = groups.get(option.cancerType) ?? [];
+                    current.push(option);
+                    groups.set(option.cancerType, current);
+                    return groups;
+                  }, new Map<string, StageOption[]>())
+                ).map(([cancerType, options]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {options.map((option) => (
+                      <option key={`${cancerType}-${option.value}`} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
