@@ -6098,7 +6098,7 @@ const PatientNotesDocuments: React.FC<{
       ==================================================== */}
       {!embedded && (
         <div className="mb-6 border-b border-slate-200">
-          <nav className="flex space-x-8 overflow-x-auto">
+          <nav className="flex space-x-8 overflow-x-auto hide-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             {tabs.map((tab) => {
               const isActive = activeTab === tab;
 
@@ -6283,7 +6283,7 @@ const PatientNotesDocuments: React.FC<{
                     <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
                       Visits:
                     </span>
-                    <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 max-w-[500px]">
+                    <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar py-0.5 max-w-[500px] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                       {clinicalNotes.map((n, idx) => {
                         const isSelected = idx === safeNoteIndex;
                         return (
@@ -7021,7 +7021,7 @@ const PatientNotesDocuments: React.FC<{
             </div>
 
             {/* Modal Form */}
-            <form onSubmit={handleSaveEditedNote} className="flex flex-1 flex-col overflow-y-auto p-6 space-y-4 text-xs">
+            <form onSubmit={handleSaveEditedNote} className="flex flex-1 flex-col overflow-y-auto hide-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden p-6 space-y-4 text-xs">
               {/* Meta information row */}
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200">
                 <div>

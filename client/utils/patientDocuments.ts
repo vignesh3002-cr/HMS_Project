@@ -1,8 +1,12 @@
 /**
- * Patient Documents Utility & IndexedDB Storage Engine
- * Manages clinical documents uploaded per patient (PDFs, images, lab reports, etc.)
- * Provides persistent offline/local storage via IndexedDB with automatic fallback.
+ * Patient Documents Utility & Dual-Engine Storage
+ * - Central PostgreSQL Database persistence via Express Backend REST API
+ * - Local IndexedDB caching engine for offline tolerance and instant blob previews
+ * - Supports PDFs, images, clinical notes, lab reports, and office documents
  */
+
+import API from "../api/axios";
+import { getToken, getUser } from "./token";
 
 export interface PatientDocumentItem {
   id: string;
@@ -10,9 +14,9 @@ export interface PatientDocumentItem {
   name: string;
   size: number;
   type: string;
-  url: string; // Active blob object URL
-  uploadDate: string; // Formatted date string, e.g. "16 Sep 2026, 03:30 PM"
-  info: string; // Display summary, e.g. "PDF • 1.2 MB • 16 Sep 2026"
+  url: string; // Active blob object URL or backend stream URL
+  uploadDate: string; // Formatted date string, e.g. "17 Sep 2026, 03:30 PM"
+  info: string; // Display summary, e.g. "PDF • 1.2 MB • 17 Sep 2026"
   icon: string; // FontAwesome icon class
   color: string; // Tailwind text color class
   hover: string; // Tailwind border hover class
@@ -27,6 +31,20 @@ interface StoredDocumentRecord {
   type: string;
   uploadDate: string;
   blob: Blob;
+}
+
+interface BackendDocumentRecord {
+  id: string;
+  document_id: string;
+  patient_id: string;
+  file_name: string;
+  original_name: string;
+  file_type: string;
+  file_size: number;
+  category?: string | null;
+  uploaded_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 const DB_NAME = "HMS_PatientDocumentsDB";
@@ -116,6 +134,21 @@ export function getDocumentIconAndColors(
 }
 
 /**
+ * Convert a File object to a Base64 data string
+ */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result);
+    };
+    reader.onerror = (error) => reject(error);
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
  * Open IndexedDB database connection
  */
 function openDB(): Promise<IDBDatabase> {
@@ -140,13 +173,11 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 /**
- * Load all documents stored for a specific patient
+ * Load documents from local IndexedDB cache
  */
-export async function loadPatientDocuments(
+async function loadPatientDocumentsFromIndexedDB(
   patientId: string
 ): Promise<PatientDocumentItem[]> {
-  if (!patientId) return [];
-
   try {
     const db = await openDB();
     return new Promise((resolve, reject) => {
@@ -157,7 +188,6 @@ export async function loadPatientDocuments(
 
       request.onsuccess = () => {
         const records: StoredDocumentRecord[] = request.result || [];
-        // Map stored records into PatientDocumentItems with live Object URLs
         const items: PatientDocumentItem[] = records.map((rec) => {
           const { icon, color, hover } = getDocumentIconAndColors(rec.name, rec.type);
           const ext = rec.name.split(".").pop()?.toUpperCase() || "FILE";
@@ -181,7 +211,6 @@ export async function loadPatientDocuments(
           };
         });
 
-        // Sort latest first
         items.sort((a, b) => b.id.localeCompare(a.id));
         resolve(items);
       };
@@ -189,25 +218,29 @@ export async function loadPatientDocuments(
       request.onerror = () => reject(request.error);
     });
   } catch (err) {
-    console.warn("IndexedDB loadPatientDocuments fallback:", err);
+    console.warn("IndexedDB fallback error:", err);
     return [];
   }
 }
 
 /**
- * Save an uploaded file for a patient into IndexedDB
+ * Save document to local IndexedDB cache
  */
-export async function savePatientDocument(
+async function savePatientDocumentToIndexedDB(
   patientId: string,
-  file: File
+  file: File,
+  customId?: string
 ): Promise<PatientDocumentItem> {
-  const id = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const id = customId || `doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const now = new Date();
-  const uploadDate = now.toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }) + ", " + now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const uploadDate =
+    now.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }) +
+    ", " +
+    now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   const storedRecord: StoredDocumentRecord = {
     id,
@@ -256,9 +289,9 @@ export async function savePatientDocument(
 }
 
 /**
- * Delete a document from IndexedDB by its ID
+ * Delete document from local IndexedDB cache
  */
-export async function deletePatientDocument(id: string): Promise<void> {
+async function deletePatientDocumentFromIndexedDB(id: string): Promise<void> {
   if (!id) return;
   try {
     const db = await openDB();
@@ -276,16 +309,209 @@ export async function deletePatientDocument(id: string): Promise<void> {
 }
 
 /**
- * Trigger immediate browser download of a document
+ * Load all documents stored in the database for a specific patient.
+ * First queries backend API `/patient-documents/patient/:patientId`.
+ * If network is unreachable, gracefully falls back to IndexedDB.
  */
-export function downloadDocument(doc: PatientDocumentItem): void {
-  if (!doc.url) return;
-  const a = document.createElement("a");
-  a.href = doc.url;
-  a.download = doc.name || "document";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+export async function loadPatientDocuments(
+  patientId: string
+): Promise<PatientDocumentItem[]> {
+  if (!patientId) return [];
+
+  const backendBase = (
+    (import.meta as any).env?.VITE_BACKEND_URL || "http://localhost:5000/api"
+  ).replace(/\/+$/, "");
+  const token = getToken();
+  const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : "";
+
+  try {
+    const response = await API.get<{ success: boolean; data: BackendDocumentRecord[] }>(
+      `/patient-documents/patient/${encodeURIComponent(patientId)}`
+    );
+
+    if (response.data && Array.isArray(response.data.data)) {
+      const backendDocs = response.data.data;
+      const items: PatientDocumentItem[] = backendDocs.map((rec) => {
+        const docId = rec.document_id || rec.id;
+        const fileName = rec.file_name || rec.original_name || "Document";
+        const fileType = rec.file_type || "application/octet-stream";
+        const fileSize = Number(rec.file_size || 0);
+        const { icon, color, hover } = getDocumentIconAndColors(fileName, fileType);
+        const ext = fileName.split(".").pop()?.toUpperCase() || "FILE";
+        const formattedSize = formatFileSize(fileSize);
+
+        const createdDate = rec.created_at ? new Date(rec.created_at) : new Date();
+        const uploadDate =
+          createdDate.toLocaleDateString("en-GB", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          }) +
+          ", " +
+          createdDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        const dateOnly = uploadDate.split(",")[0] || uploadDate;
+
+        const viewUrl = `${backendBase}/patient-documents/${encodeURIComponent(docId)}/view${tokenQuery}`;
+
+        return {
+          id: docId,
+          patientId: rec.patient_id || patientId,
+          name: fileName,
+          size: fileSize,
+          type: fileType,
+          url: viewUrl,
+          uploadDate,
+          info: `${ext} • ${formattedSize} • ${dateOnly}`,
+          icon,
+          color,
+          hover,
+        };
+      });
+
+      return items;
+    }
+  } catch (err) {
+    console.warn("Backend loadPatientDocuments failed, falling back to IndexedDB:", err);
+  }
+
+  return loadPatientDocumentsFromIndexedDB(patientId);
+}
+
+/**
+ * Save an uploaded file for a patient into PostgreSQL Database via backend API,
+ * and caches into IndexedDB for offline capability and immediate previews.
+ */
+export async function savePatientDocument(
+  patientId: string,
+  file: File
+): Promise<PatientDocumentItem> {
+  const backendBase = (
+    (import.meta as any).env?.VITE_BACKEND_URL || "http://localhost:5000/api"
+  ).replace(/\/+$/, "");
+  const token = getToken();
+  const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : "";
+
+  // 1. Prepare local item with live blob URL immediately
+  const localItem = await savePatientDocumentToIndexedDB(patientId, file);
+
+  try {
+    // 2. Read file as Base64 for database storage
+    const base64Data = await fileToBase64(file);
+    const currentUser = getUser();
+    const uploadedBy =
+      currentUser?.name || currentUser?.username || currentUser?.role || "Doctor";
+
+    // 3. Post to backend
+    const response = await API.post<{
+      success: boolean;
+      data: BackendDocumentRecord;
+    }>("/patient-documents/upload", {
+      patient_id: patientId,
+      file_name: file.name,
+      original_name: file.name,
+      file_type: file.type || "application/octet-stream",
+      file_size: file.size,
+      file_data: base64Data,
+      category: "Clinical",
+      uploaded_by: uploadedBy,
+    });
+
+    if (response.data && response.data.data) {
+      const serverDoc = response.data.data;
+      const docId = serverDoc.document_id || serverDoc.id;
+
+      // Update indexedDB record with server document_id
+      await savePatientDocumentToIndexedDB(patientId, file, docId);
+
+      const { icon, color, hover } = getDocumentIconAndColors(
+        serverDoc.file_name,
+        serverDoc.file_type
+      );
+      const ext = serverDoc.file_name.split(".").pop()?.toUpperCase() || "FILE";
+      const formattedSize = formatFileSize(Number(serverDoc.file_size));
+      const createdDate = serverDoc.created_at ? new Date(serverDoc.created_at) : new Date();
+      const uploadDate =
+        createdDate.toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        }) +
+        ", " +
+        createdDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const dateOnly = uploadDate.split(",")[0] || uploadDate;
+      const viewUrl = `${backendBase}/patient-documents/${encodeURIComponent(docId)}/view${tokenQuery}`;
+
+      return {
+        id: docId,
+        patientId: serverDoc.patient_id,
+        name: serverDoc.file_name,
+        size: Number(serverDoc.file_size),
+        type: serverDoc.file_type,
+        url: localItem.url || viewUrl,
+        uploadDate,
+        info: `${ext} • ${formattedSize} • ${dateOnly}`,
+        icon,
+        color,
+        hover,
+        blob: file,
+      };
+    }
+  } catch (err) {
+    console.error("Failed to save patient document to backend API:", err);
+  }
+
+  return localItem;
+}
+
+/**
+ * Delete a document from the database by its ID (and clean from local IndexedDB cache)
+ */
+export async function deletePatientDocument(id: string): Promise<void> {
+  if (!id) return;
+  try {
+    await API.delete(`/patient-documents/${encodeURIComponent(id)}`);
+  } catch (err) {
+    console.warn("Could not delete document from backend API:", err);
+  }
+  await deletePatientDocumentFromIndexedDB(id);
+}
+
+/**
+ * Trigger browser download of a document (fetches blob stream from backend or local blob)
+ */
+export async function downloadDocument(doc: PatientDocumentItem): Promise<void> {
+  if (doc.blob) {
+    const a = document.createElement("a");
+    a.href = doc.url;
+    a.download = doc.name || "document";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  }
+
+  try {
+    const response = await API.get(`/patient-documents/${encodeURIComponent(doc.id)}/download`, {
+      responseType: "blob",
+    });
+
+    const blob = new Blob([response.data], {
+      type: doc.type || "application/octet-stream",
+    });
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = doc.name || "document";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+  } catch (err) {
+    console.warn("API downloadDocument failed, opening URL directly:", err);
+    if (doc.url) {
+      window.open(doc.url, "_blank");
+    }
+  }
 }
 
 /**
@@ -299,4 +525,3 @@ export function downloadAllDocuments(docs: PatientDocumentItem[]): void {
     }, idx * 300);
   });
 }
-
