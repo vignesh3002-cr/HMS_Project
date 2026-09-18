@@ -4177,9 +4177,9 @@ type FormData = {
   histomorphology: string;
   cancerStage: string[];
   grade: string;
-  tStage: string;
-  nStage: string;
-  mStage: string;
+  tStage: string[];
+  nStage: string[];
+  mStage: string[];
   icdCode: string;
   notes: string;
 };
@@ -4465,9 +4465,9 @@ const Diagnosis: React.FC<{
     histomorphology: "",
     cancerStage: [],
     grade: "",
-    tStage: "",
-    nStage: "",
-    mStage: "",
+    tStage: [],
+    nStage: [],
+    mStage: [],
     icdCode: "",
     notes: "",
   });
@@ -4494,6 +4494,9 @@ const Diagnosis: React.FC<{
         ...data,
         subType: asArray(data.subType),
         cancerStage: asArray(data.cancerStage),
+        tStage: asArray(data.tStage),
+        nStage: asArray(data.nStage),
+        mStage: asArray(data.mStage),
       }));
     } catch (error) {
       console.error("Failed to restore diagnosis draft:", error);
@@ -4520,7 +4523,9 @@ const Diagnosis: React.FC<{
      qualified as `${cancerType}|${label}`, so per-type selections stay
      independent. The checkbox's checked state drives add vs. remove so a
      click can never silently invert a selection. */
-  const handleMultiToggle = (field: "subType" | "cancerStage") => (
+  const handleMultiToggle = (
+    field: "subType" | "cancerStage" | "tStage" | "nStage" | "mStage"
+  ) => (
     value: string,
     select?: boolean
   ) => {
@@ -5059,9 +5064,9 @@ const Diagnosis: React.FC<{
       formData.type ||
       formData.subType.length > 0 ||
       formData.cancerStage.length > 0 ||
-      formData.tStage ||
-      formData.nStage ||
-      formData.mStage ||
+      formData.tStage.length > 0 ||
+      formData.nStage.length > 0 ||
+      formData.mStage.length > 0 ||
       formData.icdCode.trim() ||
       formData.notes.trim();
 
@@ -5073,7 +5078,9 @@ const Diagnosis: React.FC<{
     }
 
     if (
-      formData.mStage.trim().toUpperCase().startsWith("M1") &&
+      formData.mStage.some((stage) =>
+        splitQualified(stage).raw.trim().toUpperCase().startsWith("M1")
+      ) &&
       metastasisSites.length === 0
     ) {
       setDiagnosisError(
@@ -5117,9 +5124,27 @@ const Diagnosis: React.FC<{
                 .join(", "),
             }
           : {}),
-        ...(formData.tStage ? { t_stage: formData.tStage } : {}),
-        ...(formData.nStage ? { n_stage: formData.nStage } : {}),
-        ...(formData.mStage ? { m_stage: formData.mStage } : {}),
+        ...(formData.tStage.length > 0
+          ? {
+              t_stage: formData.tStage
+                .map((stage) => splitQualified(stage).raw)
+                .join(", "),
+            }
+          : {}),
+        ...(formData.nStage.length > 0
+          ? {
+              n_stage: formData.nStage
+                .map((stage) => splitQualified(stage).raw)
+                .join(", "),
+            }
+          : {}),
+        ...(formData.mStage.length > 0
+          ? {
+              m_stage: formData.mStage
+                .map((stage) => splitQualified(stage).raw)
+                .join(", "),
+            }
+          : {}),
         ...(metastasisSites.length > 0
           ? { metastasis_sites: metastasisSites }
           : {}),
@@ -5456,149 +5481,37 @@ const Diagnosis: React.FC<{
           {/* TNM Staging */}
           <div className="col-span-full grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-3 lg:grid-cols-3">
             {/* T Stage */}
-            <div>
-              <label
-                htmlFor="tStage"
-                className="mb-2 block text-sm font-semibold text-gray-600"
-              >
-                T Stage
-              </label>
-
-              <div className="relative">
-                <select
-                  id="tStage"
-                  name="tStage"
-                  value={formData.tStage}
-                  onChange={handleChange}
-                  className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-                >
-                  <option value="">
-                    {diagnosisLoading
-                      ? "Loading"
-                      : "Select T Stage"}
-                  </option>
-
-                  {Array.from(
-                    tOptions.reduce((groups, option) => {
-                      const current = groups.get(option.cancerType) ?? [];
-                      current.push(option);
-                      groups.set(option.cancerType, current);
-                      return groups;
-                    }, new Map<string, StageOption[]>())
-                  ).map(([cancerType, options]) => (
-                    <optgroup key={cancerType} label={cancerType}>
-                      {options.map((option) => (
-                        <option key={`${cancerType}-${option.value}`} value={option.value}>
-                          {option.value}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                  <ChevronDownIcon />
-                </div>
-              </div>
-            </div>
+            <DiagnosisCheckboxList
+              title="T Stage"
+              groups={buildCheckboxGroups(tOptions)}
+              selected={formData.tStage}
+              onToggle={handleMultiToggle("tStage")}
+              loading={diagnosisLoading}
+            />
 
             {/* N Stage */}
-            <div>
-              <label
-                htmlFor="nStage"
-                className="mb-2 block text-sm font-semibold text-gray-600"
-              >
-                N Stage
-              </label>
-
-              <div className="relative">
-                <select
-                  id="nStage"
-                  name="nStage"
-                  value={formData.nStage}
-                  onChange={handleChange}
-                  className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-                >
-                  <option value="">
-                    {diagnosisLoading
-                      ? "Loading"
-                      : "Select N Stage"}
-                  </option>
-
-                  {Array.from(
-                    nOptions.reduce((groups, option) => {
-                      const current = groups.get(option.cancerType) ?? [];
-                      current.push(option);
-                      groups.set(option.cancerType, current);
-                      return groups;
-                    }, new Map<string, StageOption[]>())
-                  ).map(([cancerType, options]) => (
-                    <optgroup key={cancerType} label={cancerType}>
-                      {options.map((option) => (
-                        <option key={`${cancerType}-${option.value}`} value={option.value}>
-                          {option.value}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                  <ChevronDownIcon />
-                </div>
-              </div>
-            </div>
+            <DiagnosisCheckboxList
+              title="N Stage"
+              groups={buildCheckboxGroups(nOptions)}
+              selected={formData.nStage}
+              onToggle={handleMultiToggle("nStage")}
+              loading={diagnosisLoading}
+            />
 
             {/* M Stage */}
-            <div>
-              <label
-                htmlFor="mStage"
-                className="mb-2 block text-sm font-semibold text-gray-600"
-              >
-                M Stage
-              </label>
-
-              <div className="relative">
-                <select
-                  id="mStage"
-                  name="mStage"
-                  value={formData.mStage}
-                  onChange={handleChange}
-                  className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-                >
-                  <option value="">
-                    {diagnosisLoading
-                      ? "Loading"
-                      : "Select M Stage"}
-                  </option>
-
-                  {Array.from(
-                    mOptions.reduce((groups, option) => {
-                      const current = groups.get(option.cancerType) ?? [];
-                      current.push(option);
-                      groups.set(option.cancerType, current);
-                      return groups;
-                    }, new Map<string, StageOption[]>())
-                  ).map(([cancerType, options]) => (
-                    <optgroup key={cancerType} label={cancerType}>
-                      {options.map((option) => (
-                        <option key={`${cancerType}-${option.value}`} value={option.value}>
-                          {option.value}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                  <ChevronDownIcon />
-                </div>
-              </div>
-            </div>
+            <DiagnosisCheckboxList
+              title="M Stage"
+              groups={buildCheckboxGroups(mOptions)}
+              selected={formData.mStage}
+              onToggle={handleMultiToggle("mStage")}
+              loading={diagnosisLoading}
+            />
           </div>
 
           {/* Metastasis Sites - shown when M stage is M1+ */}
-          {formData.mStage.trim().toUpperCase().startsWith("M1") && (
+          {formData.mStage.some((stage) =>
+            splitQualified(stage).raw.trim().toUpperCase().startsWith("M1")
+          ) && (
             <div className="col-span-full">
               <label className="mb-2 block text-sm font-semibold text-gray-600">
                 Metastasis Sites
