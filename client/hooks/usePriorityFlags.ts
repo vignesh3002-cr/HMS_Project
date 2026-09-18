@@ -17,7 +17,7 @@ export function usePriorityFlags(patientIds: string[]) {
         setFlags(res.data.data);
       }
     } catch {
-      // silent — no red dots shown on failure
+      // silent
     }
   }, [key]);
 

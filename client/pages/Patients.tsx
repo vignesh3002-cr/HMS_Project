@@ -204,7 +204,7 @@ function mapToListPatient(p: PatientRecord, assignedDoctors: Record<string, Assi
 
 // 1. Avatar
 const Avatar = ({ text, color, bg }: { text: string; color: string; bg: string }) => (
-  <div className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text" style={{ backgroundColor: bg, color: color }}>
+  <div data-critical-avatar className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text" style={{ backgroundColor: bg, color: color }}>
     {text}
   </div>
 );
@@ -215,7 +215,7 @@ const Avatar = ({ text, color, bg }: { text: string; color: string; bg: string }
 
 // 3. Photo avatar with fallback
 const PatientPhoto = ({ photo, name }: { photo: string; name: string }) => (
-  <div className="w-16 h-16 rounded-full overflow-hidden bg-[#E5E7EB] flex items-center justify-center flex-shrink-0">
+  <div data-critical-avatar className="w-16 h-16 rounded-full overflow-hidden bg-[#E5E7EB] flex items-center justify-center flex-shrink-0">
     {photo ? (
       <img src={photo} alt={name} className="w-full h-full object-cover" />
     ) : (
@@ -713,14 +713,16 @@ export default function PatientsManagement() {
             ) : viewMode === "list" ? (
               <HmsTable
                 columns={[
-                  { key: "name", label: "Name", render: (r: any) => {
+                  { key: "name", label: "Name", className: "relative", render: (r: any) => {
                     const crit = getCriticalInfo(String(r.id));
                     return (
-                    <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+                    <>
                       <CriticalCorner reasons={crit.reasons} />
-                      <Avatar text={String(r.name)[0]} color={String(r.patientAvatarColor ?? "#00488D")} bg={String(r.patientAvatarBg ?? "#D6E3FF")} />
-                      <div><div className="hms-name-text">{String(r.name)}</div><div className="hms-id-text flex items-center">{String(r.id)}<CriticalDot reasons={crit.reasons} /></div></div>
-                    </CriticalWrapper>
+                      <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+                        <Avatar text={String(r.name)[0]} color={String(r.patientAvatarColor ?? "#00488D")} bg={String(r.patientAvatarBg ?? "#D6E3FF")} />
+                        <div><div className="hms-name-text">{String(r.name)}</div><div className="hms-id-text flex items-center">{String(r.id)}<CriticalDot reasons={crit.reasons} /></div></div>
+                      </CriticalWrapper>
+                    </>
                     );
                   }},
                   { key: "age/gender", label: "Age/Gender", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.age} / {String(r.gender)}</span> },
@@ -777,7 +779,7 @@ export default function PatientsManagement() {
                 rowKey={(r: any, i: number) => String(r.id) + i}
                 rowClassName={(r: any) => {
                   const crit = getCriticalInfo(String(r.id));
-                  return crit.isCritical ? "relative" : "";
+                   return "";
                 }}
               />
             ) : (
@@ -790,7 +792,7 @@ export default function PatientsManagement() {
                       return (
                       <CriticalWrapper
                         key={patient.id}
-                        className="flex items-start gap-4 p-4 border border-[#E5E7EB] rounded-xl hover:shadow-md hover:border-[#D6E3FF] transition-all duration-200 group"
+                        className={`flex items-start gap-4 p-4 border border-[#E5E7EB] rounded-xl hover:shadow-md hover:border-[#D6E3FF] transition-all duration-200 group`}
                       >
                         <CriticalCorner reasons={crit.reasons} />
                         <PatientPhoto photo={patient.photo} name={patient.name} />

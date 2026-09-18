@@ -1640,14 +1640,16 @@ export default function Dashboard() {
               <HmsTable
                 scrollable={false}
                 columns={activeTab === "appointments" ? [
-                  { key: "patientName", label: "Patient Name", render: (r: any) => {
+                  { key: "patientName", label: "Patient Name", className: "relative", render: (r: any) => {
                     const crit = getCriticalInfo(r.patientId);
                     return (
-                    <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+                    <>
                       <CriticalCorner reasons={crit.reasons} />
-                      <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.avatarBg, color: r.avatarColor }}>{r.avatar}</div>
-                      <div><div className="hms-name-text">{r.patientName}</div><div className="hms-id-text flex items-center">{r.patientId}<CriticalDot reasons={crit.reasons} /></div></div>
-                    </CriticalWrapper>
+                      <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+                        <div data-critical-avatar className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.avatarBg, color: r.avatarColor }}>{r.avatar}</div>
+                        <div><div className="hms-name-text">{r.patientName}</div><div className="hms-id-text flex items-center">{r.patientId}<CriticalDot reasons={crit.reasons} /></div></div>
+                      </CriticalWrapper>
+                    </>
                     );
                   }},
                   { key: "appointmentNo", label: "Appointment No", render: (r: any) => (
@@ -1767,7 +1769,7 @@ export default function Dashboard() {
                 rowClassName={(r: any) => {
                   if (activeTab !== "appointments") return "";
                   const crit = getCriticalInfo(r.patientId);
-                  return crit.isCritical ? "relative" : "";
+                   return "";
                 }}
               />
             )}
