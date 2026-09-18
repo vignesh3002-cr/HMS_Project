@@ -12,8 +12,8 @@ export interface MedicineOption {
 
 export interface RegimenProtocolDilution {
   protocol_dilution_id?: string;
-  administration_day?: number | null;
   medicine_id?: string | null;
+  drug_brand_name?: string | null;
   form?: string | null;
   dose?: string | number | null;
   dose_unit?: string | null;
@@ -25,8 +25,8 @@ export interface RegimenProtocolDilution {
 
 export interface RegimenProtocolDilutionInput {
   protocol_dilution_id?: string;
-  administration_day?: number | null;
   medicine_id?: string | null;
+  drug_brand_name?: string | null;
   form?: string | null;
   dose?: string | number | null;
   dose_unit?: string | null;
@@ -40,12 +40,13 @@ export interface DischargeInstruction {
   discharge_instruction_id: string;
   protocol_id: string;
   medicine_id: string | null;
+  drug_brand_name?: string | null;
   drug_sequence: number | null;
-  administration_day: number | null;
   drug_from: string | null;
   frequency: string | null;
   composition: string | null;
   duration: string | null;
+  duration_days?: string | null;
   patient_dose: string | number | null;
   patient_dose_unit: string | null;
   administration_detail: string | null;
@@ -59,11 +60,12 @@ export interface DischargeInstruction {
 export interface DischargeInstructionInput {
   discharge_instruction_id?: string;
   medicine_id?: string | null;
+  drug_brand_name?: string | null;
   drug_sequence?: number | null;
-  administration_day?: number | null;
   drug_from?: string | null;
-  frequency?: string | null;
+  frequency: string | null;
   duration?: string | null;
+  duration_days?: string | null;
   patient_dose?: number | null;
   patient_dose_unit?: string | null;
   administration_detail?: string | null;
@@ -73,6 +75,7 @@ export interface DischargeInstructionInput {
 export interface RegimenProtocolItem {
   protocol_item_id: string;
   medicine_id: string;
+  drug_brand_name?: string | null;
   drug_role: string;
   drug_sequence: number;
   drug_type: string | null;
@@ -101,7 +104,15 @@ export interface RegimenProtocol {
   regimen_name: string;
   protocol_version: string | null;
   cancer_type_id: string;
+  cancer_type_ids?: string[];
   subtype_id: string | null;
+  subtype_ids?: string[];
+  chemotherapy_protocol_cancers?: Array<{
+    cancer_type_id: string;
+    subtype_id: string | null;
+    cancer_types?: { cancer_type: string | null } | null;
+    cancer_subtypes?: { subtype_name: string | null } | null;
+  }>;
   treatment_intent: string | null;
   standard_cycles: number | null;
   no_of_days: number | null;
@@ -137,6 +148,7 @@ export interface RegimenProtocolItemInput {
   administration_detail?: string | null;
   previous_toxicity?: string | null;
   remarks?: string | null;
+  drug_brand_name?: string | null;
   dilutions?: RegimenProtocolDilutionInput[] | null;
 }
 
@@ -247,7 +259,9 @@ export const chemotherapyApi = {
     original_protocol?: string | null;
     protocol_version?: string | null;
     cancer_type_id: string;
+    cancer_type_ids?: string[];
     subtype_id?: string | null;
+    subtype_ids?: string[];
     treatment_intent?: string | null;
     standard_cycles?: number | null;
     cycle_interval_days?: number | null;
@@ -281,6 +295,7 @@ export const chemotherapyApi = {
       dilutions?: RegimenProtocolDilutionInput[] | null;
     }>;
     discharge_instructions?: DischargeInstructionInput[];
+    dilutions?: RegimenProtocolDilutionInput[];
   }) =>
     API.post<{ success: boolean; message: string; data: RegimenProtocol }>(
       "/chemotherapy/regimen-protocols",
@@ -294,7 +309,9 @@ export const chemotherapyApi = {
       original_protocol?: string | null;
       protocol_version?: string | null;
       cancer_type_id?: string;
+      cancer_type_ids?: string[];
       subtype_id?: string | null;
+      subtype_ids?: string[];
       treatment_intent?: string | null;
       standard_cycles?: number | null;
       cycle_interval_days?: number | null;
@@ -328,6 +345,7 @@ export const chemotherapyApi = {
         dilutions?: RegimenProtocolDilutionInput[] | null;
       }>;
       discharge_instructions?: DischargeInstructionInput[];
+      dilutions?: RegimenProtocolDilutionInput[];
     }
   ) =>
     API.put<{ success: boolean; message: string; data: RegimenProtocol }>(
@@ -397,14 +415,17 @@ export const chemotherapyApi = {
       };
     }>("/chemotherapy/protocol-field-options"),
   listMedicinesByCancerSubtype: (
-    cancerTypeId: string,
-    subtypeId: string | undefined,
+    cancerTypeIds: string | string[],
+    subtypeIds: string | string[] | undefined,
     drugRole: string
-  ) =>
-    API.get<{ success: boolean; message: string; data: MedicineOption[] }>(
+  ) => {
+    const cancerParam = Array.isArray(cancerTypeIds) ? cancerTypeIds.join(",") : cancerTypeIds;
+    const subtypeParam = Array.isArray(subtypeIds) ? subtypeIds.join(",") : subtypeIds;
+    return API.get<{ success: boolean; message: string; data: MedicineOption[] }>(
       "/chemotherapy/medicines/by-cancer-subtype",
-      { params: { cancer_type_id: cancerTypeId, subtype_id: subtypeId || undefined, drug_role: drugRole } }
-    ),
+      { params: { cancer_type_ids: cancerParam, subtype_ids: subtypeParam || undefined, drug_role: drugRole } }
+    );
+  },
   addDischargeInstruction: (
     protocolId: string,
     payload: DischargeInstructionInput

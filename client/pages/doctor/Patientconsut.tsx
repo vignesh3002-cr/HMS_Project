@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   useEffect,
   useRef,
   useState,
@@ -13,6 +13,7 @@ import { employeeApi } from "../../api/employee.api";
 import { appointmentApi } from "../../api/appointment.api";
 import { getUser } from "../../utils/token";
 import { computeBmi, computeBsa } from "../../utils/vitals";
+import { clinicalDetailsApi } from "../../api/clinicalDetails.api";
 import {
   doctorDashboardApi,
 } from "../../api/doctorDashboard.api";
@@ -35,7 +36,10 @@ import {
   type LabOrderItemRecord,
 } from "../../api/labOrder.api";
 import { Calendar } from "../../components/ui/calendar";
-import { ClinicalDetailsSection } from "../../components/hms/ClinicalDetailsSection";
+import {
+  ClinicalDetailsSection,
+  type ClinicalDetailsSectionHandle,
+} from "../../components/hms/ClinicalDetailsSection";
 import PatientVitalsPanel from "../../components/hms/PatientVitalsPanel";
 import {
   Popover,
@@ -202,6 +206,39 @@ interface ConsultationState {
   consultedBy?: string;
   visit_type?: string;
 }
+
+/* Past History shares the encounter's clinical_notes column with
+   Consultation Notes. This marker separates the two sections so they
+   can be split back apart when the encounter is loaded again. */
+const PAST_HISTORY_MARKER = "[Past History]";
+
+/* Treatment types selectable under the Past History section. Picking a
+   type reveals the date / brief note / treatment response fields. */
+const TREATMENT_TYPES = [
+  "Chemotherapy",
+  "Radiotherapy",
+  "Surgery",
+  "Immunotherapy",
+  "Targeted Therapy",
+  "Hormone Therapy",
+  "Bone Marrow Transplant",
+  "Other",
+];
+
+/* Molecular tests selectable under the Diagnosis > Molecular Testing
+   section. Picking a test reveals the note / date fields. */
+const MOLECULAR_TESTS = [
+  "PCR / RT-PCR",
+  "NGS (Next-Generation Sequencing)",
+  "FISH",
+  "ISH / CISH",
+  "IHC",
+  "Liquid biopsy / ctDNA",
+  "Gene-expression profiling",
+  "MSI / MMR testing",
+  "TMB testing",
+  "BRCA1/BRCA2 and HRR testing",
+];
 
 const StepCheckLogo = ({ active = false }: { active?: boolean }) => (
   <svg
@@ -627,6 +664,80 @@ const resolveStagingDetailId = async (patientId: string): Promise<string> => {
   }
 };
 
+/* Fetch the regimen protocol the Treatment Plan selected so an existing
+   plan can be brought in line with it - copying the protocol's cadence
+   (standard_cycles / cycle_interval_days) and display names exactly like
+   the backend's createPlan one-time copy does on first creation. */
+const loadProtocolSyncData = async (
+  protocolId: string
+): Promise<{
+  source_protocol_id: string;
+  regimen_name: string;
+  regimen_code: string;
+  protocol_name: string;
+  planned_cycles: number;
+  cycle_interval_days: number;
+} | null> => {
+  try {
+    const response = await API.get<{
+      success: boolean;
+      data: RegimenProtocolDetail;
+    }>(`/chemotherapy/regimen-protocols/${encodeURIComponent(protocolId)}`);
+    const protocol = response.data.data;
+    if (!protocol) return null;
+    return {
+      source_protocol_id: protocol.protocol_id,
+      regimen_name: protocol.regimen_name,
+      regimen_code: protocol.regimen_code ?? "",
+      protocol_name: protocol.regimen_name,
+      planned_cycles: protocol.standard_cycles ?? 0,
+      cycle_interval_days: protocol.cycle_interval_days ?? 0,
+    };
+  } catch (error) {
+    console.error("Failed to load regimen protocol for plan sync:", error);
+    return null;
+  }
+};
+
+/* Resolve the cancer context of the patient's latest staging detail so an
+   existing plan can be re-linked when the diagnosis changes. */
+const loadStagingSyncData = async (
+  stagingDetailId: string
+): Promise<{
+  staging_detail_id: string;
+  cancer_type: string;
+  cancer_subtype: string;
+  cancer_stage: string;
+  cancer_type_id: string;
+  subtype_id: string;
+} | null> => {
+  try {
+    const response = await API.get<{
+      success: boolean;
+      data: {
+        cancer_type_id?: string | null;
+        cancer_subtype_id?: string | null;
+        clinical_stage?: string | null;
+        cancer_types?: { cancer_type?: string | null } | null;
+        cancer_subtypes?: { subtype_name?: string | null } | null;
+      };
+    }>(`/oncology/staging-details/${encodeURIComponent(stagingDetailId)}`);
+    const staging = response.data.data;
+    if (!staging) return null;
+    return {
+      staging_detail_id: stagingDetailId,
+      cancer_type: staging.cancer_types?.cancer_type ?? "",
+      cancer_subtype: staging.cancer_subtypes?.subtype_name ?? "",
+      cancer_stage: staging.clinical_stage ?? "",
+      cancer_type_id: staging.cancer_type_id ?? "",
+      subtype_id: staging.cancer_subtype_id ?? "",
+    };
+  } catch (error) {
+    console.error("Failed to load staging detail for plan sync:", error);
+    return null;
+  }
+};
+
 /* Ensure a chemotherapy plan exists for the patient, returning its id.
    Used by the ChemotherapyOrder Save button and as a safety net before
    the Summary step creates a prescription. Re-uses an existing plan when
@@ -675,18 +786,75 @@ const createChemotherapyPlanForPatient = async (
 
   /* Prefer an existing plan for this patient; creation only happens once
      per diagnosis so repeated Saves don't stack duplicates.
-     When planItems are provided, sync them to the existing plan (delete
-     old items then add new ones) so chemo / premedication / supportive
-     drugs are persisted even when the plan already exists. */
+     When an existing plan is found, the latest oncology selections are
+     pushed onto it: the protocol (name + cadence -> planned_cycles and
+     cycle_interval_days) and the cancer context from the latest staging
+     detail, so downstream viewers (patient-details) show the new days
+     and cycles immediately. When planItems are provided, they are also
+     synced (delete old items then add new ones). */
   try {
+    /* Look the plan up via the mapping-scoped /plans/latest-for-patient
+       endpoint (same one patient-details reads) so the existing plan we
+       sync is the plan being displayed and branch-scoped list 403s don't
+       silently skip the update. */
     const existing = await API.get<{
       success: boolean;
-      data: { chemotherapy_plan_id: string }[];
-    }>("/chemotherapy/plans", {
-      params: { patient_id: patientId, page: 1, limit: 1 },
+      data: { chemotherapy_plan_id: string } | null;
+    }>("/chemotherapy/plans/latest-for-patient", {
+      params: { patient_id: patientId },
     });
-    const existingPlanId = existing.data.data?.[0]?.chemotherapy_plan_id;
+    const existingPlanId = existing.data.data?.chemotherapy_plan_id;
     if (existingPlanId) {
+      /* Resolve the selected protocol + latest staging detail so the
+         existing plan is re-linked to the current selection. Both are
+         null-safe: only what is actually selected gets synced. */
+      const [protocolSync, stagingSync] = await Promise.all([
+        protocolId ? loadProtocolSyncData(protocolId) : Promise.resolve(null),
+        stagingDetailId
+          ? loadStagingSyncData(stagingDetailId)
+          : Promise.resolve(null),
+      ]);
+
+      const planChanges: Record<string, unknown> = {};
+      if (protocolSync) {
+        planChanges.source_protocol_id = protocolSync.source_protocol_id;
+        if (protocolSync.regimen_name) {
+          planChanges.regimen_name = protocolSync.regimen_name;
+          planChanges.protocol_name = protocolSync.regimen_name;
+        }
+        if (protocolSync.regimen_code) {
+          planChanges.regimen_code = protocolSync.regimen_code;
+        }
+        if (protocolSync.planned_cycles > 0) {
+          planChanges.planned_cycles = protocolSync.planned_cycles;
+        }
+        if (protocolSync.cycle_interval_days > 0) {
+          planChanges.cycle_interval_days = protocolSync.cycle_interval_days;
+        }
+      }
+      if (stagingSync) {
+        planChanges.staging_detail_id = stagingSync.staging_detail_id;
+        if (stagingSync.cancer_type) planChanges.cancer_type = stagingSync.cancer_type;
+        if (stagingSync.cancer_subtype) planChanges.cancer_subtype = stagingSync.cancer_subtype;
+        if (stagingSync.cancer_stage) planChanges.cancer_stage = stagingSync.cancer_stage;
+        if (stagingSync.cancer_type_id) planChanges.cancer_type_id = stagingSync.cancer_type_id;
+        if (stagingSync.subtype_id) planChanges.subtype_id = stagingSync.subtype_id;
+      }
+
+      if (Object.keys(planChanges).length > 0) {
+        try {
+          await API.put(
+            `/chemotherapy/plans/${existingPlanId}`,
+            planChanges
+          );
+        } catch (syncErr: any) {
+          console.error(
+            "Failed to sync protocol/cancer context onto existing plan:",
+            syncErr?.response?.data?.message ?? syncErr?.message
+          );
+        }
+      }
+
       if (planItems && planItems.length > 0) {
         try {
           /* Fetch current items so we can remove stale ones. */
@@ -779,6 +947,59 @@ const createChemotherapyPlanForPatient = async (
   }
 };
 
+/* Immediately push a newly selected protocol onto any existing
+   chemotherapy plan for the patient. Called by the Treatment Plan
+   Protocol dropdown so a switch between already-assigned protocols is
+   reflected on the plan (and therefore patient-details) right away,
+   not only after the step is saved. */
+const syncExistingPlanProtocol = async (
+  patientId: string,
+  protocolId: string
+): Promise<void> => {
+  if (!patientId || !protocolId) return;
+  try {
+    /* Use the mapping-scoped /plans/latest-for-patient endpoint (the same
+       one patient-details reads) instead of the branch-scoped list so the
+       plan we update is the plan being displayed and multi-branch staff /
+       admins don't get a silent 403 that leaves it unchanged. */
+    const existing = await API.get<{
+      success: boolean;
+      data: { chemotherapy_plan_id: string } | null;
+    }>("/chemotherapy/plans/latest-for-patient", {
+      params: { patient_id: patientId },
+    });
+    const existingPlanId = existing.data.data?.chemotherapy_plan_id;
+    if (!existingPlanId) return;
+
+    const protocolSync = await loadProtocolSyncData(protocolId);
+    if (!protocolSync) return;
+
+    const planChanges: Record<string, unknown> = {
+      source_protocol_id: protocolSync.source_protocol_id,
+    };
+    if (protocolSync.regimen_name) {
+      planChanges.regimen_name = protocolSync.regimen_name;
+      planChanges.protocol_name = protocolSync.regimen_name;
+    }
+    if (protocolSync.regimen_code) {
+      planChanges.regimen_code = protocolSync.regimen_code;
+    }
+    if (protocolSync.planned_cycles > 0) {
+      planChanges.planned_cycles = protocolSync.planned_cycles;
+    }
+    if (protocolSync.cycle_interval_days > 0) {
+      planChanges.cycle_interval_days = protocolSync.cycle_interval_days;
+    }
+
+    await API.put(`/chemotherapy/plans/${existingPlanId}`, planChanges);
+  } catch (error: any) {
+    console.error(
+      "Failed to instantly sync protocol onto existing plan:",
+      error?.response?.data?.message ?? error?.message
+    );
+  }
+};
+
 const Consultation: React.FC = () => {
   /* ============================================================
      STATE
@@ -790,6 +1011,34 @@ const Consultation: React.FC = () => {
 
   const [consultationNotes, setConsultationNotes] = useState("");
 
+  const [historyOfPresentIllness, setHistoryOfPresentIllness] = useState("");
+
+  const [patientHistory, setPatientHistory] = useState("");
+  const [pastHistory, setPastHistory] = useState("");
+  const [pastHistoryTreatmentType, setPastHistoryTreatmentType] = useState("");
+  const [pastHistoryTreatmentDate, setPastHistoryTreatmentDate] = useState("");
+  const [pastHistoryTreatmentNote, setPastHistoryTreatmentNote] = useState("");
+  const [pastHistoryTreatmentResponse, setPastHistoryTreatmentResponse] =
+    useState("");
+
+  const [reportsTest, setReportsTest] = useState("");
+  const [reportsTestDate, setReportsTestDate] = useState("");
+  const [reportsTestResult, setReportsTestResult] = useState("");
+  const [reportsTestImpression, setReportsTestImpression] = useState("");
+  const [reportsText, setReportsText] = useState("");
+
+  const [chiefComplaint, setChiefComplaint] = useState("");
+  const [reasonOfVisit, setReasonOfVisit] = useState("");
+
+  
+
+  const [otherInvestigationExpanded, setOtherInvestigationExpanded] =
+    useState(false);
+  const [otherInvestigationName, setOtherInvestigationName] = useState("");
+  const [customInvestigations, setCustomInvestigations] = useState<string[]>(
+    []
+  );
+
   const [medications, setMedications] = useState<Medication[]>([]);
 
   const [selectedInvestigations, setSelectedInvestigations] = useState<
@@ -800,6 +1049,20 @@ const Consultation: React.FC = () => {
     Record<string, string>
   >({});
 
+  const [generalExamIcterus, setGeneralExamIcterus] = useState(false);
+  const [generalExamPallor, setGeneralExamPallor] = useState(false);
+  const [generalExamClubbing, setGeneralExamClubbing] = useState(false);
+  const [generalExamCyanosis, setGeneralExamCyanosis] = useState(false);
+  const [generalExamOedema, setGeneralExamOedema] = useState(false);
+  const [generalExamLymphadenopathy, setGeneralExamLymphadenopathy] =
+    useState(false);
+
+  const [systemicCns, setSystemicCns] = useState("");
+  const [systemicCvs, setSystemicCvs] = useState("");
+  const [systemicRespiratory, setSystemicRespiratory] = useState("");
+  const [systemicPerAbdomen, setSystemicPerAbdomen] = useState("");
+  const [allVitalsNormal, setAllVitalsNormal] = useState(false);
+
   const [labTests, setLabTests] = useState<LabTestMasterRecord[]>([]);
   const [labTestsLoading, setLabTestsLoading] = useState(true);
   const [labTestsError, setLabTestsError] = useState("");
@@ -809,6 +1072,13 @@ const Consultation: React.FC = () => {
   const [proceeding, setProceeding] = useState(false);
   const [tabsHovered, setTabsHovered] = useState(false);
   const tabsScrollRef = useRef<HTMLDivElement>(null);
+  const clinicalDetailsRef = useRef<ClinicalDetailsSectionHandle>(null);
+  const [clinicalSaveState, setClinicalSaveState] = useState<{
+    saving: boolean;
+    disabled: boolean;
+    saveError: string | null;
+    saveSuccess: boolean;
+  }>({ saving: false, disabled: true, saveError: null, saveSuccess: false });
 
   const slideTabs = (direction: 1 | -1) => {
     const el = tabsScrollRef.current;
@@ -1021,6 +1291,53 @@ const Consultation: React.FC = () => {
   }, [consultationState?.patientId, consultationState?.appointmentId]);
 
   /* ============================================================
+     SYNC HISTORY OF PRESENT ILLNESS FROM ACTIVE ENCOUNTER
+     Seed the free-text HOPI box with the encounter's saved
+     symptoms when the encounter loads. Only applied on load so
+     it never stomps in-progress typing after an update.
+   ============================================================ */
+
+  useEffect(() => {
+    setHistoryOfPresentIllness(encounter?.symptoms ?? "");
+    setChiefComplaint(encounter?.chief_complaint ?? "");
+    setPatientHistory(encounter?.chief_complaint ?? "");
+
+    /* Consultation Notes and Past History share the encounter's
+       clinical_notes column, separated by a [Past History] marker
+       (see proceedNext). A saved draft takes precedence over the
+       encounter so in-session work is never clobbered. */
+    let draftNotes = "";
+    let draftPast = "";
+    try {
+      const draft = JSON.parse(
+        localStorage.getItem("hms_consultation_draft") ?? "{}"
+      );
+      draftNotes = draft.consultationNotes ?? "";
+      draftPast = draft.pastHistory ?? "";
+    } catch {
+      /* Malformed draft - fall back to the encounter. */
+    }
+
+    if (draftNotes) {
+      setConsultationNotes(draftNotes);
+      setPastHistory(draftPast);
+      return;
+    }
+
+    const rawNotes = encounter?.clinical_notes ?? "";
+    const markerIndex = rawNotes.indexOf(PAST_HISTORY_MARKER);
+    if (markerIndex === -1) {
+      setConsultationNotes(rawNotes);
+      setPastHistory("");
+    } else {
+      setConsultationNotes(rawNotes.slice(0, markerIndex).trim());
+      setPastHistory(
+        rawNotes.slice(markerIndex + PAST_HISTORY_MARKER.length).trim()
+      );
+    }
+  }, [encounter?.encounter_no]);
+
+  /* ============================================================
      LOAD INVESTIGATION OPTIONS (lab_test_master table)
      Populates the Investigations / Scans checkboxes from the
      backend GET /lab-test-master API.
@@ -1096,7 +1413,6 @@ const Consultation: React.FC = () => {
   const [fallbackVisitType, setFallbackVisitType] = useState("");
 
   useEffect(() => {
-    if (consultationState?.visit_type) return;
     const appointmentId = encounter?.appointment_id;
     if (!appointmentId) return;
     let cancelled = false;
@@ -1104,8 +1420,12 @@ const Consultation: React.FC = () => {
       .getOne(appointmentId)
       .then((response) => {
         if (cancelled) return;
-        const value = response.data?.data?.Patient_visit_type ?? "";
-        setFallbackVisitType(value);
+        if (!consultationState?.visit_type) {
+          setFallbackVisitType(
+            response.data?.data?.Patient_visit_type ?? ""
+          );
+        }
+        setReasonOfVisit(response.data?.data?.reason_for_visit ?? "");
       })
       .catch((error) => {
         console.error("Failed to load appointment visit type:", error);
@@ -1226,6 +1546,35 @@ const Consultation: React.FC = () => {
     );
   };
 
+  /* Adds a user-typed custom investigation (Others...) as a checkbox
+     option in the grid. If the typed name matches a real lab test it
+     just checks that test; otherwise it registers a custom option. */
+
+  const addOtherInvestigation = () => {
+    const value = otherInvestigationName.trim();
+    if (!value) return;
+    if (investigations.includes(value)) {
+      toggleInvestigation(value);
+    } else if (!customInvestigations.includes(value)) {
+      setCustomInvestigations((prev) => [...prev, value]);
+      setSelectedInvestigations((prev) =>
+        prev.includes(value) ? prev : [...prev, value]
+      );
+    }
+    setOtherInvestigationName("");
+    setOtherInvestigationExpanded(false);
+  };
+
+  /* Unchecking a custom investigation removes both its checkbox option
+     and its selection. */
+
+  const toggleCustomInvestigation = (name: string) => {
+    setSelectedInvestigations((prev) =>
+      prev.filter((item) => item !== name)
+    );
+    setCustomInvestigations((prev) => prev.filter((item) => item !== name));
+  };
+
   /* ============================================================
      PRINT
   ============================================================ */
@@ -1243,6 +1592,7 @@ const Consultation: React.FC = () => {
       patient: patientName,
       patientId: patientDisplayId,
       consultationNotes,
+      pastHistory,
       medications,
       investigations: selectedInvestigations,
     };
@@ -1287,12 +1637,50 @@ const Consultation: React.FC = () => {
     try {
       setProceeding(true);
 
-      const payload: { clinical_notes?: string } = {};
-      if (consultationNotes.trim()) {
-        payload.clinical_notes = consultationNotes;
+      const payload: {
+        clinical_notes?: string;
+        symptoms?: string;
+        chief_complaint?: string;
+      } = {};
+
+      /* Consultation Notes + Past History are combined into the single
+         clinical_notes column, separated by the [Past History] marker so
+         they can be split back on load. */
+      const combinedNotes = [
+        consultationNotes.trim(),
+        ...(pastHistory.trim()
+          ? [`${PAST_HISTORY_MARKER}\n${pastHistory.trim()}`]
+          : []),
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      if (combinedNotes) {
+        payload.clinical_notes = combinedNotes;
+      }
+      if (historyOfPresentIllness.trim()) {
+        payload.symptoms = historyOfPresentIllness;
+      }
+      if (chiefComplaint.trim() || patientHistory.trim()) {
+        payload.chief_complaint = chiefComplaint.trim() || patientHistory.trim();
       }
 
       await encounterApi.update(encounter.encounter_no, payload);
+
+      /* Reason of Visit lives on the linked appointment, not the
+         encounter, so it must be persisted there separately. */
+      if (encounter.appointment_id && reasonOfVisit.trim()) {
+        try {
+          await appointmentApi.update(encounter.appointment_id, {
+            reason_for_visit: reasonOfVisit,
+          });
+        } catch (appointmentError: any) {
+          console.error(
+            "Failed to save reason for visit:",
+            appointmentError?.response?.data?.message ??
+              appointmentError?.message
+          );
+        }
+      }
 
       showToast("Consultation saved");
 
@@ -1435,248 +1823,6 @@ const Consultation: React.FC = () => {
         <div className="relative flex w-full border border-slate-200 bg-slate-50">
 
           {/* ====================================================
-              SIDEBAR
-          ==================================================== */}
-
-          <aside className={`relative z-10 w-[280px] shrink-0 border-r border-slate-200 bg-white${patientCriticalInfo.isCritical ? " border-t-4 border-t-red-500" : ""}`}>
-
-            {/* PATIENT HEADER */}
-
-            <div className="flex h-[248px] w-full flex-col items-center border-b border-slate-50 px-6 pt-6">
-
-              <div className={`relative h-24 w-24 overflow-hidden rounded-full border-2 bg-slate-100 ${patientCriticalInfo.isCritical ? "border-red-500 animate-pulse" : "border-slate-200"}`}>
-
-                <img
-                  src={patientPhoto}
-                  alt={patientName}
-                  className="h-full w-full object-cover"
-                />
-
-                {patientCriticalInfo.isCritical && (
-                  <span className="absolute -right-0.5 -top-0.5 h-4 w-4 rounded-full border-2 border-white bg-red-500" />
-                )}
-
-              </div>
-
-              <div className="flex w-full items-center justify-center gap-2 pt-4">
-                <div className="text-center text-xl font-bold leading-7 text-slate-800">
-                  {patientName}
-                </div>
-                {patientCriticalInfo.isCritical && (
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-500 animate-pulse" />
-                )}
-              </div>
-
-              <div className="w-full pb-2 text-center text-sm leading-5 text-slate-500">
-                {patientAgeSex}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="h-6 rounded bg-slate-100 px-3 py-1 text-xs font-semibold leading-4 text-slate-600">
-                  {patientDisplayId}
-                </div>
-                {patientCriticalInfo.isCritical && (
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
-                )}
-              </div>
-
-              <div className="w-full pt-4 text-center text-sm font-bold leading-5 tracking-[-0.35px] text-blue-700">
-                {""}
-              </div>
-
-            </div>
-
-            {/* PATIENT DETAILS */}
-
-            <div className="flex w-full flex-col gap-4 p-6">
-
-              {/* PHONE */}
-
-              <div className="flex w-full items-start gap-3">
-
-                <div className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center text-slate-400">
-
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    className="h-4 w-4"
-                  >
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-                  </svg>
-
-                </div>
-
-                <div className="flex flex-col">
-
-                  <div className="text-[10px] font-bold leading-[15px] tracking-[0.5px] text-slate-400">
-                    PHONE
-                  </div>
-
-                  <div className="whitespace-nowrap text-sm font-medium leading-5 text-slate-700">
-                    {patientPhone}
-                  </div>
-
-                </div>
-
-              </div>
-
-              {/* EMAIL */}
-
-              <div className="flex w-full items-start gap-3">
-
-                <div className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center text-slate-400">
-
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    className="h-4 w-4"
-                  >
-                    <rect
-                      x="3"
-                      y="5"
-                      width="18"
-                      height="14"
-                      rx="2"
-                    />
-
-                    <path d="m3 7 9 6 9-6" />
-                  </svg>
-
-                </div>
-
-                <div className="flex flex-col">
-
-                  <div className="text-[10px] font-bold leading-[15px] tracking-[0.5px] text-slate-400">
-                    EMAIL
-                  </div>
-
-                  <div className="whitespace-nowrap text-sm font-medium leading-5 text-slate-700">
-                    {patientEmail}
-                  </div>
-
-                </div>
-
-              </div>
-
-              {/* MEASUREMENTS */}
-
-              <div className="grid w-full grid-cols-2 gap-x-4 gap-y-4 pt-2">
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    HEIGHT
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.height}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    WEIGHT
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.weight}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    BSA
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.bsa}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    BMI
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.bmi}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    BP
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.bp}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    PULSE
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.pulse}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    TEMP
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.temp}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    SPO2
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.spo2}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                    PAIN SCORE
-                  </div>
-                  <div className="text-sm font-bold leading-5 text-slate-800">
-                    {measurements.painScore}
-                  </div>
-                </div>
-
-              </div>
-
-              {/* PROFILE */}
-
-              <button
-                onClick={() => {
-                  const pid = consultationState?.patientId;
-                  if (pid) {
-                    localStorage.setItem("hms_last_viewed_patient_id", pid);
-                  }
-                  navigate("/doctor/patient-details", {
-                    state: { patientId: pid },
-                  });
-                }}
-                className="h-9 w-full rounded-md border border-blue-600 bg-white text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
-              >
-                View Full Profile {/* Working */}
-              </button>
-
-            </div>
-
-            {/* FOOTER */}
-
-            <div className="absolute bottom-0 left-0 right-0 flex h-[50px] items-center justify-center border-t border-slate-100 text-xs leading-4 text-slate-400">
-              Registered on {registeredOn}
-            </div>
-
-          </aside>
-
-          {/* ====================================================
               MAIN
           ==================================================== */}
 
@@ -1748,21 +1894,29 @@ const Consultation: React.FC = () => {
 
                 <section className="flex w-full flex-col gap-5 bg-white p-5">
 
-                  <div className="flex w-full items-center gap-4">
+                  <div className="flex w-full items-center justify-between gap-4">
 
-                    <img
-                      src={patientPhoto}
-                      alt={patientName}
-                      className="h-20 w-20 shrink-0 rounded-full border-4 border-white object-cover shadow-sm"
-                    />
+                    <div className="relative shrink-0">
+                      <img
+                        src={patientPhoto}
+                        alt={patientName}
+                        className={`h-20 w-20 rounded-full border-4 object-cover shadow-sm ${patientCriticalInfo.isCritical ? "border-red-500 animate-pulse" : "border-white"}`}
+                      />
+                      {patientCriticalInfo.isCritical && (
+                        <span className="absolute -right-0.5 -top-0.5 h-3.5 w-3.5 rounded-full border-2 border-white bg-red-500" />
+                      )}
+                    </div>
 
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0">
 
                       <div className="mb-1 flex min-w-0 items-center space-x-2">
 
                         <h2 className="truncate text-xl font-bold leading-7 text-[#1e293b]">
                           {patientName}
                         </h2>
+                        {patientCriticalInfo.isCritical && (
+                          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-500 animate-pulse" />
+                        )}
 
                         <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-[#64748b]">
                           {patientDisplayId}
@@ -1854,7 +2008,7 @@ const Consultation: React.FC = () => {
 
                     {/* MEASUREMENTS */}
 
-                    <div className="grid grid-cols-4 gap-x-6 gap-y-3">
+                    <div className="grid grid-cols-5 gap-x-6 gap-y-3">
 
                       <div className="flex flex-col">
                         <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
@@ -1928,6 +2082,17 @@ const Consultation: React.FC = () => {
                         </div>
                       </div>
 
+                      {measurements.painScore && measurements.painScore !== "—" && (
+                        <div className="flex flex-col">
+                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                            PAIN SCORE
+                          </div>
+                          <div className="text-sm font-bold leading-5 text-slate-800">
+                            {measurements.painScore}
+                          </div>
+                        </div>
+                      )}
+
                     </div>
 
                     {/* PROFILE */}
@@ -1942,7 +2107,7 @@ const Consultation: React.FC = () => {
                           state: { patientId: pid },
                         });
                       }}
-                      className="ml-auto h-9 rounded-md border border-blue-600 bg-white px-4 text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
+                      className="h-9 rounded-md border border-blue-600 bg-white px-4 text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
                     >
                       View Full Profile
                     </button>
@@ -2129,6 +2294,7 @@ const Consultation: React.FC = () => {
                     patientId={patientDisplayId}
                     appointmentId={consultationState?.appointmentId}
                     encounterNo={encounter?.encounter_no}
+                    measurements={measurements}
                   />
                 ) : (
                   <div
@@ -2326,22 +2492,48 @@ const Consultation: React.FC = () => {
                         className="h-40 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-300"
                       />
 
-                      {/* CHIEF COMPLAINT */}
+                      {/* CHIEF COMPLAINT (free text) + REASON OF VISIT.
+                          Styled like the Symptoms / Allergies sections in
+                          ClinicalDetailsSection (uppercase tracked label +
+                          white bordered container). */}
 
                       <div className="flex flex-col gap-2">
 
-                        <label className="text-xs font-bold leading-4 text-slate-500">
-                          Chief Complaint
-                        </label>
+                        <div className="flex flex-col gap-1">
 
-                        <textarea
-                          readOnly
-                          value={encounter?.chief_complaint ?? ""}
-                          placeholder="Not recorded"
-                          className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
-                        />
+                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                            Chief Complaint
+                          </div>
 
-                      </div>
+                          <textarea
+                            value={chiefComplaint}
+                            onChange={(event) =>
+                              setChiefComplaint(event.target.value)
+                            }
+                            placeholder="Type the chief complaint..."
+                            className="min-h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-1.5 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                          />
+
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+
+                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                            Reason of Visit
+                          </div>
+
+                          <textarea
+                            value={reasonOfVisit}
+                            onChange={(event) =>
+                              setReasonOfVisit(event.target.value)
+                            }
+                            placeholder="Type the reason of visit..."
+                            className="min-h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-1.5 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                          />
+
+                        </div>
+
+                        </div>
 
                     </div>
 
@@ -2363,8 +2555,10 @@ const Consultation: React.FC = () => {
 
                       {encounter ? (
                         <ClinicalDetailsSection
+                          ref={clinicalDetailsRef}
                           patientId={consultationState?.patientId}
                           encounterNo={encounter.encounter_no}
+                          onSaveStateChange={setClinicalSaveState}
                         />
                       ) : (
                         !encounterError && (
@@ -2381,16 +2575,16 @@ const Consultation: React.FC = () => {
                 </section>
 
                 {/* =================================================
-                    PATIENT HISTORY
+                    PERSONAL HISTORY
                 ================================================= */}
 
                 <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
 
                   <div className="text-lg font-bold leading-7 text-slate-800">
-                    Patient History
+                    Personal History
                   </div>
 
-                  {/* PATIENT HISTORY GRID */}
+                  {/* PERSONAL HISTORY GRID */}
 
                   <div className="grid w-full grid-cols-2 gap-x-6 gap-y-4 pt-2">
 
@@ -2402,11 +2596,46 @@ const Consultation: React.FC = () => {
                         Immunization
                       </label>
 
-                      <textarea
-                        readOnly
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
-                      />
+                      <div className="relative h-[38px]">
+
+                        <select
+                          className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none"
+                          defaultValue=""
+                        >
+
+                          <option value="" disabled>
+                            Select
+                          </option>
+
+                          <option value="None">None</option>
+                          <option value="BCG">BCG</option>
+                          <option value="Hepatitis A">Hepatitis A</option>
+                          <option value="Hepatitis B">Hepatitis B</option>
+                          <option value="Polio (OPV / IPV)">Polio (OPV / IPV)</option>
+                          <option value="DPT / DTaP">DPT / DTaP</option>
+                          <option value="MMR">MMR</option>
+                          <option value="Typhoid">Typhoid</option>
+                          <option value="Tetanus (TT)">Tetanus (TT)</option>
+                          <option value="Pneumococcal">Pneumococcal</option>
+                          <option value="Rotavirus">Rotavirus</option>
+                          <option value="Varicella (Chickenpox)">Varicella (Chickenpox)</option>
+                          <option value="HPV">HPV</option>
+                          <option value="Influenza (Flu)">Influenza (Flu)</option>
+                          <option value="COVID-19">COVID-19</option>
+
+                        </select>
+
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="#94a3b8"
+                          strokeWidth="1.8"
+                          className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+
+                      </div>
 
                     </div>
 
@@ -2503,14 +2732,121 @@ const Consultation: React.FC = () => {
                       </label>
 
                       <textarea
-                        readOnly
-                        value={encounter?.chief_complaint ?? ""}
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                        value={patientHistory}
+                        onChange={(event) =>
+                          setPatientHistory(event.target.value)
+                        }
+                        placeholder="Type the patient's history..."
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
                       />
 
                     </div>
 
+                  </div>
+
+                </section>
+
+                {/* =================================================
+                    GENERAL EXAMINATION
+                ================================================= */}
+
+                <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
+
+                  <div className="text-lg font-bold leading-7 text-slate-800">
+                    General Examination
+                  </div>
+
+                  <div className="grid w-full grid-cols-3 gap-x-6 gap-y-4 pt-2">
+
+                    {[
+                      { label: "Icterus", checked: generalExamIcterus, onChange: setGeneralExamIcterus },
+                      { label: "Pallor", checked: generalExamPallor, onChange: setGeneralExamPallor },
+                      { label: "Clubbing", checked: generalExamClubbing, onChange: setGeneralExamClubbing },
+                      { label: "Cyanosis", checked: generalExamCyanosis, onChange: setGeneralExamCyanosis },
+                      { label: "Oedema", checked: generalExamOedema, onChange: setGeneralExamOedema },
+                      { label: "Lymphadenopathy", checked: generalExamLymphadenopathy, onChange: setGeneralExamLymphadenopathy },
+                    ].map((item) => (
+                      <label
+                        key={item.label}
+                        className="flex items-center gap-3 cursor-pointer select-none"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={item.checked}
+                          onChange={(e) => item.onChange(e.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm font-medium text-slate-700">
+                          {item.label}
+                        </span>
+                      </label>
+                    ))}
+
+                  </div>
+
+                </section>
+
+                {/* =================================================
+                    SYSTEMIC EXAMINATION
+                ================================================= */}
+
+                <section className="flex w-full flex-col gap-5 rounded-xl border border-slate-200 bg-white p-5">
+
+                  <div className="text-lg font-bold leading-7 text-slate-800">
+                    Systemic Examination
+                  </div>
+
+                  <div className="grid w-full grid-cols-1 gap-x-5 gap-y-6 pt-2 sm:grid-cols-2 lg:grid-cols-4">
+
+                    {[
+                      { label: "CNS", value: systemicCns, onChange: setSystemicCns },
+                      { label: "CVS", value: systemicCvs, onChange: setSystemicCvs },
+                      { label: "Respiratory", value: systemicRespiratory, onChange: setSystemicRespiratory },
+                      { label: "Per Abdomen", value: systemicPerAbdomen, onChange: setSystemicPerAbdomen },
+                    ].map((item) => (
+                      <div key={item.label} className="flex flex-col gap-2">
+                        <label className="text-xs font-bold leading-4 text-slate-500">
+                          {item.label}
+                        </label>
+                        <input
+                          type="text"
+                          value={item.value}
+                          onChange={(event) => item.onChange(event.target.value)}
+                          placeholder={`Type ${item.label.toLowerCase()} findings...`}
+className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+                        />
+                      </div>
+                    ))}
+
+                  </div>
+
+                  <div className="flex items-center gap-4 pt-2">
+                    <label className="flex items-center gap-3 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={allVitalsNormal}
+                        onChange={(e) => setAllVitalsNormal(e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm font-medium text-slate-700">
+                        All Vitals Looks Normal?
+                      </span>
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const normalText = "Normal";
+                        setSystemicCns(normalText);
+                        setSystemicCvs(normalText);
+                        setSystemicRespiratory(normalText);
+                        setSystemicPerAbdomen(normalText);
+                        setAllVitalsNormal(true);
+                      }}
+                      className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
+                    >
+                      Apply Normal To All
+                    </button>
                   </div>
 
                 </section>
@@ -2527,36 +2863,27 @@ const Consultation: React.FC = () => {
 
                   {/* PATIENT DETAILS GRID */}
 
-                  <div className="grid w-full grid-cols-2 gap-x-6 gap-y-4 pt-2">
+                  <div className="grid w-full grid-cols-2 gap-x-6 pt-2">
 
-                    {/* PERSONAL HISTORY (HABITS) */}
+                    {/* LEFT COLUMN: HOPI + REPORTS */}
 
-                    <div className="flex flex-col gap-2">
+                    <div className="flex w-full flex-col gap-4">
 
-                      <label className="text-xs font-bold leading-4 text-slate-500">
-                        Personal History (Habits)
-                      </label>
-
-                      <textarea
-                        readOnly
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
-                      />
-
-                    </div>
-
-                    {/* PAST HISTORY */}
+                    {/* HISTORY OF PRESENT ILLNESS (HOPI) */}
 
                     <div className="flex flex-col gap-2">
 
                       <label className="text-xs font-bold leading-4 text-slate-500">
-                        Past History
+                        History of Present Illness(HOPI)
                       </label>
 
                       <textarea
-                        readOnly
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                        value={historyOfPresentIllness}
+                        onChange={(event) =>
+                          setHistoryOfPresentIllness(event.target.value)
+                        }
+                        placeholder="Type the history of present illness..."
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
                       />
 
                     </div>
@@ -2569,11 +2896,276 @@ const Consultation: React.FC = () => {
                         Reports (Previous)
                       </label>
 
+                      <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+
+                          {/* SELECT TEST */}
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                              Select Test
+                            </label>
+
+                            <div className="relative">
+                              <select
+                                value={reportsTest}
+                                onChange={(event) =>
+                                  setReportsTest(event.target.value)
+                                }
+                                className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                              >
+                                <option value="" disabled>
+                                  Select Test
+                                </option>
+                                {labTests.map((test) => (
+                                  <option
+                                    key={test.lab_test_id}
+                                    value={test.lab_test_id}
+                                  >
+                                    {test.test_name}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="#94a3b8"
+                                strokeWidth="1.8"
+                                className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
+                              >
+                                <path d="m6 9 6 6 6-6" />
+                              </svg>
+                            </div>
+                          </div>
+
+                          {/* DATE / RESULT / IMPRESSION */}
+                          {reportsTest && (
+                            <>
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Date
+                                </label>
+                                <input
+                                  type="date"
+                                  value={reportsTestDate}
+                                  onChange={(event) =>
+                                    setReportsTestDate(event.target.value)
+                                  }
+                                  className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Enter Result
+                                </label>
+                                <textarea
+                                  value={reportsTestResult}
+                                  onChange={(event) =>
+                                    setReportsTestResult(event.target.value)
+                                  }
+                                  placeholder="Type the result..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Enter Impression
+                                </label>
+                                <textarea
+                                  value={reportsTestImpression}
+                                  onChange={(event) =>
+                                    setReportsTestImpression(event.target.value)
+                                  }
+                                  placeholder="Type the impression..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+                            </>
+                          )}
+
+                        </div>
+
                       <textarea
-                        readOnly
-                        placeholder="Not recorded"
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-slate-50 p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none"
+                        value={reportsText}
+                        onChange={(event) => setReportsText(event.target.value)}
+                        placeholder="Type previous reports..."
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
                       />
+
+                    </div>
+
+                    </div>
+
+                    {/* RIGHT COLUMN: PAST HISTORY + SAVE */}
+
+                    <div className="flex w-full flex-col gap-4">
+
+                    {/* PAST HISTORY */}
+
+                    <div className="flex flex-col gap-2">
+
+                      <label className="text-xs font-bold leading-4 text-slate-500">
+                        Past History
+                      </label>
+
+                      <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+
+                          {/* TREATMENT TYPE */}
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                              Treatment Type
+                            </label>
+
+                            <div className="relative">
+                              <select
+                                value={pastHistoryTreatmentType}
+                                onChange={(event) =>
+                                  setPastHistoryTreatmentType(
+                                    event.target.value
+                                  )
+                                }
+                                className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                              >
+                                <option value="" disabled>
+                                  Select Treatment
+                                </option>
+                                {TREATMENT_TYPES.map((treatment) => (
+                                  <option key={treatment} value={treatment}>
+                                    {treatment}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="#94a3b8"
+                                strokeWidth="1.8"
+                                className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
+                              >
+                                <path d="m6 9 6 6 6-6" />
+                              </svg>
+                            </div>
+                          </div>
+
+                          {/* DATE / BRIEF NOTE / TREATMENT RESPONSE */}
+                          {pastHistoryTreatmentType && (
+                            <>
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Date
+                                </label>
+                                <input
+                                  type="date"
+                                  value={pastHistoryTreatmentDate}
+                                  onChange={(event) =>
+                                    setPastHistoryTreatmentDate(
+                                      event.target.value
+                                    )
+                                  }
+                                  className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Enter Brief Note
+                                </label>
+                                <textarea
+                                  value={pastHistoryTreatmentNote}
+                                  onChange={(event) =>
+                                    setPastHistoryTreatmentNote(
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="Type a brief note..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Treatment Response
+                                </label>
+                                <textarea
+                                  value={pastHistoryTreatmentResponse}
+                                  onChange={(event) =>
+                                    setPastHistoryTreatmentResponse(
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="Type the treatment response..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+                            </>
+                          )}
+
+                        </div>
+
+                      <textarea
+                        value={pastHistory}
+                        onChange={(event) =>
+                          setPastHistory(event.target.value)
+                        }
+                        placeholder="Type the patient's past history..."
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
+                      />
+
+                    </div>
+
+                    {/* SAVE CLINICAL DETAILS (next to Reports) */}
+
+                    <div className="flex flex-col justify-end gap-2">
+
+                      <button
+                        type="button"
+                        onClick={() => clinicalDetailsRef.current?.handleSave()}
+                        disabled={clinicalSaveState.disabled}
+                        className="flex h-9 w-fit items-center justify-center gap-2 rounded-lg border-0 bg-blue-700 px-[25px] py-[9px] text-sm font-bold leading-5 text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                      >
+                        {clinicalSaveState.saving && (
+                          <svg
+                            className="h-4 w-4 animate-spin text-white"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                          >
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            />
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            />
+                          </svg>
+                        )}
+                        {clinicalSaveState.saving
+                          ? "Saving..."
+                          : "Save Clinical Details"}
+                      </button>
+
+                      {clinicalSaveState.saveError && (
+                        <div className="text-xs font-medium leading-4 text-red-600">
+                          {clinicalSaveState.saveError}
+                        </div>
+                      )}
+
+                      {clinicalSaveState.saveSuccess &&
+                        !clinicalSaveState.saveError && (
+                          <div className="text-xs font-medium leading-4 text-green-600">
+                            Clinical details saved successfully.
+                          </div>
+                        )}
+
+                    </div>
 
                     </div>
 
@@ -2605,16 +3197,21 @@ const Consultation: React.FC = () => {
                     </div>
                   )}
 
-                  {!labTestsLoading && !labTestsError && investigations.length === 0 && (
+                  {!labTestsLoading && !labTestsError &&
+                    investigations.length === 0 &&
+                    customInvestigations.length === 0 && (
                     <div className="flex items-center gap-2 text-sm leading-5 text-slate-500">
                       No lab tests available.
                     </div>
                   )}
 
-                  {!labTestsLoading && !labTestsError && investigations.length > 0 && (
+                  {!labTestsLoading && !labTestsError &&
+                    (investigations.length > 0 ||
+                      customInvestigations.length > 0) && (
                   <div className="grid w-full grid-cols-3 gap-y-3">
 
-                    {investigations.map((investigation) => (
+                    {[...investigations, ...customInvestigations].map(
+                      (investigation) => (
 
                       <label
                         key={investigation}
@@ -2627,7 +3224,9 @@ const Consultation: React.FC = () => {
                             investigation
                           )}
                           onChange={() =>
-                            toggleInvestigation(investigation)
+                            customInvestigations.includes(investigation)
+                              ? toggleCustomInvestigation(investigation)
+                              : toggleInvestigation(investigation)
                           }
                           className="h-4 w-4 shrink-0 cursor-pointer appearance-none rounded border border-slate-300 bg-white checked:border-blue-600 checked:bg-blue-600"
                         />
@@ -2638,9 +3237,65 @@ const Consultation: React.FC = () => {
 
                       </label>
 
-                    ))}
+                    )
+                    )}
 
                   </div>
+                  )}
+
+                  {!labTestsLoading && !labTestsError && (
+                    <div className="flex w-full flex-col gap-1.5">
+                      <div className="flex w-full flex-wrap items-start gap-1.5">
+                        {!otherInvestigationExpanded && (
+                          <button
+                            type="button"
+                            onClick={() => setOtherInvestigationExpanded(true)}
+                            className="flex h-[26px] items-center rounded border border-slate-200 bg-slate-50 px-[9px] py-[3px] text-xs leading-4 text-slate-500 transition hover:bg-slate-100"
+                          >
+                            Others...
+                          </button>
+                        )}
+                      </div>
+
+                      {otherInvestigationExpanded && (
+                        <div className="flex w-full items-center gap-2">
+                          <input
+                            type="text"
+                            value={otherInvestigationName}
+                            onChange={(event) =>
+                              setOtherInvestigationName(event.target.value)
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                addOtherInvestigation();
+                              }
+                            }}
+                            placeholder="Enter other investigation"
+                            className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-600 outline-none focus:border-slate-400"
+                          />
+                          <button
+                            type="button"
+                            onClick={addOtherInvestigation}
+                            disabled={!otherInvestigationName.trim()}
+                            className="h-7 shrink-0 rounded-md border border-blue-600 bg-white px-3 text-xs font-semibold leading-4 text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Add
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOtherInvestigationName("");
+                              setOtherInvestigationExpanded(false);
+                            }}
+                            className="h-7 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-500 transition hover:bg-slate-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+
+                    </div>
                   )}
 
                   {selectedInvestigations.length > 0 && (
@@ -3508,6 +4163,15 @@ const LabReview: React.FC<{
 ============================================================ */
 
 type FormData = {
+  preDiagnosis: string;
+  natureOfDiagnosis: string;
+  molecularTesting: string;
+  molecularTestingNote: string;
+  molecularTestingDate: string;
+  diseaseStatus: string;
+  laterality: string;
+  bodySite: string;
+  survivor: string;
   type: string;
   subType: string;
   histomorphology: string;
@@ -3531,6 +4195,15 @@ type CancerSubtypeItem = {
   subtype_id: string;
   subtype_name: string;
   icd10_subtype: string | null;
+};
+
+type CancerSubtypeOption = CancerSubtypeItem & {
+  cancerType: string;
+};
+
+type StageOption = {
+  value: string;
+  cancerType: string;
 };
 
 type StagingReferenceItem = {
@@ -3602,6 +4275,15 @@ const Diagnosis: React.FC<{
   const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const [formData, setFormData] = useState<FormData>({
+    preDiagnosis: "",
+    natureOfDiagnosis: "",
+    molecularTesting: "",
+    molecularTestingNote: "",
+    molecularTestingDate: "",
+    diseaseStatus: "",
+    laterality: "",
+    bodySite: "",
+    survivor: "",
     type: "",
     subType: "",
     histomorphology: "",
@@ -3636,8 +4318,23 @@ const Diagnosis: React.FC<{
   }, [formData, diagnosisDraftKey, resolvedPatientId]);
 
   const [cancerTypes, setCancerTypes] = useState<CancerTypeItem[]>([]);
-  const [subtypes, setSubtypes] = useState<CancerSubtypeItem[]>([]);
+  const [subtypes, setSubtypes] = useState<CancerSubtypeOption[]>([]);
   const [diagnosisCatalogReady, setDiagnosisCatalogReady] = useState(false);
+
+  /* Multi-select Cancer Type field. The full selection is kept for
+     documentation and to source the Histopathology subtype options;
+     the first entry still drives the dependent fields (staging)
+     exactly like the old single select. */
+  const [selectedCancerTypes, setSelectedCancerTypes] = useState<string[]>([]);
+
+  useEffect(() => {
+    setSelectedCancerTypes((previous) => {
+      if (!formData.type) return previous;
+      return previous.includes(formData.type)
+        ? previous
+        : [...previous, formData.type];
+    });
+  }, [formData.type]);
 
   /* Sync the diagnosis selection (cancer_type_id + subtype_id +
      diagnosis_id) to localStorage so downstream steps (Treatment Plan)
@@ -3688,11 +4385,11 @@ const Diagnosis: React.FC<{
     }
   }, [formData.type, formData.subType, cancerTypes, subtypes, diagnosisCatalogReady, resolvedPatientId]);
 
-  const [stageLabels, setStageLabels] = useState<string[]>([]);
+  const [stageLabels, setStageLabels] = useState<StageOption[]>([]);
   const [tnmStages, setTnmStages] = useState<string[]>([]);
-  const [tOptions, setTOptions] = useState<string[]>([]);
-  const [nOptions, setNOptions] = useState<string[]>([]);
-  const [mOptions, setMOptions] = useState<string[]>([]);
+  const [tOptions, setTOptions] = useState<StageOption[]>([]);
+  const [nOptions, setNOptions] = useState<StageOption[]>([]);
+  const [mOptions, setMOptions] = useState<StageOption[]>([]);
   const [grades, setGrades] = useState<string[]>([]);
   const [metastasisSites, setMetastasisSites] = useState<string[]>([]);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
@@ -3728,21 +4425,47 @@ const Diagnosis: React.FC<{
     );
   };
 
-  const loadSubtypesForCancerType = (
-    cancerTypeId: string,
+  /* Load the subtype options for every selected cancer type and merge
+     them into the Histopathology dropdown. Each option remembers its
+     parent cancer type so the dropdown can show the mapping. */
+  const loadSubtypesForCancerTypes = (
+    selections: { cancerTypeId: string; cancerTypeName: string }[],
     autoSelectIcd = true
   ) => {
-    if (!cancerTypeId) return;
+    const ids = selections.filter(
+      (selection) => Boolean(selection.cancerTypeId)
+    );
     const requestId = ++diagnosisRequestRef.current;
-    setDiagnosisLoading(true);
     setDiagnosisError("");
 
-    API.get<{ success: boolean; data: CancerSubtypeItem[] }>(
-      `/oncology/reference/cancer-types/${cancerTypeId}/subtypes`
+    if (ids.length === 0) {
+      setSubtypes([]);
+      setDiagnosisLoading(false);
+      return;
+    }
+
+    setDiagnosisLoading(true);
+
+    Promise.all(
+      ids.map((selection) =>
+        API.get<{ success: boolean; data: CancerSubtypeItem[] }>(
+          `/oncology/reference/cancer-types/${selection.cancerTypeId}/subtypes`
+        )
+      )
     )
-      .then((response) => {
+      .then((responses) => {
         if (requestId !== diagnosisRequestRef.current) return;
-        const items = response.data.data;
+        const merged = new Map<string, CancerSubtypeOption>();
+        responses.forEach((response, index) => {
+          const cancerType = ids[index].cancerTypeName;
+          for (const item of response.data.data) {
+            const key = `${cancerType}|${item.subtype_name}`;
+            if (!merged.has(key)) {
+              merged.set(key, { ...item, cancerType });
+            }
+          }
+        });
+        const items = Array.from(merged.values());
         setSubtypes(items);
         const first = items[0];
         if (first && autoSelectIcd) {
@@ -3767,11 +4490,14 @@ const Diagnosis: React.FC<{
       });
   };
 
-  const loadStagesForCancerType = (
-    cancerTypeId: string,
+  const loadStagesForCancerTypes = (
+    selections: {
+      cancerTypeId: string;
+      cancerTypeName: string;
+    }[],
     resetStageSelection = true
   ) => {
-    if (!cancerTypeId) return;
+    if (!selections.length) return;
     const requestId = ++stagingRequestRef.current;
     setDiagnosisLoading(true);
     setDiagnosisError("");
@@ -3782,83 +4508,139 @@ const Diagnosis: React.FC<{
     setGrades([]);
     setMetastasisSites([]);
 
-    API.get<{ success: boolean; data: StagingReferenceItem[] }>(
-      "/oncology/reference/staging",
-      { params: { cancer_type_id: cancerTypeId } }
+    Promise.all(
+      selections.map((selection) =>
+        API.get<{ success: boolean; data: StagingReferenceItem[] }>(
+          "/oncology/reference/staging",
+          { params: { cancer_type_id: selection.cancerTypeId } }
+        ).then((response) => ({
+          cancerTypeName: selection.cancerTypeName,
+          items: response.data.data,
+        }))
+      )
     )
-      .then((response) => {
+      .then((results) => {
         if (requestId !== stagingRequestRef.current) return;
-        const items = response.data.data;
-        setStageLabels(
-          items
-            .map((item) => item.stage_label)
-            .filter((label): label is string => Boolean(label))
-        );
-        const tnmOptions: string[] = [];
+
+        const seenStage = new Set<string>();
+        const seenTnm = new Set<string>();
+        const seenT = new Set<string>();
+        const seenN = new Set<string>();
+        const seenM = new Set<string>();
+        const seenGrade = new Set<string>();
+
+        const stageOptions: StageOption[] = [];
+        const tnmOptionsAggregated: string[] = [];
+        const tOptionsAggregated: StageOption[] = [];
+        const nOptionsAggregated: StageOption[] = [];
+        const mOptionsAggregated: StageOption[] = [];
         const gradeOptions: string[] = [];
-        for (const item of items) {
-          const criteria = (item.tnm_criteria ?? "")
-            .replace(/\([^)]*\)/g, " ")
-            .replace(/\s+/g, " ")
-            .replace(/\s*[-“]\s*$/g, "")
-            .trim();
-          if (criteria && /(\b[TNM]\d|\bAny\s+[TNM])/i.test(criteria)) {
-            if (!tnmOptions.includes(criteria)) tnmOptions.push(criteria);
-          }
-          const gradeSource = [
-            item.stage_label,
-            item.staging_system,
-            item.subtype_label,
-            item.tnm_criteria,
-            item.risk_criteria,
-          ]
-            .filter((value): value is string => Boolean(value))
-            .join(" ");
-          for (const match of gradeSource.matchAll(
-            /grade\s+group\s*[\d\-“]+|grade\s+[\d\-“]+/gi
-          )) {
-            const grade = match[0]
+
+        for (const result of results) {
+          const { cancerTypeName, items } = result;
+
+          const tnmOptions: string[] = [];
+          for (const item of items) {
+            const stageLabel = item.stage_label;
+            if (
+              stageLabel &&
+              !seenStage.has(`${cancerTypeName}|${stageLabel}`)
+            ) {
+              seenStage.add(`${cancerTypeName}|${stageLabel}`);
+              stageOptions.push({ value: stageLabel, cancerType: cancerTypeName });
+            }
+            const criteria = (item.tnm_criteria ?? "")
+              .replace(/\([^)]*\)/g, " ")
               .replace(/\s+/g, " ")
-              .replace(/\b\w/g, (c) => c.toUpperCase());
-            if (!gradeOptions.includes(grade)) gradeOptions.push(grade);
+              .replace(/\s*[-“]\s*$/g, "")
+              .trim();
+            if (criteria && /(\b[TNM]\d|\bAny\s+[TNM])/i.test(criteria)) {
+              if (!tnmOptions.includes(criteria)) tnmOptions.push(criteria);
+            }
+            const gradeSource = [
+              item.stage_label,
+              item.staging_system,
+              item.subtype_label,
+              item.tnm_criteria,
+              item.risk_criteria,
+            ]
+              .filter((value): value is string => Boolean(value))
+              .join(" ");
+            for (const match of gradeSource.matchAll(
+              /grade\s+group\s*[\d\-“]+|grade\s+[\d\-“]+/gi
+            )) {
+              const grade = match[0]
+                .replace(/\s+/g, " ")
+                .replace(/\b\w/g, (c) => c.toUpperCase());
+              if (!seenGrade.has(grade)) {
+                seenGrade.add(grade);
+                gradeOptions.push(grade);
+              }
+            }
+          }
+
+          for (const criteria of tnmOptions) {
+            if (!seenTnm.has(criteria)) {
+              seenTnm.add(criteria);
+              tnmOptionsAggregated.push(criteria);
+            }
+          }
+
+          const expandTnmRange = (token: string): string[] => {
+            const rangeMatch = token.match(/^([TNM])(\d+)([a-z])?-([a-z\d]+)$/i);
+            if (!rangeMatch) return [token];
+            const prefix = rangeMatch[1].toUpperCase();
+            const startNum = parseInt(rangeMatch[2], 10);
+            const startLetter = rangeMatch[3] || "";
+            const endStr = rangeMatch[4];
+            const results: string[] = [];
+            const endNum = parseInt(endStr, 10);
+            if (!startLetter && !isNaN(endNum)) {
+              for (let i = startNum; i <= endNum; i++) results.push(`${prefix}${i}`);
+            } else if (startLetter && endStr.length === 1) {
+              const startCode = startLetter.charCodeAt(0);
+              const endCode = endStr.charCodeAt(0);
+              for (let c = startCode; c <= endCode; c++) results.push(`${prefix}${startNum}${String.fromCharCode(c)}`);
+            }
+            return results.length > 0 ? results : [token];
+          };
+
+          const tSet = new Set<string>();
+          const nSet = new Set<string>();
+          const mSet = new Set<string>();
+          for (const option of tnmOptions) {
+            const parts = option.split(/\s+/);
+            for (const part of parts) {
+              if (/^T\d/i.test(part)) expandTnmRange(part).forEach((v) => tSet.add(v));
+              else if (/^N\d/i.test(part) || /^N[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => nSet.add(v));
+              else if (/^M\d/i.test(part) || /^M[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => mSet.add(v));
+            }
+          }
+          for (const value of [...tSet].sort()) {
+            if (!seenT.has(`${cancerTypeName}|${value}`)) {
+              seenT.add(`${cancerTypeName}|${value}`);
+              tOptionsAggregated.push({ value, cancerType: cancerTypeName });
+            }
+          }
+          for (const value of [...nSet].sort()) {
+            if (!seenN.has(`${cancerTypeName}|${value}`)) {
+              seenN.add(`${cancerTypeName}|${value}`);
+              nOptionsAggregated.push({ value, cancerType: cancerTypeName });
+            }
+          }
+          for (const value of [...mSet].sort()) {
+            if (!seenM.has(`${cancerTypeName}|${value}`)) {
+              seenM.add(`${cancerTypeName}|${value}`);
+              mOptionsAggregated.push({ value, cancerType: cancerTypeName });
+            }
           }
         }
-        setTnmStages(tnmOptions.sort());
 
-        const expandTnmRange = (token: string): string[] => {
-          const rangeMatch = token.match(/^([TNM])(\d+)([a-z])?-([a-z\d]+)$/i);
-          if (!rangeMatch) return [token];
-          const prefix = rangeMatch[1].toUpperCase();
-          const startNum = parseInt(rangeMatch[2], 10);
-          const startLetter = rangeMatch[3] || "";
-          const endStr = rangeMatch[4];
-          const results: string[] = [];
-          const endNum = parseInt(endStr, 10);
-          if (!startLetter && !isNaN(endNum)) {
-            for (let i = startNum; i <= endNum; i++) results.push(`${prefix}${i}`);
-          } else if (startLetter && endStr.length === 1) {
-            const startCode = startLetter.charCodeAt(0);
-            const endCode = endStr.charCodeAt(0);
-            for (let c = startCode; c <= endCode; c++) results.push(`${prefix}${startNum}${String.fromCharCode(c)}`);
-          }
-          return results.length > 0 ? results : [token];
-        };
-
-        const tSet = new Set<string>();
-        const nSet = new Set<string>();
-        const mSet = new Set<string>();
-        for (const option of tnmOptions) {
-          const parts = option.split(/\s+/);
-          for (const part of parts) {
-            if (/^T\d/i.test(part)) expandTnmRange(part).forEach((v) => tSet.add(v));
-            else if (/^N\d/i.test(part) || /^N[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => nSet.add(v));
-            else if (/^M\d/i.test(part) || /^M[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => mSet.add(v));
-          }
-        }
-        setTOptions([...tSet].sort());
-        setNOptions([...nSet].sort());
-        setMOptions([...mSet].sort());
-
+        setStageLabels(stageOptions);
+        setTnmStages(tnmOptionsAggregated.sort());
+        setTOptions(tOptionsAggregated);
+        setNOptions(nOptionsAggregated);
+        setMOptions(mOptionsAggregated);
         setGrades(gradeOptions.sort());
         if (!resetStageSelection) return;
         setFormData((previous) => ({
@@ -3909,8 +4691,18 @@ const Diagnosis: React.FC<{
         if (matchedSavedType) {
           // Restoring a saved draft: reload options for the saved
           // type without overwriting the user's selections.
-          loadSubtypesForCancerType(matchedSavedType.cancer_type_id, false);
-          loadStagesForCancerType(matchedSavedType.cancer_type_id, false);
+          loadSubtypesForCancerTypes([
+            {
+              cancerTypeId: matchedSavedType.cancer_type_id,
+              cancerTypeName: matchedSavedType.cancer_type,
+            },
+          ], false);
+          loadStagesForCancerTypes([
+            {
+              cancerTypeId: matchedSavedType.cancer_type_id,
+              cancerTypeName: matchedSavedType.cancer_type,
+            },
+          ], false);
           return;
         }
 
@@ -3922,8 +4714,18 @@ const Diagnosis: React.FC<{
             type: previous.type || initial.cancer_type,
             icdCode: previous.icdCode || initial.icd10 || "",
           }));
-          loadSubtypesForCancerType(initial.cancer_type_id);
-          loadStagesForCancerType(initial.cancer_type_id);
+          loadSubtypesForCancerTypes([
+            {
+              cancerTypeId: initial.cancer_type_id,
+              cancerTypeName: initial.cancer_type,
+            },
+          ]);
+          loadStagesForCancerTypes([
+            {
+              cancerTypeId: initial.cancer_type_id,
+              cancerTypeName: initial.cancer_type,
+            },
+          ]);
         }
       })
       .catch((error) => {
@@ -3971,22 +4773,32 @@ const Diagnosis: React.FC<{
     }));
   };
 
-  const handleTypeChange = (value: string) => {
+  const handleTypesChange = (values: string[]) => {
+    setSelectedCancerTypes(values);
+
+    /* Reload the dependent fields off the first selected type. */
+    const primaryType = values[0] ?? "";
     setFormData((previous) => ({
       ...previous,
-      type: value,
+      type: primaryType,
       subType: "",
       icdCode: "",
     }));
 
-    const cancerType = cancerTypes.find(
-      (item) => item.cancer_type === value
-    );
-
-    if (cancerType) {
-      loadSubtypesForCancerType(cancerType.cancer_type_id);
-      loadStagesForCancerType(cancerType.cancer_type_id);
-    }
+    /* Histopathology shows the subtypes of every selected cancer type,
+       grouped under its parent cancer type. */
+    const selectedTypes = values
+      .map((name) => cancerTypes.find((item) => item.cancer_type === name))
+      .filter(
+        (item): item is CancerTypeItem =>
+          Boolean(item && item.cancer_type_id)
+      )
+      .map((item) => ({
+        cancerTypeId: item.cancer_type_id,
+        cancerTypeName: item.cancer_type,
+      }));
+    loadSubtypesForCancerTypes(selectedTypes);
+    loadStagesForCancerTypes(selectedTypes);
   };
 
   const handleNext = async () => {
@@ -4065,6 +4877,47 @@ const Diagnosis: React.FC<{
           `hms_staging_detail_id_${resolvedPatientId}`,
           JSON.stringify({ staging_detail_id: stagingDetailId })
         );
+
+        /* When this patient already has a chemotherapy plan, re-link it to
+           the new diagnosis so downstream viewers (patient-details) show
+           the updated cancer type / stage immediately. */
+        try {
+          const existingPlan = await API.get<{
+            success: boolean;
+            data: { chemotherapy_plan_id: string } | null;
+          }>("/chemotherapy/plans/latest-for-patient", {
+            params: {
+              patient_id: resolvedPatientId,
+            },
+          });
+          const existingPlanId =
+            existingPlan.data.data?.chemotherapy_plan_id;
+          if (existingPlanId) {
+            const planChanges: Record<string, unknown> = {
+              staging_detail_id: stagingDetailId,
+            };
+            if (matchedType?.cancer_type_id) {
+              planChanges.cancer_type_id = matchedType.cancer_type_id;
+              planChanges.cancer_type = matchedType.cancer_type;
+            }
+            if (matchedSubtype?.subtype_id) {
+              planChanges.subtype_id = matchedSubtype.subtype_id;
+              planChanges.cancer_subtype = matchedSubtype.subtype_name;
+            }
+            if (formData.cancerStage) {
+              planChanges.cancer_stage = formData.cancerStage;
+            }
+            await API.put(
+              `/chemotherapy/plans/${existingPlanId}`,
+              planChanges
+            );
+          }
+        } catch (planSyncError: any) {
+          console.error(
+            "Failed to sync new diagnosis onto existing plan:",
+            planSyncError?.response?.data?.message ?? planSyncError?.message
+          );
+        }
       }
 
       onNext?.();
@@ -4096,36 +4949,162 @@ const Diagnosis: React.FC<{
         }}
         className="space-y-8"
       >
-        {/* Two Column Fields */}
-        <div className="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-2">
-          {/* Cancer Type */}
+        {/* Four Column Fields */}
+        <div className="grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
+          {/* Pre Diagnosis */}
           <div>
             <label
-              htmlFor="type"
+              htmlFor="preDiagnosis"
               className="mb-2 block text-sm font-semibold text-gray-600"
             >
-              Cancer Type
+              Pre Diagnosis
+            </label>
+
+            <div className="relative">
+              <input
+                id="preDiagnosis"
+                name="preDiagnosis"
+                type="text"
+                value={formData.preDiagnosis}
+                onChange={handleChange}
+                placeholder="Type the pre diagnosis..."
+                className="block w-full rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              />
+            </div>
+          </div>
+
+          {/* Nature of Diagnosis */}
+          <div>
+            <label
+              htmlFor="natureOfDiagnosis"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Nature of Diagnosis
             </label>
 
             <div className="relative">
               <select
-                id="type"
-                name="type"
-                value={formData.type}
-                onChange={(event) =>
-                  handleTypeChange(event.target.value)
-                }
+                id="natureOfDiagnosis"
+                name="natureOfDiagnosis"
+                value={formData.natureOfDiagnosis}
+                onChange={handleChange}
                 className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
               >
-                {cancerTypes.length > 0 &&
-                  cancerTypes.map((cancerType) => (
-                    <option
-                      key={cancerType.cancer_type_id}
-                      value={cancerType.cancer_type}
-                    >
-                      {cancerType.cancer_type}
-                    </option>
-                  ))}
+                <option value="">
+                  Select Nature of Diagnosis
+                </option>
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Disease Status */}
+          <div>
+            <label
+              htmlFor="diseaseStatus"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Disease Status
+            </label>
+
+            <div className="relative">
+              <select
+                id="diseaseStatus"
+                name="diseaseStatus"
+                value={formData.diseaseStatus}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Disease Status
+                </option>
+                <option value="Newly Diagnosed">Newly Diagnosed</option>
+                <option value="In Remission">In Remission</option>
+                <option value="Recurrence">Recurrence</option>
+                <option value="Progressive">Progressive</option>
+                <option value="Stable">Stable</option>
+                <option value="Metastatic">Metastatic</option>
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Cancer Type */}
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-gray-600">
+              Cancer Type
+            </label>
+
+            <MultiSelectDropdown
+              options={cancerTypes.map((cancerType) => ({
+                label: cancerType.cancer_type,
+                value: cancerType.cancer_type,
+              }))}
+              value={selectedCancerTypes}
+              onValueChange={handleTypesChange}
+              placeholder="Select Cancer Type"
+            />
+          </div>
+
+          {/* Laterality */}
+          <div>
+            <label
+              htmlFor="laterality"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Laterality
+            </label>
+
+            <div className="relative">
+              <select
+                id="laterality"
+                name="laterality"
+                value={formData.laterality}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Laterality
+                </option>
+                <option value="Left">Left</option>
+                <option value="Right">Right</option>
+                <option value="Bilateral">Bilateral</option>
+                <option value="Midline">Midline</option>
+                <option value="Not Applicable">Not Applicable</option>
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {/* Body Site */}
+          <div>
+            <label
+              htmlFor="bodySite"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Body Site
+            </label>
+
+            <div className="relative">
+              <select
+                id="bodySite"
+                name="bodySite"
+                value={formData.bodySite}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Body Site
+                </option>
               </select>
 
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
@@ -4155,13 +5134,24 @@ const Diagnosis: React.FC<{
                   {diagnosisLoading ? "Loading" : "Select Sub Type"}
                 </option>
 
-                {subtypes.map((subtype) => (
-                  <option
-                    key={subtype.subtype_id}
-                    value={subtype.subtype_name}
-                  >
-                    {subtype.subtype_name}
-                  </option>
+                {Array.from(
+                  subtypes.reduce((groups, subtype) => {
+                    const current = groups.get(subtype.cancerType) ?? [];
+                    current.push(subtype);
+                    groups.set(subtype.cancerType, current);
+                    return groups;
+                  }, new Map<string, CancerSubtypeOption[]>())
+                ).map(([cancerType, groupSubtypes]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {groupSubtypes.map((subtype) => (
+                      <option
+                        key={subtype.subtype_id}
+                        value={subtype.subtype_name}
+                      >
+                        {subtype.subtype_name}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
@@ -4219,10 +5209,21 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                     : "Select Cancer Stage"}
                 </option>
 
-                {stageLabels.map((label) => (
-                  <option key={label} value={label}>
-                    {label}
-                  </option>
+                {Array.from(
+                  stageLabels.reduce((groups, option) => {
+                    const current = groups.get(option.cancerType) ?? [];
+                    current.push(option);
+                    groups.set(option.cancerType, current);
+                    return groups;
+                  }, new Map<string, StageOption[]>())
+                ).map(([cancerType, options]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {options.map((option) => (
+                      <option key={`${cancerType}-${option.value}`} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
@@ -4291,10 +5292,21 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                     : "Select T Stage"}
                 </option>
 
-                {tOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
+                {Array.from(
+                  tOptions.reduce((groups, option) => {
+                    const current = groups.get(option.cancerType) ?? [];
+                    current.push(option);
+                    groups.set(option.cancerType, current);
+                    return groups;
+                  }, new Map<string, StageOption[]>())
+                ).map(([cancerType, options]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {options.map((option) => (
+                      <option key={`${cancerType}-${option.value}`} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
@@ -4327,10 +5339,21 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                     : "Select N Stage"}
                 </option>
 
-                {nOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
+                {Array.from(
+                  nOptions.reduce((groups, option) => {
+                    const current = groups.get(option.cancerType) ?? [];
+                    current.push(option);
+                    groups.set(option.cancerType, current);
+                    return groups;
+                  }, new Map<string, StageOption[]>())
+                ).map(([cancerType, options]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {options.map((option) => (
+                      <option key={`${cancerType}-${option.value}`} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
@@ -4363,10 +5386,21 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                     : "Select M Stage"}
                 </option>
 
-                {mOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
+                {Array.from(
+                  mOptions.reduce((groups, option) => {
+                    const current = groups.get(option.cancerType) ?? [];
+                    current.push(option);
+                    groups.set(option.cancerType, current);
+                    return groups;
+                  }, new Map<string, StageOption[]>())
+                ).map(([cancerType, options]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {options.map((option) => (
+                      <option key={`${cancerType}-${option.value}`} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
@@ -4378,7 +5412,7 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
 
           {/* Metastasis Sites - shown when M stage is M1+ */}
           {formData.mStage.trim().toUpperCase().startsWith("M1") && (
-            <div className="lg:col-span-2">
+            <div className="col-span-full">
               <label className="mb-2 block text-sm font-semibold text-gray-600">
                 Metastasis Sites
               </label>
@@ -4394,6 +5428,121 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
               />
             </div>
           )}
+
+          {/* Molecular Testing */}
+          <div>
+            <label
+              htmlFor="molecularTesting"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              Molecular Testing
+            </label>
+
+            <div className="relative">
+              <select
+                id="molecularTesting"
+                name="molecularTesting"
+                value={formData.molecularTesting}
+                onChange={handleChange}
+                className="block w-full appearance-none rounded-md border border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+              >
+                <option value="">
+                  Select Molecular Testing
+                </option>
+
+                {MOLECULAR_TESTS.map((test) => (
+                  <option key={test} value={test}>
+                    {test}
+                  </option>
+                ))}
+              </select>
+
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                <ChevronDownIcon />
+              </div>
+            </div>
+          </div>
+
+          {formData.molecularTesting && (
+            <>
+              <div>
+                <label
+                  htmlFor="molecularTestingNote"
+                  className="mb-2 block text-sm font-semibold text-gray-600"
+                >
+                  Enter Note
+                </label>
+
+                <input
+                  id="molecularTestingNote"
+                  name="molecularTestingNote"
+                  type="text"
+                  value={formData.molecularTestingNote}
+                  onChange={handleChange}
+                  placeholder="Type a note..."
+                  className="block w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="molecularTestingDate"
+                  className="mb-2 block text-sm font-semibold text-gray-600"
+                >
+                  Select Date
+                </label>
+
+                <input
+                  id="molecularTestingDate"
+                  name="molecularTestingDate"
+                  type="date"
+                  value={formData.molecularTestingDate}
+                  onChange={handleChange}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+                />
+              </div>
+            </>
+          )}
+
+          {/* Survivor */}
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-gray-600">
+              Survivor
+            </label>
+
+            <div className="flex h-[38px] items-center gap-4 rounded-md border border-gray-300 bg-white px-3">
+              <label className="flex items-center gap-1.5 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  name="survivor"
+                  checked={formData.survivor === "Yes"}
+                  onChange={() =>
+                    setFormData((previous) => ({
+                      ...previous,
+                      survivor: formData.survivor === "Yes" ? "" : "Yes",
+                    }))
+                  }
+                  className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                />
+                Yes
+              </label>
+              <label className="flex items-center gap-1.5 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  name="survivor"
+                  checked={formData.survivor === "No"}
+                  onChange={() =>
+                    setFormData((previous) => ({
+                      ...previous,
+                      survivor: formData.survivor === "No" ? "" : "No",
+                    }))
+                  }
+                  className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                />
+                No
+              </label>
+            </div>
+          </div>
 
           {/* ICD Code */}
           <div>
@@ -5549,6 +6698,7 @@ const ChemotherapyOrder: React.FC<{
   const [protocolName, setProtocolName] = useState("");
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState("");
+  const [discussion, setDiscussion] = useState("");
 
   const [drugs, setDrugs] = useState<Drug[]>([]);
   const [premedicationDrugs, setPremedicationDrugs] = useState<Drug[]>(
@@ -5932,11 +7082,16 @@ const ChemotherapyOrder: React.FC<{
         drugs?: Drug[];
         premedicationDrugs?: Drug[];
         supportiveDrugs?: Drug[];
+        discussion?: string;
       };
 
       if (data.cycleDay) {
         updateCycleDay(data.cycleDay);
         userTouched.current.cycleDay = true;
+      }
+
+      if (data.discussion) {
+        setDiscussion(data.discussion);
       }
 
       if (data.startDate) {
@@ -5983,6 +7138,7 @@ const ChemotherapyOrder: React.FC<{
         supportiveDrugs: userTouched.current.supportive
           ? supportiveDrugs
           : [],
+        discussion,
       })
     );
   }, [
@@ -5991,6 +7147,7 @@ const ChemotherapyOrder: React.FC<{
     drugs,
     premedicationDrugs,
     supportiveDrugs,
+    discussion,
     orderDraftKey,
     resolvedPatientId,
   ]);
@@ -6125,7 +7282,15 @@ const ChemotherapyOrder: React.FC<{
     setPlanError("");
     setSavingPlan(true);
 
-    try {
+    let navigated = false;
+    const navigateNext = () => {
+      if (navigated) return;
+      navigated = true;
+      onNext?.();
+    };
+    const navigateTimer = setTimeout(navigateNext, 500);
+
+    const saveOrder = async () => {
       const planItems: Array<{
         medicine_id: string;
         drug_role: string;
@@ -6182,20 +7347,27 @@ const ChemotherapyOrder: React.FC<{
         ) ||
         toIsoDate(new Date().toISOString());
 
-      const { error } = await createChemotherapyPlanForPatient(
+      return createChemotherapyPlanForPatient(
         resolvedPatientId,
         planStartDate,
         planItems.length > 0 ? planItems : undefined,
         undefined
       );
+    };
+
+    try {
+      const { error } = await saveOrder();
 
       if (error) {
+        clearTimeout(navigateTimer);
         setPlanError(error);
         return;
       }
 
-      onNext?.();
+      clearTimeout(navigateTimer);
+      navigateNext();
     } catch (err: any) {
+      clearTimeout(navigateTimer);
       console.error("Failed to save chemotherapy order:", err);
       setPlanError(
         err?.response?.data?.message ||
@@ -7245,8 +8417,9 @@ const ChemotherapyOrder: React.FC<{
                     );
                   })}
                 </tbody>
-              </table>
-            </div>
+</table>
+             </div>
+
           </div>
         ) : activeTab === "Premedication" ? (
           <div className="p-8">
@@ -7738,6 +8911,18 @@ const ChemotherapyOrder: React.FC<{
             </div>
           </div>
         )}
+
+        <div className="mt-6 flex flex-col gap-4 rounded-lg border border-gray-200 p-6">
+          <div className="text-base font-semibold text-gray-900">
+            Discussion
+          </div>
+          <textarea
+            value={discussion}
+            onChange={(event) => setDiscussion(event.target.value)}
+            placeholder="Type the discussion..."
+            className="h-28 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm leading-5 text-gray-700 outline-none focus:border-blue-500"
+          />
+        </div>
       </div>
     </div>
   );
@@ -9487,6 +10672,11 @@ const TreatmentPlan: React.FC<{
                       })
                     );
                   }
+                  /* Push the newly selected protocol onto any existing
+                     plan immediately so patient-details shows the new
+                     protocol + days/cycle without waiting for the step
+                     to be saved. */
+                  void syncExistingPlanProtocol(resolvedPatientId, value);
                 } else {
                   localStorage.removeItem(
                     `hms_selected_protocol_id_${resolvedPatientId}`
@@ -9995,7 +11185,7 @@ const Summary: React.FC<{
   patientId,
   appointmentId,
   encounterNo,
-  measurements = { height: "", weight: "", bsa: "", bmi: "", bp: "", pulse: "", temp: "", spo2: "" },
+  measurements = { height: "", weight: "", bsa: "", bmi: "", bp: "", pulse: "", temp: "", spo2: "", painScore: "" },
 }) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -10032,6 +11222,113 @@ const Summary: React.FC<{
   const [dischargeError, setDischargeError] = useState("");
   const [dischargeProtocolId, setDischargeProtocolId] = useState("");
   const [patientName, setPatientName] = useState("");
+
+  const [summaryAllergies, setSummaryAllergies] = useState<string[]>([]);
+  const [summarySymptoms, setSummarySymptoms] = useState<string[]>([]);
+  const [summaryReasonForVisit, setSummaryReasonForVisit] = useState("");
+  const [summaryDiscussion, setSummaryDiscussion] = useState("");
+  const [summaryHopi, setSummaryHopi] = useState("");
+  const [summaryClinicalFindings, setSummaryClinicalFindings] = useState("");
+
+  useEffect(() => {
+    if (!appointmentId) return;
+    let cancelled = false;
+    appointmentApi
+      .getOne(appointmentId)
+      .then((response) => {
+        if (cancelled) return;
+        setSummaryReasonForVisit(
+          response.data?.data?.reason_for_visit ?? ""
+        );
+      })
+      .catch((error) => {
+        console.error("Failed to load reason for visit:", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [appointmentId]);
+
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        if (encounterNo) {
+          const response = await clinicalDetailsApi.getEncounterClinicalDetails(
+            encounterNo
+          );
+          if (cancelled) return;
+          const data = response.data?.data;
+          setSummaryAllergies(
+            (data?.allergies ?? []).map((allergy) => allergy.substanceName)
+          );
+          setSummarySymptoms(
+            (data?.symptoms ?? []).map((symptom) => symptom.symptomName)
+          );
+          return;
+        }
+      } catch {
+        // Fall through to the patient-level allergies lookup below.
+      }
+      try {
+        const allergyResponse = await API.get<{
+          success: boolean;
+          data: Array<{
+            allergy_master?: { substance_name?: string | null } | null;
+            substance_name?: string | null;
+            substanceName?: string | null;
+          }>;
+        }>(`/clinical-details/patients/${resolvedPatientId}/allergies`);
+        if (cancelled) return;
+        const rows = allergyResponse.data?.data ?? [];
+        setSummaryAllergies(
+          rows.map(
+            (item) =>
+              item.substanceName ||
+              item.allergy_master?.substance_name ||
+              item.substance_name ||
+              ""
+          ).filter(Boolean)
+        );
+      } catch {
+        // Leave allergies/symptoms empty when unavailable.
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId, encounterNo]);
+
+  useEffect(() => {
+    if (!encounterNo && !appointmentId) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = encounterNo
+          ? await encounterApi.getByNumber(encounterNo)
+          : await encounterApi.getByAppointment(appointmentId!);
+        if (cancelled) return;
+        const enc = response.data?.data;
+        const rawNotes = enc?.clinical_notes ?? "";
+        const markerIndex = rawNotes.indexOf(PAST_HISTORY_MARKER);
+        setSummaryDiscussion(
+          markerIndex !== -1
+            ? rawNotes.slice(0, markerIndex).trim()
+            : rawNotes.trim()
+        );
+        setSummaryHopi(enc?.symptoms ?? "");
+        setSummaryClinicalFindings(enc?.chief_complaint ?? "");
+      } catch (error) {
+        console.error("Failed to load summary consultation details:", error);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [encounterNo, appointmentId]);
 
   useEffect(() => {
     if (!resolvedPatientId) return;
@@ -10708,67 +12005,169 @@ const Summary: React.FC<{
                 No chemotherapy plan found for this patient yet.
               </div>
             )}
-            <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Cancer Type
-                </p>
-                <p className="text-sm text-slate-500">
-                  {cancerType}
-                </p>
+            <div className="flex flex-col gap-10 lg:flex-row">
+              <div className="flex flex-1 flex-col gap-6">
+                <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Cancer Type
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      {cancerType}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Stage
+                    </p>
+
+                    <p className="flex items-center gap-2 text-sm text-slate-500">
+                      {stage}
+                      <span className="text-slate-400"></span>
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Context
+                    </p>
+
+                    <p className="text-sm text-slate-500">{context}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Protocol
+                    </p>
+
+                    <p className="flex items-center gap-2 text-sm text-slate-500">
+                      {protocol}
+                      <span className="text-slate-400"></span>
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Duration
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {duration}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Current
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {current}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Allergies
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryAllergies.length > 0
+                        ? summaryAllergies.join(", ")
+                        : "No allergies recorded"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Symptoms
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summarySymptoms.length > 0
+                        ? summarySymptoms.join(", ")
+                        : "No symptoms recorded"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Reason for Visit
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryReasonForVisit || "No reason recorded"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Discussion
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryDiscussion || "No discussion recorded"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      HOPI
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryHopi || "No HOPI recorded"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium text-slate-900">
+                      Clinical findings
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      {summaryClinicalFindings || "No clinical findings recorded"}
+                    </p>
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Stage
+              {/* Vitals box - same vitals as shown in the patient header */}
+              <aside className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-5 lg:w-72">
+                <p className="mb-3 text-sm font-semibold text-slate-900">
+                  Vitals
                 </p>
 
-                <p className="flex items-center gap-2 text-sm text-slate-500">
-                  {stage}
-                  <span className="text-slate-400"></span>
-                </p>
-              </div>
-
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Context
-                </p>
-
-                <p className="text-sm text-slate-500">{context}</p>
-              </div>
-
-              <div />
-
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Protocol
-                </p>
-
-                <p className="flex items-center gap-2 text-sm text-slate-500">
-                  {protocol}
-                  <span className="text-slate-400"></span>
-                </p>
-              </div>
-
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Duration
-                </p>
-
-                <p className="text-sm text-slate-500">
-                  {duration}
-                </p>
-              </div>
-
-              <div>
-                <p className="mb-2 font-medium text-slate-900">
-                  Current
-                </p>
-
-                <p className="text-sm text-slate-500">
-                  {current}
-                </p>
-              </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  {[
+                    { label: "HEIGHT", value: measurements.height },
+                    { label: "WEIGHT", value: measurements.weight },
+                    { label: "BSA", value: measurements.bsa },
+                    { label: "BMI", value: measurements.bmi },
+                    { label: "BP", value: measurements.bp },
+                    { label: "PULSE", value: measurements.pulse },
+                    { label: "TEMP", value: measurements.temp },
+                    { label: "SPO2", value: measurements.spo2 },
+                    { label: "PAIN", value: measurements.painScore },
+                  ].map((item) => (
+                    <div key={item.label} className="flex flex-col">
+                      <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                        {item.label}
+                      </div>
+                      <div className="truncate text-sm font-bold leading-5 text-slate-800">
+                        {item.value || "—"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </aside>
             </div>
           </section>
 
