@@ -4173,9 +4173,9 @@ type FormData = {
   bodySite: string;
   survivor: string;
   type: string;
-  subType: string;
+  subType: string[];
   histomorphology: string;
-  cancerStage: string;
+  cancerStage: string[];
   grade: string;
   tStage: string;
   nStage: string;
@@ -4204,6 +4204,182 @@ type CancerSubtypeOption = CancerSubtypeItem & {
 type StageOption = {
   value: string;
   cancerType: string;
+};
+
+/* Multi-select checkbox helpers for the Histopathology (subtype) and
+   Cancer Stage fields. Options are grouped under their parent cancer type;
+   each stored value is qualified as `${cancerType}|${label}` so the same
+   label can be selected independently for every cancer type. */
+const splitQualified = (value: string) => {
+  const pipe = value.indexOf("|");
+  return pipe === -1
+    ? { cancerType: "", raw: value }
+    : { cancerType: value.slice(0, pipe), raw: value.slice(pipe + 1) };
+};
+
+const buildCheckboxGroups = (
+  items: { value: string; cancerType: string }[]
+): { cancerType: string; items: { value: string; label: string }[] }[] => {
+  const map = new Map<string, { value: string; label: string }[]>();
+  items.forEach((item) => {
+    const group = map.get(item.cancerType) ?? [];
+    group.push({ value: `${item.cancerType}|${item.value}`, label: item.value });
+    map.set(item.cancerType, group);
+  });
+  return Array.from(map.entries()).map(([cancerType, list]) => ({
+    cancerType,
+    items: list,
+  }));
+};
+
+/* Checkbox multi-select shown as a dropdown (same interaction as the
+   Cancer Type field): the selected-chips strip acts as the trigger and
+   the grouped checkbox list appears only on hover or click. */
+const DiagnosisCheckboxList: React.FC<{
+  title: string;
+  groups: { cancerType: string; items: { value: string; label: string }[] }[];
+  selected: string[];
+  onToggle: (value: string, select?: boolean) => void;
+  loading?: boolean;
+}> = ({ title, groups, selected, onToggle, loading }) => {
+  const [open, setOpen] = React.useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const total = groups.reduce((sum, group) => sum + group.items.length, 0);
+
+  /* Close on outside click, like the Cancer Type dropdown. */
+  React.useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  return (
+    <div>
+      <label className="mb-2 block text-sm font-semibold text-gray-600">
+        {title}
+      </label>
+
+      <div className="relative" ref={containerRef}>
+        {/* Trigger: selected chips strip. */}
+        <button
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          onClick={() => setOpen((current) => !current)}
+          className="flex min-h-[46px] w-full flex-wrap items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-left"
+        >
+          {selected.length === 0 ? (
+            <span className="text-gray-400">
+              Select one or more options below
+            </span>
+          ) : (
+            selected.map((value) => {
+              const label = splitQualified(value).raw || value;
+              return (
+                <span
+                  key={value}
+                  className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700"
+                >
+                  {label}
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Remove ${label}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggle(value);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onToggle(value);
+                      }
+                    }}
+                    className="inline-flex items-center justify-center leading-none hover:text-blue-900 cursor-pointer"
+                  >
+                    ×
+                  </span>
+                </span>
+              );
+            })
+          )}
+          <span
+            className={
+              "ml-auto h-4 w-4 flex-shrink-0 text-gray-400 transition-transform duration-200 " +
+              (open ? "rotate-180" : "")
+            }
+          >
+            <ChevronDownIcon />
+          </span>
+        </button>
+
+        {/* Dropdown body: only rendered on hover or click. */}
+        {open && (
+          <div className="absolute left-0 right-0 top-full z-20 mt-2 block w-full max-h-60 overflow-y-auto rounded-md border border-gray-300 bg-white p-3 text-sm text-gray-800 shadow-lg slim-scrollbar">
+            {total === 0 && (
+              <p className="text-sm text-gray-400">
+                {loading
+                  ? "Loading..."
+                  : `No ${title.toLowerCase()} options for the selected cancer type(s)`}
+              </p>
+            )}
+
+            {groups.map((group) => (
+              <div key={group.cancerType} className="mb-3 last:mb-0">
+                <div className="mb-1.5 border-b border-gray-100 pb-1 text-[11px] font-bold uppercase tracking-wide text-[#1d4ed8]">
+                  {group.cancerType}
+                </div>
+
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                  {group.items.map((item) => {
+                    /* Ticked only for this exact group's own qualified value so
+                       each option stays independent per cancer type. */
+                    const hasQualified = selected.some(
+                      (value) =>
+                        value.includes("|") &&
+                        splitQualified(value).raw === item.label
+                    );
+                    const isChecked =
+                      selected.includes(item.value) ||
+                      (!hasQualified &&
+                        selected.some(
+                          (value) =>
+                            !value.includes("|") && value === item.label
+                        ));
+                    return (
+                      <label
+                        key={item.value}
+                        className="flex cursor-pointer items-center gap-1.5 text-sm text-gray-700"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(event) =>
+                            onToggle(item.value, event.target.checked)
+                          }
+                          className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                        />
+                        <span className="leading-snug">{item.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
 type StagingReferenceItem = {
@@ -4285,9 +4461,9 @@ const Diagnosis: React.FC<{
     bodySite: "",
     survivor: "",
     type: "",
-    subType: "",
+    subType: [],
     histomorphology: "",
-    cancerStage: "",
+    cancerStage: [],
     grade: "",
     tStage: "",
     nStage: "",
@@ -4306,7 +4482,19 @@ const Diagnosis: React.FC<{
 
     try {
       const data = JSON.parse(saved) as Partial<FormData>;
-      setFormData((previous) => ({ ...previous, ...data }));
+      /* Normalize legacy drafts: subType / cancerStage used to be single
+         strings, they are now multi-select arrays. */
+      const asArray = (value: unknown): string[] => {
+        if (Array.isArray(value)) return value.map(String);
+        if (typeof value === "string" && value.length > 0) return [value];
+        return [];
+      };
+      setFormData((previous) => ({
+        ...previous,
+        ...data,
+        subType: asArray(data.subType),
+        cancerStage: asArray(data.cancerStage),
+      }));
     } catch (error) {
       console.error("Failed to restore diagnosis draft:", error);
     }
@@ -4327,6 +4515,61 @@ const Diagnosis: React.FC<{
      exactly like the old single select. */
   const [selectedCancerTypes, setSelectedCancerTypes] = useState<string[]>([]);
 
+  /* Toggle a qualified multi-select value on/off for the Histopathology
+     (subType) and Cancer Stage (cancerStage) arrays. Each value is stored
+     qualified as `${cancerType}|${label}`, so per-type selections stay
+     independent. The checkbox's checked state drives add vs. remove so a
+     click can never silently invert a selection. */
+  const handleMultiToggle = (field: "subType" | "cancerStage") => (
+    value: string,
+    select?: boolean
+  ) => {
+    setFormData((previous) => {
+      const current = Array.isArray(previous[field]) ? previous[field] : [];
+      const raw = splitQualified(value).raw;
+      const present = current.includes(value);
+      if (select === true) {
+        /* Adding. Only one subtype / stage may be picked per cancer type:
+           any other entry belonging to the same cancer type group (and any
+           legacy raw-only entry carrying the same label) is replaced by
+           this new one, so the box ticks exactly once per cancer type. */
+        if (present) return previous;
+        const group = splitQualified(value).cancerType;
+        return {
+          ...previous,
+          [field]: [
+            ...current.filter(
+              (item) =>
+                splitQualified(item).cancerType !== group && item !== raw
+            ),
+            value,
+          ],
+        };
+      }
+      if (select === false) {
+        /* Removing. Drop the qualified value and any legacy raw-only
+           entry carrying the same label. */
+        return {
+          ...previous,
+          [field]: current.filter(
+            (item) =>
+              item !== value && !(item.indexOf("|") === -1 && item === raw)
+          ),
+        };
+      }
+      /* Binary toggle fallback (e.g. chip removal). */
+      return present
+        ? {
+            ...previous,
+            [field]: current.filter(
+              (item) =>
+                item !== value && !(item.indexOf("|") === -1 && item === raw)
+            ),
+          }
+        : { ...previous, [field]: [...current, value] };
+    });
+  };
+
   useEffect(() => {
     setSelectedCancerTypes((previous) => {
       if (!formData.type) return previous;
@@ -4340,13 +4583,15 @@ const Diagnosis: React.FC<{
      diagnosis_id) to localStorage so downstream steps (Treatment Plan)
      can read the IDs to query regimen protocols from the backend. */
   useEffect(() => {
-    if (!formData.type || !formData.subType) return;
+    if (!formData.type || formData.subType.length === 0) return;
 
+    /* Primary subtype = the first selected one. */
+    const primarySubtype = splitQualified(formData.subType[0]).raw;
     const matchedType = cancerTypes.find(
       (item) => item.cancer_type === formData.type
     );
     const matchedSubtype = subtypes.find(
-      (item) => item.subtype_name === formData.subType
+      (item) => item.subtype_name === primarySubtype
     );
 
     if (matchedType && matchedSubtype) {
@@ -4386,6 +4631,7 @@ const Diagnosis: React.FC<{
   }, [formData.type, formData.subType, cancerTypes, subtypes, diagnosisCatalogReady, resolvedPatientId]);
 
   const [stageLabels, setStageLabels] = useState<StageOption[]>([]);
+
   const [tnmStages, setTnmStages] = useState<string[]>([]);
   const [tOptions, setTOptions] = useState<StageOption[]>([]);
   const [nOptions, setNOptions] = useState<StageOption[]>([]);
@@ -4645,7 +4891,7 @@ const Diagnosis: React.FC<{
         if (!resetStageSelection) return;
         setFormData((previous) => ({
           ...previous,
-          cancerStage: "",
+          cancerStage: [],
         }));
       })
       .catch((error) => {
@@ -4781,7 +5027,7 @@ const Diagnosis: React.FC<{
     setFormData((previous) => ({
       ...previous,
       type: primaryType,
-      subType: "",
+      subType: [],
       icdCode: "",
     }));
 
@@ -4811,8 +5057,8 @@ const Diagnosis: React.FC<{
 
     const hasAnyData =
       formData.type ||
-      formData.subType ||
-      formData.cancerStage ||
+      formData.subType.length > 0 ||
+      formData.cancerStage.length > 0 ||
       formData.tStage ||
       formData.nStage ||
       formData.mStage ||
@@ -4843,8 +5089,12 @@ const Diagnosis: React.FC<{
       const matchedType = cancerTypes.find(
         (item) => item.cancer_type === formData.type
       );
+      const primarySubtype =
+        formData.subType.length > 0
+          ? splitQualified(formData.subType[0]).raw
+          : "";
       const matchedSubtype = subtypes.find(
-        (item) => item.subtype_name === formData.subType
+        (item) => item.subtype_name === primarySubtype
       );
 
       const diagnosisId = await resolveDiagnosisId(
@@ -4860,8 +5110,12 @@ const Diagnosis: React.FC<{
         cancer_type_id: matchedType?.cancer_type_id ?? "",
         cancer_subtype_id: matchedSubtype?.subtype_id ?? "",
         ...(diagnosisId ? { diagnosis_id: diagnosisId } : {}),
-        ...(formData.cancerStage
-          ? { clinical_stage: formData.cancerStage }
+        ...(formData.cancerStage.length > 0
+          ? {
+              clinical_stage: formData.cancerStage
+                .map((stage) => splitQualified(stage).raw)
+                .join(", "),
+            }
           : {}),
         ...(formData.tStage ? { t_stage: formData.tStage } : {}),
         ...(formData.nStage ? { n_stage: formData.nStage } : {}),
@@ -4904,8 +5158,10 @@ const Diagnosis: React.FC<{
               planChanges.subtype_id = matchedSubtype.subtype_id;
               planChanges.cancer_subtype = matchedSubtype.subtype_name;
             }
-            if (formData.cancerStage) {
-              planChanges.cancer_stage = formData.cancerStage;
+            if (formData.cancerStage.length > 0) {
+              planChanges.cancer_stage = formData.cancerStage
+                .map((stage) => splitQualified(stage).raw)
+                .join(", ");
             }
             await API.put(
               `/chemotherapy/plans/${existingPlanId}`,
@@ -4950,7 +5206,7 @@ const Diagnosis: React.FC<{
         className="space-y-8"
       >
         {/* Four Column Fields */}
-        <div className="grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-3 lg:grid-cols-3">
           {/* Pre Diagnosis */}
           <div>
             <label
@@ -5114,52 +5370,18 @@ const Diagnosis: React.FC<{
           </div>
 
           {/* Histopathology */}
-          <div>
-            <label
-              htmlFor="subType"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
-              Histopathology 
-            </label>
-
-            <div className="relative">
-              <select
-                id="subType"
-                name="subType"
-                value={formData.subType}
-                onChange={handleChange}
-                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-              >
-                <option value="">
-                  {diagnosisLoading ? "Loading" : "Select Sub Type"}
-                </option>
-
-                {Array.from(
-                  subtypes.reduce((groups, subtype) => {
-                    const current = groups.get(subtype.cancerType) ?? [];
-                    current.push(subtype);
-                    groups.set(subtype.cancerType, current);
-                    return groups;
-                  }, new Map<string, CancerSubtypeOption[]>())
-                ).map(([cancerType, groupSubtypes]) => (
-                  <optgroup key={cancerType} label={cancerType}>
-                    {groupSubtypes.map((subtype) => (
-                      <option
-                        key={subtype.subtype_id}
-                        value={subtype.subtype_name}
-                      >
-                        {subtype.subtype_name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                <ChevronDownIcon />
-              </div>
-            </div>
-          </div>
+          <DiagnosisCheckboxList
+            title="Histopathology"
+            groups={buildCheckboxGroups(
+              subtypes.map((item) => ({
+                value: item.subtype_name,
+                cancerType: item.cancerType,
+              }))
+            )}
+            selected={formData.subType}
+            onToggle={handleMultiToggle("subType")}
+            loading={diagnosisLoading}
+          />
 
           {/* Histomorphology 
           <div>
@@ -5187,51 +5409,13 @@ const Diagnosis: React.FC<{
           </div>*/}
 
           {/* Cancer Stage */}
-          <div>
-            <label
-              htmlFor="cancerStage"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
-              Cancer Stage
-            </label>
-
-            <div className="relative">
-              <select
-                id="cancerStage"
-                name="cancerStage"
-                value={formData.cancerStage}
-                onChange={handleChange}
-className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-              >
-                <option value="">
-                  {diagnosisLoading
-                    ? "Loading"
-                    : "Select Cancer Stage"}
-                </option>
-
-                {Array.from(
-                  stageLabels.reduce((groups, option) => {
-                    const current = groups.get(option.cancerType) ?? [];
-                    current.push(option);
-                    groups.set(option.cancerType, current);
-                    return groups;
-                  }, new Map<string, StageOption[]>())
-                ).map(([cancerType, options]) => (
-                  <optgroup key={cancerType} label={cancerType}>
-                    {options.map((option) => (
-                      <option key={`${cancerType}-${option.value}`} value={option.value}>
-                        {option.value}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                <ChevronDownIcon />
-              </div>
-            </div>
-          </div>
+          <DiagnosisCheckboxList
+            title="Cancer Stage"
+            groups={buildCheckboxGroups(stageLabels)}
+            selected={formData.cancerStage}
+            onToggle={handleMultiToggle("cancerStage")}
+            loading={diagnosisLoading}
+          />
 
           {/* Grade */}
           <div>
@@ -5269,143 +5453,146 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
             </div>
           </div>
 
-          {/* T Stage */}
-          <div>
-            <label
-              htmlFor="tStage"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
-              T Stage
-            </label>
-
-            <div className="relative">
-              <select
-                id="tStage"
-                name="tStage"
-                value={formData.tStage}
-                onChange={handleChange}
-                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+          {/* TNM Staging */}
+          <div className="col-span-full grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-3 lg:grid-cols-3">
+            {/* T Stage */}
+            <div>
+              <label
+                htmlFor="tStage"
+                className="mb-2 block text-sm font-semibold text-gray-600"
               >
-                <option value="">
-                  {diagnosisLoading
-                    ? "Loading"
-                    : "Select T Stage"}
-                </option>
+                T Stage
+              </label>
 
-                {Array.from(
-                  tOptions.reduce((groups, option) => {
-                    const current = groups.get(option.cancerType) ?? [];
-                    current.push(option);
-                    groups.set(option.cancerType, current);
-                    return groups;
-                  }, new Map<string, StageOption[]>())
-                ).map(([cancerType, options]) => (
-                  <optgroup key={cancerType} label={cancerType}>
-                    {options.map((option) => (
-                      <option key={`${cancerType}-${option.value}`} value={option.value}>
-                        {option.value}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+              <div className="relative">
+                <select
+                  id="tStage"
+                  name="tStage"
+                  value={formData.tStage}
+                  onChange={handleChange}
+                  className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+                >
+                  <option value="">
+                    {diagnosisLoading
+                      ? "Loading"
+                      : "Select T Stage"}
+                  </option>
 
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                <ChevronDownIcon />
+                  {Array.from(
+                    tOptions.reduce((groups, option) => {
+                      const current = groups.get(option.cancerType) ?? [];
+                      current.push(option);
+                      groups.set(option.cancerType, current);
+                      return groups;
+                    }, new Map<string, StageOption[]>())
+                  ).map(([cancerType, options]) => (
+                    <optgroup key={cancerType} label={cancerType}>
+                      {options.map((option) => (
+                        <option key={`${cancerType}-${option.value}`} value={option.value}>
+                          {option.value}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                  <ChevronDownIcon />
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* N Stage */}
-          <div>
-            <label
-              htmlFor="nStage"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
-              N Stage
-            </label>
-
-            <div className="relative">
-              <select
-                id="nStage"
-                name="nStage"
-                value={formData.nStage}
-                onChange={handleChange}
-                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+            {/* N Stage */}
+            <div>
+              <label
+                htmlFor="nStage"
+                className="mb-2 block text-sm font-semibold text-gray-600"
               >
-                <option value="">
-                  {diagnosisLoading
-                    ? "Loading"
-                    : "Select N Stage"}
-                </option>
+                N Stage
+              </label>
 
-                {Array.from(
-                  nOptions.reduce((groups, option) => {
-                    const current = groups.get(option.cancerType) ?? [];
-                    current.push(option);
-                    groups.set(option.cancerType, current);
-                    return groups;
-                  }, new Map<string, StageOption[]>())
-                ).map(([cancerType, options]) => (
-                  <optgroup key={cancerType} label={cancerType}>
-                    {options.map((option) => (
-                      <option key={`${cancerType}-${option.value}`} value={option.value}>
-                        {option.value}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+              <div className="relative">
+                <select
+                  id="nStage"
+                  name="nStage"
+                  value={formData.nStage}
+                  onChange={handleChange}
+                  className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+                >
+                  <option value="">
+                    {diagnosisLoading
+                      ? "Loading"
+                      : "Select N Stage"}
+                  </option>
 
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                <ChevronDownIcon />
+                  {Array.from(
+                    nOptions.reduce((groups, option) => {
+                      const current = groups.get(option.cancerType) ?? [];
+                      current.push(option);
+                      groups.set(option.cancerType, current);
+                      return groups;
+                    }, new Map<string, StageOption[]>())
+                  ).map(([cancerType, options]) => (
+                    <optgroup key={cancerType} label={cancerType}>
+                      {options.map((option) => (
+                        <option key={`${cancerType}-${option.value}`} value={option.value}>
+                          {option.value}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                  <ChevronDownIcon />
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* M Stage */}
-          <div>
-            <label
-              htmlFor="mStage"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
-              M Stage
-            </label>
-
-            <div className="relative">
-              <select
-                id="mStage"
-                name="mStage"
-                value={formData.mStage}
-                onChange={handleChange}
-                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+            {/* M Stage */}
+            <div>
+              <label
+                htmlFor="mStage"
+                className="mb-2 block text-sm font-semibold text-gray-600"
               >
-                <option value="">
-                  {diagnosisLoading
-                    ? "Loading"
-                    : "Select M Stage"}
-                </option>
+                M Stage
+              </label>
 
-                {Array.from(
-                  mOptions.reduce((groups, option) => {
-                    const current = groups.get(option.cancerType) ?? [];
-                    current.push(option);
-                    groups.set(option.cancerType, current);
-                    return groups;
-                  }, new Map<string, StageOption[]>())
-                ).map(([cancerType, options]) => (
-                  <optgroup key={cancerType} label={cancerType}>
-                    {options.map((option) => (
-                      <option key={`${cancerType}-${option.value}`} value={option.value}>
-                        {option.value}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+              <div className="relative">
+                <select
+                  id="mStage"
+                  name="mStage"
+                  value={formData.mStage}
+                  onChange={handleChange}
+                  className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+                >
+                  <option value="">
+                    {diagnosisLoading
+                      ? "Loading"
+                      : "Select M Stage"}
+                  </option>
 
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                <ChevronDownIcon />
+                  {Array.from(
+                    mOptions.reduce((groups, option) => {
+                      const current = groups.get(option.cancerType) ?? [];
+                      current.push(option);
+                      groups.set(option.cancerType, current);
+                      return groups;
+                    }, new Map<string, StageOption[]>())
+                  ).map(([cancerType, options]) => (
+                    <optgroup key={cancerType} label={cancerType}>
+                      {options.map((option) => (
+                        <option key={`${cancerType}-${option.value}`} value={option.value}>
+                          {option.value}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                  <ChevronDownIcon />
+                </div>
               </div>
             </div>
           </div>
