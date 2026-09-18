@@ -132,12 +132,35 @@ const FormProtocolDropdown = React.forwardRef<HTMLInputElement, FormDropdownProp
       }
     }
 
-    function openDropdown() {
-      if (loading || disabled) return;
+    const updatePosition = React.useCallback(() => {
       const el = containerRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
-      setCoords({ top: rect.bottom, left: rect.left, width: rect.width });
+      if (rect.bottom < 0 || rect.top > window.innerHeight) {
+        setOpen(false);
+        return;
+      }
+      const fitsBelow = rect.bottom + 260 <= window.innerHeight;
+      const top = fitsBelow ? rect.bottom : Math.max(8, rect.top - 264);
+      const baseWidth = rect.width;
+      const targetWidth = Math.min(window.innerWidth - 24, Math.round(baseWidth * 1.3));
+      setCoords({ top, left: rect.left, width: targetWidth });
+    }, []);
+
+    React.useEffect(() => {
+      if (!open) return;
+      updatePosition();
+      window.addEventListener("scroll", updatePosition, true);
+      window.addEventListener("resize", updatePosition);
+      return () => {
+        window.removeEventListener("scroll", updatePosition, true);
+        window.removeEventListener("resize", updatePosition);
+      };
+    }, [open, updatePosition]);
+
+    function openDropdown() {
+      if (loading || disabled) return;
+      updatePosition();
       setOpen(true);
     }
 
@@ -204,7 +227,7 @@ const FormProtocolDropdown = React.forwardRef<HTMLInputElement, FormDropdownProp
               <div
                 ref={listRef}
                 style={{
-                  position: "absolute",
+                  position: "fixed",
                   top: coords.top,
                   left: coords.left,
                   width: coords.width,

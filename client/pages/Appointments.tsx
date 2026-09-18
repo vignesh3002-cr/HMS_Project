@@ -9,7 +9,6 @@ import {
   ChevronDown,
   Check,
   Loader2,
-  FlaskConical,
 } from "lucide-react";
 import HmsTable from "@/components/hms/HmsTable";
 import { getDepartmentColors } from "@/components/hms/DepartmentBadge";
@@ -130,9 +129,8 @@ function formatAppointmentTimeConditional(record: Appointment): string {
 
 function mapAppointmentRecord(record: AppointmentRecord, index: number): Appointment {
   const patientName = formatPatientName(record.patient_bio_data);
-  const isLab = (record.Patient_visit_type || record.patient_visit_type || record.reason_for_visit || "").toLowerCase().includes("lab");
   const hasDoctor = Boolean(record.employees && record.employee_id && record.employee_id !== "—");
-  const doctorName = (!isLab && hasDoctor) ? formatDoctorName(record.employees) : "—";
+  const doctorName = hasDoctor ? formatDoctorName(record.employees) : "—";
   const deptName = record.department_master?.department_name ?? record.department ?? null;
   const { bg: deptBg, text: deptColor } = getDepartmentColors(deptName);
 
@@ -153,7 +151,7 @@ function mapAppointmentRecord(record: AppointmentRecord, index: number): Appoint
     avatarBg: deptBg,
     branch: record.branch?.branch_name ?? "—",
     doctor: doctorName,
-    doctorId: (!isLab && hasDoctor && record.employee_id) ? record.employee_id : "—",
+    doctorId: (hasDoctor && record.employee_id) ? record.employee_id : "—",
     doctorInitial: getInitials(doctorName),
     visitType: record.Patient_visit_type || record.patient_visit_type || "",
     date: formatAppointmentDate(record.appointment_date),
@@ -447,7 +445,7 @@ const AppointmentSchedule: React.FC = () => {
           { header: "Patient", cell: (r: Appointment) => r.patient },
           { header: "Patient ID", cell: (r: Appointment) => r.patientId },
           { header: "Branch", cell: (r: Appointment) => r.branch },
-          { header: "Doctor", cell: (r: Appointment) => r.visitType?.toLowerCase().includes("lab") ? "Direct Lab Visit" : r.doctor },
+          { header: "Doctor", cell: (r: Appointment) => r.doctor },
           { header: "Doctor ID", cell: (r: Appointment) => r.doctorId },
           { header: "Visit Type", cell: (r: Appointment) => r.visitType || "—" },
           { header: "Date", cell: (r: Appointment) => r.date },
@@ -700,11 +698,7 @@ const AppointmentSchedule: React.FC = () => {
                   }},
                   { key: "branch", label: "Branch", className: "!whitespace-normal", render: (r: Appointment) => <span className="hms-content-text text-[#191C1E]">{r.branch}</span> },
                   { key: "doctor", label: "Doctor", className: "!whitespace-normal", render: (r: Appointment) => (
-                    r.visitType?.toLowerCase().includes("lab") ? (
-                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-full">
-                        <FlaskConical className="h-3.5 w-3.5" /> Direct Lab Visit
-                      </span>
-                    ) : !r.doctor || r.doctor === "—" || r.doctor === "Unassigned" ? (
+                    !r.doctor || r.doctor === "—" || r.doctor === "Unassigned" ? (
                       <span className="text-gray-400 font-semibold pl-2">—</span>
                     ) : (
                       <div className="flex items-center gap-2">

@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+﻿import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2, Activity, AlertCircle, FlaskConical, CheckCircle2, XCircle } from "lucide-react";
+import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2, Activity, AlertCircle, FlaskConical, CheckCircle2, XCircle, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import HmsTable from "@/components/hms/HmsTable";
-import { format, isToday, isTomorrow, isYesterday, addDays, subDays, startOfWeek, endOfWeek, subWeeks, startOfMonth, endOfMonth, subMonths } from "date-fns";
+import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import CalendarPicker, { type DateRange as CalendarDateRange } from "@/components/hms/Calender";
+import CalendarPicker from "@/components/hms/Calender";
+import BranchPerformance from "@/components/hms/branchPerformance";
 import { useFilterPanel, useDashboardFilters } from "@/components/Filter";
 import { ToolbarFilter } from "@/components/ui/toolbar-filter";
 import { applySearchAndFilter } from "@/components/Filter/utils";
@@ -16,7 +17,6 @@ import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { encounterApi, type EncounterRecord } from "@/api/encounter.api";
 import { patientApi } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
-import { branchApi } from "@/api/branch.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { AppointmentActionMenu } from "@/components/hms/AppointmentActionMenu";
@@ -127,7 +127,7 @@ function getInitials(name: string): string {
 }
 
 function formatBranch(branch: EmployeeRecord["branch"]): string {
-  if (!branch?.branch_name) return "—";
+  if (!branch?.branch_name) return "â€”";
   return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
 }
 
@@ -191,57 +191,15 @@ function formatAppointmentStatus(status: string | null): string {
     .join(" ");
 }
 
-function calculatePercentage(actual: number, total: number): number {
-  if (!total || total <= 0) return 0;
-  return Math.min(100, Math.max(0, Math.round((actual / total) * 100)));
-}
-
-function systemSharePct(branchBookedCount: number, totalSystemBookedCount: number): number {
-  if (totalSystemBookedCount <= 0) return 0;
-  return Math.round((branchBookedCount / totalSystemBookedCount) * 100);
-}
-
-function utilizationPct(bookedCount: number, totalSlots: number): number | null {
-  if (totalSlots <= 0) return null; // no capacity data -> render "N/A", never 0% or 100%
-  return Math.round((bookedCount / totalSlots) * 100);
-}
-
-function utilizationConfidence(totalSlots: number): "low" | "normal" {
-  return totalSlots < 5 ? "low" : "normal";
-}
-
-type Trend =
-  | { kind: "none" }
-  | { kind: "new"; count: number }
-  | { kind: "dropped"; count: number }
-  | { kind: "change"; pct: number; delta: number };
-
-function computeTrend(current: number, previous: number): Trend {
-  if (previous === 0 && current === 0) return { kind: "none" };
-  if (previous === 0 && current > 0) return { kind: "new", count: current };
-  if (previous > 0 && current === 0) return { kind: "dropped", count: previous };
-  const delta = current - previous;
-  const pct = Math.round((delta / previous) * 100);
-  return { kind: "change", pct, delta };
-}
-
-function formatTrend(t: Trend): string {
-  switch (t.kind) {
-    case "none":
-      return "No change";
-    case "new":
-      return `+${t.count} appt${t.count === 1 ? "" : "s"} (new)`;
-    case "dropped":
-      return `-${t.count} appt${t.count === 1 ? "" : "s"} (-100%)`;
-    case "change": {
-      const sign = t.delta > 0 ? "+" : "";
-      return `${sign}${t.delta} appt${Math.abs(t.delta) === 1 ? "" : "s"} (${sign}${t.pct}%)`;
-    }
-  }
-}
-
-function formatComparisonRange(from: Date, to: Date): string {
-  return `${format(from, "MMM d")} – ${format(to, "MMM d")}`;
+function getStatusDotColor(status: string): string {
+  const s = status.toLowerCase();
+  if (s.includes("schedul") || s.includes("booked")) return "bg-blue-500";
+  if (s.includes("consult")) return "bg-purple-500";
+  if (s.includes("complete")) return "bg-emerald-500";
+  if (s.includes("cancel")) return "bg-red-500";
+  if (s.includes("no show") || s.includes("no_show")) return "bg-gray-400";
+  if (s.includes("reschedul")) return "bg-teal-500";
+  return "bg-blue-400";
 }
 
 function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
@@ -254,15 +212,14 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
     : "Unknown Patient";
 
   const doctor = doc.employees;
-  const isLab = (doc.Patient_visit_type || "").toLowerCase().includes("lab");
-  const doctorName = (!isLab && doctor)
+  const doctorName = doctor
     ? `${doctor.first_name} ${doctor.middle_name ? doctor.middle_name + " " : ""}${doctor.last_name}`.trim()
-    : (!isLab && doc.doctor_name && doc.doctor_name !== "Laboratory" && doc.doctor_name !== "Unassigned" ? doc.doctor_name : "—");
+    : (doc.doctor_name && doc.doctor_name !== "Laboratory" && doc.doctor_name !== "Unassigned" ? doc.doctor_name : "â€”");
   const branchName = doc.branch
     ? doc.branch.branch_area
       ? `${doc.branch.branch_name} (${doc.branch.branch_area})`
       : doc.branch.branch_name
-    : doc.branch_id || "—";
+    : doc.branch_id || "â€”";
 
   return {
     id: doc.appointment_id,
@@ -273,13 +230,13 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
     avatarColor: patientPalette.avatarColor,
     avatarBg: patientPalette.initBg,
     doctorName,
-    doctorId: (!isLab && doc.employee_id) ? doc.employee_id : "—",
+    doctorId: doc.employee_id ? doc.employee_id : "â€”",
     doctorAvatar: getInitials(doctorName),
     doctorAvatarcolor: doctorPalette.avatarColor,
     doctorAvatarBg: doctorPalette.initBg,
     branch: branchName,
-    branchId: doc.branch_id ?? "—",
-    reason: doc.reason_for_visit || "—",
+    branchId: doc.branch_id ?? "â€”",
+    reason: doc.reason_for_visit || "â€”",
     date: formatDateOnly(doc.appointment_date),
     time: formatTimeOnly(doc.appointment_time),
     status: formatAppointmentStatus(doc.status ?? ""),
@@ -288,98 +245,6 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
     chemo_fitness: doc.chemo_fitness,
     chemo_unfit_reason: doc.chemo_unfit_reason,
     rawRecord: doc,
-  };
-}
-
-type BranchPerfRange = "today" | "yesterday" | "tomorrow" | "thisWeek" | "lastWeek" | "thisMonth" | "lastMonth" | "custom";
-
-const BRANCH_PERF_RANGE_OPTIONS: { value: BranchPerfRange; label: string }[] = [
-  { value: "today", label: "Today" },
-  { value: "yesterday", label: "Yesterday" },
-  { value: "tomorrow", label: "Tomorrow" },
-  { value: "thisWeek", label: "This Week" },
-  { value: "lastWeek", label: "Last Week" },
-  { value: "thisMonth", label: "This Month" },
-  { value: "lastMonth", label: "Last Month" },
-  { value: "custom", label: "Custom Range" },
-];
-
-interface BranchPerfRangeResult {
-  dateFrom: string;
-  dateTo: string;
-  prevDateFrom: string;
-  prevDateTo: string;
-  dateLabel: string;
-  compareLabel: string;
-}
-
-function getBranchPerfRangeDates(range: BranchPerfRange, base: Date, customRange?: CalendarDateRange | null): BranchPerfRangeResult {
-  const weekStart = startOfWeek(base, { weekStartsOn: 1 });
-  const weekEnd = endOfWeek(base, { weekStartsOn: 1 });
-  const lastWeekStart = subWeeks(weekStart, 1);
-  const lastWeekEnd = subWeeks(weekEnd, 1);
-  const monthStart = startOfMonth(base);
-  const monthEnd = endOfMonth(base);
-  const lastMonthStart = startOfMonth(subMonths(base, 1));
-  const lastMonthEnd = endOfMonth(subMonths(base, 1));
-
-  let currentFrom: Date;
-  let currentTo: Date;
-  let prevFrom: Date;
-  let prevTo: Date;
-
-  if (range === "custom" && customRange?.from && customRange?.to) {
-    currentFrom = customRange.from;
-    currentTo = customRange.to;
-    const durationMs = currentTo.getTime() - currentFrom.getTime();
-    prevFrom = new Date(currentFrom.getTime() - durationMs);
-    prevTo = new Date(currentTo.getTime() - durationMs);
-  } else {
-    const ranges: Record<string, { dateFrom: Date; dateTo: Date; prevFrom: Date; prevTo: Date }> = {
-      today: {
-        dateFrom: base, dateTo: base,
-        prevFrom: subDays(base, 1), prevTo: subDays(base, 1),
-      },
-      yesterday: {
-        dateFrom: subDays(base, 1), dateTo: subDays(base, 1),
-        prevFrom: subDays(base, 2), prevTo: subDays(base, 2),
-      },
-      tomorrow: {
-        dateFrom: addDays(base, 1), dateTo: addDays(base, 1),
-        prevFrom: base, prevTo: base,
-      },
-      thisWeek: {
-        dateFrom: weekStart, dateTo: weekEnd,
-        prevFrom: lastWeekStart, prevTo: lastWeekEnd,
-      },
-      lastWeek: {
-        dateFrom: lastWeekStart, dateTo: lastWeekEnd,
-        prevFrom: subWeeks(lastWeekStart, 1), prevTo: subWeeks(lastWeekEnd, 1),
-      },
-      thisMonth: {
-        dateFrom: monthStart, dateTo: monthEnd,
-        prevFrom: lastMonthStart, prevTo: lastMonthEnd,
-      },
-      lastMonth: {
-        dateFrom: lastMonthStart, dateTo: lastMonthEnd,
-        prevFrom: startOfMonth(subMonths(base, 2)), prevTo: endOfMonth(subMonths(base, 2)),
-      },
-    };
-
-    const r = ranges[range] || ranges.today;
-    currentFrom = r.dateFrom;
-    currentTo = r.dateTo;
-    prevFrom = r.prevFrom;
-    prevTo = r.prevTo;
-  }
-
-  return {
-    dateFrom: format(currentFrom, "yyyy-MM-dd"),
-    dateTo: format(currentTo, "yyyy-MM-dd"),
-    prevDateFrom: format(prevFrom, "yyyy-MM-dd"),
-    prevDateTo: format(prevTo, "yyyy-MM-dd"),
-    dateLabel: formatComparisonRange(currentFrom, currentTo),
-    compareLabel: `Compared with ${formatComparisonRange(prevFrom, prevTo)}`,
   };
 }
 
@@ -476,7 +341,7 @@ export default function Dashboard() {
   const [patientCount, setPatientCount] = useState<number>(0);
   const [patientLoading, setPatientLoading] = useState(false);
 
-  // Real appointments fetched from the backend. No dummy fallback — an
+  // Real appointments fetched from the backend. No dummy fallback â€” an
   // empty/failed fetch just leaves this null and the tab shows no rows.
   const [realAppointments, setRealAppointments] = useState<Record<string, unknown>[] | null>(null);
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
@@ -497,6 +362,53 @@ export default function Dashboard() {
   // depends on it to scope the Appointments tab to the selected day.
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [isKpiCalendarOpen, setIsKpiCalendarOpen] = useState(false);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateScrollButtons = useCallback(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(maxScroll > 0 && el.scrollLeft < maxScroll - 4);
+  }, []);
+
+  const handleKpiScroll = (direction: "left" | "right") => {
+    const el = trackRef.current;
+    if (!el) return;
+    const scrollAmount = 320;
+    el.scrollBy({
+      left: direction === "left" ? -scrollAmount : scrollAmount,
+      behavior: "smooth",
+    });
+  };
+
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el) return;
+
+    updateScrollButtons();
+
+    const handleScroll = () => {
+      updateScrollButtons();
+    };
+
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("resize", updateScrollButtons);
+
+    const ro = new ResizeObserver(() => {
+      updateScrollButtons();
+    });
+    ro.observe(el);
+
+    return () => {
+      el.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("resize", updateScrollButtons);
+      ro.disconnect();
+    };
+  }, [updateScrollButtons]);
 
   const canReadEmployees = permissions.some((p) => p === "employee.read" || p === "doctor.read");
   // React Query: fetch employees once and keep them cached keyed by branch + date.
@@ -529,153 +441,9 @@ export default function Dashboard() {
     setRealStaff(employeesQuery.data.staff);
   }, [employeesQuery.data]);
 
-  // Branch progress bar state — branches come from the real /branch API.
-  // Each branch's pct/color is driven by its relative appointment volume
-  // compared to the busiest branch (not tier-based).
-  const [branches, setBranches] = useState<
-    { id: string; name: string; count: number; previousCount: number; totalSlots: number; systemShare: number; color: string }[]
-  >([]);
-  const [branchPerfLoading, setBranchPerfLoading] = useState(false);
-  const [branchPerfError, setBranchPerfError] = useState<string | null>(null);
-  const [branchPerfRange, setBranchPerfRange] = useState<BranchPerfRange>("today");
-  const [customDateRange, setCustomDateRange] = useState<CalendarDateRange | null>(null);
-  const [isCustomRangeOpen, setIsCustomRangeOpen] = useState(false);
-  const [branchPerfDateLabel, setBranchPerfDateLabel] = useState("");
-  const [branchPerfCompareLabel, setBranchPerfCompareLabel] = useState("");
-
-  // Hover card state — fetched on demand when user hovers a branch row.
-  const [hoveredBranchId, setHoveredBranchId] = useState<string | null>(null);
-  const [hoveredBranchDetails, setHoveredBranchDetails] = useState<{
-    total: number;
-    booked: number;
-    completed: number;
-    cancelled: number;
-    noShow: number;
-    scheduled: number;
-  } | null>(null);
-  const [isHoverDetailsLoading, setIsHoverDetailsLoading] = useState(false);
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isApptStatusDropdownOpen, setIsApptStatusDropdownOpen] = useState(false);
 
   const canReadAppointments = permissions.includes("appointment.read");
-  // React Query-backed branch performance. Runs its own appointment-count sweep
-  // (the slow part) so switching branch Perf range or the main date keeps the
-  // previous result on screen while a background refetch refreshes branch data.
-  const branchPerfQuery = useQuery({
-    queryKey: ["dashboard-branch-perf", branchPerfRange, format(selectedDate, "yyyy-MM-dd"), customDateRange],
-    queryFn: async () => {
-      const branchRes = await branchApi.getAll();
-      const branchList = branchRes.data?.data || [];
-
-      const { dateFrom, dateTo, prevDateFrom, prevDateTo, dateLabel, compareLabel } = getBranchPerfRangeDates(branchPerfRange, selectedDate, customDateRange);
-
-      const results = await Promise.all(
-        branchList.map(async (b) => {
-          const currentCount = await appointmentApi
-            .getAll({ branchId: b.branch_id, limit: 1, dateFrom, dateTo, excludeStatuses: "CANCELLED,NO_SHOW" })
-            .then((res) => res.data?.data?.total ?? 0)
-            .catch(() => 0);
-          const previousCount = await appointmentApi
-            .getAll({ branchId: b.branch_id, limit: 1, dateFrom: prevDateFrom, dateTo: prevDateTo, excludeStatuses: "CANCELLED,NO_SHOW" })
-            .then((res) => res.data?.data?.total ?? 0)
-            .catch(() => 0);
-          const totalSlots = await appointmentApi
-            .getAll({ branchId: b.branch_id, limit: 1, dateFrom, dateTo })
-            .then((res) => res.data?.data?.total ?? 0)
-            .catch(() => 0);
-          return { currentCount, previousCount, totalSlots };
-        }),
-      );
-
-      const branchData = branchList.map((b, index) => ({
-        id: b.branch_id,
-        name: b.branch_area ? `${b.branch_name} (${b.branch_area})` : (b.branch_name || b.branch_id),
-        count: results[index]?.currentCount ?? 0,
-        previousCount: results[index]?.previousCount ?? 0,
-        totalSlots: results[index]?.totalSlots ?? 0,
-      }));
-
-      const ranked = [...branchData].sort((a, b) => b.count - a.count);
-      const totalSystemBookedCount = ranked.reduce((sum, b) => sum + b.count, 0);
-
-      return {
-        branches: ranked.map((b) => ({
-          ...b,
-          systemShare: systemSharePct(b.count, totalSystemBookedCount),
-          color: "#00488D",
-        })),
-        dateLabel,
-        compareLabel,
-      };
-    },
-    enabled: canReadAppointments,
-    refetchOnWindowFocus: false,
-    staleTime: 1000 * 60 * 2,
-  });
-
-  useEffect(() => {
-    if (branchPerfQuery.data) {
-      setBranches(branchPerfQuery.data.branches);
-      setBranchPerfDateLabel(branchPerfQuery.data.dateLabel);
-      setBranchPerfCompareLabel(branchPerfQuery.data.compareLabel);
-    }
-  }, [branchPerfQuery.data]);
-
-  useEffect(() => {
-    setBranchPerfLoading(branchPerfQuery.isLoading || branchPerfQuery.isFetching);
-  }, [branchPerfQuery.isLoading, branchPerfQuery.isFetching]);
-
-  useEffect(() => {
-    if (!branchPerfQuery.error) return;
-    console.error("[Dashboard] Failed to load branch performance:", branchPerfQuery.error);
-    setBranchPerfError("Failed to load branch performance.");
-    setBranches([]);
-  }, [branchPerfQuery.error]);
-
-  // Fetch detailed branch KPIs on demand when a branch row is hovered.
-  const fetchBranchHoverDetails = useCallback(async (branchId: string) => {
-    setIsHoverDetailsLoading(true);
-    try {
-      const { dateFrom, dateTo } = getBranchPerfRangeDates(branchPerfRange, selectedDate, customDateRange);
-      const res = await appointmentApi.getAll({
-        branchId,
-        limit: 100,
-        dateFrom,
-        dateTo,
-      });
-      const appointments = res.data?.data?.appointments || [];
-
-      let completed = 0;
-      let cancelled = 0;
-      let noShow = 0;
-      let scheduled = 0;
-
-      appointments.forEach((a: AppointmentRecord) => {
-        const s = (a.status || "").toUpperCase();
-        if (s === "COMPLETED") completed++;
-        else if (s === "CANCELLED") cancelled++;
-        else if (s === "NO_SHOW") noShow++;
-        else if (s === "SCHEDULED" || s === "RESCHEDULED" || s === "NOT_CHECKED_IN" || s === "IN_CONSULTATION") scheduled++;
-      });
-
-      setHoveredBranchDetails({
-        total: appointments.length,
-        booked: appointments.length - cancelled - noShow,
-        completed,
-        cancelled,
-        noShow,
-        scheduled,
-      });
-    } catch {
-      setHoveredBranchDetails(null);
-    } finally {
-      setIsHoverDetailsLoading(false);
-    }
-  }, [branchPerfRange, selectedDate, customDateRange]);
-
-  useEffect(() => {
-    if (!hoveredBranchId) return;
-    fetchBranchHoverDetails(hoveredBranchId);
-}, [hoveredBranchId, fetchBranchHoverDetails]);
 
   // React Query-backed appointments fetch. Cached per branch + date so switching
   const appointmentsQuery = useQuery({
@@ -817,109 +585,6 @@ export default function Dashboard() {
     setRealStaff([]);
   }, [employeesQuery.error, toast]);
 
-  const liveStats = useMemo(() => {
-    const currentDoctors = realDoctors?.length ?? 0;
-    const currentStaff = realStaff?.length ?? 0;
-    const currentPatients = patientCount;
-    const currentAppointments = appointmentCount;
-    const currentPrescriptions = prescriptionCount;
-
-    const doctorDelta = currentDoctors - prevDoctorsRef.current;
-    const staffDelta = currentStaff - prevStaffRef.current;
-    const patientDelta = currentPatients - prevPatientsRef.current;
-    const appointmentDelta = currentAppointments - prevAppointmentsRef.current;
-    const prescriptionDelta = currentPrescriptions - prevPrescriptionsRef.current;
-
-    // Only show delta after initial load
-    const showDelta = !isInitialLoadRef.current;
-    isInitialLoadRef.current = false;
-
-    return [
-      {
-        label: "Doctors",
-        permission: "doctor.read",
-        route: "/doctor",
-        loading: isEmployeesLoading,
-        value: currentDoctors.toLocaleString(),
-        change: showDelta && doctorDelta > 0 ? `+${doctorDelta}` : "",
-        changeType: doctorDelta >= 0 ? "positive" : "negative",
-        bg: "#D6E3FF",
-        border: "#00488D",
-        valueColor: "#00488D",
-        icon: <Stethoscope className="h-4 w-4" color="#00488D" />,
-        iconBg: "rgba(255,255,255,0.20)",
-      },
-      {
-        label: "Patients",
-        permission: "patient.read",
-        route: "/patients",
-        loading: patientLoading,
-        value: currentPatients.toLocaleString(),
-        change: showDelta && patientDelta > 0 ? `+${patientDelta}` : "",
-        changeType: patientDelta >= 0 ? "positive" : "negative",
-        bg: "rgba(0,200,150,0.12)",
-        border: "#00C896",
-        valueColor: "#00C896",
-        icon: <UserRound className="h-4 w-4" color="#00C896" />,
-        iconBg: "rgba(255,255,255,0.20)",
-      },
-      {
-        label: "Staff",
-        permission: "employee.read",
-        route: "/Staff",
-        loading: isEmployeesLoading,
-        value: currentStaff.toLocaleString(),
-        change: showDelta && staffDelta > 0 ? `+${staffDelta}` : "",
-        changeType: staffDelta >= 0 ? "positive" : "negative",
-        bg: "rgba(255,107,53,0.12)",
-        border: "rgba(123,50,0,0.40)",
-        valueColor: "#7B3200",
-        icon: <Users className="h-4 w-4" color="#7B3200" />,
-        iconBg: "#FFDBCB",
-      },
-      {
-        label: "Appointments",
-        permission: "appointment.read",
-        route: "/appointments",
-        loading: isAppointmentsLoading,
-        value: currentAppointments.toLocaleString(),
-        change: showDelta && appointmentDelta > 0 ? `+${appointmentDelta}` : "",
-        changeType: appointmentDelta >= 0 ? "positive" : "negative",
-        bg: "rgba(255,255,255,0.80)",
-        border: "#C2C6D4",
-        valueColor: "#00488D",
-        icon: <CalendarIcon className="h-4 w-4" color="#00488D" />,
-        iconBg: "rgba(168,200,255,0.20)",
-    },
-    {
-      label: "Prescription Generated",
-      permission: undefined,
-      loading: isPrescriptionsLoading,
-      value: currentPrescriptions.toLocaleString(),
-      change: showDelta && prescriptionDelta > 0 ? `+${prescriptionDelta}` : "",
-      changeType: prescriptionDelta >= 0 ? "positive" : "negative",
-      bg: "#E6E8EA",
-      border: "#4A5F83",
-      valueColor: "#4A5F83",
-      icon: <FileText className="h-4 w-4" color="#4A5F83" />,
-      iconBg: "rgba(236,238,240,0.40)",
-    },
-    {
-      label: "Bills Generated",
-      permission: undefined,
-      value: "0",
-      change: "+160",
-      changeType: "positive",
-      bg: "#D6E3FF",
-      border: "#00488D",
-      valueColor: "#00488D",
-      icon: <Receipt className="h-4 w-4" color="#00488D" />,
-      iconBg: "rgba(255,255,255,0.20)",
-    },
-    ];
-}, [realDoctors, realStaff, patientCount, appointmentCount, prescriptionCount, isEmployeesLoading, isAppointmentsLoading, isPrescriptionsLoading]);
-
-  const visibleStats = liveStats.filter((stat) => !stat.permission || can(stat.permission));
 
   // Oncology & Daycare Daily Tracking Metrics
   const oncologyMetrics = useMemo(() => {
@@ -1008,9 +673,16 @@ export default function Dashboard() {
     handleChange: handleFilterChange,
     handleApply: handleApplyFilter,
     handleClear: handleClearFilter,
+    setAppliedFilter,
   } = useFilterPanel(activeFilterFields);
 
+  const skipClearFilterRef = useRef(false);
+
   useEffect(() => {
+    if (skipClearFilterRef.current) {
+      skipClearFilterRef.current = false;
+      return;
+    }
     handleClearFilter();
   }, [activeTab]);
 
@@ -1111,59 +783,6 @@ export default function Dashboard() {
   const visibleStart = totalRecords === 0 ? 0 : startIndex + 1;
   const visibleEnd = Math.min(endIndex, totalRecords);
 
-  const [animatedValues, setAnimatedValues] = useState<Record<string, number>>({});
-  // Mirror of `animatedValues` that lives in a ref so the animation effect
-  // below can read the latest displayed % WITHOUT listing `animatedValues` as
-  // a dependency. Listing it caused an infinite update loop: the effect sets
-  // animatedValues, which changed the dep, which re-ran the effect, ad infinitum.
-  const animatedValuesRef = useRef<Record<string, number>>(animatedValues);
-  animatedValuesRef.current = animatedValues;
-
-  // Animate each branch's bar from its current displayed value to its real
-  // pct whenever `branches` loads/changes. Cleans up its own intervals so
-  // repeated branch/date changes can't leak overlapping timers.
-  useEffect(() => {
-    const validIds = new Set(branches.map((b) => b.id));
-    setAnimatedValues((prev) => {
-      let changed = false;
-      const next: Record<string, number> = {};
-      for (const [k, v] of Object.entries(prev)) {
-        if (validIds.has(k)) {
-          next[k] = v;
-        } else {
-          changed = true;
-        }
-      }
-      // Only update state when something actually changed. Returning a brand
-      // new object every run (even with identical content) made the effect's
-      // dependency appear "changed" and caused the reverse infinite loop.
-      return changed ? next : prev;
-    });
-
-    const intervals = branches
-      .filter((b) => b.systemShare !== (animatedValuesRef.current[b.id] ?? 0))
-      .map((branch) => {
-        const interval = window.setInterval(() => {
-          setAnimatedValues((prev) => {
-            const value = prev[branch.id] ?? 0;
-
-            if (value === branch.systemShare) {
-              window.clearInterval(interval);
-              return prev;
-            }
-
-            return {
-              ...prev,
-              [branch.id]: value < branch.systemShare ? value + 1 : value - 1,
-            };
-          });
-        }, 30);
-        return interval;
-      });
-
-    return () => intervals.forEach((interval) => window.clearInterval(interval));
-  }, [branches]);
-
   const navigate = useNavigate();
 
   const handleEdit = (id: string | number) => {
@@ -1175,7 +794,7 @@ export default function Dashboard() {
   };
 
   // Doctor rows always route to the real Edit Doctor page, regardless of
-  // which page/tab they're clicked from — role drives the destination, not
+  // which page/tab they're clicked from â€” role drives the destination, not
   // the page. (Staff/Appointments keep the placeholder handler above.)
   const handleEditDoctor = (id: string | number) => {
     navigate(`/doctor/edit/${id}`);
@@ -1267,9 +886,373 @@ export default function Dashboard() {
     }
   };
 
+  const ALL_DOCTOR_STATUSES = useMemo(() => ["Active", "Leave", "Inactive"], []);
+  const ALL_STAFF_STATUSES = useMemo(() => ["Active", "Inactive"], []);
+
+  const totalDoctors = realDoctors?.length ?? 0;
+  const activeDoctors = useMemo(
+    () => (realDoctors ?? []).filter((d: any) => d.status === "Active").length,
+    [realDoctors]
+  );
+
+  const isDoctorAllSelected = useMemo(() => {
+    if (activeTab !== "doctors") return false;
+    const s = appliedValues.status;
+    if (!Array.isArray(s)) return false;
+    return ALL_DOCTOR_STATUSES.every((status) => s.includes(status));
+  }, [activeTab, appliedValues.status, ALL_DOCTOR_STATUSES]);
+
+  const totalStaff = realStaff?.length ?? 0;
+  const activeStaff = useMemo(
+    () => (realStaff ?? []).filter((s: any) => s.status === "Active").length,
+    [realStaff]
+  );
+
+  const isStaffAllSelected = useMemo(() => {
+    if (activeTab !== "staff") return false;
+    const s = appliedValues.status;
+    if (!Array.isArray(s)) return false;
+    return ALL_STAFF_STATUSES.every((status) => s.includes(status));
+  }, [activeTab, appliedValues.status, ALL_STAFF_STATUSES]);
+
+  const appointmentStatusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const a of realAppointments ?? []) {
+      const s = String(a.status || "").trim();
+      if (s) {
+        counts[s] = (counts[s] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [realAppointments]);
+
+  const availableAppointmentStatuses = useMemo(() => {
+    const PREFERRED_STATUSES = [
+      "Scheduled",
+      "In Consultation",
+      "Completed",
+      "Cancelled",
+      "No Show",
+      "Not Checked In",
+      "Rescheduled",
+    ];
+    const keys = Object.keys(appointmentStatusCounts);
+    return keys.sort((a, b) => {
+      const idxA = PREFERRED_STATUSES.indexOf(a);
+      const idxB = PREFERRED_STATUSES.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }, [appointmentStatusCounts]);
+
+  const selectedApptStatus = useMemo(() => {
+    if (activeTab !== "appointments") return null;
+    const s = appliedValues.status;
+    if (Array.isArray(s) && s.length === 1) {
+      return s[0];
+    }
+    return null;
+  }, [activeTab, appliedValues.status]);
+
+  const switchToTabWithFilter = useCallback((targetTab: string, filterName: string, filterValue: any) => {
+    if (activeTab !== targetTab) {
+      skipClearFilterRef.current = true;
+      setActiveTab(targetTab);
+    }
+    setAppliedFilter(filterName, filterValue);
+    setCurrentPage(1);
+  }, [activeTab, setAppliedFilter]);
+
+  const handleSelectAppointmentStatus = useCallback((status: string | null) => {
+    if (activeTab !== "appointments") {
+      skipClearFilterRef.current = true;
+      setActiveTab("appointments");
+    }
+    setSearchQuery("");
+    setCurrentPage(1);
+    const currentStatus = activeTab === "appointments" && Array.isArray(appliedValues.status) ? appliedValues.status : [];
+    if (!status || (currentStatus.length === 1 && currentStatus[0] === status)) {
+      setAppliedFilter("status", undefined);
+    } else {
+      setAppliedFilter("status", [status]);
+    }
+    setIsApptStatusDropdownOpen(false);
+  }, [activeTab, appliedValues.status, setAppliedFilter]);
+
+  const allKpiItems = useMemo(() => {
+    const currentDoctors = realDoctors?.length ?? 0;
+    const currentStaff = realStaff?.length ?? 0;
+    const currentPatients = patientCount;
+    const currentAppointments = appointmentCount;
+    const currentPrescriptions = prescriptionCount;
+
+    const doctorDelta = currentDoctors - prevDoctorsRef.current;
+    const staffDelta = currentStaff - prevStaffRef.current;
+    const patientDelta = currentPatients - prevPatientsRef.current;
+    const appointmentDelta = currentAppointments - prevAppointmentsRef.current;
+    const prescriptionDelta = currentPrescriptions - prevPrescriptionsRef.current;
+
+    const showDelta = !isInitialLoadRef.current;
+    if (isInitialLoadRef.current && (currentDoctors > 0 || currentPatients > 0 || currentAppointments > 0)) {
+      isInitialLoadRef.current = false;
+    }
+
+    return [
+      {
+        id: "doctors",
+        label: "Doctors",
+        subLabel: isDoctorAllSelected ? "Total registered" : "Active today",
+        permission: "doctor.read",
+        loading: isEmployeesLoading,
+        value: isDoctorAllSelected ? totalDoctors : activeDoctors,
+        tag: isDoctorAllSelected ? `Active: ${activeDoctors}` : `+${totalDoctors}`,
+        bg: "#D6E3FF",
+        border: "none",
+        valueColor: "#00488D",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <Stethoscope className="w-[17px] h-[17px]" color="#00488D" />,
+        isActive: activeTab === "doctors",
+        onClick: () => {
+          switchToTabWithFilter("doctors", "status", ["Active"]);
+        },
+        onTagClick: () => {
+          switchToTabWithFilter(
+            "doctors",
+            "status",
+            isDoctorAllSelected ? ["Active"] : ALL_DOCTOR_STATUSES
+          );
+        },
+      },
+      {
+        id: "patients",
+        label: "Patients",
+        subLabel: "Patient registry",
+        permission: "patient.read",
+        loading: patientLoading,
+        value: currentPatients,
+        tag: showDelta && patientDelta !== 0 ? (patientDelta > 0 ? `+${patientDelta}` : `${patientDelta}`) : "Total",
+        bg: "rgba(0, 200, 150, 0.12)",
+        border: "none",
+        valueColor: "#00A87E",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <UserRound className="w-[17px] h-[17px]" color="#00A87E" />,
+        isActive: false,
+        onClick: () => {
+          navigate("/patients");
+        },
+      },
+      {
+        id: "staff",
+        label: "Staff",
+        subLabel: isStaffAllSelected ? "Total staff" : "Active today",
+        permission: "employee.read",
+        loading: isEmployeesLoading,
+        value: isStaffAllSelected ? totalStaff : activeStaff,
+        tag: isStaffAllSelected ? `Active: ${activeStaff}` : `+${totalStaff}`,
+        bg: "rgba(255, 107, 53, 0.12)",
+        border: "none",
+        valueColor: "#7B3200",
+        iconBg: "#FFDBCB",
+        icon: <Users className="w-[17px] h-[17px]" color="#7B3200" />,
+        isActive: activeTab === "staff",
+        onClick: () => {
+          switchToTabWithFilter("staff", "status", ["Active"]);
+        },
+        onTagClick: () => {
+          switchToTabWithFilter(
+            "staff",
+            "status",
+            isStaffAllSelected ? ["Active"] : ALL_STAFF_STATUSES
+          );
+        },
+      },
+      {
+        id: "appointments",
+        label: "Appointments",
+        subLabel: selectedApptStatus ? `${selectedApptStatus} status` : "Scheduled for date",
+        permission: "appointment.read",
+        loading: isAppointmentsLoading,
+        value: selectedApptStatus ? (appointmentStatusCounts[selectedApptStatus] ?? 0) : currentAppointments,
+        tag: selectedApptStatus ? `${selectedApptStatus}: ${appointmentStatusCounts[selectedApptStatus] ?? 0}` : `All: ${currentAppointments}`,
+        bg: "rgba(255, 255, 255, 0.85)",
+        border: "none",
+        valueColor: "#00488D",
+        iconBg: "rgba(168, 200, 255, 0.25)",
+        icon: <CalendarIcon className="w-[17px] h-[17px]" color="#00488D" />,
+        isActive: activeTab === "appointments" && !searchQuery,
+        isDropdown: true,
+        onClick: () => {
+          if (activeTab !== "appointments") {
+            skipClearFilterRef.current = true;
+            setActiveTab("appointments");
+          }
+          setSearchQuery("");
+          setCurrentPage(1);
+          setIsApptStatusDropdownOpen(true);
+        },
+        onTagClick: () => {
+          setIsApptStatusDropdownOpen((prev) => !prev);
+        },
+      },
+      {
+        id: "prescriptions",
+        label: "Prescription Generated",
+        subLabel: "Prescriptions generated",
+        permission: undefined,
+        loading: isPrescriptionsLoading,
+        value: currentPrescriptions,
+        tag: showDelta && prescriptionDelta !== 0 ? (prescriptionDelta > 0 ? `+${prescriptionDelta}` : `${prescriptionDelta}`) : "Rx Count",
+        bg: "#E6E8EA",
+        border: "none",
+        valueColor: "#4A5F83",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <FileText className="w-[17px] h-[17px]" color="#4A5F83" />,
+        isActive: false,
+        onClick: () => {
+          setActiveTab("appointments");
+          setCurrentPage(1);
+        },
+      },
+      {
+        id: "bills",
+        label: "Bills Generated",
+        subLabel: "Invoices & billing",
+        permission: undefined,
+        loading: false,
+        value: 0,
+        tag: "Invoices",
+        bg: "#ded3fa",
+        border: "none",
+        valueColor: "#00488D",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <Receipt className="w-[17px] h-[17px]" color="#00488D" />,
+        isActive: false,
+        onClick: () => {
+          navigate("/billing");
+        },
+      },
+      {
+        id: "total-op",
+        label: "Total OP Visits",
+        subLabel: "OPD & chemo consults",
+        permission: "appointment.read",
+        loading: isAppointmentsLoading,
+        value: oncologyMetrics.totalOpVisits,
+        tag: "OPD",
+        bg: "#dcebba",
+        border: "none",
+        valueColor: "#00488D",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <Activity className="w-[17px] h-[17px]" color="#00488D" />,
+        isActive: false,
+        onClick: () => {
+          setActiveTab("appointments");
+          setSearchQuery("");
+          setCurrentPage(1);
+        },
+      },
+      {
+        id: "chemo-delivered",
+        label: "Actual Chemo Delivered",
+        subLabel: "Completed / cleared cycles",
+        permission: "appointment.read",
+        loading: isAppointmentsLoading,
+        value: oncologyMetrics.actualChemoDelivered,
+        tag: "Daycare",
+        bg: "#E6E8EA",
+        border: "none",
+        valueColor: "#4A5F83",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <CheckCircle2 className="w-[17px] h-[17px]" color="#4A5F83" />,
+        isActive: activeTab === "appointments" && searchQuery.toLowerCase() === "chemo",
+        onClick: () => {
+          setActiveTab("appointments");
+          setSearchQuery((prev) => (prev.toLowerCase() === "chemo" ? "" : "chemo"));
+          setCurrentPage(1);
+        },
+      },
+      {
+        id: "chemo-cancelled",
+        label: "Cancelled / Deferred Chemo",
+        subLabel: "Unfit (OP visit retained)",
+        permission: "appointment.read",
+        loading: isAppointmentsLoading,
+        value: oncologyMetrics.cancelledChemo,
+        tag: "Deferred",
+        bg: "#FFDBCB",
+        border: "none",
+        valueColor: "#7B3200",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <XCircle className="w-[17px] h-[17px]" color="#7B3200" />,
+        isActive: activeTab === "appointments" && searchQuery.toLowerCase() === "cancel",
+        onClick: () => {
+          setActiveTab("appointments");
+          setSearchQuery((prev) => (prev.toLowerCase() === "cancel" ? "" : "cancel"));
+          setCurrentPage(1);
+        },
+      },
+      {
+        id: "lab-visits",
+        label: "Lab Visits",
+        subLabel: "Laboratory visits",
+        permission: "appointment.read",
+        loading: isAppointmentsLoading,
+        value: oncologyMetrics.labVisits,
+        tag: "Lab",
+        bg: "#D6E3FF",
+        border: "none",
+        valueColor: "#00488D",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <FlaskConical className="w-[17px] h-[17px]" color="#00488D" />,
+        isActive: activeTab === "appointments" && searchQuery.toLowerCase() === "lab",
+        onClick: () => {
+          setActiveTab("appointments");
+          setSearchQuery((prev) => (prev.toLowerCase() === "lab" ? "" : "lab"));
+          setCurrentPage(1);
+        },
+      },
+    ];
+  }, [
+    realDoctors,
+    realStaff,
+    patientCount,
+    appointmentCount,
+    prescriptionCount,
+    isEmployeesLoading,
+    isAppointmentsLoading,
+    isPrescriptionsLoading,
+    patientLoading,
+    activeTab,
+    searchQuery,
+    oncologyMetrics,
+    navigate,
+    totalDoctors,
+    activeDoctors,
+    isDoctorAllSelected,
+    ALL_DOCTOR_STATUSES,
+    totalStaff,
+    activeStaff,
+    isStaffAllSelected,
+    ALL_STAFF_STATUSES,
+    selectedApptStatus,
+    appointmentStatusCounts,
+    switchToTabWithFilter,
+  ]);
+
+  const visibleStats = useMemo(() => {
+    return allKpiItems.filter((stat) => !stat.permission || can(stat.permission));
+  }, [allKpiItems, can]);
+
+  useEffect(() => {
+    const timer = setTimeout(updateScrollButtons, 150);
+    return () => clearTimeout(timer);
+  }, [visibleStats.length, updateScrollButtons]);
+
   // Only the very first load (waiting on permissions) shows the full-page
   // skeleton. Branch/date changes and manual refreshes just flip
-  // isEmployeesLoading/isAppointmentsLoading — those are handled inline
+  // isEmployeesLoading/isAppointmentsLoading â€” those are handled inline
   // (stat cards + table spinner below) so the shell never unmounts, same
   // as the Staff page.
   if (permissionsLoading) {
@@ -1292,212 +1275,279 @@ export default function Dashboard() {
       <div className="flex flex-col flex-1 min-w-0">
         {/* Content */}
         <main className="flex flex-col gap-6 border-t border-[#E5E7EB] pt-6">
-          {/* Stats Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-8">
-            {visibleStats.map((stat) => (
-              <div
-                key={stat.label}
-                onClick={stat.route ? () => navigate(stat.route) : undefined}
-                role={stat.route ? "button" : undefined}
-                tabIndex={stat.route ? 0 : undefined}
-                onKeyDown={
-                  stat.route
-                    ? (e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          navigate(stat.route);
-                        }
-                      }
-                    : undefined
-                }
-                className={`flex flex-col p-4 rounded-xl shadow-[2px_2px_16px_0_rgba(0,0,0,0.25)] transition-all duration-200 hover:-translate-y-1 hover:shadow-lg ${stat.route ? "cursor-pointer" : "cursor-default"}`}
-                style={{ background: stat.bg, border: `0.2px solid ${stat.border}` }}
-              >
-                <div className="flex justify-between items-start">
-                  <div
-                    className="w-8 h-8 flex items-center justify-center rounded-[4px]"
-                    style={{ background: stat.iconBg }}
-                  >
-                    {stat.icon}
-                  </div>
-                  <span
-                    className="text-[9px] font-semibold leading-[13.5px]"
-                    style={{
-                      color: stat.changeType === "negative" ? "#EF4444" : "#16A34A",
-                    }}
-                  >
-                    {stat.change}
-                  </span>
-                </div>
-                <div className="pt-2">
-                  <div className="font-extrabold text-xl leading-7 tracking-[-1px]" style={{ color: stat.valueColor }}>
-                    {stat.loading ? (
-                      <div className="w-12 h-5 rounded-md bg-black/10 animate-pulse" />
-                    ) : (
-                      <CountUp target={parseStatValue(stat.value)} />
-                    )}
-                  </div>
-                  <div className="text-[rgba(0,0,0,0.70)] text-[9px] font-semibold tracking-[0.9px] capitalize leading-[13.5px]">
-                    {stat.label}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Oncology & Daycare Clinical Operations Tracking */}
-          <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          {/* Key Performance Indicators - Unified Scrollable Row */}
+          <div className="flex flex-col gap-3">
+            {/* KPI Header with Date Picker */}
+            <div className="flex items-center justify-between flex-wrap gap-2 px-1">
               <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-bold text-slate-800 tracking-wide">
-                    Oncology & Daycare Daily Tracking
-                  </h3>
-                  <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700 border border-blue-200">
-                    Clinical Operations
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500">
-                  Daily breakdown for Outpatient consultations, Chemotherapy delivery, cancellations, and Lab visits.
-                </p>
+                <h2 className="text-base font-bold text-[#1c1e21] tracking-tight">Key Performance Indicators</h2>
+                <p className="text-xs text-[#70747c]">Real-time operational & clinical metrics across departments</p>
               </div>
-              <div className="text-xs text-slate-400 font-medium">
-                {format(selectedDate, "dd MMM yyyy")}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center bg-white border border-[#E5E7EB] rounded-lg shadow-sm">
+                  <button
+                    onClick={() => setSelectedDate((prev) => subDays(prev, 1))}
+                    className="flex items-center justify-center w-[28px] h-[28px] rounded-l-lg transition-colors hover:bg-[#F2F4F6] text-slate-600"
+                    title="Previous Day"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <Popover open={isKpiCalendarOpen} onOpenChange={setIsKpiCalendarOpen}>
+                    <PopoverTrigger asChild>
+                      <button className="flex items-center justify-center h-[28px] px-2.5 text-xs font-semibold text-slate-700 hover:bg-[#F2F4F6] transition-colors border-x border-[#E5E7EB]">
+                        <CalendarIcon className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
+                        {isToday(selectedDate)
+                          ? "Today"
+                          : isYesterday(selectedDate)
+                            ? "Yesterday"
+                            : isTomorrow(selectedDate)
+                              ? "Tomorrow"
+                              : format(selectedDate, "dd/MM/yyyy")}
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
+                      <CalendarPicker
+                        selected={selectedDate}
+                        hideThemePicker
+                        onSelect={(date) => {
+                          if (date instanceof Date) {
+                            setSelectedDate(date);
+                            setIsKpiCalendarOpen(false);
+                          }
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <button
+                    onClick={() => setSelectedDate((prev) => addDays(prev, 1))}
+                    className="flex items-center justify-center w-[28px] h-[28px] rounded-r-lg transition-colors hover:bg-[#F2F4F6] text-slate-600"
+                    title="Next Day"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <span className="text-xs font-medium text-slate-500 hidden sm:inline-block">
+                  {format(selectedDate, "MMM d, yyyy")}
+                </span>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-1">
-              {/* Card 1: Total OP Visits */}
+            {/* Scrollable KPI Track Container */}
+            <div className="relative">
+              {/* Left Arrow Button */}
+              {canScrollLeft && (
+                <button
+                  type="button"
+                  onClick={() => handleKpiScroll("left")}
+                  aria-label="Scroll left"
+                  className="absolute -left-3 top-[calc(50%-16px)] w-8 h-8 rounded-full bg-white border border-[#e6e7eb] shadow-[0_2px_8px_rgba(0,0,0,0.08)] flex items-center justify-center cursor-pointer z-10 transition-all duration-150 hover:bg-[#fafafa] hover:scale-105 text-[#1c1e21]"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+              )}
+
+              {/* Left Fade Gradient */}
               <div
-                onClick={() => {
-                  setActiveTab("appointments");
-                  setSearchQuery("");
-                }}
-                className="group flex flex-col justify-between rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50/70 to-white p-4 shadow-sm hover:border-blue-400 hover:shadow-md transition-all cursor-pointer"
+                className={`absolute left-0 top-0 bottom-2 w-12 pointer-events-none z-[2] transition-opacity duration-200 bg-gradient-to-r from-[#F7F9FB] to-transparent ${
+                  canScrollLeft ? "opacity-100" : "opacity-0"
+                }`}
+              />
+
+              {/* Scroll Track */}
+              <div
+                ref={trackRef}
+                className="flex gap-[14px] overflow-x-auto scroll-smooth py-[6px] px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
-                    <Activity className="h-5 w-5" />
+                {visibleStats.map((card) => (
+                  <div
+                    key={card.id}
+                    onClick={card.onClick}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        card.onClick();
+                      }
+                    }}
+                    style={{ background: card.bg }}
+                    className={`flex-[0_0_206px] min-w-[206px] rounded-[12px] p-[14px_16px] flex flex-col gap-[10px] cursor-pointer transition-all duration-200 select-none shadow-[0_2px_10px_rgba(0,0,0,0.06)] hover:-translate-y-[2px] hover:shadow-[0_6px_20px_rgba(0,0,0,0.10)] ${
+                      card.isActive ? "ring-2 ring-offset-2 ring-current shadow-md" : ""
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div
+                        style={{ background: card.iconBg }}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 shadow-sm"
+                      >
+                        {card.icon}
+                      </div>
+                      {card.tag && (
+                        card.isDropdown ? (
+                          <Popover open={isApptStatusDropdownOpen} onOpenChange={setIsApptStatusDropdownOpen}>
+                            <PopoverTrigger asChild>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsApptStatusDropdownOpen((prev) => !prev);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.stopPropagation();
+                                  }
+                                }}
+                                style={{ color: card.valueColor }}
+                                className="text-[11px] font-bold px-[8px] py-[2px] rounded-full tracking-[-0.2px] bg-white/70 shadow-sm inline-flex items-center gap-1 cursor-pointer transition-all duration-150 hover:bg-white hover:scale-105 active:scale-95 select-none"
+                                title="Filter by appointment status"
+                              >
+                                <span>{card.tag}</span>
+                                <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${isApptStatusDropdownOpen ? "rotate-180" : ""}`} />
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              align="end"
+                              sideOffset={6}
+                              className="w-60 p-2 shadow-xl rounded-xl z-50 bg-white border border-gray-100 text-[#1c1e21]"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div className="flex items-center justify-between px-2 py-1 mb-1 border-b border-gray-100">
+                                <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Filter by Status</span>
+                                {selectedApptStatus && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSelectAppointmentStatus(null)}
+                                    className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold cursor-pointer"
+                                  >
+                                    Reset
+                                  </button>
+                                )}
+                              </div>
+                              <div className="flex flex-col gap-0.5 max-h-60 overflow-y-auto">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectAppointmentStatus(null)}
+                                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                                    !selectedApptStatus
+                                      ? "bg-blue-50 text-blue-700 font-semibold"
+                                      : "text-gray-700 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />
+                                    <span>All Appointments</span>
+                                  </div>
+                                  <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-white border text-gray-600 font-bold">
+                                    {appointmentCount}
+                                  </span>
+                                </button>
+                                {availableAppointmentStatuses.map((status) => {
+                                  const count = appointmentStatusCounts[status] ?? 0;
+                                  const isSelected = selectedApptStatus === status;
+                                  const dotColor = getStatusDotColor(status);
+                                  return (
+                                    <button
+                                      key={status}
+                                      type="button"
+                                      onClick={() => handleSelectAppointmentStatus(status)}
+                                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                                        isSelected
+                                          ? "bg-blue-50 text-blue-700 font-semibold"
+                                          : "text-gray-700 hover:bg-gray-50"
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span className={`w-2 h-2 rounded-full ${dotColor} shrink-0`} />
+                                        <span className="truncate">{status}</span>
+                                      </div>
+                                      <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-white border text-gray-600 font-bold">
+                                        {count}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        ) : card.onTagClick ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              card.onTagClick?.();
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.stopPropagation();
+                              }
+                            }}
+                            style={{ color: card.valueColor }}
+                            className="text-[11px] font-bold px-[8px] py-[2px] rounded-full tracking-[-0.2px] bg-white/70 shadow-sm inline-flex items-center cursor-pointer transition-all duration-150 hover:bg-white hover:scale-105 active:scale-95 select-none"
+                            title="Click to toggle filter (Active / All)"
+                          >
+                            {card.tag}
+                          </button>
+                        ) : (
+                          <span
+                            style={{ color: card.valueColor }}
+                            className="text-[11px] font-bold px-[7px] py-[2px] rounded-full tracking-[-0.2px] bg-white/60 shadow-sm"
+                          >
+                            {card.tag}
+                          </span>
+                        )
+                      )}
+                    </div>
+
+                    <div
+                      style={{ color: card.valueColor }}
+                      className="text-[26px] font-extrabold leading-[1.05] tracking-[-0.6px]"
+                    >
+                      {card.loading ? (
+                        <div
+                          style={{ backgroundColor: card.valueColor, opacity: 0.15 }}
+                          className="w-14 h-7 rounded-md animate-pulse"
+                        />
+                      ) : (
+                        <CountUp target={typeof card.value === "number" ? card.value : parseStatValue(String(card.value))} />
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-[2px] min-w-0">
+                      <span
+                        style={{ color: card.valueColor }}
+                        className="text-[12.5px] font-bold tracking-tight truncate"
+                      >
+                        {card.label}
+                      </span>
+                      <span
+                        style={{ color: card.valueColor, opacity: 0.75 }}
+                        className="text-[11px] font-medium truncate"
+                      >
+                        {card.subLabel}
+                      </span>
+                    </div>
                   </div>
-                  <span className="rounded-full bg-blue-100/70 px-2 py-0.5 text-[10px] font-bold text-blue-800">
-                    All Consultations
-                  </span>
-                </div>
-                <div className="mt-3">
-                  <div className="text-2xl font-black text-blue-900">
-                    {isAppointmentsLoading ? (
-                      <div className="h-7 w-12 rounded bg-blue-200/50 animate-pulse" />
-                    ) : (
-                      <CountUp target={oncologyMetrics.totalOpVisits} />
-                    )}
-                  </div>
-                  <div className="text-xs font-bold text-slate-700 mt-0.5">
-                    Total OP Visits
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">
-                    Includes OPD & Chemo-unfit consultations
-                  </div>
-                </div>
+                ))}
               </div>
 
-              {/* Card 2: Actual Chemo Delivered */}
+              {/* Right Fade Gradient */}
               <div
-                onClick={() => {
-                  setActiveTab("appointments");
-                  setSearchQuery("Chemotherapy");
-                }}
-                className="group flex flex-col justify-between rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50/70 to-white p-4 shadow-sm hover:border-emerald-400 hover:shadow-md transition-all cursor-pointer"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
-                    <CheckCircle2 className="h-5 w-5" />
-                  </div>
-                  <span className="rounded-full bg-emerald-100/70 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
-                    Administered / Fit
-                  </span>
-                </div>
-                <div className="mt-3">
-                  <div className="text-2xl font-black text-emerald-900">
-                    {isAppointmentsLoading ? (
-                      <div className="h-7 w-12 rounded bg-emerald-200/50 animate-pulse" />
-                    ) : (
-                      <CountUp target={oncologyMetrics.actualChemoDelivered} />
-                    )}
-                  </div>
-                  <div className="text-xs font-bold text-slate-700 mt-0.5">
-                    Actual Chemo Delivered
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">
-                    Completed or cleared daycare cycles
-                  </div>
-                </div>
-              </div>
+                className={`absolute right-0 top-0 bottom-2 w-12 pointer-events-none z-[2] transition-opacity duration-200 bg-gradient-to-l from-[#F7F9FB] to-transparent ${
+                  canScrollRight ? "opacity-100" : "opacity-0"
+                }`}
+              />
 
-              {/* Card 3: Cancelled / Deferred Chemo */}
-              <div
-                onClick={() => {
-                  setActiveTab("appointments");
-                  setSearchQuery("Chemo");
-                }}
-                className="group flex flex-col justify-between rounded-xl border border-rose-200 bg-gradient-to-br from-rose-50/70 to-white p-4 shadow-sm hover:border-rose-400 hover:shadow-md transition-all cursor-pointer"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-100 text-rose-700">
-                    <XCircle className="h-5 w-5" />
-                  </div>
-                  <span className="rounded-full bg-rose-100/70 px-2 py-0.5 text-[10px] font-bold text-rose-800">
-                    Unfit / Deferred
-                  </span>
-                </div>
-                <div className="mt-3">
-                  <div className="text-2xl font-black text-rose-900">
-                    {isAppointmentsLoading ? (
-                      <div className="h-7 w-12 rounded bg-rose-200/50 animate-pulse" />
-                    ) : (
-                      <CountUp target={oncologyMetrics.cancelledChemo} />
-                    )}
-                  </div>
-                  <div className="text-xs font-bold text-slate-700 mt-0.5">
-                    Cancelled / Deferred Chemo
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">
-                    Unfit for chemo (OP visit retained)
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 4: Lab Visits */}
-              <div
-                onClick={() => {
-                  setActiveTab("appointments");
-                  setSearchQuery("Lab");
-                }}
-                className="group flex flex-col justify-between rounded-xl border border-purple-200 bg-gradient-to-br from-purple-50/70 to-white p-4 shadow-sm hover:border-purple-400 hover:shadow-md transition-all cursor-pointer"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-100 text-purple-700">
-                    <FlaskConical className="h-5 w-5" />
-                  </div>
-                  <span className="rounded-full bg-purple-100/70 px-2 py-0.5 text-[10px] font-bold text-purple-800">
-                    Lab Diagnostic
-                  </span>
-                </div>
-                <div className="mt-3">
-                  <div className="text-2xl font-black text-purple-900">
-                    {isAppointmentsLoading ? (
-                      <div className="h-7 w-12 rounded bg-purple-200/50 animate-pulse" />
-                    ) : (
-                      <CountUp target={oncologyMetrics.labVisits} />
-                    )}
-                  </div>
-                  <div className="text-xs font-bold text-slate-700 mt-0.5">
-                    Lab Visits
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">
-                    Direct laboratory visits without doctor
-                  </div>
-                </div>
-              </div>
+              {/* Right Arrow Button */}
+              {canScrollRight && (
+                <button
+                  type="button"
+                  onClick={() => handleKpiScroll("right")}
+                  aria-label="Scroll right"
+                  className="absolute -right-3 top-[calc(50%-16px)] w-8 h-8 rounded-full bg-white border border-[#e6e7eb] shadow-[0_2px_8px_rgba(0,0,0,0.08)] flex items-center justify-center cursor-pointer z-10 transition-all duration-150 hover:bg-[#fafafa] hover:scale-105 text-[#1c1e21]"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
 
@@ -1654,16 +1704,10 @@ export default function Dashboard() {
                     <span className="px-3 py-1 rounded-[20px] hms-content-text inline-block" style={{ background: "#EEF2FF", color: "#4F46E5" }}>{r.appointmentNo}</span>
                   )},
                   { key: "doctorName", label: "Assigned Doctor", render: (r: any) => (
-                    r.visitType?.toLowerCase().includes("lab") ? (
-                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-full">
-                        <FlaskConical className="h-3.5 w-3.5" /> Direct Lab Visit
-                      </span>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.doctorAvatarBg, color: r.doctorAvatarcolor }}>{r.doctorAvatar}</div>
-                        <div><div className="hms-name-text">{r.doctorName}</div><div className="hms-id-text">{r.doctorId}</div></div>
-                      </div>
-                    )
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 flex items-center justify-center rounded-xl flex-shrink-0 hms-avatar-text" style={{ background: r.doctorAvatarBg, color: r.doctorAvatarcolor }}>{r.doctorAvatar}</div>
+                      <div><div className="hms-name-text">{r.doctorName}</div><div className="hms-id-text">{r.doctorId}</div></div>
+                    </div>
                   )},
                   { key: "branch", label: "Branch", render: (r: any) => (
                     <span className="text-[#191C1E] hms-content-text leading-4">{r.branch}</span>
@@ -1776,316 +1820,9 @@ export default function Dashboard() {
 
           {/* Bottom Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
-            {/* Branch Performance */}
+            {/* Branch Performance -- extracted into its own component (incl. Bar/Pie toggle) */}
             {can("appointment.read") && (
-            <div className="bg-white rounded-lg border border-[rgba(194,198,212,0.10)] p-5 flex flex-col gap-3 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="text-[#191C1E] font-extrabold text-base leading-6 tracking-[-0.4px]">Branch Performance</h3>
-                  {branchPerfDateLabel && (
-                    <p className="text-[#424752] text-[10px] font-semibold mt-0.5">{branchPerfDateLabel}</p>
-                  )}
-                  {branchPerfCompareLabel && (
-                    <p className="text-[#8C8D8F] text-[9px] font-medium">{branchPerfCompareLabel}</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  {(branchPerfRange === "custom" && (
-                    <Popover
-                      open={isCustomRangeOpen}
-                      onOpenChange={(open) => {
-                        setIsCustomRangeOpen(open);
-                        if (open) {
-                          setHoveredBranchId(null);
-                          setHoveredBranchDetails(null);
-                        }
-                      }}
-                    >
-                      <PopoverTrigger asChild>
-                        <button
-                          className="px-2 py-1 rounded border border-[#00488D] bg-[#D6E3FF] text-[#00488D] text-[9px] font-semibold tracking-[0.9px] outline-none cursor-pointer"
-                        >
-                          {customDateRange
-                            ? `${formatComparisonRange(customDateRange.from, customDateRange.to)}`
-                            : "Pick Range"}
-                        </button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg" align="end">
-                        <CalendarPicker
-                          mode="range"
-                          selected={customDateRange}
-                          hideThemePicker
-                          onSelect={(range) => {
-                            if (range && typeof range === "object" && "from" in range && "to" in range) {
-                              setCustomDateRange(range);
-                              setIsCustomRangeOpen(false);
-                            }
-                          }}
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  )) || null}
-                  <select
-                    value={branchPerfRange}
-                    onChange={(e) => {
-                      const next = e.target.value as BranchPerfRange;
-                      setBranchPerfRange(next);
-                      if (next === "custom" && !customDateRange) {
-                        setHoveredBranchId(null);
-                        setHoveredBranchDetails(null);
-                        setIsCustomRangeOpen(true);
-                      }
-                    }}
-                    className="px-2 py-1 rounded border border-[rgba(194,198,212,0.40)] bg-white text-[#424752] text-[9px] font-semibold tracking-[0.9px] outline-none cursor-pointer focus:border-[#00488D]"
-                  >
-                    {BRANCH_PERF_RANGE_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="flex flex-col gap-3 max-h-[260px] overflow-y-auto hide-scrollbar pr-1">
-                {/* Loading skeleton */}
-                {branchPerfLoading && branches.length === 0 && (
-                  <div className="flex flex-col gap-3 py-2">
-                    {[1, 2, 3, 4].map((i) => (
-                      <div key={i} className="flex flex-col gap-1">
-                        <div className="flex justify-between">
-                          <div className="w-24 h-2.5 bg-slate-200 rounded animate-pulse" />
-                          <div className="w-12 h-2.5 bg-slate-200 rounded animate-pulse" />
-                        </div>
-                        <div className="h-1.5 rounded-full bg-slate-100 animate-pulse" />
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Error state */}
-                {!branchPerfLoading && branchPerfError && (
-                  <div className="flex flex-col items-center justify-center gap-2 py-6">
-                    <p className="text-[#6B7280] text-xs">{branchPerfError}</p>
-                    <button
-                      onClick={() => branchPerfQuery.refetch()}
-                      className="px-3 py-1 rounded border border-[rgba(194,198,212,0.40)] text-[#00488D] text-[9px] font-semibold tracking-[0.9px] hover:bg-[#F2F4F6]"
-                    >
-                      Retry
-                    </button>
-                  </div>
-                )}
-
-                {/* Empty state */}
-                {!branchPerfLoading && !branchPerfError && branches.length === 0 && (
-                  <div className="py-6 text-center text-[#6B7280] text-xs">
-                    No branch data available.
-                  </div>
-                )}
-
-                {/* Ranked branch bars */}
-                {branches.map((branch, index) => {
-                  const trendObj = computeTrend(branch.count, branch.previousCount);
-                  const formattedTrendText = formatTrend(trendObj);
-                  const isTop = index === 0 && branch.count > 0;
-                  const isOpen = hoveredBranchId === branch.id;
-
-                  const trendColor =
-                    trendObj.kind === "none"
-                      ? "#8C8D8F"
-                      : trendObj.kind === "new" || (trendObj.kind === "change" && trendObj.delta > 0)
-                      ? "#16A34A"
-                      : "#EF4444";
-
-                  const sharePct = animatedValues[branch.id] ?? branch.systemShare;
-                  const uPct = utilizationPct(branch.count, branch.totalSlots);
-                  const uConf = utilizationConfidence(branch.totalSlots);
-                  const unusedCapacity = branch.totalSlots > 0 ? branch.totalSlots - branch.count : null;
-
-                  return (
-                    <Popover key={branch.id} open={isOpen}>
-                      <PopoverTrigger asChild>
-                        <div
-                          className="relative flex flex-col gap-1 cursor-pointer rounded-md px-1.5 py-1 transition-colors duration-150 hover:bg-[#F8FAFC]"
-                          onMouseEnter={() => {
-                            if (isCustomRangeOpen) return;
-                            if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-                            setHoveredBranchId(branch.id);
-                          }}
-                          onMouseLeave={() => {
-                            if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-                            hoverTimerRef.current = setTimeout(() => {
-                              setHoveredBranchId(null);
-                              setHoveredBranchDetails(null);
-                            }, 150);
-                          }}
-                        >
-                          <div className="flex justify-between items-center">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <span className="text-[#8C8D8F] text-[9px] font-bold w-3 flex-shrink-0">{index + 1}.</span>
-                              <span className="text-[#191C1E] text-[10px] font-semibold tracking-[0.3px] capitalize truncate">
-                                {branch.name}
-                              </span>
-                              {isTop && (
-                                <span className="text-[#00488D] text-[9px] leading-none" title="Highest volume">★</span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                              <span className="text-[10px] font-semibold text-[#424752]">
-                                {branch.count} {branch.count === 1 ? "appt" : "appts"}
-                              </span>
-                              <span className="text-[9px] font-semibold tracking-[0.5px] uppercase" style={{ color: branch.color }}>
-                                {sharePct}% share
-                              </span>
-                            </div>
-                          </div>
-                          {/* System Share bar */}
-                          <div className="h-1.5 rounded-full bg-[#ECEEF0] overflow-hidden">
-                            <div className="h-full rounded-full transition-all duration-300" style={{ width: `${sharePct}%`, background: branch.color }} />
-                          </div>
-                          {/* Trend badge */}
-                          <div className="flex items-center gap-1 pl-[18px]">
-                            <span className="text-[8px] font-semibold" style={{ color: trendColor }}>
-                              {formattedTrendText}
-                            </span>
-                          </div>
-                        </div>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        side="right"
-                        align="start"
-                        sideOffset={10}
-                        className="w-72 p-0 border-[#E5E7EB] shadow-lg"
-                        onMouseEnter={() => {
-                          if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-                        }}
-                        onMouseLeave={() => {
-                          setHoveredBranchId(null);
-                          setHoveredBranchDetails(null);
-                        }}
-                      >
-                        {/* Hover card header */}
-                        <div className="px-4 pt-3 pb-2">
-                          <div className="text-[#191C1E] font-bold text-xs tracking-[0.2px]">{branch.name}</div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-[#424752] text-[11px] font-semibold">
-                              {branch.count} appointment{branch.count === 1 ? "" : "s"}
-                            </span>
-                            <span className="text-[10px] font-semibold" style={{ color: trendColor }}>
-                              {formattedTrendText}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="border-t border-[#E5E7EB] mx-3" />
-
-                        {/* Volume & Capacity metrics */}
-                        <div className="px-4 py-2.5 flex flex-col gap-2">
-                          {/* System Share */}
-                          <div className="flex justify-between items-center">
-                            <span className="text-[#6B7280] text-[10px] font-medium">System Share</span>
-                            <span className="text-[#191C1E] text-[11px] font-semibold">{branch.systemShare}%</span>
-                          </div>
-
-                          {/* Utilization */}
-                          <div className="flex justify-between items-start">
-                            <span className="text-[#6B7280] text-[10px] font-medium">Utilization</span>
-                            <div className="flex flex-col items-end gap-0.5">
-                              {uPct !== null ? (
-                                <>
-                                  <span className="text-[#191C1E] text-[11px] font-semibold flex items-center gap-1">
-                                    {uPct}%
-                                    {uConf === "low" && (
-                                      <span
-                                        className="text-[7px] px-1 py-px rounded bg-amber-100 text-amber-700 font-medium cursor-help"
-                                        title="Based on small sample (<5 slots)"
-                                      >
-                                        ⚠ Low sample
-                                      </span>
-                                    )}
-                                  </span>
-                                  <span className="text-[#8C8D8F] text-[9px] font-normal">
-                                    {branch.count} / {branch.totalSlots} slots
-                                  </span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="text-[#8C8D8F] text-[11px] font-semibold">N/A</span>
-                                  <span className="text-[#8C8D8F] text-[8px] font-normal">Capacity unavailable</span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Capacity Breakdown */}
-                          {branch.totalSlots > 0 && (
-                            <>
-                              <div className="flex justify-between items-center">
-                                <span className="text-[#6B7280] text-[10px] font-medium">Capacity</span>
-                                <span className="text-[#191C1E] text-[10px] font-semibold">{branch.totalSlots} slots</span>
-                              </div>
-                              <div className="flex justify-between items-center">
-                                <span className="text-[#6B7280] text-[10px] font-medium">Unused</span>
-                                <span className="text-[#191C1E] text-[10px] font-semibold">
-                                  {unusedCapacity !== null && unusedCapacity >= 0 ? unusedCapacity : 0}
-                                </span>
-                              </div>
-                            </>
-                          )}
-                        </div>
-
-                        <div className="border-t border-[#E5E7EB] mx-3" />
-
-                        {/* Appointment Outcomes */}
-                        <div className="px-4 py-2.5 pb-3">
-                          {isHoverDetailsLoading && !hoveredBranchDetails ? (
-                            <div className="flex items-center gap-2 text-[#6B7280] text-[10px] py-1">
-                              <Loader2 size={12} className="animate-spin text-[#00488D]" />
-                              Loading...
-                            </div>
-                          ) : hoveredBranchDetails ? (
-                            branchPerfRange === "tomorrow" ? (
-                              <div className="flex flex-col gap-1.5 text-[10px]">
-                                <div className="text-[#424752] text-[10px] font-semibold tracking-[0.3px] mb-0.5">Upcoming</div>
-                                <div className="flex justify-between">
-                                  <span className="text-[#6B7280] font-medium">Scheduled</span>
-                                  <span className="text-[#191C1E] font-semibold">{hoveredBranchDetails.scheduled}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-[#6B7280] font-medium">Total Appointments</span>
-                                  <span className="text-[#191C1E] font-semibold">{hoveredBranchDetails.total}</span>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="flex flex-col gap-1.5 text-[10px]">
-                                <div className="text-[#424752] text-[10px] font-semibold tracking-[0.3px] mb-0.5">Appointment Outcomes</div>
-                                <div className="flex justify-between">
-                                  <span className="text-[#6B7280] font-medium">Completed</span>
-                                  <span className="text-[#191C1E] font-semibold">
-                                    {hoveredBranchDetails.completed} · {calculatePercentage(hoveredBranchDetails.completed, hoveredBranchDetails.booked)}%
-                                  </span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-[#6B7280] font-medium">Cancelled</span>
-                                  <span className="text-[#191C1E] font-semibold">
-                                    {hoveredBranchDetails.cancelled} · {calculatePercentage(hoveredBranchDetails.cancelled, hoveredBranchDetails.booked)}%
-                                  </span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-[#6B7280] font-medium">No-show</span>
-                                  <span className="text-[#191C1E] font-semibold">
-                                    {hoveredBranchDetails.noShow} · {calculatePercentage(hoveredBranchDetails.noShow, hoveredBranchDetails.booked)}%
-                                  </span>
-                                </div>
-                              </div>
-                            )
-                          ) : (
-                            <div className="text-[#8C8D8F] text-[10px]">No appointment data.</div>
-                          )}
-                        </div>
-                      </PopoverContent>
-                    </Popover>
-                  );
-                })}
-              </div>
-            </div>
+            <BranchPerformance selectedDate={selectedDate} />
             )}
 
             {/* System Integrity */}
