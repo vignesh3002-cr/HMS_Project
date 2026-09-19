@@ -664,6 +664,80 @@ const resolveStagingDetailId = async (patientId: string): Promise<string> => {
   }
 };
 
+/* Fetch the regimen protocol the Treatment Plan selected so an existing
+   plan can be brought in line with it - copying the protocol's cadence
+   (standard_cycles / cycle_interval_days) and display names exactly like
+   the backend's createPlan one-time copy does on first creation. */
+const loadProtocolSyncData = async (
+  protocolId: string
+): Promise<{
+  source_protocol_id: string;
+  regimen_name: string;
+  regimen_code: string;
+  protocol_name: string;
+  planned_cycles: number;
+  cycle_interval_days: number;
+} | null> => {
+  try {
+    const response = await API.get<{
+      success: boolean;
+      data: RegimenProtocolDetail;
+    }>(`/chemotherapy/regimen-protocols/${encodeURIComponent(protocolId)}`);
+    const protocol = response.data.data;
+    if (!protocol) return null;
+    return {
+      source_protocol_id: protocol.protocol_id,
+      regimen_name: protocol.regimen_name,
+      regimen_code: protocol.regimen_code ?? "",
+      protocol_name: protocol.regimen_name,
+      planned_cycles: protocol.standard_cycles ?? 0,
+      cycle_interval_days: protocol.cycle_interval_days ?? 0,
+    };
+  } catch (error) {
+    console.error("Failed to load regimen protocol for plan sync:", error);
+    return null;
+  }
+};
+
+/* Resolve the cancer context of the patient's latest staging detail so an
+   existing plan can be re-linked when the diagnosis changes. */
+const loadStagingSyncData = async (
+  stagingDetailId: string
+): Promise<{
+  staging_detail_id: string;
+  cancer_type: string;
+  cancer_subtype: string;
+  cancer_stage: string;
+  cancer_type_id: string;
+  subtype_id: string;
+} | null> => {
+  try {
+    const response = await API.get<{
+      success: boolean;
+      data: {
+        cancer_type_id?: string | null;
+        cancer_subtype_id?: string | null;
+        clinical_stage?: string | null;
+        cancer_types?: { cancer_type?: string | null } | null;
+        cancer_subtypes?: { subtype_name?: string | null } | null;
+      };
+    }>(`/oncology/staging-details/${encodeURIComponent(stagingDetailId)}`);
+    const staging = response.data.data;
+    if (!staging) return null;
+    return {
+      staging_detail_id: stagingDetailId,
+      cancer_type: staging.cancer_types?.cancer_type ?? "",
+      cancer_subtype: staging.cancer_subtypes?.subtype_name ?? "",
+      cancer_stage: staging.clinical_stage ?? "",
+      cancer_type_id: staging.cancer_type_id ?? "",
+      subtype_id: staging.cancer_subtype_id ?? "",
+    };
+  } catch (error) {
+    console.error("Failed to load staging detail for plan sync:", error);
+    return null;
+  }
+};
+
 /* Ensure a chemotherapy plan exists for the patient, returning its id.
    Used by the ChemotherapyOrder Save button and as a safety net before
    the Summary step creates a prescription. Re-uses an existing plan when
@@ -712,18 +786,75 @@ const createChemotherapyPlanForPatient = async (
 
   /* Prefer an existing plan for this patient; creation only happens once
      per diagnosis so repeated Saves don't stack duplicates.
-     When planItems are provided, sync them to the existing plan (delete
-     old items then add new ones) so chemo / premedication / supportive
-     drugs are persisted even when the plan already exists. */
+     When an existing plan is found, the latest oncology selections are
+     pushed onto it: the protocol (name + cadence -> planned_cycles and
+     cycle_interval_days) and the cancer context from the latest staging
+     detail, so downstream viewers (patient-details) show the new days
+     and cycles immediately. When planItems are provided, they are also
+     synced (delete old items then add new ones). */
   try {
+    /* Look the plan up via the mapping-scoped /plans/latest-for-patient
+       endpoint (same one patient-details reads) so the existing plan we
+       sync is the plan being displayed and branch-scoped list 403s don't
+       silently skip the update. */
     const existing = await API.get<{
       success: boolean;
-      data: { chemotherapy_plan_id: string }[];
-    }>("/chemotherapy/plans", {
-      params: { patient_id: patientId, page: 1, limit: 1 },
+      data: { chemotherapy_plan_id: string } | null;
+    }>("/chemotherapy/plans/latest-for-patient", {
+      params: { patient_id: patientId },
     });
-    const existingPlanId = existing.data.data?.[0]?.chemotherapy_plan_id;
+    const existingPlanId = existing.data.data?.chemotherapy_plan_id;
     if (existingPlanId) {
+      /* Resolve the selected protocol + latest staging detail so the
+         existing plan is re-linked to the current selection. Both are
+         null-safe: only what is actually selected gets synced. */
+      const [protocolSync, stagingSync] = await Promise.all([
+        protocolId ? loadProtocolSyncData(protocolId) : Promise.resolve(null),
+        stagingDetailId
+          ? loadStagingSyncData(stagingDetailId)
+          : Promise.resolve(null),
+      ]);
+
+      const planChanges: Record<string, unknown> = {};
+      if (protocolSync) {
+        planChanges.source_protocol_id = protocolSync.source_protocol_id;
+        if (protocolSync.regimen_name) {
+          planChanges.regimen_name = protocolSync.regimen_name;
+          planChanges.protocol_name = protocolSync.regimen_name;
+        }
+        if (protocolSync.regimen_code) {
+          planChanges.regimen_code = protocolSync.regimen_code;
+        }
+        if (protocolSync.planned_cycles > 0) {
+          planChanges.planned_cycles = protocolSync.planned_cycles;
+        }
+        if (protocolSync.cycle_interval_days > 0) {
+          planChanges.cycle_interval_days = protocolSync.cycle_interval_days;
+        }
+      }
+      if (stagingSync) {
+        planChanges.staging_detail_id = stagingSync.staging_detail_id;
+        if (stagingSync.cancer_type) planChanges.cancer_type = stagingSync.cancer_type;
+        if (stagingSync.cancer_subtype) planChanges.cancer_subtype = stagingSync.cancer_subtype;
+        if (stagingSync.cancer_stage) planChanges.cancer_stage = stagingSync.cancer_stage;
+        if (stagingSync.cancer_type_id) planChanges.cancer_type_id = stagingSync.cancer_type_id;
+        if (stagingSync.subtype_id) planChanges.subtype_id = stagingSync.subtype_id;
+      }
+
+      if (Object.keys(planChanges).length > 0) {
+        try {
+          await API.put(
+            `/chemotherapy/plans/${existingPlanId}`,
+            planChanges
+          );
+        } catch (syncErr: any) {
+          console.error(
+            "Failed to sync protocol/cancer context onto existing plan:",
+            syncErr?.response?.data?.message ?? syncErr?.message
+          );
+        }
+      }
+
       if (planItems && planItems.length > 0) {
         try {
           /* Fetch current items so we can remove stale ones. */
@@ -816,6 +947,59 @@ const createChemotherapyPlanForPatient = async (
   }
 };
 
+/* Immediately push a newly selected protocol onto any existing
+   chemotherapy plan for the patient. Called by the Treatment Plan
+   Protocol dropdown so a switch between already-assigned protocols is
+   reflected on the plan (and therefore patient-details) right away,
+   not only after the step is saved. */
+const syncExistingPlanProtocol = async (
+  patientId: string,
+  protocolId: string
+): Promise<void> => {
+  if (!patientId || !protocolId) return;
+  try {
+    /* Use the mapping-scoped /plans/latest-for-patient endpoint (the same
+       one patient-details reads) instead of the branch-scoped list so the
+       plan we update is the plan being displayed and multi-branch staff /
+       admins don't get a silent 403 that leaves it unchanged. */
+    const existing = await API.get<{
+      success: boolean;
+      data: { chemotherapy_plan_id: string } | null;
+    }>("/chemotherapy/plans/latest-for-patient", {
+      params: { patient_id: patientId },
+    });
+    const existingPlanId = existing.data.data?.chemotherapy_plan_id;
+    if (!existingPlanId) return;
+
+    const protocolSync = await loadProtocolSyncData(protocolId);
+    if (!protocolSync) return;
+
+    const planChanges: Record<string, unknown> = {
+      source_protocol_id: protocolSync.source_protocol_id,
+    };
+    if (protocolSync.regimen_name) {
+      planChanges.regimen_name = protocolSync.regimen_name;
+      planChanges.protocol_name = protocolSync.regimen_name;
+    }
+    if (protocolSync.regimen_code) {
+      planChanges.regimen_code = protocolSync.regimen_code;
+    }
+    if (protocolSync.planned_cycles > 0) {
+      planChanges.planned_cycles = protocolSync.planned_cycles;
+    }
+    if (protocolSync.cycle_interval_days > 0) {
+      planChanges.cycle_interval_days = protocolSync.cycle_interval_days;
+    }
+
+    await API.put(`/chemotherapy/plans/${existingPlanId}`, planChanges);
+  } catch (error: any) {
+    console.error(
+      "Failed to instantly sync protocol onto existing plan:",
+      error?.response?.data?.message ?? error?.message
+    );
+  }
+};
+
 const Consultation: React.FC = () => {
   /* ============================================================
      STATE
@@ -831,15 +1015,12 @@ const Consultation: React.FC = () => {
 
   const [patientHistory, setPatientHistory] = useState("");
   const [pastHistory, setPastHistory] = useState("");
-
-  const [pastHistoryExpanded, setPastHistoryExpanded] = useState(false);
   const [pastHistoryTreatmentType, setPastHistoryTreatmentType] = useState("");
   const [pastHistoryTreatmentDate, setPastHistoryTreatmentDate] = useState("");
   const [pastHistoryTreatmentNote, setPastHistoryTreatmentNote] = useState("");
   const [pastHistoryTreatmentResponse, setPastHistoryTreatmentResponse] =
     useState("");
 
-  const [reportsExpanded, setReportsExpanded] = useState(false);
   const [reportsTest, setReportsTest] = useState("");
   const [reportsTestDate, setReportsTestDate] = useState("");
   const [reportsTestResult, setReportsTestResult] = useState("");
@@ -1713,7 +1894,7 @@ const Consultation: React.FC = () => {
 
                 <section className="flex w-full flex-col gap-5 bg-white p-5">
 
-                  <div className="flex w-full items-center gap-4">
+                  <div className="flex w-full items-center justify-between gap-4">
 
                     <div className="relative shrink-0">
                       <img
@@ -1726,7 +1907,7 @@ const Consultation: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0">
 
                       <div className="mb-1 flex min-w-0 items-center space-x-2">
 
@@ -1827,7 +2008,7 @@ const Consultation: React.FC = () => {
 
                     {/* MEASUREMENTS */}
 
-                    <div className="grid grid-cols-4 gap-x-6 gap-y-3">
+                    <div className="grid grid-cols-5 gap-x-6 gap-y-3">
 
                       <div className="flex flex-col">
                         <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
@@ -1926,7 +2107,7 @@ const Consultation: React.FC = () => {
                           state: { patientId: pid },
                         });
                       }}
-                      className="ml-auto h-9 rounded-md border border-blue-600 bg-white px-4 text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
+                      className="h-9 rounded-md border border-blue-600 bg-white px-4 text-sm font-semibold leading-5 text-blue-600 transition hover:bg-blue-50"
                     >
                       View Full Profile
                     </button>
@@ -2113,6 +2294,7 @@ const Consultation: React.FC = () => {
                     patientId={patientDisplayId}
                     appointmentId={consultationState?.appointmentId}
                     encounterNo={encounter?.encounter_no}
+                    measurements={measurements}
                   />
                 ) : (
                   <div
@@ -2681,7 +2863,11 @@ className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-
 
                   {/* PATIENT DETAILS GRID */}
 
-                  <div className="grid w-full grid-cols-2 gap-x-6 gap-y-4 pt-2">
+                  <div className="grid w-full grid-cols-2 gap-x-6 pt-2">
+
+                    {/* LEFT COLUMN: HOPI + REPORTS */}
+
+                    <div className="flex w-full flex-col gap-4">
 
                     {/* HISTORY OF PRESENT ILLNESS (HOPI) */}
 
@@ -2702,34 +2888,128 @@ className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-
 
                     </div>
 
+                    {/* REPORTS (PREVIOUS) */}
+
+                    <div className="flex flex-col gap-2">
+
+                      <label className="text-xs font-bold leading-4 text-slate-500">
+                        Reports (Previous)
+                      </label>
+
+                      <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+
+                          {/* SELECT TEST */}
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                              Select Test
+                            </label>
+
+                            <div className="relative">
+                              <select
+                                value={reportsTest}
+                                onChange={(event) =>
+                                  setReportsTest(event.target.value)
+                                }
+                                className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                              >
+                                <option value="" disabled>
+                                  Select Test
+                                </option>
+                                {labTests.map((test) => (
+                                  <option
+                                    key={test.lab_test_id}
+                                    value={test.lab_test_id}
+                                  >
+                                    {test.test_name}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="#94a3b8"
+                                strokeWidth="1.8"
+                                className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
+                              >
+                                <path d="m6 9 6 6 6-6" />
+                              </svg>
+                            </div>
+                          </div>
+
+                          {/* DATE / RESULT / IMPRESSION */}
+                          {reportsTest && (
+                            <>
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Date
+                                </label>
+                                <input
+                                  type="date"
+                                  value={reportsTestDate}
+                                  onChange={(event) =>
+                                    setReportsTestDate(event.target.value)
+                                  }
+                                  className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Enter Result
+                                </label>
+                                <textarea
+                                  value={reportsTestResult}
+                                  onChange={(event) =>
+                                    setReportsTestResult(event.target.value)
+                                  }
+                                  placeholder="Type the result..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                                  Enter Impression
+                                </label>
+                                <textarea
+                                  value={reportsTestImpression}
+                                  onChange={(event) =>
+                                    setReportsTestImpression(event.target.value)
+                                  }
+                                  placeholder="Type the impression..."
+                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                                />
+                              </div>
+                            </>
+                          )}
+
+                        </div>
+
+                      <textarea
+                        value={reportsText}
+                        onChange={(event) => setReportsText(event.target.value)}
+                        placeholder="Type previous reports..."
+                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
+                      />
+
+                    </div>
+
+                    </div>
+
+                    {/* RIGHT COLUMN: PAST HISTORY + SAVE */}
+
+                    <div className="flex w-full flex-col gap-4">
+
                     {/* PAST HISTORY */}
 
                     <div className="flex flex-col gap-2">
 
-                      <button
-                        type="button"
-                        onClick={() => setPastHistoryExpanded((prev) => !prev)}
-                        className="flex w-fit items-center gap-1.5 text-xs font-bold leading-4 text-slate-500 transition hover:text-slate-700"
-                      >
+                      <label className="text-xs font-bold leading-4 text-slate-500">
                         Past History
+                      </label>
 
-                        <svg
-                          viewBox="0 0 20 20"
-                          fill="currentColor"
-                          className={`h-3.5 w-3.5 transition-transform ${
-                            pastHistoryExpanded ? "rotate-90" : ""
-                          }`}
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      </button>
-
-                      {pastHistoryExpanded && (
-                        <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
 
                           {/* TREATMENT TYPE */}
                           <div className="flex flex-col gap-1.5">
@@ -2823,7 +3103,6 @@ className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-
                           )}
 
                         </div>
-                      )}
 
                       <textarea
                         value={pastHistory}
@@ -2831,133 +3110,6 @@ className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-
                           setPastHistory(event.target.value)
                         }
                         placeholder="Type the patient's past history..."
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
-                      />
-
-                    </div>
-
-                    {/* REPORTS (PREVIOUS) */}
-
-                    <div className="flex flex-col gap-2">
-
-                      <button
-                        type="button"
-                        onClick={() => setReportsExpanded((prev) => !prev)}
-                        className="flex w-fit items-center gap-1.5 text-xs font-bold leading-4 text-slate-500 transition hover:text-slate-700"
-                      >
-                        Reports (Previous)
-
-                        <svg
-                          viewBox="0 0 20 20"
-                          fill="currentColor"
-                          className={`h-3.5 w-3.5 transition-transform ${
-                            reportsExpanded ? "rotate-90" : ""
-                          }`}
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      </button>
-
-                      {reportsExpanded && (
-                        <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-
-                          {/* SELECT TEST */}
-                          <div className="flex flex-col gap-1.5">
-                            <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                              Select Test
-                            </label>
-
-                            <div className="relative">
-                              <select
-                                value={reportsTest}
-                                onChange={(event) =>
-                                  setReportsTest(event.target.value)
-                                }
-                                className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-                              >
-                                <option value="" disabled>
-                                  Select Test
-                                </option>
-                                {labTests.map((test) => (
-                                  <option
-                                    key={test.lab_test_id}
-                                    value={test.lab_test_id}
-                                  >
-                                    {test.test_name}
-                                  </option>
-                                ))}
-                              </select>
-
-                              <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="#94a3b8"
-                                strokeWidth="1.8"
-                                className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
-                              >
-                                <path d="m6 9 6 6 6-6" />
-                              </svg>
-                            </div>
-                          </div>
-
-                          {/* DATE / RESULT / IMPRESSION */}
-                          {reportsTest && (
-                            <>
-                              <div className="flex flex-col gap-1.5">
-                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                                  Date
-                                </label>
-                                <input
-                                  type="date"
-                                  value={reportsTestDate}
-                                  onChange={(event) =>
-                                    setReportsTestDate(event.target.value)
-                                  }
-                                  className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-                                />
-                              </div>
-
-                              <div className="flex flex-col gap-1.5">
-                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                                  Enter Result
-                                </label>
-                                <textarea
-                                  value={reportsTestResult}
-                                  onChange={(event) =>
-                                    setReportsTestResult(event.target.value)
-                                  }
-                                  placeholder="Type the result..."
-                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-                                />
-                              </div>
-
-                              <div className="flex flex-col gap-1.5">
-                                <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                                  Enter Impression
-                                </label>
-                                <textarea
-                                  value={reportsTestImpression}
-                                  onChange={(event) =>
-                                    setReportsTestImpression(event.target.value)
-                                  }
-                                  placeholder="Type the impression..."
-                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-                                />
-                              </div>
-                            </>
-                          )}
-
-                        </div>
-                      )}
-
-                      <textarea
-                        value={reportsText}
-                        onChange={(event) => setReportsText(event.target.value)}
-                        placeholder="Type previous reports..."
                         className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
                       />
 
@@ -3012,6 +3164,8 @@ className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-
                             Clinical details saved successfully.
                           </div>
                         )}
+
+                    </div>
 
                     </div>
 
@@ -4043,6 +4197,15 @@ type CancerSubtypeItem = {
   icd10_subtype: string | null;
 };
 
+type CancerSubtypeOption = CancerSubtypeItem & {
+  cancerType: string;
+};
+
+type StageOption = {
+  value: string;
+  cancerType: string;
+};
+
 type StagingReferenceItem = {
   stage_ref_id: string;
   cancer_type_id: string;
@@ -4155,8 +4318,23 @@ const Diagnosis: React.FC<{
   }, [formData, diagnosisDraftKey, resolvedPatientId]);
 
   const [cancerTypes, setCancerTypes] = useState<CancerTypeItem[]>([]);
-  const [subtypes, setSubtypes] = useState<CancerSubtypeItem[]>([]);
+  const [subtypes, setSubtypes] = useState<CancerSubtypeOption[]>([]);
   const [diagnosisCatalogReady, setDiagnosisCatalogReady] = useState(false);
+
+  /* Multi-select Cancer Type field. The full selection is kept for
+     documentation and to source the Histopathology subtype options;
+     the first entry still drives the dependent fields (staging)
+     exactly like the old single select. */
+  const [selectedCancerTypes, setSelectedCancerTypes] = useState<string[]>([]);
+
+  useEffect(() => {
+    setSelectedCancerTypes((previous) => {
+      if (!formData.type) return previous;
+      return previous.includes(formData.type)
+        ? previous
+        : [...previous, formData.type];
+    });
+  }, [formData.type]);
 
   /* Sync the diagnosis selection (cancer_type_id + subtype_id +
      diagnosis_id) to localStorage so downstream steps (Treatment Plan)
@@ -4207,11 +4385,11 @@ const Diagnosis: React.FC<{
     }
   }, [formData.type, formData.subType, cancerTypes, subtypes, diagnosisCatalogReady, resolvedPatientId]);
 
-  const [stageLabels, setStageLabels] = useState<string[]>([]);
+  const [stageLabels, setStageLabels] = useState<StageOption[]>([]);
   const [tnmStages, setTnmStages] = useState<string[]>([]);
-  const [tOptions, setTOptions] = useState<string[]>([]);
-  const [nOptions, setNOptions] = useState<string[]>([]);
-  const [mOptions, setMOptions] = useState<string[]>([]);
+  const [tOptions, setTOptions] = useState<StageOption[]>([]);
+  const [nOptions, setNOptions] = useState<StageOption[]>([]);
+  const [mOptions, setMOptions] = useState<StageOption[]>([]);
   const [grades, setGrades] = useState<string[]>([]);
   const [metastasisSites, setMetastasisSites] = useState<string[]>([]);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
@@ -4247,21 +4425,47 @@ const Diagnosis: React.FC<{
     );
   };
 
-  const loadSubtypesForCancerType = (
-    cancerTypeId: string,
+  /* Load the subtype options for every selected cancer type and merge
+     them into the Histopathology dropdown. Each option remembers its
+     parent cancer type so the dropdown can show the mapping. */
+  const loadSubtypesForCancerTypes = (
+    selections: { cancerTypeId: string; cancerTypeName: string }[],
     autoSelectIcd = true
   ) => {
-    if (!cancerTypeId) return;
+    const ids = selections.filter(
+      (selection) => Boolean(selection.cancerTypeId)
+    );
     const requestId = ++diagnosisRequestRef.current;
-    setDiagnosisLoading(true);
     setDiagnosisError("");
 
-    API.get<{ success: boolean; data: CancerSubtypeItem[] }>(
-      `/oncology/reference/cancer-types/${cancerTypeId}/subtypes`
+    if (ids.length === 0) {
+      setSubtypes([]);
+      setDiagnosisLoading(false);
+      return;
+    }
+
+    setDiagnosisLoading(true);
+
+    Promise.all(
+      ids.map((selection) =>
+        API.get<{ success: boolean; data: CancerSubtypeItem[] }>(
+          `/oncology/reference/cancer-types/${selection.cancerTypeId}/subtypes`
+        )
+      )
     )
-      .then((response) => {
+      .then((responses) => {
         if (requestId !== diagnosisRequestRef.current) return;
-        const items = response.data.data;
+        const merged = new Map<string, CancerSubtypeOption>();
+        responses.forEach((response, index) => {
+          const cancerType = ids[index].cancerTypeName;
+          for (const item of response.data.data) {
+            const key = `${cancerType}|${item.subtype_name}`;
+            if (!merged.has(key)) {
+              merged.set(key, { ...item, cancerType });
+            }
+          }
+        });
+        const items = Array.from(merged.values());
         setSubtypes(items);
         const first = items[0];
         if (first && autoSelectIcd) {
@@ -4286,11 +4490,14 @@ const Diagnosis: React.FC<{
       });
   };
 
-  const loadStagesForCancerType = (
-    cancerTypeId: string,
+  const loadStagesForCancerTypes = (
+    selections: {
+      cancerTypeId: string;
+      cancerTypeName: string;
+    }[],
     resetStageSelection = true
   ) => {
-    if (!cancerTypeId) return;
+    if (!selections.length) return;
     const requestId = ++stagingRequestRef.current;
     setDiagnosisLoading(true);
     setDiagnosisError("");
@@ -4301,83 +4508,139 @@ const Diagnosis: React.FC<{
     setGrades([]);
     setMetastasisSites([]);
 
-    API.get<{ success: boolean; data: StagingReferenceItem[] }>(
-      "/oncology/reference/staging",
-      { params: { cancer_type_id: cancerTypeId } }
+    Promise.all(
+      selections.map((selection) =>
+        API.get<{ success: boolean; data: StagingReferenceItem[] }>(
+          "/oncology/reference/staging",
+          { params: { cancer_type_id: selection.cancerTypeId } }
+        ).then((response) => ({
+          cancerTypeName: selection.cancerTypeName,
+          items: response.data.data,
+        }))
+      )
     )
-      .then((response) => {
+      .then((results) => {
         if (requestId !== stagingRequestRef.current) return;
-        const items = response.data.data;
-        setStageLabels(
-          items
-            .map((item) => item.stage_label)
-            .filter((label): label is string => Boolean(label))
-        );
-        const tnmOptions: string[] = [];
+
+        const seenStage = new Set<string>();
+        const seenTnm = new Set<string>();
+        const seenT = new Set<string>();
+        const seenN = new Set<string>();
+        const seenM = new Set<string>();
+        const seenGrade = new Set<string>();
+
+        const stageOptions: StageOption[] = [];
+        const tnmOptionsAggregated: string[] = [];
+        const tOptionsAggregated: StageOption[] = [];
+        const nOptionsAggregated: StageOption[] = [];
+        const mOptionsAggregated: StageOption[] = [];
         const gradeOptions: string[] = [];
-        for (const item of items) {
-          const criteria = (item.tnm_criteria ?? "")
-            .replace(/\([^)]*\)/g, " ")
-            .replace(/\s+/g, " ")
-            .replace(/\s*[-“]\s*$/g, "")
-            .trim();
-          if (criteria && /(\b[TNM]\d|\bAny\s+[TNM])/i.test(criteria)) {
-            if (!tnmOptions.includes(criteria)) tnmOptions.push(criteria);
-          }
-          const gradeSource = [
-            item.stage_label,
-            item.staging_system,
-            item.subtype_label,
-            item.tnm_criteria,
-            item.risk_criteria,
-          ]
-            .filter((value): value is string => Boolean(value))
-            .join(" ");
-          for (const match of gradeSource.matchAll(
-            /grade\s+group\s*[\d\-“]+|grade\s+[\d\-“]+/gi
-          )) {
-            const grade = match[0]
+
+        for (const result of results) {
+          const { cancerTypeName, items } = result;
+
+          const tnmOptions: string[] = [];
+          for (const item of items) {
+            const stageLabel = item.stage_label;
+            if (
+              stageLabel &&
+              !seenStage.has(`${cancerTypeName}|${stageLabel}`)
+            ) {
+              seenStage.add(`${cancerTypeName}|${stageLabel}`);
+              stageOptions.push({ value: stageLabel, cancerType: cancerTypeName });
+            }
+            const criteria = (item.tnm_criteria ?? "")
+              .replace(/\([^)]*\)/g, " ")
               .replace(/\s+/g, " ")
-              .replace(/\b\w/g, (c) => c.toUpperCase());
-            if (!gradeOptions.includes(grade)) gradeOptions.push(grade);
+              .replace(/\s*[-“]\s*$/g, "")
+              .trim();
+            if (criteria && /(\b[TNM]\d|\bAny\s+[TNM])/i.test(criteria)) {
+              if (!tnmOptions.includes(criteria)) tnmOptions.push(criteria);
+            }
+            const gradeSource = [
+              item.stage_label,
+              item.staging_system,
+              item.subtype_label,
+              item.tnm_criteria,
+              item.risk_criteria,
+            ]
+              .filter((value): value is string => Boolean(value))
+              .join(" ");
+            for (const match of gradeSource.matchAll(
+              /grade\s+group\s*[\d\-“]+|grade\s+[\d\-“]+/gi
+            )) {
+              const grade = match[0]
+                .replace(/\s+/g, " ")
+                .replace(/\b\w/g, (c) => c.toUpperCase());
+              if (!seenGrade.has(grade)) {
+                seenGrade.add(grade);
+                gradeOptions.push(grade);
+              }
+            }
+          }
+
+          for (const criteria of tnmOptions) {
+            if (!seenTnm.has(criteria)) {
+              seenTnm.add(criteria);
+              tnmOptionsAggregated.push(criteria);
+            }
+          }
+
+          const expandTnmRange = (token: string): string[] => {
+            const rangeMatch = token.match(/^([TNM])(\d+)([a-z])?-([a-z\d]+)$/i);
+            if (!rangeMatch) return [token];
+            const prefix = rangeMatch[1].toUpperCase();
+            const startNum = parseInt(rangeMatch[2], 10);
+            const startLetter = rangeMatch[3] || "";
+            const endStr = rangeMatch[4];
+            const results: string[] = [];
+            const endNum = parseInt(endStr, 10);
+            if (!startLetter && !isNaN(endNum)) {
+              for (let i = startNum; i <= endNum; i++) results.push(`${prefix}${i}`);
+            } else if (startLetter && endStr.length === 1) {
+              const startCode = startLetter.charCodeAt(0);
+              const endCode = endStr.charCodeAt(0);
+              for (let c = startCode; c <= endCode; c++) results.push(`${prefix}${startNum}${String.fromCharCode(c)}`);
+            }
+            return results.length > 0 ? results : [token];
+          };
+
+          const tSet = new Set<string>();
+          const nSet = new Set<string>();
+          const mSet = new Set<string>();
+          for (const option of tnmOptions) {
+            const parts = option.split(/\s+/);
+            for (const part of parts) {
+              if (/^T\d/i.test(part)) expandTnmRange(part).forEach((v) => tSet.add(v));
+              else if (/^N\d/i.test(part) || /^N[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => nSet.add(v));
+              else if (/^M\d/i.test(part) || /^M[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => mSet.add(v));
+            }
+          }
+          for (const value of [...tSet].sort()) {
+            if (!seenT.has(`${cancerTypeName}|${value}`)) {
+              seenT.add(`${cancerTypeName}|${value}`);
+              tOptionsAggregated.push({ value, cancerType: cancerTypeName });
+            }
+          }
+          for (const value of [...nSet].sort()) {
+            if (!seenN.has(`${cancerTypeName}|${value}`)) {
+              seenN.add(`${cancerTypeName}|${value}`);
+              nOptionsAggregated.push({ value, cancerType: cancerTypeName });
+            }
+          }
+          for (const value of [...mSet].sort()) {
+            if (!seenM.has(`${cancerTypeName}|${value}`)) {
+              seenM.add(`${cancerTypeName}|${value}`);
+              mOptionsAggregated.push({ value, cancerType: cancerTypeName });
+            }
           }
         }
-        setTnmStages(tnmOptions.sort());
 
-        const expandTnmRange = (token: string): string[] => {
-          const rangeMatch = token.match(/^([TNM])(\d+)([a-z])?-([a-z\d]+)$/i);
-          if (!rangeMatch) return [token];
-          const prefix = rangeMatch[1].toUpperCase();
-          const startNum = parseInt(rangeMatch[2], 10);
-          const startLetter = rangeMatch[3] || "";
-          const endStr = rangeMatch[4];
-          const results: string[] = [];
-          const endNum = parseInt(endStr, 10);
-          if (!startLetter && !isNaN(endNum)) {
-            for (let i = startNum; i <= endNum; i++) results.push(`${prefix}${i}`);
-          } else if (startLetter && endStr.length === 1) {
-            const startCode = startLetter.charCodeAt(0);
-            const endCode = endStr.charCodeAt(0);
-            for (let c = startCode; c <= endCode; c++) results.push(`${prefix}${startNum}${String.fromCharCode(c)}`);
-          }
-          return results.length > 0 ? results : [token];
-        };
-
-        const tSet = new Set<string>();
-        const nSet = new Set<string>();
-        const mSet = new Set<string>();
-        for (const option of tnmOptions) {
-          const parts = option.split(/\s+/);
-          for (const part of parts) {
-            if (/^T\d/i.test(part)) expandTnmRange(part).forEach((v) => tSet.add(v));
-            else if (/^N\d/i.test(part) || /^N[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => nSet.add(v));
-            else if (/^M\d/i.test(part) || /^M[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => mSet.add(v));
-          }
-        }
-        setTOptions([...tSet].sort());
-        setNOptions([...nSet].sort());
-        setMOptions([...mSet].sort());
-
+        setStageLabels(stageOptions);
+        setTnmStages(tnmOptionsAggregated.sort());
+        setTOptions(tOptionsAggregated);
+        setNOptions(nOptionsAggregated);
+        setMOptions(mOptionsAggregated);
         setGrades(gradeOptions.sort());
         if (!resetStageSelection) return;
         setFormData((previous) => ({
@@ -4428,8 +4691,18 @@ const Diagnosis: React.FC<{
         if (matchedSavedType) {
           // Restoring a saved draft: reload options for the saved
           // type without overwriting the user's selections.
-          loadSubtypesForCancerType(matchedSavedType.cancer_type_id, false);
-          loadStagesForCancerType(matchedSavedType.cancer_type_id, false);
+          loadSubtypesForCancerTypes([
+            {
+              cancerTypeId: matchedSavedType.cancer_type_id,
+              cancerTypeName: matchedSavedType.cancer_type,
+            },
+          ], false);
+          loadStagesForCancerTypes([
+            {
+              cancerTypeId: matchedSavedType.cancer_type_id,
+              cancerTypeName: matchedSavedType.cancer_type,
+            },
+          ], false);
           return;
         }
 
@@ -4441,8 +4714,18 @@ const Diagnosis: React.FC<{
             type: previous.type || initial.cancer_type,
             icdCode: previous.icdCode || initial.icd10 || "",
           }));
-          loadSubtypesForCancerType(initial.cancer_type_id);
-          loadStagesForCancerType(initial.cancer_type_id);
+          loadSubtypesForCancerTypes([
+            {
+              cancerTypeId: initial.cancer_type_id,
+              cancerTypeName: initial.cancer_type,
+            },
+          ]);
+          loadStagesForCancerTypes([
+            {
+              cancerTypeId: initial.cancer_type_id,
+              cancerTypeName: initial.cancer_type,
+            },
+          ]);
         }
       })
       .catch((error) => {
@@ -4490,22 +4773,32 @@ const Diagnosis: React.FC<{
     }));
   };
 
-  const handleTypeChange = (value: string) => {
+  const handleTypesChange = (values: string[]) => {
+    setSelectedCancerTypes(values);
+
+    /* Reload the dependent fields off the first selected type. */
+    const primaryType = values[0] ?? "";
     setFormData((previous) => ({
       ...previous,
-      type: value,
+      type: primaryType,
       subType: "",
       icdCode: "",
     }));
 
-    const cancerType = cancerTypes.find(
-      (item) => item.cancer_type === value
-    );
-
-    if (cancerType) {
-      loadSubtypesForCancerType(cancerType.cancer_type_id);
-      loadStagesForCancerType(cancerType.cancer_type_id);
-    }
+    /* Histopathology shows the subtypes of every selected cancer type,
+       grouped under its parent cancer type. */
+    const selectedTypes = values
+      .map((name) => cancerTypes.find((item) => item.cancer_type === name))
+      .filter(
+        (item): item is CancerTypeItem =>
+          Boolean(item && item.cancer_type_id)
+      )
+      .map((item) => ({
+        cancerTypeId: item.cancer_type_id,
+        cancerTypeName: item.cancer_type,
+      }));
+    loadSubtypesForCancerTypes(selectedTypes);
+    loadStagesForCancerTypes(selectedTypes);
   };
 
   const handleNext = async () => {
@@ -4584,6 +4877,47 @@ const Diagnosis: React.FC<{
           `hms_staging_detail_id_${resolvedPatientId}`,
           JSON.stringify({ staging_detail_id: stagingDetailId })
         );
+
+        /* When this patient already has a chemotherapy plan, re-link it to
+           the new diagnosis so downstream viewers (patient-details) show
+           the updated cancer type / stage immediately. */
+        try {
+          const existingPlan = await API.get<{
+            success: boolean;
+            data: { chemotherapy_plan_id: string } | null;
+          }>("/chemotherapy/plans/latest-for-patient", {
+            params: {
+              patient_id: resolvedPatientId,
+            },
+          });
+          const existingPlanId =
+            existingPlan.data.data?.chemotherapy_plan_id;
+          if (existingPlanId) {
+            const planChanges: Record<string, unknown> = {
+              staging_detail_id: stagingDetailId,
+            };
+            if (matchedType?.cancer_type_id) {
+              planChanges.cancer_type_id = matchedType.cancer_type_id;
+              planChanges.cancer_type = matchedType.cancer_type;
+            }
+            if (matchedSubtype?.subtype_id) {
+              planChanges.subtype_id = matchedSubtype.subtype_id;
+              planChanges.cancer_subtype = matchedSubtype.subtype_name;
+            }
+            if (formData.cancerStage) {
+              planChanges.cancer_stage = formData.cancerStage;
+            }
+            await API.put(
+              `/chemotherapy/plans/${existingPlanId}`,
+              planChanges
+            );
+          }
+        } catch (planSyncError: any) {
+          console.error(
+            "Failed to sync new diagnosis onto existing plan:",
+            planSyncError?.response?.data?.message ?? planSyncError?.message
+          );
+        }
       }
 
       onNext?.();
@@ -4703,38 +5037,19 @@ const Diagnosis: React.FC<{
 
           {/* Cancer Type */}
           <div>
-            <label
-              htmlFor="type"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
+            <label className="mb-2 block text-sm font-semibold text-gray-600">
               Cancer Type
             </label>
 
-            <div className="relative">
-              <select
-                id="type"
-                name="type"
-                value={formData.type}
-                onChange={(event) =>
-                  handleTypeChange(event.target.value)
-                }
-                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-              >
-                {cancerTypes.length > 0 &&
-                  cancerTypes.map((cancerType) => (
-                    <option
-                      key={cancerType.cancer_type_id}
-                      value={cancerType.cancer_type}
-                    >
-                      {cancerType.cancer_type}
-                    </option>
-                  ))}
-              </select>
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                <ChevronDownIcon />
-              </div>
-            </div>
+            <MultiSelectDropdown
+              options={cancerTypes.map((cancerType) => ({
+                label: cancerType.cancer_type,
+                value: cancerType.cancer_type,
+              }))}
+              value={selectedCancerTypes}
+              onValueChange={handleTypesChange}
+              placeholder="Select Cancer Type"
+            />
           </div>
 
           {/* Laterality */}
@@ -4819,13 +5134,24 @@ const Diagnosis: React.FC<{
                   {diagnosisLoading ? "Loading" : "Select Sub Type"}
                 </option>
 
-                {subtypes.map((subtype) => (
-                  <option
-                    key={subtype.subtype_id}
-                    value={subtype.subtype_name}
-                  >
-                    {subtype.subtype_name}
-                  </option>
+                {Array.from(
+                  subtypes.reduce((groups, subtype) => {
+                    const current = groups.get(subtype.cancerType) ?? [];
+                    current.push(subtype);
+                    groups.set(subtype.cancerType, current);
+                    return groups;
+                  }, new Map<string, CancerSubtypeOption[]>())
+                ).map(([cancerType, groupSubtypes]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {groupSubtypes.map((subtype) => (
+                      <option
+                        key={subtype.subtype_id}
+                        value={subtype.subtype_name}
+                      >
+                        {subtype.subtype_name}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
@@ -4883,10 +5209,21 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                     : "Select Cancer Stage"}
                 </option>
 
-                {stageLabels.map((label) => (
-                  <option key={label} value={label}>
-                    {label}
-                  </option>
+                {Array.from(
+                  stageLabels.reduce((groups, option) => {
+                    const current = groups.get(option.cancerType) ?? [];
+                    current.push(option);
+                    groups.set(option.cancerType, current);
+                    return groups;
+                  }, new Map<string, StageOption[]>())
+                ).map(([cancerType, options]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {options.map((option) => (
+                      <option key={`${cancerType}-${option.value}`} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
@@ -4955,10 +5292,21 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                     : "Select T Stage"}
                 </option>
 
-                {tOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
+                {Array.from(
+                  tOptions.reduce((groups, option) => {
+                    const current = groups.get(option.cancerType) ?? [];
+                    current.push(option);
+                    groups.set(option.cancerType, current);
+                    return groups;
+                  }, new Map<string, StageOption[]>())
+                ).map(([cancerType, options]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {options.map((option) => (
+                      <option key={`${cancerType}-${option.value}`} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
@@ -4991,10 +5339,21 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                     : "Select N Stage"}
                 </option>
 
-                {nOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
+                {Array.from(
+                  nOptions.reduce((groups, option) => {
+                    const current = groups.get(option.cancerType) ?? [];
+                    current.push(option);
+                    groups.set(option.cancerType, current);
+                    return groups;
+                  }, new Map<string, StageOption[]>())
+                ).map(([cancerType, options]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {options.map((option) => (
+                      <option key={`${cancerType}-${option.value}`} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
@@ -5027,10 +5386,21 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
                     : "Select M Stage"}
                 </option>
 
-                {mOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
+                {Array.from(
+                  mOptions.reduce((groups, option) => {
+                    const current = groups.get(option.cancerType) ?? [];
+                    current.push(option);
+                    groups.set(option.cancerType, current);
+                    return groups;
+                  }, new Map<string, StageOption[]>())
+                ).map(([cancerType, options]) => (
+                  <optgroup key={cancerType} label={cancerType}>
+                    {options.map((option) => (
+                      <option key={`${cancerType}-${option.value}`} value={option.value}>
+                        {option.value}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
 
@@ -6912,7 +7282,15 @@ const ChemotherapyOrder: React.FC<{
     setPlanError("");
     setSavingPlan(true);
 
-    try {
+    let navigated = false;
+    const navigateNext = () => {
+      if (navigated) return;
+      navigated = true;
+      onNext?.();
+    };
+    const navigateTimer = setTimeout(navigateNext, 500);
+
+    const saveOrder = async () => {
       const planItems: Array<{
         medicine_id: string;
         drug_role: string;
@@ -6969,20 +7347,27 @@ const ChemotherapyOrder: React.FC<{
         ) ||
         toIsoDate(new Date().toISOString());
 
-      const { error } = await createChemotherapyPlanForPatient(
+      return createChemotherapyPlanForPatient(
         resolvedPatientId,
         planStartDate,
         planItems.length > 0 ? planItems : undefined,
         undefined
       );
+    };
+
+    try {
+      const { error } = await saveOrder();
 
       if (error) {
+        clearTimeout(navigateTimer);
         setPlanError(error);
         return;
       }
 
-      onNext?.();
+      clearTimeout(navigateTimer);
+      navigateNext();
     } catch (err: any) {
+      clearTimeout(navigateTimer);
       console.error("Failed to save chemotherapy order:", err);
       setPlanError(
         err?.response?.data?.message ||
@@ -10287,6 +10672,11 @@ const TreatmentPlan: React.FC<{
                       })
                     );
                   }
+                  /* Push the newly selected protocol onto any existing
+                     plan immediately so patient-details shows the new
+                     protocol + days/cycle without waiting for the step
+                     to be saved. */
+                  void syncExistingPlanProtocol(resolvedPatientId, value);
                 } else {
                   localStorage.removeItem(
                     `hms_selected_protocol_id_${resolvedPatientId}`
@@ -10795,7 +11185,7 @@ const Summary: React.FC<{
   patientId,
   appointmentId,
   encounterNo,
-  measurements = { height: "", weight: "", bsa: "", bmi: "", bp: "", pulse: "", temp: "", spo2: "" },
+  measurements = { height: "", weight: "", bsa: "", bmi: "", bp: "", pulse: "", temp: "", spo2: "", painScore: "" },
 }) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -11765,6 +12155,7 @@ const Summary: React.FC<{
                     { label: "PULSE", value: measurements.pulse },
                     { label: "TEMP", value: measurements.temp },
                     { label: "SPO2", value: measurements.spo2 },
+                    { label: "PAIN", value: measurements.painScore },
                   ].map((item) => (
                     <div key={item.label} className="flex flex-col">
                       <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">

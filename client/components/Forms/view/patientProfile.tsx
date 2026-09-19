@@ -369,6 +369,13 @@ export default function PatientProfile() {
 
           {/* Patient Header Card */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-2 relative overflow-hidden">
+            {crit.isCritical && (
+              <span className="absolute top-0 left-0 z-10 pointer-events-none">
+                <svg width="24" height="24" viewBox="0 0 20 20" className="block">
+                  <polygon points="0,0 20,0 0,20" fill="#DC2626" />
+                </svg>
+              </span>
+            )}
             <div className="absolute top-0 right-0 w-1/3 h-full bg-slate-50 opacity-50 rounded-l-full transform translate-x-1/4 -translate-y-1/4 pointer-events-none" />
             <div className="relative z-10 flex flex-col items-start gap-6 p-4 md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-6">
