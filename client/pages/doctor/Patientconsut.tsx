@@ -346,7 +346,7 @@ const buildMeasurements = (
   encounter: EncounterRecord | null | undefined,
   recentEncounters: EncounterRecord[] = []
 ): MeasurementValues => {
-  const getField = (field: keyof EncounterRecord) => {
+    const getField = (field: keyof EncounterRecord) => {
     // Prefer active encounter
     const activeVal = (encounter as any)?.[field];
     if (activeVal != null && activeVal !== "") return vitalNum(activeVal);
@@ -393,6 +393,28 @@ const buildMeasurements = (
     spo2: spo2 !== null ? `${spo2}%` : "",
     painScore: painScore !== null ? `${painScore}/10` : "",
   };
+};
+
+/* Parse a MeasurementValues height/weight/bsa string like "170 cm",
+   "70 kg", "1.8 m²" back to a number. */
+const parseMeasureString = (value: string): number | null => {
+  const parsed = parseFloat(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+/* Plain BSA (Mosteller) of the patient derived from height/weight:
+   BSA (m²) = √(height_cm × weight_kg / 3600). Applied directly to the
+   protocol dose so larger patients get a higher dose and smaller
+   patients a lower one. Returns 1 when BSA cannot be derived so doses
+   stay unchanged. */
+const bsaDoseScaleFactor = (
+  measurements?: MeasurementValues
+): number => {
+  const height = parseMeasureString(measurements?.height ?? "");
+  const weight = parseMeasureString(measurements?.weight ?? "");
+  const bsa = computeBsa(height, weight);
+  if (bsa === null) return 1;
+  return Math.round(bsa * 1000) / 1000;
 };
 
 const findActiveEncounter = async (
@@ -2301,6 +2323,8 @@ const Consultation: React.FC = () => {
                   <ChemotherapyOrder
                     embedded
                     patientId={patientDisplayId}
+                    measurements={measurements}
+                    gender={patient?.patient_gender ?? ""}
                     onNext={() => { selectStep("DISCHARGE MEDICATION", markStepCompleted("CHEMOTHERAPY ORDER")); }}
                   />
                 ) : activeStep === "DISCHARGE MEDICATION" ? (
@@ -6818,8 +6842,16 @@ type RegimenProtocolDetail = {
 const ChemotherapyOrder: React.FC<{
   embedded?: boolean;
   patientId?: string;
+  measurements?: MeasurementValues;
+  gender?: string;
   onNext?: () => void;
-}> = ({ embedded = false, patientId, onNext }) => {
+}> = ({
+  embedded = false,
+  patientId,
+  measurements,
+  gender,
+  onNext,
+}) => {
   const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
   const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
@@ -6828,6 +6860,14 @@ const ChemotherapyOrder: React.FC<{
     (location.state as ConsultationState | null)?.patientId ?? ""
   );
   const resolvedPatientId = patientId || statePatientId;
+
+  /* BSA dose scale factor computed from the patient's height/weight via
+     the BSA formula; used to auto-adjust chemo doses (increase/decrease)
+     across all three tabs when the factor differs from 1. */
+  const doseScaleFactor = useMemo(
+    () => bsaDoseScaleFactor(measurements),
+    [measurements]
+  );
 
   const [cycleDay, setCycleDay] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -7138,7 +7178,10 @@ const ChemotherapyOrder: React.FC<{
       item.medicine_master?.dosage_form ||
       item.administration_route ||
       "",
-    dose: item.dosage != null ? String(item.dosage) : "",
+    dose:
+      item.dosage != null
+        ? String(Math.round(item.dosage * doseScaleFactor * 10) / 10)
+        : "",
     unit: item.dosage_unit || item.medicine_master?.unit || "",
     volume: "",
     medicineId: item.medicine_id,
@@ -7675,7 +7718,12 @@ const ChemotherapyOrder: React.FC<{
               item.formulation ||
               item.medicine_master?.dosage_form ||
               "",
-            dose: item.protocol_dose != null ? String(item.protocol_dose) : "",
+            dose:
+              item.protocol_dose != null
+                ? String(
+                    Math.round(item.protocol_dose * doseScaleFactor * 10) / 10
+                  )
+                : "",
             unit:
               item.protocol_dose_unit ||
               item.medicine_master?.unit ||

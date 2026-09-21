@@ -148,19 +148,28 @@ export const FormProtocolMultiSelect: React.FC<FormProtocolMultiSelectProps> = (
         }}
         className={cn(
           "w-full min-h-[38px] px-2.5 py-1.5 bg-[#f8fafc] border border-[#dde4ec] rounded-[11px] text-[13px] text-[#17212e] transition-all duration-150 flex items-center justify-between gap-1.5 cursor-pointer select-none",
+          "overflow-hidden",
           "hover:border-[#c7d2dd] hover:bg-[#f5f8fb]",
           open && "border-[#12335c] bg-white ring-3 ring-[#12335c]/15",
           disabled && "bg-[#f1f3f5] text-[#9aa5b1] cursor-not-allowed border-[#dde4ec] hover:bg-[#f1f3f5] hover:border-[#dde4ec]"
         )}
       >
         <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+        <div
+          className="flex items-center gap-1.5 flex-1 min-w-0 overflow-x-auto overflow-y-hidden hide-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden py-0.5"
+          onWheel={(e) => {
+            if (e.currentTarget.scrollWidth > e.currentTarget.clientWidth && e.deltaY !== 0) {
+              e.currentTarget.scrollLeft += e.deltaY;
+            }
+          }}
+        >
           {selectedOptions.length === 0 ? (
-            <span className="text-[#a7b2bf] text-[13px] px-1">{placeholder}</span>
+            <span className="text-[#a7b2bf] text-[13px] px-1 truncate">{placeholder}</span>
           ) : (
             selectedOptions.map((opt) => (
               <span
                 key={opt.value}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#eaf0f7] text-[#12335c] font-medium text-[12px] border border-[#d2e0f0] animate-in fade-in-50 duration-100"
+                className="inline-flex shrink-0 items-center gap-1 px-2 py-0.5 rounded-md bg-[#eaf0f7] text-[#12335c] font-medium text-[12px] border border-[#d2e0f0] animate-in fade-in-50 duration-100 whitespace-nowrap"
               >
                 <span className="max-w-[160px] truncate">{opt.label}</span>
                 {!disabled && (
@@ -189,6 +198,8 @@ export const FormProtocolMultiSelect: React.FC<FormProtocolMultiSelectProps> = (
             />
           )}
         </div>
+      </div>
+
       </div>
 
       {open && !disabled && !loading && coords
@@ -294,5 +305,4 @@ export const FormProtocolMultiSelect: React.FC<FormProtocolMultiSelectProps> = (
         : null}
     </div>
   );
-};
-
+  };
