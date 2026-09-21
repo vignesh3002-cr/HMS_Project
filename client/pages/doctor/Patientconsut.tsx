@@ -240,6 +240,38 @@ const MOLECULAR_TESTS = [
   "BRCA1/BRCA2 and HRR testing",
 ];
 
+/* Standard options for the single-select Diagnosis fields that had no
+   dropdown list defined (the old <select> rendered only the placeholder). */
+const NATURE_OF_DIAGNOSIS_OPTIONS = [
+  "Primary",
+  "Recurrent",
+  "Metastatic",
+  "In Situ",
+  "Unknown",
+];
+
+const BODY_SITE_OPTIONS = [
+  "Breast",
+  "Lung",
+  "Colon",
+  "Rectum",
+  "Stomach",
+  "Liver",
+  "Pancreas",
+  "Kidney",
+  "Bladder",
+  "Prostate",
+  "Ovary",
+  "Cervix",
+  "Uterus",
+  "Skin",
+  "Brain",
+  "Head and Neck",
+  "Bone",
+  "Lymph Node",
+  "Other",
+];
+
 const StepCheckLogo = ({ active = false }: { active?: boolean }) => (
   <svg
     className="h-6 w-6"
@@ -4365,6 +4397,124 @@ const DiagnosisCheckboxList: React.FC<{
   );
 };
 
+/* Single-select checkbox dropdown for the Diagnosis fields that used a plain
+   <select>. Styled identically to DiagnosisCheckboxList / MultiSelectDropdown:
+   a chips trigger opens a checkbox list; checking an option sets it as the
+   chosen value (unchecking clears it), and the selected chip is removable. */
+const DiagnosisCheckboxSelect: React.FC<{
+  title: string;
+  options: string[];
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  loading?: boolean;
+}> = ({ title, options, value, onChange, placeholder = "Select one option below", loading }) => {
+  const [open, setOpen] = React.useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  const handleToggle = (option: string) => {
+    onChange(option === value ? "" : option);
+  };
+
+  return (
+    <div>
+      <label className="mb-2 block text-sm font-semibold text-gray-600">
+        {title}
+      </label>
+
+      <div className="relative" ref={containerRef}>
+        {/* Trigger: selected chips strip. */}
+        <button
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          onClick={() => setOpen((current) => !current)}
+          className="flex min-h-[46px] w-full flex-wrap items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-left"
+        >
+          {!value ? (
+            <span className="text-gray-400">
+              {loading && options.length === 0 ? "Loading..." : placeholder}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+              {value}
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label={`Remove ${value}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChange("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onChange("");
+                  }
+                }}
+                className="inline-flex items-center justify-center leading-none hover:text-blue-900 cursor-pointer"
+              >
+                ×
+              </span>
+            </span>
+          )}
+          <span
+            className={
+              "ml-auto h-4 w-4 flex-shrink-0 text-gray-400 transition-transform duration-200 " +
+              (open ? "rotate-180" : "")
+            }
+          >
+            <ChevronDownIcon />
+          </span>
+        </button>
+
+        {/* Dropdown body: rendered on click. */}
+        {open && (
+          <div className="absolute left-0 right-0 top-full z-20 mt-2 block w-full max-h-60 overflow-y-auto rounded-md border border-gray-300 bg-white p-3 text-sm text-gray-800 shadow-lg slim-scrollbar">
+            {options.length === 0 && (
+              <p className="text-sm text-gray-400">
+                {loading
+                  ? "Loading..."
+                  : `No ${title.toLowerCase()} options available`}
+              </p>
+            )}
+
+            {options.map((option) => (
+              <label
+                key={option}
+                className="flex cursor-pointer items-center gap-1.5 py-1 text-sm text-gray-700"
+              >
+                <input
+                  type="checkbox"
+                  checked={value === option}
+                  onChange={() => handleToggle(option)}
+                  className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                />
+                <span className="leading-snug">{option}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 type StagingReferenceItem = {
   stage_ref_id: string;
   cancer_type_id: string;
@@ -5238,66 +5388,39 @@ const Diagnosis: React.FC<{
           </div>
 
           {/* Nature of Diagnosis */}
-          <div>
-            <label
-              htmlFor="natureOfDiagnosis"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
-              Nature of Diagnosis
-            </label>
-
-            <div className="relative">
-              <select
-                id="natureOfDiagnosis"
-                name="natureOfDiagnosis"
-                value={formData.natureOfDiagnosis}
-                onChange={handleChange}
-                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-              >
-                <option value="">
-                  Select Nature of Diagnosis
-                </option>
-              </select>
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                <ChevronDownIcon />
-              </div>
-            </div>
-          </div>
+          <DiagnosisCheckboxSelect
+            title="Nature of Diagnosis"
+            options={NATURE_OF_DIAGNOSIS_OPTIONS}
+            value={formData.natureOfDiagnosis}
+            onChange={(value) =>
+              setFormData((previous) => ({
+                ...previous,
+                natureOfDiagnosis: value,
+              }))
+            }
+            placeholder="Select Nature of Diagnosis"
+          />
 
           {/* Disease Status */}
-          <div>
-            <label
-              htmlFor="diseaseStatus"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
-              Disease Status
-            </label>
-
-            <div className="relative">
-              <select
-                id="diseaseStatus"
-                name="diseaseStatus"
-                value={formData.diseaseStatus}
-                onChange={handleChange}
-                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-              >
-                <option value="">
-                  Select Disease Status
-                </option>
-                <option value="Newly Diagnosed">Newly Diagnosed</option>
-                <option value="In Remission">In Remission</option>
-                <option value="Recurrence">Recurrence</option>
-                <option value="Progressive">Progressive</option>
-                <option value="Stable">Stable</option>
-                <option value="Metastatic">Metastatic</option>
-              </select>
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                <ChevronDownIcon />
-              </div>
-            </div>
-          </div>
+          <DiagnosisCheckboxSelect
+            title="Disease Status"
+            options={[
+              "Newly Diagnosed",
+              "In Remission",
+              "Recurrence",
+              "Progressive",
+              "Stable",
+              "Metastatic",
+            ]}
+            value={formData.diseaseStatus}
+            onChange={(value) =>
+              setFormData((previous) => ({
+                ...previous,
+                diseaseStatus: value,
+              }))
+            }
+            placeholder="Select Disease Status"
+          />
 
           {/* Cancer Type */}
           <div>
@@ -5317,65 +5440,38 @@ const Diagnosis: React.FC<{
           </div>
 
           {/* Laterality */}
-          <div>
-            <label
-              htmlFor="laterality"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
-              Laterality
-            </label>
-
-            <div className="relative">
-              <select
-                id="laterality"
-                name="laterality"
-                value={formData.laterality}
-                onChange={handleChange}
-                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-              >
-                <option value="">
-                  Select Laterality
-                </option>
-                <option value="Left">Left</option>
-                <option value="Right">Right</option>
-                <option value="Bilateral">Bilateral</option>
-                <option value="Midline">Midline</option>
-                <option value="Not Applicable">Not Applicable</option>
-              </select>
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                <ChevronDownIcon />
-              </div>
-            </div>
-          </div>
+          <DiagnosisCheckboxSelect
+            title="Laterality"
+            options={[
+              "Left",
+              "Right",
+              "Bilateral",
+              "Midline",
+              "Not Applicable",
+            ]}
+            value={formData.laterality}
+            onChange={(value) =>
+              setFormData((previous) => ({
+                ...previous,
+                laterality: value,
+              }))
+            }
+            placeholder="Select Laterality"
+          />
 
           {/* Body Site */}
-          <div>
-            <label
-              htmlFor="bodySite"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
-              Body Site
-            </label>
-
-            <div className="relative">
-              <select
-                id="bodySite"
-                name="bodySite"
-                value={formData.bodySite}
-                onChange={handleChange}
-                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-              >
-                <option value="">
-                  Select Body Site
-                </option>
-              </select>
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                <ChevronDownIcon />
-              </div>
-            </div>
-          </div>
+          <DiagnosisCheckboxSelect
+            title="Body Site"
+            options={BODY_SITE_OPTIONS}
+            value={formData.bodySite}
+            onChange={(value) =>
+              setFormData((previous) => ({
+                ...previous,
+                bodySite: value,
+              }))
+            }
+            placeholder="Select Body Site"
+          />
 
           {/* Histopathology */}
           <DiagnosisCheckboxList
@@ -5426,40 +5522,19 @@ const Diagnosis: React.FC<{
           />
 
           {/* Grade */}
-          <div>
-            <label
-              htmlFor="grade"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
-              Grade
-            </label>
-
-            <div className="relative">
-              <select
-                id="grade"
-                name="grade"
-                value={formData.grade}
-                onChange={handleChange}
-                className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-              >
-                <option value="">
-                  {diagnosisLoading
-                    ? "Loading"
-                    : "Select Grade"}
-                </option>
-
-                {grades.map((grade) => (
-                  <option key={grade} value={grade}>
-                    {grade}
-                  </option>
-                ))}
-              </select>
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                <ChevronDownIcon />
-              </div>
-            </div>
-          </div>
+          <DiagnosisCheckboxSelect
+            title="Grade"
+            options={grades}
+            value={formData.grade}
+            onChange={(value) =>
+              setFormData((previous) => ({
+                ...previous,
+                grade: value,
+              }))
+            }
+            loading={diagnosisLoading}
+            placeholder="Select Grade"
+          />
 
           {/* TNM Staging */}
           <div className="col-span-full grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-3 lg:grid-cols-3">
@@ -5513,38 +5588,18 @@ const Diagnosis: React.FC<{
           )}
 
           {/* Molecular Testing */}
-          <div>
-            <label
-              htmlFor="molecularTesting"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
-              Molecular Testing
-            </label>
-
-            <div className="relative">
-              <select
-                id="molecularTesting"
-                name="molecularTesting"
-                value={formData.molecularTesting}
-                onChange={handleChange}
-                className="block w-full appearance-none rounded-md border border-gray-300 bg-white py-3 pl-4 pr-10 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-              >
-                <option value="">
-                  Select Molecular Testing
-                </option>
-
-                {MOLECULAR_TESTS.map((test) => (
-                  <option key={test} value={test}>
-                    {test}
-                  </option>
-                ))}
-              </select>
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
-                <ChevronDownIcon />
-              </div>
-            </div>
-          </div>
+          <DiagnosisCheckboxSelect
+            title="Molecular Testing"
+            options={MOLECULAR_TESTS}
+            value={formData.molecularTesting}
+            onChange={(value) =>
+              setFormData((previous) => ({
+                ...previous,
+                molecularTesting: value,
+              }))
+            }
+            placeholder="Select Molecular Testing"
+          />
 
           {formData.molecularTesting && (
             <>
