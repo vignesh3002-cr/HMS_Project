@@ -14,7 +14,10 @@ declare module "axios" {
 }
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_BACKEND_URL,
+  baseURL:
+    import.meta.env.VITE_BACKEND_URL ||
+    import.meta.env.VITE_BACKEND_URL_PROD ||
+    "/api",
   withCredentials: true,
   timeout: 30000,
 });
