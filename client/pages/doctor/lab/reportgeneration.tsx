@@ -100,7 +100,6 @@ export default function ReportGeneration() {
     "ALL" | "GENERATED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL"
   >("ALL");
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
-  const [quickRequestId, setQuickRequestId] = useState("");
 
   const handleGenerateReport = (id: string) => {
     setReports((prev) =>
@@ -117,26 +116,6 @@ export default function ReportGeneration() {
       title: "Printing Diagnostic Report",
       description: `Sending report ${report.reportId} for ${report.patientName} to printer.`,
     });
-  };
-
-  const handleQuickGenerate = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!quickRequestId.trim()) return;
-    const match = reports.find(
-      (r) =>
-        r.requestId.toLowerCase() === quickRequestId.trim().toLowerCase() ||
-        r.patientName.toLowerCase().includes(quickRequestId.trim().toLowerCase()),
-    );
-    if (match) {
-      handleGenerateReport(match.id);
-      setQuickRequestId("");
-    } else {
-      toast({
-        title: "Requisition Not Found",
-        description: `No lab requisition found for "${quickRequestId}".`,
-        variant: "destructive",
-      });
-    }
   };
 
   const filteredReports = useMemo(() => {
@@ -320,15 +299,16 @@ export default function ReportGeneration() {
           </nav>
         </div>
 
-        {/* Bottom Part: Settings & Support & Technician Profile */}
-        <div className="p-3 border-t border-[#e2e8f0] space-y-1">
+        {/* Bottom Part: Settings, Support & Admin Profile */}
+        <div className="px-3 pb-6 space-y-1">
+          {/* Settings */}
           <a
-            className="flex items-center gap-3.5 px-4 py-2 text-sm font-medium text-[#334155] hover:bg-slate-200/60 rounded-lg transition-colors"
+            className="flex items-center gap-3 px-4 py-2 text-sm font-medium text-[#475569] hover:bg-slate-200/60 rounded-lg transition-colors"
             href="#settings"
             onClick={(e) => e.preventDefault()}
           >
             <svg
-              className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
+              className="w-5 h-5 text-slate-500"
               fill="none"
               stroke="currentColor"
               strokeWidth="1.8"
@@ -339,21 +319,19 @@ export default function ReportGeneration() {
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
-              <path
-                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+              <circle cx="12" cy="12" r="3" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             <span>Settings</span>
           </a>
+
+          {/* Support */}
           <a
-            className="flex items-center gap-3.5 px-4 py-2 text-sm font-medium text-[#334155] hover:bg-slate-200/60 rounded-lg transition-colors"
+            className="flex items-center gap-3 px-4 py-2 text-sm font-medium text-[#475569] hover:bg-slate-200/60 rounded-lg transition-colors"
             href="#support"
             onClick={(e) => e.preventDefault()}
           >
             <svg
-              className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
+              className="w-5 h-5 text-slate-500"
               fill="none"
               stroke="currentColor"
               strokeWidth="1.8"
@@ -389,18 +367,8 @@ export default function ReportGeneration() {
               title="Sign Out"
               className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
             >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-                />
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
               </svg>
             </button>
           </div>
@@ -412,36 +380,9 @@ export default function ReportGeneration() {
       <div className="flex-1 ml-[260px] min-h-screen flex flex-col min-w-0 bg-[#f8fafd]">
         {/* TopNavbar */}
         <header
-          className="h-20 bg-white border-b border-slate-100 px-10 flex items-center justify-between sticky top-0 z-10"
+          className="h-20 bg-white border-b border-slate-100 px-10 flex items-center justify-end sticky top-0 z-10"
           data-purpose="dashboard-header"
         >
-          {/* Title & Back link */}
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate("/lab/dashboard")}
-              className="p-1.5 -ml-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-              title="Back to Dashboard"
-            >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M10 19l-7-7m0 0l7-7m-7 7h18"
-                />
-              </svg>
-            </button>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-              Report Generation
-            </h1>
-          </div>
-
           <div className="flex items-center gap-6">
             {/* Notification Bell with Counter */}
             <div className="relative cursor-pointer hover:opacity-80 transition-opacity">
@@ -630,49 +571,6 @@ export default function ReportGeneration() {
             </div>
           </section>
 
-          {/* Quick Generate Report Card */}
-          <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                <svg
-                  className="w-5 h-5 text-[#0b57d0]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                  />
-                </svg>
-                <span>Fast Diagnostic Report Compilation</span>
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Compile patient laboratory values into certified PDF report ready for doctor review.
-              </p>
-            </div>
-            <form
-              onSubmit={handleQuickGenerate}
-              className="flex items-center gap-2.5 w-full sm:w-auto"
-            >
-              <input
-                type="text"
-                value={quickRequestId}
-                onChange={(e) => setQuickRequestId(e.target.value)}
-                placeholder="Enter Requisition ID (e.g. TRF1256)..."
-                className="w-full sm:w-80 px-4 py-2 border border-slate-200 rounded-lg text-[13px] text-slate-700 font-mono placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all"
-              />
-              <button
-                type="submit"
-                className="px-6 py-2 bg-[#00875A] hover:bg-[#00744E] text-white text-sm font-semibold rounded-lg shadow-sm transition-colors cursor-pointer shrink-0"
-              >
-                Compile Report
-              </button>
-            </form>
-          </section>
-
           {/* TableContainerCard */}
           <section
             className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
@@ -682,7 +580,7 @@ export default function ReportGeneration() {
             <div className="px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-4">
               <div>
                 <h2 className="text-[20px] font-bold text-slate-800">
-                  Diagnostic Reports Catalog
+                  Report Generation Details
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
                   Review generated laboratory test findings, download formatted PDF reports, and approve release
@@ -777,7 +675,7 @@ export default function ReportGeneration() {
                             : "text-slate-700"
                         }`}
                       >
-                        <span>All ({reports.length})</span>
+                        <span>All Statuses</span>
                         {statusFilter === "ALL" && <span>✓</span>}
                       </button>
                       <button
@@ -879,7 +777,7 @@ export default function ReportGeneration() {
                       STATUS
                     </th>
                     <th
-                      className="py-4 px-6 font-bold text-center"
+                      className="py-4 px-4 font-bold text-center"
                       scope="col"
                     >
                       ACTION
@@ -902,7 +800,7 @@ export default function ReportGeneration() {
                         key={r.id}
                         className="hover:bg-blue-50/40 transition-colors group"
                       >
-                        <td className="py-4 px-8">
+                        <td className="py-5 px-8">
                           <span className="font-semibold text-slate-900 font-mono block">
                             {r.reportId}
                           </span>
@@ -910,7 +808,7 @@ export default function ReportGeneration() {
                             {r.requestId}
                           </span>
                         </td>
-                        <td className="py-4 px-6">
+                        <td className="py-5 px-6">
                           <span className="font-semibold text-slate-900 block">
                             {r.patientName}
                           </span>
@@ -918,40 +816,40 @@ export default function ReportGeneration() {
                             {r.patientId}
                           </span>
                         </td>
-                        <td className="py-4 px-6 text-slate-700 font-medium text-xs">
+                        <td className="py-5 px-6 text-slate-700 font-normal text-xs">
                           {r.doctorName}
                         </td>
-                        <td className="py-4 px-6">
-                          <span className="font-semibold text-slate-800 block">
+                        <td className="py-5 px-6">
+                          <span className="font-medium text-slate-800 block">
                             {r.testPanel}
                           </span>
                           <span className="text-[11px] text-slate-500 block truncate max-w-xs">
                             {r.findingsSummary}
                           </span>
                         </td>
-                        <td className="py-4 px-6 text-center text-slate-600 font-mono text-xs">
+                        <td className="py-5 px-6 text-center text-slate-600 font-normal">
                           {r.generatedDate}
                         </td>
-                        <td className="py-4 px-8 text-center">
+                        <td className="py-5 px-8 text-center">
                           {r.status === "GENERATED" ? (
-                            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#def7ec] text-[#03543f]">
+                            <span className="inline-block px-4 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#bbf7d0] text-[#15803d]">
                               GENERATED
                             </span>
                           ) : r.status === "UNDER_REVIEW" ? (
-                            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#e0edff] text-[#2563eb]">
+                            <span className="inline-block px-4 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#bfdbfe] text-[#1d4ed8]">
                               UNDER REVIEW
                             </span>
                           ) : r.status === "CRITICAL" ? (
-                            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#fee2e2] text-[#991b1b]">
+                            <span className="inline-block px-4 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#fecaca] text-[#991b1b]">
                               CRITICAL
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#fef3c7] text-[#92400e]">
+                            <span className="inline-block px-4 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#fef08a] text-[#854d0e]">
                               DRAFT
                             </span>
                           )}
                         </td>
-                        <td className="py-4 px-6 text-center">
+                        <td className="py-5 px-4 text-center">
                           <div className="flex items-center justify-center gap-2">
                             {r.status === "DRAFT" || r.status === "UNDER_REVIEW" ? (
                               <button
@@ -965,9 +863,9 @@ export default function ReportGeneration() {
                               <button
                                 type="button"
                                 onClick={() => handlePrintReport(r)}
-                                className="px-3 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-600 hover:text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer inline-flex items-center gap-1"
+                                className="px-3 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-600 hover:text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
                               >
-                                <span>PDF</span>
+                                PDF
                               </button>
                             )}
                             <button
@@ -992,4 +890,3 @@ export default function ReportGeneration() {
     </div>
   );
 }
-

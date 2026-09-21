@@ -197,9 +197,7 @@ export default function SampleVerification() {
             {/* Dashboard */}
             <button
               type="button"
-              onClick={() => {
-                navigate("/lab/dashboard");
-              }}
+              onClick={() => navigate("/lab/dashboard")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Dashboard"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -219,9 +217,7 @@ export default function SampleVerification() {
             {/* Samples Verification */}
             <button
               type="button"
-              onClick={() => {
-                setActiveNav("Samples Verification");
-              }}
+              onClick={() => setActiveNav("Samples Verification")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Samples Verification"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -247,9 +243,7 @@ export default function SampleVerification() {
             {/* Testing Samples */}
             <button
               type="button"
-              onClick={() => {
-                navigate("/lab/testing-samples");
-              }}
+              onClick={() => navigate("/lab/testing-samples")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Testing Samples"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -275,9 +269,7 @@ export default function SampleVerification() {
             {/* Report Generation */}
             <button
               type="button"
-              onClick={() => {
-                navigate("/lab/report-generation");
-              }}
+              onClick={() => navigate("/lab/report-generation")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Report Generation"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -303,9 +295,7 @@ export default function SampleVerification() {
             {/* Report Transfer */}
             <button
               type="button"
-              onClick={() => {
-                navigate("/lab/report-transfer");
-              }}
+              onClick={() => navigate("/lab/report-transfer")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Report Transfer"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -330,15 +320,16 @@ export default function SampleVerification() {
           </nav>
         </div>
 
-        {/* Bottom Part: Settings & Support & Technician Profile */}
-        <div className="p-3 border-t border-[#e2e8f0] space-y-1">
+        {/* Bottom Part: Settings, Support & Admin Profile */}
+        <div className="px-3 pb-6 space-y-1">
+          {/* Settings */}
           <a
-            className="flex items-center gap-3.5 px-4 py-2 text-sm font-medium text-[#334155] hover:bg-slate-200/60 rounded-lg transition-colors"
+            className="flex items-center gap-3 px-4 py-2 text-sm font-medium text-[#475569] hover:bg-slate-200/60 rounded-lg transition-colors"
             href="#settings"
             onClick={(e) => e.preventDefault()}
           >
             <svg
-              className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
+              className="w-5 h-5 text-slate-500"
               fill="none"
               stroke="currentColor"
               strokeWidth="1.8"
@@ -349,21 +340,19 @@ export default function SampleVerification() {
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
-              <path
-                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+              <circle cx="12" cy="12" r="3" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             <span>Settings</span>
           </a>
+
+          {/* Support */}
           <a
-            className="flex items-center gap-3.5 px-4 py-2 text-sm font-medium text-[#334155] hover:bg-slate-200/60 rounded-lg transition-colors"
+            className="flex items-center gap-3 px-4 py-2 text-sm font-medium text-[#475569] hover:bg-slate-200/60 rounded-lg transition-colors"
             href="#support"
             onClick={(e) => e.preventDefault()}
           >
             <svg
-              className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
+              className="w-5 h-5 text-slate-500"
               fill="none"
               stroke="currentColor"
               strokeWidth="1.8"
@@ -399,18 +388,8 @@ export default function SampleVerification() {
               title="Sign Out"
               className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
             >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-                />
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
               </svg>
             </button>
           </div>
@@ -422,36 +401,9 @@ export default function SampleVerification() {
       <div className="flex-1 ml-[260px] min-h-screen flex flex-col min-w-0 bg-[#f8fafd]">
         {/* TopNavbar */}
         <header
-          className="h-20 bg-white border-b border-slate-100 px-10 flex items-center justify-between sticky top-0 z-10"
+          className="h-20 bg-white border-b border-slate-100 px-10 flex items-center justify-end sticky top-0 z-10"
           data-purpose="dashboard-header"
         >
-          {/* Title & Back link */}
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate("/lab/dashboard")}
-              className="p-1.5 -ml-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-              title="Back to Dashboard"
-            >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M10 19l-7-7m0 0l7-7m-7 7h18"
-                />
-              </svg>
-            </button>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-              Samples Verification
-            </h1>
-          </div>
-
           <div className="flex items-center gap-6">
             {/* Notification Bell with Counter */}
             <div className="relative cursor-pointer hover:opacity-80 transition-opacity">
@@ -635,49 +587,6 @@ export default function SampleVerification() {
             </div>
           </section>
 
-          {/* Quick Barcode Scanner Card */}
-          <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                <svg
-                  className="w-5 h-5 text-[#0b57d0]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"
-                  />
-                </svg>
-                <span>Quick Barcode Verification Scanner</span>
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Scan or enter the sample tube barcode to immediately verify specimen integrity.
-              </p>
-            </div>
-            <form
-              onSubmit={handleBarcodeScan}
-              className="flex items-center gap-2.5 w-full sm:w-auto"
-            >
-              <input
-                type="text"
-                value={barcodeInput}
-                onChange={(e) => setBarcodeInput(e.target.value)}
-                placeholder="Scan / Type Barcode (e.g. BC2405200001)..."
-                className="w-full sm:w-80 px-4 py-2 border border-slate-200 rounded-lg text-[13px] text-slate-700 font-mono placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all"
-              />
-              <button
-                type="submit"
-                className="px-6 py-2 bg-[#00875A] hover:bg-[#00744E] text-white text-sm font-semibold rounded-lg shadow-sm transition-colors cursor-pointer shrink-0"
-              >
-                Verify
-              </button>
-            </form>
-          </section>
-
           {/* TableContainerCard */}
           <section
             className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
@@ -687,15 +596,35 @@ export default function SampleVerification() {
             <div className="px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-4">
               <div>
                 <h2 className="text-[20px] font-bold text-slate-800">
-                  Specimens Awaiting Verification
+                  Samples Verification Details
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
                   Confirm tube volume, label alignment, and pre-analytical integrity before routing to analyzers
                 </p>
               </div>
-              <div className="flex items-center gap-3 w-full sm:w-auto">
+              <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+                {/* Barcode Quick Scan Input */}
+                <form
+                  onSubmit={handleBarcodeScan}
+                  className="relative flex items-center"
+                >
+                  <input
+                    type="text"
+                    value={barcodeInput}
+                    onChange={(e) => setBarcodeInput(e.target.value)}
+                    placeholder="Scan / Type Barcode..."
+                    className="w-48 pl-3 pr-14 py-2 border border-slate-200 rounded-lg text-[13px] font-mono text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                  />
+                  <button
+                    type="submit"
+                    className="absolute right-1.5 px-2.5 py-1 bg-[#00875A] hover:bg-[#00744E] text-white text-xs font-semibold rounded-md shadow-2xs transition-colors cursor-pointer"
+                  >
+                    Verify
+                  </button>
+                </form>
+
                 {/* Search Bar */}
-                <div className="relative w-full sm:w-[320px]">
+                <div className="relative w-full sm:w-[280px]">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
                     <svg
                       className="w-4 h-4 text-slate-400 stroke-[2]"
@@ -714,7 +643,7 @@ export default function SampleVerification() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-[13px] text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                    placeholder="Search Patient, Barcode, Sample ID..."
+                    placeholder="Search Patient, Barcode, ID..."
                     type="text"
                   />
                   {searchQuery && (
@@ -782,7 +711,7 @@ export default function SampleVerification() {
                             : "text-slate-700"
                         }`}
                       >
-                        <span>All ({samples.length})</span>
+                        <span>All Statuses</span>
                         {statusFilter === "ALL" && <span>✓</span>}
                       </button>
                       <button
@@ -869,7 +798,7 @@ export default function SampleVerification() {
                       STATUS
                     </th>
                     <th
-                      className="py-4 px-6 font-bold text-center"
+                      className="py-4 px-4 font-bold text-center"
                       scope="col"
                     >
                       ACTION
@@ -892,13 +821,13 @@ export default function SampleVerification() {
                         key={s.id}
                         className="hover:bg-blue-50/40 transition-colors group"
                       >
-                        <td className="py-4 px-8 font-semibold text-slate-900 font-mono">
+                        <td className="py-5 px-8 font-semibold text-slate-900 font-mono">
                           {s.sampleId}
                         </td>
-                        <td className="py-4 px-6 font-semibold text-blue-600 font-mono">
+                        <td className="py-5 px-6 font-semibold text-blue-600 font-mono">
                           {s.barcode}
                         </td>
-                        <td className="py-4 px-6">
+                        <td className="py-5 px-6">
                           <span className="font-semibold text-slate-900 block">
                             {s.patientName}
                           </span>
@@ -906,7 +835,7 @@ export default function SampleVerification() {
                             {s.patientId}
                           </span>
                         </td>
-                        <td className="py-4 px-6">
+                        <td className="py-5 px-6">
                           <span className="font-medium text-slate-800 block">
                             {s.testName}
                           </span>
@@ -914,28 +843,28 @@ export default function SampleVerification() {
                             {s.sampleType}
                           </span>
                         </td>
-                        <td className="py-4 px-6 text-center text-slate-600 font-mono text-xs">
+                        <td className="py-5 px-6 text-center text-slate-600 font-normal">
                           {s.collectionTime}
                         </td>
-                        <td className="py-4 px-8 text-center">
+                        <td className="py-5 px-8 text-center">
                           {s.status === "VERIFIED" ? (
-                            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#def7ec] text-[#03543f]">
+                            <span className="inline-block px-4 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#bbf7d0] text-[#15803d]">
                               VERIFIED
                             </span>
                           ) : s.status === "REJECTED" ? (
                             <span
-                              className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#fee2e2] text-[#991b1b]"
+                              className="inline-block px-4 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#fecaca] text-[#991b1b]"
                               title={s.rejectionReason}
                             >
                               REJECTED
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#fef3c7] text-[#92400e]">
+                            <span className="inline-block px-4 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#fef08a] text-[#854d0e]">
                               PENDING
                             </span>
                           )}
                         </td>
-                        <td className="py-4 px-6 text-center">
+                        <td className="py-5 px-4 text-center">
                           {s.status === "PENDING" && (
                             <div className="flex items-center justify-center gap-2">
                               <button
@@ -955,13 +884,13 @@ export default function SampleVerification() {
                             </div>
                           )}
                           {s.status === "VERIFIED" && (
-                            <span className="text-xs font-semibold text-[#059669]">
-                              Ready for Analyzer
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600">
+                              ✓ Verified
                             </span>
                           )}
                           {s.status === "REJECTED" && (
-                            <span className="text-xs font-semibold text-[#dc2626] italic">
-                              Recollection Ordered
+                            <span className="text-xs font-semibold text-rose-600 italic">
+                              Recollection
                             </span>
                           )}
                         </td>
