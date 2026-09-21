@@ -97,6 +97,9 @@ import DoctorPatientProfile from "./pages/doctor/notes and doc";
 import PatientDetails from "./pages/doctor/patient-details";
 import LabDashboard from "./pages/doctor/lab/labdashboard";
 import SampleVerification from "./pages/doctor/lab/sampleverification";
+import TestingSamples from "./pages/doctor/lab/testingsamples";
+import ReportGeneration from "./pages/doctor/lab/reportgeneration";
+import ReportTransfer from "./pages/doctor/lab/reporttransfer";
 
 // ============================================================
 // HOOKS / AUTH
@@ -557,6 +560,33 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <SampleVerification />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/lab/testing-samples"
+              element={
+                <ProtectedRoute>
+                  <TestingSamples />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/lab/report-generation"
+              element={
+                <ProtectedRoute>
+                  <ReportGeneration />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/lab/report-transfer"
+              element={
+                <ProtectedRoute>
+                  <ReportTransfer />
                 </ProtectedRoute>
               }
             />

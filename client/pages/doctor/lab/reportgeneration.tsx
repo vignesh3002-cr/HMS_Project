@@ -3,79 +3,83 @@ import { useNavigate } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
 import { toast } from "@/hooks/use-toast";
 
-interface SampleItem {
+interface ReportItem {
   id: string;
-  sampleId: string;
-  barcode: string;
+  reportId: string;
+  requestId: string;
   patientId: string;
   patientName: string;
-  testName: string;
-  sampleType: string;
-  collectionTime: string;
-  status: "VERIFIED" | "PENDING" | "REJECTED";
-  rejectionReason?: string;
+  doctorName: string;
+  testPanel: string;
+  generatedDate: string;
+  status: "GENERATED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL";
+  findingsSummary: string;
 }
 
-const INITIAL_SAMPLES: SampleItem[] = [
+const INITIAL_REPORTS: ReportItem[] = [
   {
-    id: "s1",
-    sampleId: "SMP-001",
-    barcode: "BC2405200001",
+    id: "rep-1",
+    reportId: "REP-2026-001",
+    requestId: "TRF1256",
     patientId: "P000123",
     patientName: "Rahul Sharma",
-    testName: "Complete Blood Count (CBC)",
-    sampleType: "Whole Blood (EDTA)",
-    collectionTime: "20 May 2024 10:30 AM",
-    status: "PENDING",
+    doctorName: "Dr. Sharma",
+    testPanel: "Complete Blood Count & Liver Function",
+    generatedDate: "20 May 2024 11:30 AM",
+    status: "GENERATED",
+    findingsSummary: "All parameters within normal clinical reference ranges.",
   },
   {
-    id: "s2",
-    sampleId: "SMP-002",
-    barcode: "BC2405200002",
-    patientId: "P000123",
-    patientName: "Rahul Sharma",
-    testName: "Liver Function Test (LFT)",
-    sampleType: "Serum (SST)",
-    collectionTime: "20 May 2024 10:32 AM",
-    status: "VERIFIED",
-  },
-  {
-    id: "s3",
-    sampleId: "SMP-003",
-    barcode: "BC2405200003",
+    id: "rep-2",
+    reportId: "REP-2026-002",
+    requestId: "TRF1257",
     patientId: "P000124",
     patientName: "Priya",
-    testName: "Kidney Function Test (KFT)",
-    sampleType: "Serum (SST)",
-    collectionTime: "30 Mar 2026 11:30 AM",
-    status: "VERIFIED",
+    doctorName: "Dr. Patel",
+    testPanel: "Kidney Function Test (KFT)",
+    generatedDate: "30 Mar 2026 12:15 PM",
+    status: "GENERATED",
+    findingsSummary: "Normal Serum Creatinine and Blood Urea levels.",
   },
   {
-    id: "s4",
-    sampleId: "SMP-004",
-    barcode: "BC2405200004",
+    id: "rep-3",
+    reportId: "REP-2026-003",
+    requestId: "TRF1258",
     patientId: "P000125",
     patientName: "Praveen Singh",
-    testName: "Lipid Profile",
-    sampleType: "Serum (SST)",
-    collectionTime: "03 Apr 2026 10:45 AM",
-    status: "PENDING",
+    doctorName: "Dr. Rao",
+    testPanel: "Lipid Profile & Glucose Fasting",
+    generatedDate: "03 Apr 2026 11:50 AM",
+    status: "CRITICAL",
+    findingsSummary: "Severe hypertriglyceridemia flagged. Urgent doctor notification advised.",
   },
   {
-    id: "s5",
-    sampleId: "SMP-005",
-    barcode: "BC2405200005",
+    id: "rep-4",
+    reportId: "REP-2026-004",
+    requestId: "TRF1259",
     patientId: "P000126",
     patientName: "Naziya",
-    testName: "Complete Blood Count (CBC)",
-    sampleType: "Whole Blood (EDTA)",
-    collectionTime: "05 Apr 2026 10:30 AM",
-    status: "REJECTED",
-    rejectionReason: "Hemolyzed specimen",
+    doctorName: "Dr. Sharma",
+    testPanel: "Thyroid Profile (T3, T4, TSH)",
+    generatedDate: "05 Apr 2026 10:55 AM",
+    status: "UNDER_REVIEW",
+    findingsSummary: "Awaiting Pathologist signature and hormone value confirmation.",
+  },
+  {
+    id: "rep-5",
+    reportId: "REP-2026-005",
+    requestId: "TRF1260",
+    patientId: "P000127",
+    patientName: "Meena Kumari",
+    doctorName: "Dr. Verma",
+    testPanel: "Electrolytes & Arterial Blood Gas",
+    generatedDate: "10 Apr 2026 09:40 AM",
+    status: "DRAFT",
+    findingsSummary: "Preliminary analyzer readings imported; awaiting technician review.",
   },
 ];
 
-export default function SampleVerification() {
+export default function ReportGeneration() {
   const navigate = useNavigate();
   const currentUser = getUser();
   const displayName = currentUser?.username || "Labtech";
@@ -89,88 +93,84 @@ export default function SampleVerification() {
     navigate("/", { replace: true });
   };
 
-  const [activeNav, setActiveNav] = useState("Samples Verification");
-  const [samples, setSamples] = useState<SampleItem[]>(INITIAL_SAMPLES);
+  const [activeNav, setActiveNav] = useState("Report Generation");
+  const [reports, setReports] = useState<ReportItem[]>(INITIAL_REPORTS);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
-    "ALL" | "PENDING" | "VERIFIED" | "REJECTED"
+    "ALL" | "GENERATED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL"
   >("ALL");
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
-  const [barcodeInput, setBarcodeInput] = useState("");
+  const [quickRequestId, setQuickRequestId] = useState("");
 
-  const handleVerifySample = (id: string) => {
-    setSamples((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, status: "VERIFIED" } : s)),
+  const handleGenerateReport = (id: string) => {
+    setReports((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, status: "GENERATED" } : r)),
     );
     toast({
-      title: "Sample Verified",
-      description: "Sample passed pre-analytical integrity check.",
+      title: "Report Generated",
+      description: "Diagnostic report compiled and certified for dispatch.",
     });
   };
 
-  const handleRejectSample = (id: string) => {
-    const reason = prompt("Enter reason for rejection:", "Hemolyzed specimen");
-    if (reason) {
-      setSamples((prev) =>
-        prev.map((s) =>
-          s.id === id
-            ? { ...s, status: "REJECTED", rejectionReason: reason }
-            : s,
-        ),
-      );
-      toast({
-        title: "Sample Rejected",
-        description: `Sample marked for recollection. Reason: ${reason}`,
-        variant: "destructive",
-      });
-    }
+  const handlePrintReport = (report: ReportItem) => {
+    toast({
+      title: "Printing Diagnostic Report",
+      description: `Sending report ${report.reportId} for ${report.patientName} to printer.`,
+    });
   };
 
-  const handleBarcodeScan = (e: React.FormEvent) => {
+  const handleQuickGenerate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!barcodeInput.trim()) return;
-    const match = samples.find(
-      (s) => s.barcode.toLowerCase() === barcodeInput.trim().toLowerCase(),
+    if (!quickRequestId.trim()) return;
+    const match = reports.find(
+      (r) =>
+        r.requestId.toLowerCase() === quickRequestId.trim().toLowerCase() ||
+        r.patientName.toLowerCase().includes(quickRequestId.trim().toLowerCase()),
     );
     if (match) {
-      handleVerifySample(match.id);
-      setBarcodeInput("");
+      handleGenerateReport(match.id);
+      setQuickRequestId("");
     } else {
       toast({
-        title: "Barcode Not Found",
-        description: `No sample matching barcode "${barcodeInput}" found in queue.`,
+        title: "Requisition Not Found",
+        description: `No lab requisition found for "${quickRequestId}".`,
         variant: "destructive",
       });
     }
   };
 
-  const filteredSamples = useMemo(() => {
-    return samples.filter((sample) => {
+  const filteredReports = useMemo(() => {
+    return reports.filter((rep) => {
       const matchesSearch =
         searchQuery.trim() === "" ||
-        sample.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        sample.barcode.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        sample.sampleId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        sample.testName.toLowerCase().includes(searchQuery.toLowerCase());
+        rep.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        rep.requestId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        rep.reportId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        rep.doctorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        rep.testPanel.toLowerCase().includes(searchQuery.toLowerCase());
 
       const matchesStatus =
-        statusFilter === "ALL" || sample.status === statusFilter;
+        statusFilter === "ALL" || rep.status === statusFilter;
 
       return matchesSearch && matchesStatus;
     });
-  }, [samples, searchQuery, statusFilter]);
+  }, [reports, searchQuery, statusFilter]);
 
-  const verifiedCount = useMemo(
-    () => samples.filter((s) => s.status === "VERIFIED").length,
-    [samples],
+  const generatedCount = useMemo(
+    () => reports.filter((r) => r.status === "GENERATED").length,
+    [reports],
   );
-  const pendingCount = useMemo(
-    () => samples.filter((s) => s.status === "PENDING").length,
-    [samples],
+  const reviewCount = useMemo(
+    () => reports.filter((r) => r.status === "UNDER_REVIEW").length,
+    [reports],
   );
-  const rejectedCount = useMemo(
-    () => samples.filter((s) => s.status === "REJECTED").length,
-    [samples],
+  const draftCount = useMemo(
+    () => reports.filter((r) => r.status === "DRAFT").length,
+    [reports],
+  );
+  const criticalCount = useMemo(
+    () => reports.filter((r) => r.status === "CRITICAL").length,
+    [reports],
   );
 
   return (
@@ -197,9 +197,7 @@ export default function SampleVerification() {
             {/* Dashboard */}
             <button
               type="button"
-              onClick={() => {
-                navigate("/lab/dashboard");
-              }}
+              onClick={() => navigate("/lab/dashboard")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Dashboard"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -219,9 +217,7 @@ export default function SampleVerification() {
             {/* Samples Verification */}
             <button
               type="button"
-              onClick={() => {
-                setActiveNav("Samples Verification");
-              }}
+              onClick={() => navigate("/lab/sample-verification")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Samples Verification"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -247,9 +243,7 @@ export default function SampleVerification() {
             {/* Testing Samples */}
             <button
               type="button"
-              onClick={() => {
-                navigate("/lab/testing-samples");
-              }}
+              onClick={() => navigate("/lab/testing-samples")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Testing Samples"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -275,9 +269,7 @@ export default function SampleVerification() {
             {/* Report Generation */}
             <button
               type="button"
-              onClick={() => {
-                navigate("/lab/report-generation");
-              }}
+              onClick={() => setActiveNav("Report Generation")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Report Generation"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -303,9 +295,7 @@ export default function SampleVerification() {
             {/* Report Transfer */}
             <button
               type="button"
-              onClick={() => {
-                navigate("/lab/report-transfer");
-              }}
+              onClick={() => navigate("/lab/report-transfer")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Report Transfer"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -331,10 +321,7 @@ export default function SampleVerification() {
             {/* Patient Registration */}
             <button
               type="button"
-              onClick={() => {
-                setActiveNav("Patient Registration");
-                navigate("/lab/dashboard");
-              }}
+              onClick={() => navigate("/lab/dashboard")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Patient Registration"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -360,10 +347,7 @@ export default function SampleVerification() {
             {/* Inventory */}
             <button
               type="button"
-              onClick={() => {
-                setActiveNav("Inventory");
-                navigate("/lab/dashboard");
-              }}
+              onClick={() => navigate("/lab/dashboard")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Inventory"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -506,7 +490,7 @@ export default function SampleVerification() {
               </svg>
             </button>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-              Samples Verification
+              Report Generation
             </h1>
           </div>
 
@@ -526,7 +510,7 @@ export default function SampleVerification() {
                 />
               </svg>
               <span className="absolute -top-1.5 -right-1.5 bg-[#e05252] text-white font-bold text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
-                2
+                4
               </span>
             </div>
 
@@ -576,7 +560,7 @@ export default function SampleVerification() {
             className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
             data-purpose="kpi-metric-cards"
           >
-            {/* Card 1: Verified Specimens */}
+            {/* Card 1: Reports Generated */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
               <div className="w-14 h-14 rounded-full bg-[#def7ec] flex items-center justify-center shrink-0">
                 <svg
@@ -586,7 +570,7 @@ export default function SampleVerification() {
                   viewBox="0 0 24 24"
                 >
                   <path
-                    d="M5 13l4 4L19 7"
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
@@ -594,18 +578,18 @@ export default function SampleVerification() {
               </div>
               <div>
                 <span className="text-[13px] font-semibold text-[#059669]">
-                  Verified Specimens
+                  Reports Ready
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {verifiedCount}
+                  {generatedCount}
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Integrity approved &amp; ready
+                  Certified &amp; signed off
                 </p>
               </div>
             </div>
 
-            {/* Card 2: Pending Verification */}
+            {/* Card 2: Under Pathologist Review */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
               <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
                 <svg
@@ -615,7 +599,12 @@ export default function SampleVerification() {
                   viewBox="0 0 24 24"
                 >
                   <path
-                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
@@ -623,18 +612,18 @@ export default function SampleVerification() {
               </div>
               <div>
                 <span className="text-[13px] font-semibold text-[#2563eb]">
-                  Pending Verification
+                  Under Review
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {pendingCount}
+                  {reviewCount}
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Awaiting tube inspection
+                  Awaiting pathologist sign
                 </p>
               </div>
             </div>
 
-            {/* Card 3: Total Logged */}
+            {/* Card 3: Draft Reports */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
               <div className="w-14 h-14 rounded-full bg-[#fef3c7] flex items-center justify-center shrink-0">
                 <svg
@@ -644,7 +633,7 @@ export default function SampleVerification() {
                   viewBox="0 0 24 24"
                 >
                   <path
-                    d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
@@ -652,18 +641,18 @@ export default function SampleVerification() {
               </div>
               <div>
                 <span className="text-[13px] font-semibold text-[#d97706]">
-                  Total Samples
+                  Draft Reports
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {samples.length}
+                  {draftCount}
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Total collection queue
+                  Pending test completion
                 </p>
               </div>
             </div>
 
-            {/* Card 4: Rejected Specimens */}
+            {/* Card 4: Critical Findings */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
               <div className="w-14 h-14 rounded-full bg-[#fee2e2] flex items-center justify-center shrink-0">
                 <svg
@@ -681,19 +670,19 @@ export default function SampleVerification() {
               </div>
               <div>
                 <span className="text-[13px] font-semibold text-[#dc2626]">
-                  Rejected Samples
+                  Critical Reports
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {rejectedCount}
+                  {criticalCount}
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Recollection ordered
+                  Urgent doctor alert needed
                 </p>
               </div>
             </div>
           </section>
 
-          {/* Quick Barcode Scanner Card */}
+          {/* Quick Generate Report Card */}
           <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
@@ -707,31 +696,31 @@ export default function SampleVerification() {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     strokeWidth="2"
-                    d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"
+                    d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
                   />
                 </svg>
-                <span>Quick Barcode Verification Scanner</span>
+                <span>Fast Diagnostic Report Compilation</span>
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Scan or enter the sample tube barcode to immediately verify specimen integrity.
+                Compile patient laboratory values into certified PDF report ready for doctor review.
               </p>
             </div>
             <form
-              onSubmit={handleBarcodeScan}
+              onSubmit={handleQuickGenerate}
               className="flex items-center gap-2.5 w-full sm:w-auto"
             >
               <input
                 type="text"
-                value={barcodeInput}
-                onChange={(e) => setBarcodeInput(e.target.value)}
-                placeholder="Scan / Type Barcode (e.g. BC2405200001)..."
+                value={quickRequestId}
+                onChange={(e) => setQuickRequestId(e.target.value)}
+                placeholder="Enter Requisition ID (e.g. TRF1256)..."
                 className="w-full sm:w-80 px-4 py-2 border border-slate-200 rounded-lg text-[13px] text-slate-700 font-mono placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all"
               />
               <button
                 type="submit"
                 className="px-6 py-2 bg-[#00875A] hover:bg-[#00744E] text-white text-sm font-semibold rounded-lg shadow-sm transition-colors cursor-pointer shrink-0"
               >
-                Verify
+                Compile Report
               </button>
             </form>
           </section>
@@ -739,16 +728,16 @@ export default function SampleVerification() {
           {/* TableContainerCard */}
           <section
             className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
-            data-purpose="specimens-details-container"
+            data-purpose="reports-details-container"
           >
             {/* Header & Action Controls Bar */}
             <div className="px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-4">
               <div>
                 <h2 className="text-[20px] font-bold text-slate-800">
-                  Specimens Awaiting Verification
+                  Diagnostic Reports Catalog
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Confirm tube volume, label alignment, and pre-analytical integrity before routing to analyzers
+                  Review generated laboratory test findings, download formatted PDF reports, and approve release
                 </p>
               </div>
               <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -772,7 +761,7 @@ export default function SampleVerification() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-[13px] text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                    placeholder="Search Patient, Barcode, Sample ID..."
+                    placeholder="Search Patient, Report ID, Doctor..."
                     type="text"
                   />
                   {searchQuery && (
@@ -827,7 +816,7 @@ export default function SampleVerification() {
                   </button>
 
                   {isFilterDropdownOpen && (
-                    <div className="absolute right-0 mt-2 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1.5 text-[13px]">
+                    <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1.5 text-[13px]">
                       <button
                         type="button"
                         onClick={() => {
@@ -840,53 +829,68 @@ export default function SampleVerification() {
                             : "text-slate-700"
                         }`}
                       >
-                        <span>All ({samples.length})</span>
+                        <span>All ({reports.length})</span>
                         {statusFilter === "ALL" && <span>✓</span>}
                       </button>
                       <button
                         type="button"
                         onClick={() => {
-                          setStatusFilter("PENDING");
+                          setStatusFilter("GENERATED");
                           setIsFilterDropdownOpen(false);
                         }}
                         className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
-                          statusFilter === "PENDING"
-                            ? "font-semibold text-[#854d0e] bg-yellow-50/50"
-                            : "text-slate-700"
-                        }`}
-                      >
-                        <span>Pending ({pendingCount})</span>
-                        {statusFilter === "PENDING" && <span>✓</span>}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setStatusFilter("VERIFIED");
-                          setIsFilterDropdownOpen(false);
-                        }}
-                        className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
-                          statusFilter === "VERIFIED"
+                          statusFilter === "GENERATED"
                             ? "font-semibold text-[#15803d] bg-green-50/50"
                             : "text-slate-700"
                         }`}
                       >
-                        <span>Verified ({verifiedCount})</span>
-                        {statusFilter === "VERIFIED" && <span>✓</span>}
+                        <span>Generated ({generatedCount})</span>
+                        {statusFilter === "GENERATED" && <span>✓</span>}
                       </button>
                       <button
                         type="button"
                         onClick={() => {
-                          setStatusFilter("REJECTED");
+                          setStatusFilter("UNDER_REVIEW");
                           setIsFilterDropdownOpen(false);
                         }}
                         className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
-                          statusFilter === "REJECTED"
+                          statusFilter === "UNDER_REVIEW"
+                            ? "font-semibold text-blue-600 bg-blue-50/50"
+                            : "text-slate-700"
+                        }`}
+                      >
+                        <span>Under Review ({reviewCount})</span>
+                        {statusFilter === "UNDER_REVIEW" && <span>✓</span>}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStatusFilter("CRITICAL");
+                          setIsFilterDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
+                          statusFilter === "CRITICAL"
                             ? "font-semibold text-[#b91c1c] bg-red-50/50"
                             : "text-slate-700"
                         }`}
                       >
-                        <span>Rejected ({rejectedCount})</span>
-                        {statusFilter === "REJECTED" && <span>✓</span>}
+                        <span>Critical ({criticalCount})</span>
+                        {statusFilter === "CRITICAL" && <span>✓</span>}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStatusFilter("DRAFT");
+                          setIsFilterDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
+                          statusFilter === "DRAFT"
+                            ? "font-semibold text-[#854d0e] bg-yellow-50/50"
+                            : "text-slate-700"
+                        }`}
+                      >
+                        <span>Draft ({draftCount})</span>
+                        {statusFilter === "DRAFT" && <span>✓</span>}
                       </button>
                     </div>
                   )}
@@ -898,27 +902,27 @@ export default function SampleVerification() {
             <div className="overflow-x-auto">
               <table
                 className="w-full text-left border-collapse"
-                id="samples-details-table"
+                id="reports-catalog-table"
               >
                 <thead>
                   <tr className="border-t border-b border-slate-200 text-[11px] font-bold tracking-wider text-slate-600 uppercase bg-transparent">
                     <th className="py-4 px-8 font-bold" scope="col">
-                      SAMPLE ID
-                    </th>
-                    <th className="py-4 px-6 font-bold" scope="col">
-                      BARCODE
+                      REPORT &amp; REQUISITION
                     </th>
                     <th className="py-4 px-6 font-bold" scope="col">
                       PATIENT NAME
                     </th>
                     <th className="py-4 px-6 font-bold" scope="col">
-                      TEST &amp; SAMPLE TUBE
+                      DOCTOR
+                    </th>
+                    <th className="py-4 px-6 font-bold" scope="col">
+                      TEST PANEL &amp; FINDINGS
                     </th>
                     <th
                       className="py-4 px-6 font-bold text-center"
                       scope="col"
                     >
-                      COLLECTED TIME
+                      DATE GENERATED
                     </th>
                     <th
                       className="py-4 px-8 font-bold text-center"
@@ -935,93 +939,98 @@ export default function SampleVerification() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[13px] font-medium text-slate-600">
-                  {filteredSamples.length === 0 ? (
+                  {filteredReports.length === 0 ? (
                     <tr>
                       <td
                         colSpan={7}
                         className="py-10 text-center text-slate-400 text-sm"
                       >
-                        No specimen records found matching your criteria.
+                        No diagnostic reports found matching your search.
                       </td>
                     </tr>
                   ) : (
-                    filteredSamples.map((s) => (
+                    filteredReports.map((r) => (
                       <tr
-                        key={s.id}
+                        key={r.id}
                         className="hover:bg-blue-50/40 transition-colors group"
                       >
-                        <td className="py-4 px-8 font-semibold text-slate-900 font-mono">
-                          {s.sampleId}
-                        </td>
-                        <td className="py-4 px-6 font-semibold text-blue-600 font-mono">
-                          {s.barcode}
+                        <td className="py-4 px-8">
+                          <span className="font-semibold text-slate-900 font-mono block">
+                            {r.reportId}
+                          </span>
+                          <span className="font-mono text-blue-600 text-xs font-semibold">
+                            {r.requestId}
+                          </span>
                         </td>
                         <td className="py-4 px-6">
                           <span className="font-semibold text-slate-900 block">
-                            {s.patientName}
+                            {r.patientName}
                           </span>
                           <span className="text-[11px] text-slate-400 font-mono">
-                            {s.patientId}
+                            {r.patientId}
                           </span>
                         </td>
+                        <td className="py-4 px-6 text-slate-700 font-medium text-xs">
+                          {r.doctorName}
+                        </td>
                         <td className="py-4 px-6">
-                          <span className="font-medium text-slate-800 block">
-                            {s.testName}
+                          <span className="font-semibold text-slate-800 block">
+                            {r.testPanel}
                           </span>
-                          <span className="text-[11px] text-slate-500">
-                            {s.sampleType}
+                          <span className="text-[11px] text-slate-500 block truncate max-w-xs">
+                            {r.findingsSummary}
                           </span>
                         </td>
                         <td className="py-4 px-6 text-center text-slate-600 font-mono text-xs">
-                          {s.collectionTime}
+                          {r.generatedDate}
                         </td>
                         <td className="py-4 px-8 text-center">
-                          {s.status === "VERIFIED" ? (
+                          {r.status === "GENERATED" ? (
                             <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#def7ec] text-[#03543f]">
-                              VERIFIED
+                              GENERATED
                             </span>
-                          ) : s.status === "REJECTED" ? (
-                            <span
-                              className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#fee2e2] text-[#991b1b]"
-                              title={s.rejectionReason}
-                            >
-                              REJECTED
+                          ) : r.status === "UNDER_REVIEW" ? (
+                            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#e0edff] text-[#2563eb]">
+                              UNDER REVIEW
+                            </span>
+                          ) : r.status === "CRITICAL" ? (
+                            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#fee2e2] text-[#991b1b]">
+                              CRITICAL
                             </span>
                           ) : (
                             <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#fef3c7] text-[#92400e]">
-                              PENDING
+                              DRAFT
                             </span>
                           )}
                         </td>
                         <td className="py-4 px-6 text-center">
-                          {s.status === "PENDING" && (
-                            <div className="flex items-center justify-center gap-2">
+                          <div className="flex items-center justify-center gap-2">
+                            {r.status === "DRAFT" || r.status === "UNDER_REVIEW" ? (
                               <button
                                 type="button"
-                                onClick={() => handleVerifySample(s.id)}
+                                onClick={() => handleGenerateReport(r.id)}
                                 className="px-3 py-1.5 bg-[#00875A] hover:bg-[#00744E] text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
                               >
-                                Accept
+                                Certify
                               </button>
+                            ) : (
                               <button
                                 type="button"
-                                onClick={() => handleRejectSample(s.id)}
-                                className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-red-50 hover:text-red-700 hover:border-red-300 text-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                                onClick={() => handlePrintReport(r)}
+                                className="px-3 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-600 hover:text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer inline-flex items-center gap-1"
                               >
-                                Reject
+                                <span>PDF</span>
                               </button>
-                            </div>
-                          )}
-                          {s.status === "VERIFIED" && (
-                            <span className="text-xs font-semibold text-[#059669]">
-                              Ready for Analyzer
-                            </span>
-                          )}
-                          {s.status === "REJECTED" && (
-                            <span className="text-xs font-semibold text-[#dc2626] italic">
-                              Recollection Ordered
-                            </span>
-                          )}
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => navigate("/lab/report-transfer")}
+                              className="px-2.5 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                              title="Transfer to Doctor / EMR"
+                            >
+                              Dispatch
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -1035,3 +1044,4 @@ export default function SampleVerification() {
     </div>
   );
 }
+

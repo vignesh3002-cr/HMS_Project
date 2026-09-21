@@ -440,8 +440,7 @@ export default function LabDashboard() {
             <button
               type="button"
               onClick={() => {
-                setActiveNav("Testing Samples");
-                setSelectedPatient(null);
+                navigate("/lab/testing-samples");
               }}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Testing Samples"
@@ -469,8 +468,7 @@ export default function LabDashboard() {
             <button
               type="button"
               onClick={() => {
-                setActiveNav("Report Generation");
-                setSelectedPatient(null);
+                navigate("/lab/report-generation");
               }}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Report Generation"
@@ -498,8 +496,7 @@ export default function LabDashboard() {
             <button
               type="button"
               onClick={() => {
-                setActiveNav("Report Transfer");
-                setSelectedPatient(null);
+                navigate("/lab/report-transfer");
               }}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Report Transfer"

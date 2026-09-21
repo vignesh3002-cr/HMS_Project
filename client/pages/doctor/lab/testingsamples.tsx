@@ -3,79 +3,101 @@ import { useNavigate } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
 import { toast } from "@/hooks/use-toast";
 
-interface SampleItem {
+interface TestingSampleItem {
   id: string;
   sampleId: string;
   barcode: string;
   patientId: string;
   patientName: string;
   testName: string;
-  sampleType: string;
-  collectionTime: string;
-  status: "VERIFIED" | "PENDING" | "REJECTED";
-  rejectionReason?: string;
+  analyzerBench: string;
+  startTime: string;
+  estimatedCompletion: string;
+  status: "RUNNING" | "COMPLETED" | "CALIBRATING" | "FLAGGED";
+  criticalAlert?: string;
+  testResult?: string;
 }
 
-const INITIAL_SAMPLES: SampleItem[] = [
+const INITIAL_TESTING_SAMPLES: TestingSampleItem[] = [
   {
-    id: "s1",
+    id: "ts-1",
     sampleId: "SMP-001",
     barcode: "BC2405200001",
     patientId: "P000123",
     patientName: "Rahul Sharma",
     testName: "Complete Blood Count (CBC)",
-    sampleType: "Whole Blood (EDTA)",
-    collectionTime: "20 May 2024 10:30 AM",
-    status: "PENDING",
+    analyzerBench: "Sysmex XN-1000 (Hematology)",
+    startTime: "10:45 AM",
+    estimatedCompletion: "11:15 AM",
+    status: "RUNNING",
   },
   {
-    id: "s2",
+    id: "ts-2",
     sampleId: "SMP-002",
     barcode: "BC2405200002",
     patientId: "P000123",
     patientName: "Rahul Sharma",
     testName: "Liver Function Test (LFT)",
-    sampleType: "Serum (SST)",
-    collectionTime: "20 May 2024 10:32 AM",
-    status: "VERIFIED",
+    analyzerBench: "Cobas 6000 (Biochemistry)",
+    startTime: "10:35 AM",
+    estimatedCompletion: "11:05 AM",
+    status: "COMPLETED",
+    testResult: "Bilirubin: 0.9 mg/dL, SGOT: 34 U/L, SGPT: 29 U/L",
   },
   {
-    id: "s3",
+    id: "ts-3",
     sampleId: "SMP-003",
     barcode: "BC2405200003",
     patientId: "P000124",
     patientName: "Priya",
     testName: "Kidney Function Test (KFT)",
-    sampleType: "Serum (SST)",
-    collectionTime: "30 Mar 2026 11:30 AM",
-    status: "VERIFIED",
+    analyzerBench: "Cobas 6000 (Biochemistry)",
+    startTime: "11:35 AM",
+    estimatedCompletion: "12:00 PM",
+    status: "COMPLETED",
+    testResult: "Creatinine: 0.8 mg/dL, Urea: 22 mg/dL",
   },
   {
-    id: "s4",
+    id: "ts-4",
     sampleId: "SMP-004",
     barcode: "BC2405200004",
     patientId: "P000125",
     patientName: "Praveen Singh",
     testName: "Lipid Profile",
-    sampleType: "Serum (SST)",
-    collectionTime: "03 Apr 2026 10:45 AM",
-    status: "PENDING",
+    analyzerBench: "Beckman Coulter AU480",
+    startTime: "11:00 AM",
+    estimatedCompletion: "11:45 AM",
+    status: "FLAGGED",
+    criticalAlert: "High Triglycerides (> 450 mg/dL)",
+    testResult: "Cholesterol: 245 mg/dL, Triglycerides: 480 mg/dL",
   },
   {
-    id: "s5",
-    sampleId: "SMP-005",
-    barcode: "BC2405200005",
-    patientId: "P000126",
-    patientName: "Naziya",
-    testName: "Complete Blood Count (CBC)",
-    sampleType: "Whole Blood (EDTA)",
-    collectionTime: "05 Apr 2026 10:30 AM",
-    status: "REJECTED",
-    rejectionReason: "Hemolyzed specimen",
+    id: "ts-5",
+    sampleId: "SMP-006",
+    barcode: "BC2405200006",
+    patientId: "P000127",
+    patientName: "Meena Kumari",
+    testName: "Electrolytes (Na+, K+, Cl-)",
+    analyzerBench: "Roche 9180 Electrolyte Analyzer",
+    startTime: "11:10 AM",
+    estimatedCompletion: "11:25 AM",
+    status: "CALIBRATING",
+  },
+  {
+    id: "ts-6",
+    sampleId: "SMP-007",
+    barcode: "BC2405200007",
+    patientId: "P000128",
+    patientName: "Vikram Malhotra",
+    testName: "HbA1c Glycated Hemoglobin",
+    analyzerBench: "Bio-Rad D-10 HPLC",
+    startTime: "11:20 AM",
+    estimatedCompletion: "11:50 AM",
+    status: "RUNNING",
   },
 ];
 
-export default function SampleVerification() {
+export default function TestingSamples() {
   const navigate = useNavigate();
   const currentUser = getUser();
   const displayName = currentUser?.username || "Labtech";
@@ -89,56 +111,71 @@ export default function SampleVerification() {
     navigate("/", { replace: true });
   };
 
-  const [activeNav, setActiveNav] = useState("Samples Verification");
-  const [samples, setSamples] = useState<SampleItem[]>(INITIAL_SAMPLES);
+  const [activeNav, setActiveNav] = useState("Testing Samples");
+  const [samples, setSamples] = useState<TestingSampleItem[]>(
+    INITIAL_TESTING_SAMPLES,
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
-    "ALL" | "PENDING" | "VERIFIED" | "REJECTED"
+    "ALL" | "RUNNING" | "COMPLETED" | "FLAGGED" | "CALIBRATING"
   >("ALL");
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
-  const [barcodeInput, setBarcodeInput] = useState("");
+  const [quickInputBarcode, setQuickInputBarcode] = useState("");
 
-  const handleVerifySample = (id: string) => {
-    setSamples((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, status: "VERIFIED" } : s)),
+  const handleMarkCompleted = (id: string) => {
+    const resultVal = prompt(
+      "Enter or confirm analyzer test results:",
+      "Within Normal Clinical Range (Auto-Validated)",
     );
-    toast({
-      title: "Sample Verified",
-      description: "Sample passed pre-analytical integrity check.",
-    });
-  };
-
-  const handleRejectSample = (id: string) => {
-    const reason = prompt("Enter reason for rejection:", "Hemolyzed specimen");
-    if (reason) {
+    if (resultVal) {
       setSamples((prev) =>
         prev.map((s) =>
-          s.id === id
-            ? { ...s, status: "REJECTED", rejectionReason: reason }
-            : s,
+          s.id === id ? { ...s, status: "COMPLETED", testResult: resultVal } : s,
         ),
       );
       toast({
-        title: "Sample Rejected",
-        description: `Sample marked for recollection. Reason: ${reason}`,
-        variant: "destructive",
+        title: "Test Run Completed",
+        description: "Analyzer results saved and queued for report generation.",
       });
     }
   };
 
-  const handleBarcodeScan = (e: React.FormEvent) => {
+  const handleRerunTest = (id: string) => {
+    setSamples((prev) =>
+      prev.map((s) =>
+        s.id === id
+          ? {
+              ...s,
+              status: "RUNNING",
+              startTime: new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            }
+          : s,
+      ),
+    );
+    toast({
+      title: "Rerun Initiated",
+      description: "Sample queued for secondary analyzer run.",
+    });
+  };
+
+  const handleQuickRun = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!barcodeInput.trim()) return;
+    if (!quickInputBarcode.trim()) return;
     const match = samples.find(
-      (s) => s.barcode.toLowerCase() === barcodeInput.trim().toLowerCase(),
+      (s) =>
+        s.barcode.toLowerCase() === quickInputBarcode.trim().toLowerCase() ||
+        s.sampleId.toLowerCase() === quickInputBarcode.trim().toLowerCase(),
     );
     if (match) {
-      handleVerifySample(match.id);
-      setBarcodeInput("");
+      handleMarkCompleted(match.id);
+      setQuickInputBarcode("");
     } else {
       toast({
-        title: "Barcode Not Found",
-        description: `No sample matching barcode "${barcodeInput}" found in queue.`,
+        title: "Sample Not Found",
+        description: `No testing sample with ID/barcode "${quickInputBarcode}" found in analytical run.`,
         variant: "destructive",
       });
     }
@@ -151,7 +188,8 @@ export default function SampleVerification() {
         sample.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         sample.barcode.toLowerCase().includes(searchQuery.toLowerCase()) ||
         sample.sampleId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        sample.testName.toLowerCase().includes(searchQuery.toLowerCase());
+        sample.testName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        sample.analyzerBench.toLowerCase().includes(searchQuery.toLowerCase());
 
       const matchesStatus =
         statusFilter === "ALL" || sample.status === statusFilter;
@@ -160,16 +198,20 @@ export default function SampleVerification() {
     });
   }, [samples, searchQuery, statusFilter]);
 
-  const verifiedCount = useMemo(
-    () => samples.filter((s) => s.status === "VERIFIED").length,
+  const runningCount = useMemo(
+    () => samples.filter((s) => s.status === "RUNNING").length,
     [samples],
   );
-  const pendingCount = useMemo(
-    () => samples.filter((s) => s.status === "PENDING").length,
+  const completedCount = useMemo(
+    () => samples.filter((s) => s.status === "COMPLETED").length,
     [samples],
   );
-  const rejectedCount = useMemo(
-    () => samples.filter((s) => s.status === "REJECTED").length,
+  const flaggedCount = useMemo(
+    () => samples.filter((s) => s.status === "FLAGGED").length,
+    [samples],
+  );
+  const calibratingCount = useMemo(
+    () => samples.filter((s) => s.status === "CALIBRATING").length,
     [samples],
   );
 
@@ -197,9 +239,7 @@ export default function SampleVerification() {
             {/* Dashboard */}
             <button
               type="button"
-              onClick={() => {
-                navigate("/lab/dashboard");
-              }}
+              onClick={() => navigate("/lab/dashboard")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Dashboard"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -219,9 +259,7 @@ export default function SampleVerification() {
             {/* Samples Verification */}
             <button
               type="button"
-              onClick={() => {
-                setActiveNav("Samples Verification");
-              }}
+              onClick={() => navigate("/lab/sample-verification")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Samples Verification"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -247,9 +285,7 @@ export default function SampleVerification() {
             {/* Testing Samples */}
             <button
               type="button"
-              onClick={() => {
-                navigate("/lab/testing-samples");
-              }}
+              onClick={() => setActiveNav("Testing Samples")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Testing Samples"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -275,9 +311,7 @@ export default function SampleVerification() {
             {/* Report Generation */}
             <button
               type="button"
-              onClick={() => {
-                navigate("/lab/report-generation");
-              }}
+              onClick={() => navigate("/lab/report-generation")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Report Generation"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -303,9 +337,7 @@ export default function SampleVerification() {
             {/* Report Transfer */}
             <button
               type="button"
-              onClick={() => {
-                navigate("/lab/report-transfer");
-              }}
+              onClick={() => navigate("/lab/report-transfer")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Report Transfer"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -331,10 +363,7 @@ export default function SampleVerification() {
             {/* Patient Registration */}
             <button
               type="button"
-              onClick={() => {
-                setActiveNav("Patient Registration");
-                navigate("/lab/dashboard");
-              }}
+              onClick={() => navigate("/lab/dashboard")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Patient Registration"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -360,10 +389,7 @@ export default function SampleVerification() {
             {/* Inventory */}
             <button
               type="button"
-              onClick={() => {
-                setActiveNav("Inventory");
-                navigate("/lab/dashboard");
-              }}
+              onClick={() => navigate("/lab/dashboard")}
               className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 activeNav === "Inventory"
                   ? "bg-[#004bb5] text-white shadow-sm"
@@ -506,7 +532,7 @@ export default function SampleVerification() {
               </svg>
             </button>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-              Samples Verification
+              Testing Samples
             </h1>
           </div>
 
@@ -526,7 +552,7 @@ export default function SampleVerification() {
                 />
               </svg>
               <span className="absolute -top-1.5 -right-1.5 bg-[#e05252] text-white font-bold text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
-                2
+                3
               </span>
             </div>
 
@@ -576,7 +602,36 @@ export default function SampleVerification() {
             className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
             data-purpose="kpi-metric-cards"
           >
-            {/* Card 1: Verified Specimens */}
+            {/* Card 1: Samples in Analyzer */}
+            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+              <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
+                <svg
+                  className="w-6 h-6 text-[#2563eb] stroke-[2.2]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              <div>
+                <span className="text-[13px] font-semibold text-[#2563eb]">
+                  Running in Analyzer
+                </span>
+                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                  {runningCount}
+                </h3>
+                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                  Active test run batches
+                </p>
+              </div>
+            </div>
+
+            {/* Card 2: Tests Completed */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
               <div className="w-14 h-14 rounded-full bg-[#def7ec] flex items-center justify-center shrink-0">
                 <svg
@@ -594,22 +649,22 @@ export default function SampleVerification() {
               </div>
               <div>
                 <span className="text-[13px] font-semibold text-[#059669]">
-                  Verified Specimens
+                  Results Completed
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {verifiedCount}
+                  {completedCount}
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Integrity approved &amp; ready
+                  Ready for report generation
                 </p>
               </div>
             </div>
 
-            {/* Card 2: Pending Verification */}
+            {/* Card 3: Calibrating / Pending */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
-              <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
+              <div className="w-14 h-14 rounded-full bg-[#fef3c7] flex items-center justify-center shrink-0">
                 <svg
-                  className="w-6 h-6 text-[#2563eb] stroke-[2.2]"
+                  className="w-6 h-6 text-[#d97706] stroke-[2.2]"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -622,48 +677,19 @@ export default function SampleVerification() {
                 </svg>
               </div>
               <div>
-                <span className="text-[13px] font-semibold text-[#2563eb]">
-                  Pending Verification
-                </span>
-                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {pendingCount}
-                </h3>
-                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Awaiting tube inspection
-                </p>
-              </div>
-            </div>
-
-            {/* Card 3: Total Logged */}
-            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
-              <div className="w-14 h-14 rounded-full bg-[#fef3c7] flex items-center justify-center shrink-0">
-                <svg
-                  className="w-6 h-6 text-[#d97706] stroke-[2.2]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              <div>
                 <span className="text-[13px] font-semibold text-[#d97706]">
-                  Total Samples
+                  Calibrating
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {samples.length}
+                  {calibratingCount}
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Total collection queue
+                  Bench instrument setup
                 </p>
               </div>
             </div>
 
-            {/* Card 4: Rejected Specimens */}
+            {/* Card 4: Flagged / Critical */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
               <div className="w-14 h-14 rounded-full bg-[#fee2e2] flex items-center justify-center shrink-0">
                 <svg
@@ -681,19 +707,19 @@ export default function SampleVerification() {
               </div>
               <div>
                 <span className="text-[13px] font-semibold text-[#dc2626]">
-                  Rejected Samples
+                  Flagged / Critical
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {rejectedCount}
+                  {flaggedCount}
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Recollection ordered
+                  Out-of-range clinical values
                 </p>
               </div>
             </div>
           </section>
 
-          {/* Quick Barcode Scanner Card */}
+          {/* Quick Analyzer Run Card */}
           <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
@@ -707,31 +733,31 @@ export default function SampleVerification() {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     strokeWidth="2"
-                    d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"
+                    d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"
                   />
                 </svg>
-                <span>Quick Barcode Verification Scanner</span>
+                <span>Automated Analyzer Results &amp; Validation</span>
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Scan or enter the sample tube barcode to immediately verify specimen integrity.
+                Scan sample barcode to validate analyzer output or submit manual test measurements.
               </p>
             </div>
             <form
-              onSubmit={handleBarcodeScan}
+              onSubmit={handleQuickRun}
               className="flex items-center gap-2.5 w-full sm:w-auto"
             >
               <input
                 type="text"
-                value={barcodeInput}
-                onChange={(e) => setBarcodeInput(e.target.value)}
-                placeholder="Scan / Type Barcode (e.g. BC2405200001)..."
+                value={quickInputBarcode}
+                onChange={(e) => setQuickInputBarcode(e.target.value)}
+                placeholder="Scan / Enter Barcode (e.g. BC2405200001)..."
                 className="w-full sm:w-80 px-4 py-2 border border-slate-200 rounded-lg text-[13px] text-slate-700 font-mono placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all"
               />
               <button
                 type="submit"
                 className="px-6 py-2 bg-[#00875A] hover:bg-[#00744E] text-white text-sm font-semibold rounded-lg shadow-sm transition-colors cursor-pointer shrink-0"
               >
-                Verify
+                Validate Result
               </button>
             </form>
           </section>
@@ -739,16 +765,16 @@ export default function SampleVerification() {
           {/* TableContainerCard */}
           <section
             className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
-            data-purpose="specimens-details-container"
+            data-purpose="testing-queue-details"
           >
             {/* Header & Action Controls Bar */}
             <div className="px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-4">
               <div>
                 <h2 className="text-[20px] font-bold text-slate-800">
-                  Specimens Awaiting Verification
+                  Analytical Testing Queue
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Confirm tube volume, label alignment, and pre-analytical integrity before routing to analyzers
+                  Monitor live analyzer runs, review preliminary test values, and sign off completed tests
                 </p>
               </div>
               <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -772,7 +798,7 @@ export default function SampleVerification() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-[13px] text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                    placeholder="Search Patient, Barcode, Sample ID..."
+                    placeholder="Search Patient, Barcode, Analyzer..."
                     type="text"
                   />
                   {searchQuery && (
@@ -827,7 +853,7 @@ export default function SampleVerification() {
                   </button>
 
                   {isFilterDropdownOpen && (
-                    <div className="absolute right-0 mt-2 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1.5 text-[13px]">
+                    <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1.5 text-[13px]">
                       <button
                         type="button"
                         onClick={() => {
@@ -846,47 +872,62 @@ export default function SampleVerification() {
                       <button
                         type="button"
                         onClick={() => {
-                          setStatusFilter("PENDING");
+                          setStatusFilter("RUNNING");
                           setIsFilterDropdownOpen(false);
                         }}
                         className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
-                          statusFilter === "PENDING"
-                            ? "font-semibold text-[#854d0e] bg-yellow-50/50"
+                          statusFilter === "RUNNING"
+                            ? "font-semibold text-blue-600 bg-blue-50/50"
                             : "text-slate-700"
                         }`}
                       >
-                        <span>Pending ({pendingCount})</span>
-                        {statusFilter === "PENDING" && <span>✓</span>}
+                        <span>Running ({runningCount})</span>
+                        {statusFilter === "RUNNING" && <span>✓</span>}
                       </button>
                       <button
                         type="button"
                         onClick={() => {
-                          setStatusFilter("VERIFIED");
+                          setStatusFilter("COMPLETED");
                           setIsFilterDropdownOpen(false);
                         }}
                         className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
-                          statusFilter === "VERIFIED"
+                          statusFilter === "COMPLETED"
                             ? "font-semibold text-[#15803d] bg-green-50/50"
                             : "text-slate-700"
                         }`}
                       >
-                        <span>Verified ({verifiedCount})</span>
-                        {statusFilter === "VERIFIED" && <span>✓</span>}
+                        <span>Completed ({completedCount})</span>
+                        {statusFilter === "COMPLETED" && <span>✓</span>}
                       </button>
                       <button
                         type="button"
                         onClick={() => {
-                          setStatusFilter("REJECTED");
+                          setStatusFilter("FLAGGED");
                           setIsFilterDropdownOpen(false);
                         }}
                         className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
-                          statusFilter === "REJECTED"
+                          statusFilter === "FLAGGED"
                             ? "font-semibold text-[#b91c1c] bg-red-50/50"
                             : "text-slate-700"
                         }`}
                       >
-                        <span>Rejected ({rejectedCount})</span>
-                        {statusFilter === "REJECTED" && <span>✓</span>}
+                        <span>Flagged ({flaggedCount})</span>
+                        {statusFilter === "FLAGGED" && <span>✓</span>}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStatusFilter("CALIBRATING");
+                          setIsFilterDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
+                          statusFilter === "CALIBRATING"
+                            ? "font-semibold text-[#854d0e] bg-yellow-50/50"
+                            : "text-slate-700"
+                        }`}
+                      >
+                        <span>Calibrating ({calibratingCount})</span>
+                        {statusFilter === "CALIBRATING" && <span>✓</span>}
                       </button>
                     </div>
                   )}
@@ -898,27 +939,27 @@ export default function SampleVerification() {
             <div className="overflow-x-auto">
               <table
                 className="w-full text-left border-collapse"
-                id="samples-details-table"
+                id="testing-samples-table"
               >
                 <thead>
                   <tr className="border-t border-b border-slate-200 text-[11px] font-bold tracking-wider text-slate-600 uppercase bg-transparent">
                     <th className="py-4 px-8 font-bold" scope="col">
-                      SAMPLE ID
-                    </th>
-                    <th className="py-4 px-6 font-bold" scope="col">
-                      BARCODE
+                      SAMPLE &amp; BARCODE
                     </th>
                     <th className="py-4 px-6 font-bold" scope="col">
                       PATIENT NAME
                     </th>
                     <th className="py-4 px-6 font-bold" scope="col">
-                      TEST &amp; SAMPLE TUBE
+                      TEST PROCEDURE
+                    </th>
+                    <th className="py-4 px-6 font-bold" scope="col">
+                      ANALYZER BENCH
                     </th>
                     <th
                       className="py-4 px-6 font-bold text-center"
                       scope="col"
                     >
-                      COLLECTED TIME
+                      START / RUN TIME
                     </th>
                     <th
                       className="py-4 px-8 font-bold text-center"
@@ -941,7 +982,7 @@ export default function SampleVerification() {
                         colSpan={7}
                         className="py-10 text-center text-slate-400 text-sm"
                       >
-                        No specimen records found matching your criteria.
+                        No testing samples found matching your search.
                       </td>
                     </tr>
                   ) : (
@@ -950,11 +991,13 @@ export default function SampleVerification() {
                         key={s.id}
                         className="hover:bg-blue-50/40 transition-colors group"
                       >
-                        <td className="py-4 px-8 font-semibold text-slate-900 font-mono">
-                          {s.sampleId}
-                        </td>
-                        <td className="py-4 px-6 font-semibold text-blue-600 font-mono">
-                          {s.barcode}
+                        <td className="py-4 px-8">
+                          <span className="font-semibold text-slate-900 font-mono block">
+                            {s.sampleId}
+                          </span>
+                          <span className="font-mono text-blue-600 text-xs font-semibold">
+                            {s.barcode}
+                          </span>
                         </td>
                         <td className="py-4 px-6">
                           <span className="font-semibold text-slate-900 block">
@@ -968,59 +1011,81 @@ export default function SampleVerification() {
                           <span className="font-medium text-slate-800 block">
                             {s.testName}
                           </span>
-                          <span className="text-[11px] text-slate-500">
-                            {s.sampleType}
-                          </span>
+                          {s.testResult && (
+                            <span className="text-[11px] text-slate-500 block truncate max-w-xs">
+                              {s.testResult}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-4 px-6 text-slate-700 text-xs">
+                          {s.analyzerBench}
                         </td>
                         <td className="py-4 px-6 text-center text-slate-600 font-mono text-xs">
-                          {s.collectionTime}
+                          {s.startTime}
                         </td>
                         <td className="py-4 px-8 text-center">
-                          {s.status === "VERIFIED" ? (
+                          {s.status === "COMPLETED" ? (
                             <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#def7ec] text-[#03543f]">
-                              VERIFIED
+                              COMPLETED
                             </span>
-                          ) : s.status === "REJECTED" ? (
+                          ) : s.status === "RUNNING" ? (
+                            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#e0edff] text-[#2563eb]">
+                              RUNNING
+                            </span>
+                          ) : s.status === "FLAGGED" ? (
                             <span
                               className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#fee2e2] text-[#991b1b]"
-                              title={s.rejectionReason}
+                              title={s.criticalAlert}
                             >
-                              REJECTED
+                              FLAGGED
                             </span>
                           ) : (
                             <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#fef3c7] text-[#92400e]">
-                              PENDING
+                              CALIBRATING
                             </span>
                           )}
                         </td>
                         <td className="py-4 px-6 text-center">
-                          {s.status === "PENDING" && (
+                          {s.status === "RUNNING" && (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkCompleted(s.id)}
+                              className="px-3 py-1.5 bg-[#00875A] hover:bg-[#00744E] text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                            >
+                              Enter Result
+                            </button>
+                          )}
+                          {s.status === "FLAGGED" && (
                             <div className="flex items-center justify-center gap-2">
                               <button
                                 type="button"
-                                onClick={() => handleVerifySample(s.id)}
-                                className="px-3 py-1.5 bg-[#00875A] hover:bg-[#00744E] text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                                onClick={() => handleRerunTest(s.id)}
+                                className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
                               >
-                                Accept
+                                Rerun
                               </button>
                               <button
                                 type="button"
-                                onClick={() => handleRejectSample(s.id)}
-                                className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-red-50 hover:text-red-700 hover:border-red-300 text-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                                onClick={() => handleMarkCompleted(s.id)}
+                                className="px-3 py-1.5 bg-[#00875A] hover:bg-[#00744E] text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
                               >
-                                Reject
+                                Approve
                               </button>
                             </div>
                           )}
-                          {s.status === "VERIFIED" && (
+                          {s.status === "COMPLETED" && (
                             <span className="text-xs font-semibold text-[#059669]">
-                              Ready for Analyzer
+                              ✓ Result Ready
                             </span>
                           )}
-                          {s.status === "REJECTED" && (
-                            <span className="text-xs font-semibold text-[#dc2626] italic">
-                              Recollection Ordered
-                            </span>
+                          {s.status === "CALIBRATING" && (
+                            <button
+                              type="button"
+                              onClick={() => handleRerunTest(s.id)}
+                              className="px-3 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-600 hover:text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                            >
+                              Start Run
+                            </button>
                           )}
                         </td>
                       </tr>
@@ -1035,3 +1100,4 @@ export default function SampleVerification() {
     </div>
   );
 }
+
