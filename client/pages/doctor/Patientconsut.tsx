@@ -6962,10 +6962,12 @@ const ChemotherapyOrder: React.FC<{
      (weight kg / height m²). When the "Creatinine Clearance (CrCl) —
      Cockcroft-Gault" calculator is selected, doses scale by the value
      from CrCl (mL/min) = ((140 − age) × weight kg) / (72 × serum
-     creatinine), × 0.85 for women. Any other selection (or none) falls
-     back to BSA (Mosteller) derived from height/weight. Falls back to
-     BSA (and 1 when BSA is unavailable) until the selected calculator's
-     inputs are complete. */
+     creatinine), × 0.85 for women. When the "Carboplatin Dose —
+     Calvert Formula" calculator is selected, doses scale by the total
+     dose (mg) = target AUC × (CrCl + 25). Any other selection (or
+     none) falls back to BSA (Mosteller) derived from height/weight.
+     Falls back to BSA (and 1 when BSA is unavailable) until the
+     selected calculator's inputs are complete. */
   const doseScaleFactor = useMemo(() => {
     const bsa = bsaDoseScaleFactor(measurements);
     const height = parseMeasureString(measurements?.height ?? "");
@@ -6982,8 +6984,13 @@ const ChemotherapyOrder: React.FC<{
         ? Math.round(calcCrClValue * 1000) / 1000
         : bsa;
     }
+    if (doseCalculator === "Carboplatin Dose — Calvert Formula") {
+      return calcCarboplatinValue !== null
+        ? Math.round(calcCarboplatinValue * 1000) / 1000
+        : bsa;
+    }
     return bsa;
-  }, [doseCalculator, measurements, calcCrClValue]);
+  }, [doseCalculator, measurements, calcCrClValue, calcCarboplatinValue]);
 
   const [cycleDay, setCycleDay] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -8703,6 +8710,30 @@ const ChemotherapyOrder: React.FC<{
                 </div>
                 <div className="flex flex-wrap items-end gap-3">
                   <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
+                    Age (years)
+                    <input
+                      type="number"
+                      value={calcAgeYears}
+                      onChange={(event) =>
+                        setCalcAgeYears(event.target.value)
+                      }
+                      placeholder="e.g. 55"
+                      className="w-28 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
+                    Serum creatinine (mg/dL)
+                    <input
+                      type="number"
+                      value={calcSerumCreatinine}
+                      onChange={(event) =>
+                        setCalcSerumCreatinine(event.target.value)
+                      }
+                      placeholder="0.9"
+                      className="w-36 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
                     Target AUC (mg/mL·min)
                     <input
                       type="number"
@@ -8716,9 +8747,9 @@ const ChemotherapyOrder: React.FC<{
                   </label>
                 </div>
                 <p className="max-w-md text-sm text-gray-500">
-                  Calvert: Dose (mg) = AUC × (CrCl + 25). CrCl is computed
-                  by Cockcroft-Gault from the age, serum creatinine and
-                  weight entered above.
+                  Calvert: Dose (mg) = AUC × (GFR + 25). GFR is estimated
+                  by CrCl (Cockcroft-Gault) from the age, serum creatinine
+                  and weight entered above.
                 </p>
               </div>
             )}
