@@ -1072,170 +1072,163 @@ export default function LabDashboard() {
                     ------------------------------------------------------------- */}
                 {currentStep === 2 && (
                   <div className="space-y-6">
-                    {/* Patient Summary Strip */}
-                    <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-slate-200">
-                      <div className="p-2">
-                        <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                          Patient ID
-                        </span>
-                        <span className="mt-1 block text-base font-mono font-bold text-slate-900">
-                          {selectedPatient.patientId}
-                        </span>
-                      </div>
-                      <div className="p-2 md:pl-6">
-                        <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                          Patient Name
-                        </span>
-                        <span className="mt-1 block text-base font-bold text-slate-900">
-                          {selectedPatient.patientName}
-                        </span>
-                      </div>
-                      <div className="p-2 md:pl-6">
-                        <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                          Age / Gender
-                        </span>
-                        <span className="mt-1 block text-base font-bold text-slate-900">
-                          {calculateAge(selectedPatient.dob)} Yrs /{" "}
-                          {selectedPatient.gender}
-                        </span>
-                      </div>
-                      <div className="p-2 md:pl-6">
-                        <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                          Request ID
-                        </span>
-                        <span className="mt-1 block text-base font-mono font-bold text-blue-600">
-                          {selectedPatient.requestId}
-                        </span>
-                      </div>
-                    </section>
-
-                    {/* Valid Tests Table */}
-                    <section className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                          <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
-                            Valid Tests to Proceed
-                          </h2>
-                          <span className="bg-emerald-50 text-emerald-700 border border-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded">
-                            {selectedValidTests.length} Selected
+                    {/* BEGIN: PatientSummaryCard */}
+                    <section
+                      className="rounded-2xl bg-[#eff6ff]/70 border border-[#dbeafe] p-7"
+                      data-purpose="patient-summary"
+                    >
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                        <div>
+                          <span className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Patient ID
+                          </span>
+                          <span className="mt-1.5 block text-xl font-bold text-slate-900">
+                            {selectedPatient.patientId}
                           </span>
                         </div>
-                        <span className="text-xs text-slate-500">
-                          All pre-analytical requirements confirmed
-                        </span>
+                        <div>
+                          <span className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Patient Name
+                          </span>
+                          <span className="mt-1.5 block text-xl font-bold text-slate-900">
+                            {selectedPatient.patientName}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Age / Gender
+                          </span>
+                          <span className="mt-1.5 block text-xl font-bold text-slate-900">
+                            {calculateAge(selectedPatient.dob)} /{" "}
+                            {selectedPatient.gender}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Request ID
+                          </span>
+                          <span className="mt-1.5 block text-xl font-bold text-slate-900">
+                            {selectedPatient.requestId}
+                          </span>
+                        </div>
+                      </div>
+                    </section>
+                    {/* END: PatientSummaryCard */}
+
+                    {/* BEGIN: ValidTestsSection */}
+                    <section
+                      className="space-y-3"
+                      data-purpose="valid-tests-group"
+                    >
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <CheckCircle2 className="w-6 h-6 text-emerald-600 stroke-[2.2]" />
+                          <h2 className="text-xl font-bold text-slate-900">
+                            Valid Tests to Proceed
+                          </h2>
+                        </div>
+                        <p className="mt-1 text-sm text-slate-500">
+                          These tests meet all pre-analytical requirements and
+                          are ready for sampling.
+                        </p>
                       </div>
 
-                      <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-xs">
+                      <div className="border border-slate-200/90 rounded-xl overflow-hidden bg-white shadow-xs">
                         <table className="w-full text-left border-collapse">
                           <thead>
-                            <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-                              <th className="py-3 px-5 w-16" scope="col">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedValidTests.length === 3}
-                                  onChange={handleToggleAllValid}
-                                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer"
-                                />
+                            <tr className="border-b border-slate-200 bg-[#f8fafc]/80 text-[13px] font-bold text-slate-600 uppercase tracking-wider">
+                              <th className="py-4 px-6 w-28" scope="col">
+                                Select
                               </th>
-                              <th className="py-3 px-5" scope="col">
+                              <th className="py-4 px-6 w-1/3" scope="col">
                                 Test Name
                               </th>
-                              <th className="py-3 px-5" scope="col">
+                              <th className="py-4 px-6 w-1/4" scope="col">
                                 Sample Type
                               </th>
-                              <th className="py-3 px-5" scope="col">
+                              <th className="py-4 px-6 w-1/4" scope="col">
                                 Priority
                               </th>
                               <th
-                                className="py-3 px-5 text-center w-28"
+                                className="py-4 px-6 text-center w-28"
                                 scope="col"
                               >
                                 Status
                               </th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-800">
-                            {/* Row 1 */}
-                            <tr className="hover:bg-slate-50/70 transition-colors">
-                              <td className="py-3.5 px-5">
+                          <tbody className="divide-y divide-slate-100 text-sm font-normal text-slate-800">
+                            {/* Row 1: Complete Blood Count */}
+                            <tr className="hover:bg-slate-50/50 transition-colors">
+                              <td className="py-4 px-6">
                                 <input
                                   type="checkbox"
                                   checked={selectedValidTests.includes("cbc")}
                                   onChange={() => handleToggleValidTest("cbc")}
-                                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer"
+                                  className="h-5 w-5 rounded bg-[#1d6bf3] border-slate-300 text-[#1d6bf3] focus:ring-0 focus:ring-offset-0 cursor-pointer"
                                 />
                               </td>
-                              <td className="py-3.5 px-5 font-bold text-slate-900">
-                                Complete Blood Count (CBC)
+                              <td className="py-4 px-6 font-medium text-slate-800">
+                                Complete Blood Count
                               </td>
-                              <td className="py-3.5 px-5 text-slate-600">
-                                Whole Blood (EDTA)
+                              <td className="py-4 px-6 text-slate-700">
+                                Whole Blood
                               </td>
-                              <td className="py-3.5 px-5">
-                                <span className="bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded text-[11px] font-semibold">
-                                  Routine
-                                </span>
+                              <td className="py-4 px-6 text-slate-700">
+                                Normal
                               </td>
-                              <td className="py-3.5 px-5 text-center">
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-300">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              <td className="py-4 px-6 text-center">
+                                <span className="inline-flex items-center px-3 py-0.5 rounded-full text-xs font-semibold bg-emerald-100/70 text-emerald-800">
                                   READY
                                 </span>
                               </td>
                             </tr>
-                            {/* Row 2 */}
-                            <tr className="hover:bg-slate-50/70 transition-colors">
-                              <td className="py-3.5 px-5">
+                            {/* Row 2: Liver Function Test */}
+                            <tr className="hover:bg-slate-50/50 transition-colors">
+                              <td className="py-4 px-6">
                                 <input
                                   type="checkbox"
                                   checked={selectedValidTests.includes("lft")}
                                   onChange={() => handleToggleValidTest("lft")}
-                                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer"
+                                  className="h-5 w-5 rounded bg-[#1d6bf3] border-slate-300 text-[#1d6bf3] focus:ring-0 focus:ring-offset-0 cursor-pointer"
                                 />
                               </td>
-                              <td className="py-3.5 px-5 font-bold text-slate-900">
-                                Liver Function Test (LFT)
+                              <td className="py-4 px-6 font-medium text-slate-800">
+                                Liver Function Test
                               </td>
-                              <td className="py-3.5 px-5 text-slate-600">
-                                Serum (SST)
+                              <td className="py-4 px-6 text-slate-700">
+                                Serum
                               </td>
-                              <td className="py-3.5 px-5">
-                                <span className="bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded text-[11px] font-semibold">
-                                  Routine
-                                </span>
+                              <td className="py-4 px-6 text-slate-700">
+                                Normal
                               </td>
-                              <td className="py-3.5 px-5 text-center">
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-300">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              <td className="py-4 px-6 text-center">
+                                <span className="inline-flex items-center px-3 py-0.5 rounded-full text-xs font-semibold bg-emerald-100/70 text-emerald-800">
                                   READY
                                 </span>
                               </td>
                             </tr>
-                            {/* Row 3 */}
-                            <tr className="hover:bg-slate-50/70 transition-colors">
-                              <td className="py-3.5 px-5">
+                            {/* Row 3: Kidney Function Test */}
+                            <tr className="hover:bg-slate-50/50 transition-colors">
+                              <td className="py-4 px-6">
                                 <input
                                   type="checkbox"
                                   checked={selectedValidTests.includes("kft")}
                                   onChange={() => handleToggleValidTest("kft")}
-                                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer"
+                                  className="h-5 w-5 rounded bg-[#1d6bf3] border-slate-300 text-[#1d6bf3] focus:ring-0 focus:ring-offset-0 cursor-pointer"
                                 />
                               </td>
-                              <td className="py-3.5 px-5 font-bold text-slate-900">
-                                Kidney Function Test (KFT)
+                              <td className="py-4 px-6 font-medium text-slate-800">
+                                Kidney Function Test
                               </td>
-                              <td className="py-3.5 px-5 text-slate-600">
-                                Serum (SST)
+                              <td className="py-4 px-6 text-slate-700">
+                                Serum
                               </td>
-                              <td className="py-3.5 px-5">
-                                <span className="bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded text-[11px] font-semibold">
-                                  Routine
-                                </span>
+                              <td className="py-4 px-6 text-slate-700">
+                                Normal
                               </td>
-                              <td className="py-3.5 px-5 text-center">
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-300">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              <td className="py-4 px-6 text-center">
+                                <span className="inline-flex items-center px-3 py-0.5 rounded-full text-xs font-semibold bg-emerald-100/70 text-emerald-800">
                                   READY
                                 </span>
                               </td>
@@ -1244,210 +1237,106 @@ export default function LabDashboard() {
                         </table>
                       </div>
                     </section>
+                    {/* END: ValidTestsSection */}
 
-                    {/* Excluded Tests Alert Section / Conflict Resolution */}
-                    <section className="space-y-3 pt-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          {conflictResolved ? (
-                            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                          ) : (
-                            <AlertTriangle className="w-5 h-5 text-amber-600" />
-                          )}
-                          <h2
-                            className={`text-sm font-bold uppercase tracking-wide ${
-                              conflictResolved
-                                ? "text-emerald-700"
-                                : "text-amber-700"
-                            }`}
-                          >
-                            {conflictResolved
-                              ? "Clinical Conflict Resolved (Approved)"
-                              : "Excluded Tests (Clinical Conflict)"}
+                    {/* BEGIN: ExcludedTestsSection */}
+                    <section
+                      className="space-y-3 pt-2"
+                      data-purpose="excluded-tests-group"
+                    >
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <AlertTriangle className="w-6 h-6 text-red-600 stroke-[2]" />
+                          <h2 className="text-xl font-bold text-red-600 tracking-tight">
+                            Excluded Tests (Requires Action)
                           </h2>
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                              conflictResolved
-                                ? "bg-emerald-50 text-emerald-700 border-emerald-300"
-                                : "bg-amber-50 text-amber-700 border-amber-300"
-                            }`}
-                          >
-                            {conflictResolved
-                              ? "Conflict Fixed"
-                              : "1 Clinical Conflict"}
-                          </span>
                         </div>
-
-                        <button
-                          type="button"
-                          onClick={handleToggleResolveConflict}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer ${
-                            conflictResolved
-                              ? "bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
-                              : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
-                          }`}
-                        >
-                          {conflictResolved ? (
-                            <>
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              <span>Revert to Excluded</span>
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>Fix / Resolve Conflict</span>
-                            </>
-                          )}
-                        </button>
+                        <p className="mt-1 text-sm text-slate-500">
+                          The following tests cannot be performed due to
+                          clinical conflicts or missing requirements.
+                        </p>
                       </div>
 
-                      <div
-                        className={`border rounded-xl overflow-hidden shadow-xs transition-colors ${
-                          conflictResolved
-                            ? "border-emerald-200 bg-emerald-50/20"
-                            : "border-amber-200 bg-amber-50/20"
-                        }`}
-                      >
+                      <div className="border border-slate-200/90 rounded-xl overflow-hidden bg-white shadow-xs">
                         <table className="w-full text-left border-collapse">
                           <thead>
-                            <tr
-                              className={`border-b text-[11px] font-bold uppercase tracking-wider ${
-                                conflictResolved
-                                  ? "border-emerald-200/80 bg-emerald-50/50 text-emerald-900"
-                                  : "border-amber-200/80 bg-amber-50/50 text-amber-900"
-                              }`}
-                            >
-                              <th className="py-3 px-5 w-16" scope="col">
+                            <tr className="border-b border-slate-200 bg-[#f8fafc]/80 text-[13px] font-bold text-slate-600 uppercase tracking-wider">
+                              <th className="py-4 px-6 w-28" scope="col">
                                 Select
                               </th>
-                              <th className="py-3 px-5" scope="col">
+                              <th className="py-4 px-6 w-1/3" scope="col">
                                 Test Name
                               </th>
-                              <th className="py-3 px-5" scope="col">
-                                Conflict Description &amp; Resolution
+                              <th className="py-4 px-6 w-1/2" scope="col">
+                                Reason For Exclusion
                               </th>
                               <th
-                                className="py-3 px-5 text-center w-36"
+                                className="py-4 px-6 text-center w-28"
                                 scope="col"
                               >
                                 Status
                               </th>
-                              <th
-                                className="py-3 px-5 text-center w-32"
-                                scope="col"
-                              >
-                                Action
-                              </th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-800">
-                            <tr
-                              className={`transition-colors ${
-                                conflictResolved
-                                  ? "hover:bg-emerald-50/30"
-                                  : "hover:bg-amber-50/30"
-                              }`}
-                            >
-                              <td className="py-3.5 px-5">
+                          <tbody className="divide-y divide-slate-100 text-sm font-normal text-slate-800">
+                            {/* Row 1: Glucose - Fasting */}
+                            <tr className="hover:bg-slate-50/50 transition-colors">
+                              <td className="py-5 px-6">
                                 <input
                                   type="checkbox"
-                                  checked={
-                                    conflictResolved || isExcludedSelected
+                                  checked={isExcludedSelected}
+                                  onChange={() =>
+                                    setIsExcludedSelected(!isExcludedSelected)
                                   }
-                                  onChange={handleToggleResolveConflict}
-                                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer"
+                                  className="h-5 w-5 rounded border border-slate-400/80 bg-white text-red-600 focus:ring-0 cursor-pointer"
                                 />
                               </td>
-                              <td className="py-3.5 px-5 font-bold text-slate-900">
-                                Glucose - Fasting (FBS)
+                              <td className="py-5 px-6 font-medium text-slate-800">
+                                Glucose - Fasting
                               </td>
-                              <td className="py-3.5 px-5">
-                                {conflictResolved ? (
-                                  <div>
-                                    <div className="font-bold text-emerald-700 flex items-center gap-1.5">
-                                      <Check className="w-4 h-4" />
-                                      <span>
-                                        Conflict Resolved: Fasting Verified /
-                                        Override Approved
-                                      </span>
-                                    </div>
-                                    <div className="text-[11px] text-slate-500 mt-0.5">
-                                      Sample collection scheduled · Grey top
-                                      (Sodium Fluoride) tube assigned
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div>
-                                    <div className="font-bold text-rose-700">
-                                      Fasting Requirement Mismatch
-                                    </div>
-                                    <div className="text-[11px] text-slate-500 mt-0.5">
-                                      Clinical Conflict: Patient reported
-                                      non-fasting meal 1.5 hours prior.
-                                    </div>
-                                  </div>
-                                )}
+                              <td className="py-5 px-6">
+                                <div className="font-bold text-red-600">
+                                  Fasting Requirement Mismatch
+                                </div>
+                                <div className="text-xs text-slate-600 mt-0.5">
+                                  Conflict: Sample taken Post-Fasting
+                                </div>
                               </td>
-                              <td className="py-3.5 px-5 text-center">
-                                {conflictResolved ? (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-300">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                    RESOLVED
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
-                                    EXCLUDED
-                                  </span>
-                                )}
-                              </td>
-                              <td className="py-3.5 px-5 text-center">
-                                <button
-                                  type="button"
-                                  onClick={handleToggleResolveConflict}
-                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold transition-all shadow-2xs cursor-pointer ${
-                                    conflictResolved
-                                      ? "bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300"
-                                      : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
-                                  }`}
-                                >
-                                  {conflictResolved ? (
-                                    <>
-                                      <RotateCcw className="w-3 h-3" />
-                                      <span>Undo</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Check className="w-3 h-3" />
-                                      <span>Fix Conflict</span>
-                                    </>
-                                  )}
-                                </button>
+                              <td className="py-5 px-6 text-center">
+                                <span className="inline-flex items-center px-3 py-0.5 rounded-full text-xs font-bold tracking-tight bg-red-100 text-red-700">
+                                  EXCLUDED
+                                </span>
                               </td>
                             </tr>
                           </tbody>
                         </table>
                       </div>
                     </section>
+                    {/* END: ExcludedTestsSection */}
 
-                    {/* Navigation Footer */}
-                    <div className="flex items-center justify-between pt-4 border-t border-slate-200">
+                    {/* BEGIN: BottomActionBar */}
+                    <div
+                      className="flex items-center justify-between pt-4 border-t border-slate-200"
+                      data-purpose="action-footer"
+                    >
                       <button
                         type="button"
                         onClick={() => setCurrentStep(1)}
-                        className="px-5 py-2.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-bold hover:bg-slate-50 shadow-2xs transition-colors flex items-center gap-2 cursor-pointer"
+                        className="px-8 py-2.5 rounded-lg border border-slate-300 bg-white text-slate-800 text-sm font-medium hover:bg-slate-50 active:bg-slate-100 transition-colors shadow-xs flex items-center gap-2 cursor-pointer"
                       >
                         <ArrowLeft className="w-4 h-4" />
-                        <span>Back to Patient Details</span>
+                        <span>Back</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => setCurrentStep(3)}
-                        className="px-6 py-2.5 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-xs transition-colors flex items-center gap-2 cursor-pointer"
+                        className="px-10 py-2.5 rounded-lg bg-[#1d6bf3] text-white text-sm font-semibold hover:bg-blue-600 active:bg-blue-700 transition-colors shadow-sm flex items-center gap-2 cursor-pointer"
                       >
-                        <span>Generate Sample Barcodes</span>
+                        <span>Next</span>
                         <ArrowRight className="w-4 h-4" />
                       </button>
                     </div>
+                    {/* END: BottomActionBar */}
                   </div>
                 )}
 
