@@ -1642,7 +1642,7 @@ export default function LabDashboard() {
           /* =========================================================================
               VIEW 2: RAZOR-SHARP LAB TECHNICIAN DASHBOARD
               ========================================================================= */
-          <>
+          <div className="flex-1 flex flex-col min-w-0 bg-[#F8FAFC]">
             {/* Top Navbar */}
             <header className="h-16 border-b border-slate-200 bg-white/95 backdrop-blur-md px-8 flex items-center justify-between sticky top-0 z-20 shadow-2xs">
               {/* Breadcrumb & Live Tag */}
@@ -2038,7 +2038,7 @@ export default function LabDashboard() {
                 </div>
               </section>
             </main>
-          </>
+          </div>
         )}
       </div>
     </div>

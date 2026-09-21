@@ -22,7 +22,6 @@
     "noImplicitAny": false,
     "noFallthroughCasesInSwitch": false,
     "strictNullChecks": false,
-
     "baseUrl": ".",
     "paths": {
       "@/*": ["./client/*"],
