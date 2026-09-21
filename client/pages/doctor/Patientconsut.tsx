@@ -453,6 +453,7 @@ const computeCalvertCarboplatin = (
 
 /* Dose calculator options shown next to the Chemotherapy Orders tab. */
 const DOSE_CALCULATOR_OPTIONS = [
+  "Body Surface Area (BSA)",
   "Body Mass Index (BMI)",
   "Creatinine Clearance (CrCl) — Cockcroft-Gault",
   "Carboplatin Dose — Calvert Formula",
@@ -6924,6 +6925,7 @@ const ChemotherapyOrder: React.FC<{
   const calcIsFemale = (gender ?? "").trim().toLowerCase() === "female";
 
   const calcBmiValue = computeBmi(calcHeight, calcWeight);
+  const calcBsaValue = computeBsa(calcHeight, calcWeight);
   const calcCrClValue = computeCockcroftGault(
     calcWeight,
     calcAgeYears ? Number(calcAgeYears) : null,
@@ -6939,6 +6941,10 @@ const ChemotherapyOrder: React.FC<{
     calcBmiValue !== null
       ? `${String(Math.round(calcBmiValue * 10) / 10)} kg/m²`
       : "Enter height & weight";
+  const calcBsaDisplay =
+    calcBsaValue !== null
+      ? `${String(Math.round(calcBsaValue * 1000) / 1000)} m²`
+      : "Enter height & weight";
   const calcCrClDisplay =
     calcCrClValue !== null
       ? `${String(calcCrClValue)} mL/min`
@@ -6953,9 +6959,13 @@ const ChemotherapyOrder: React.FC<{
   /* Dose scale factor used to auto-adjust drug doses (increase/decrease)
      across all three tabs. When the "Body Mass Index (BMI)" calculator
      is selected in the dropdown, doses scale by the patient's BMI
-     (weight kg / height m²); otherwise they scale by BSA (Mosteller)
-     derived from height/weight. Falls back to 1 (doses unchanged) when
-     the required measurements are missing. */
+     (weight kg / height m²). When the "Creatinine Clearance (CrCl) —
+     Cockcroft-Gault" calculator is selected, doses scale by the value
+     from CrCl (mL/min) = ((140 − age) × weight kg) / (72 × serum
+     creatinine), × 0.85 for women. Any other selection (or none) falls
+     back to BSA (Mosteller) derived from height/weight. Falls back to
+     BSA (and 1 when BSA is unavailable) until the selected calculator's
+     inputs are complete. */
   const doseScaleFactor = useMemo(() => {
     const bsa = bsaDoseScaleFactor(measurements);
     const height = parseMeasureString(measurements?.height ?? "");
@@ -6964,8 +6974,16 @@ const ChemotherapyOrder: React.FC<{
     if (doseCalculator === "Body Mass Index (BMI)") {
       return bmi !== null ? Math.round(bmi * 1000) / 1000 : bsa;
     }
+    if (
+      doseCalculator ===
+      "Creatinine Clearance (CrCl) — Cockcroft-Gault"
+    ) {
+      return calcCrClValue !== null
+        ? Math.round(calcCrClValue * 1000) / 1000
+        : bsa;
+    }
     return bsa;
-  }, [doseCalculator, measurements]);
+  }, [doseCalculator, measurements, calcCrClValue]);
 
   const [cycleDay, setCycleDay] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -8591,6 +8609,24 @@ const ChemotherapyOrder: React.FC<{
         {/* ================= DOSE CALCULATOR RESULT ================= */}
         {doseCalculator && (
           <div className="mx-8 mt-6 rounded-lg border border-gray-200 bg-gray-50 p-5">
+            {doseCalculator === "Body Surface Area (BSA)" && (
+              <div className="flex flex-wrap items-center gap-6">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    BSA
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold text-gray-900">
+                    {calcBsaDisplay}
+                  </p>
+                </div>
+                <p className="max-w-md text-sm text-gray-500">
+                  Body Surface Area (Mosteller) = √(height cm × weight kg /
+                  3600) in m². Derived from the most recent recorded height
+                  and weight for this patient.
+                </p>
+              </div>
+            )}
+
             {doseCalculator === "Body Mass Index (BMI)" && (
               <div className="flex flex-wrap items-center gap-6">
                 <div>
