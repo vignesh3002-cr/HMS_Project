@@ -633,3 +633,211 @@ export function inferDosingBasisForMedicine(medicineName: string | undefined): D
   return "BSA";
 }
 
+// ---------------------------------------------------------------------------
+// 4.8 Unit Conversion & Dynamic Dose Calculation Engine
+// - Mass units: kg, g, mg, mcg / ug
+// - Volume units: L, mL, CC (1 CC = 1 mL)
+// - Mass-to-Volume: Volume (CC) = Mass (mg) / Concentration (mg/mL)
+// - Dose Calc to Unit Mappings
+// ---------------------------------------------------------------------------
+
+export const MASS_UNIT_FACTORS: Record<string, number> = {
+  kg: 1_000_000,
+  g: 1_000,
+  gm: 1_000,
+  gms: 1_000,
+  gram: 1_000,
+  grams: 1_000,
+  mg: 1,
+  mgs: 1,
+  milligram: 1,
+  milligrams: 1,
+  mcg: 0.001,
+  ug: 0.001,
+  "µg": 0.001,
+  microgram: 0.001,
+  micrograms: 0.001,
+};
+
+export const VOLUME_UNIT_FACTORS: Record<string, number> = {
+  l: 1_000,
+  liter: 1_000,
+  liters: 1_000,
+  litre: 1_000,
+  litres: 1_000,
+  ml: 1,
+  mls: 1,
+  milliliter: 1,
+  milliliters: 1,
+  cc: 1,
+  ccs: 1,
+};
+
+function normalizeUnitKey(unit: string): string {
+  return unit
+    .trim()
+    .toLowerCase()
+    .replace(/[.\s]/g, "");
+}
+
+/**
+ * Converts a numerical value from one unit to another within the same dimension (mass to mass, volume to volume).
+ * Also supports compound units such as g/m² -> mg/m² or g/kg -> mg/kg.
+ */
+export function convertUnit(
+  value: number | null | undefined,
+  fromUnit: string | null | undefined,
+  toUnit: string | null | undefined
+): number | null {
+  if (value == null || !Number.isFinite(value) || !fromUnit || !toUnit) {
+    return null;
+  }
+
+  const rawFrom = normalizeUnitKey(fromUnit);
+  const rawTo = normalizeUnitKey(toUnit);
+
+  if (rawFrom === rawTo) return value;
+
+  // Check for compound suffix (e.g., /m², /kg)
+  const compoundSuffixes = ["/m²", "/m2", "/kg"];
+  for (const suffix of compoundSuffixes) {
+    const cleanSuffix = normalizeUnitKey(suffix);
+    if (rawFrom.endsWith(cleanSuffix) && rawTo.endsWith(cleanSuffix)) {
+      const baseFrom = rawFrom.slice(0, -cleanSuffix.length);
+      const baseTo = rawTo.slice(0, -cleanSuffix.length);
+      const factorFrom = MASS_UNIT_FACTORS[baseFrom];
+      const factorTo = MASS_UNIT_FACTORS[baseTo];
+      if (factorFrom != null && factorTo != null) {
+        const inMg = value * factorFrom;
+        const res = inMg / factorTo;
+        return Number(res.toFixed(4));
+      }
+    }
+  }
+
+  // Pure Mass conversions
+  const massFrom = MASS_UNIT_FACTORS[rawFrom];
+  const massTo = MASS_UNIT_FACTORS[rawTo];
+  if (massFrom != null && massTo != null) {
+    const inMg = value * massFrom;
+    const res = inMg / massTo;
+    return Number(res.toFixed(4));
+  }
+
+  // Pure Volume conversions (e.g. mL <-> CC <-> L)
+  const volFrom = VOLUME_UNIT_FACTORS[rawFrom];
+  const volTo = VOLUME_UNIT_FACTORS[rawTo];
+  if (volFrom != null && volTo != null) {
+    const inMl = value * volFrom;
+    const res = inMl / volTo;
+    return Number(res.toFixed(4));
+  }
+
+  return null;
+}
+
+/**
+ * Converts a mass value (e.g. in g, mg, mcg) into volume (e.g. CC or mL).
+ * Formula: Volume (mL) = Mass (mg) / Concentration (mg/mL).
+ * If concentration is omitted, assumes standard aqueous density (1 g = 1 mL / 1 CC).
+ */
+export function convertMassToVolume(
+  massValue: number | null | undefined,
+  massUnit: string | null | undefined,
+  targetVolumeUnit: string = "CC",
+  concentrationMgPerMl?: number | null
+): number | null {
+  if (massValue == null || !Number.isFinite(massValue) || massValue <= 0 || !massUnit) {
+    return null;
+  }
+
+  const rawUnit = normalizeUnitKey(massUnit);
+  const factor = MASS_UNIT_FACTORS[rawUnit];
+  if (factor == null) return null;
+
+  const massInMg = massValue * factor;
+
+  // If concentration is provided and valid (mg/mL): Volume = Mass(mg) / Concentration(mg/mL)
+  let volumeInMl: number;
+  if (concentrationMgPerMl != null && concentrationMgPerMl > 0) {
+    volumeInMl = massInMg / concentrationMgPerMl;
+  } else {
+    // Default aqueous density assumption: 1 g = 1 mL (1000 mg = 1 mL)
+    volumeInMl = massInMg / 1000;
+  }
+
+  const rawVolUnit = normalizeUnitKey(targetVolumeUnit);
+  const volFactor = VOLUME_UNIT_FACTORS[rawVolUnit] ?? 1; // default to mL/CC (factor 1)
+  const finalVolume = volumeInMl / volFactor;
+
+  return Number(finalVolume.toFixed(2));
+}
+
+/**
+ * Returns canonical units for a chosen dose calculation method.
+ */
+export function getRecommendedUnitsForDoseCalc(doseCalc: string | null | undefined): {
+  unit: string;
+  patientUnit: string;
+} {
+  if (!doseCalc) return { unit: "mg", patientUnit: "mg" };
+  const lower = doseCalc.toLowerCase();
+
+  if (lower.includes("auc")) {
+    return { unit: "AUC", patientUnit: "mg" };
+  }
+  if (lower.includes("weight") || lower.includes("kg")) {
+    return { unit: "mg/kg", patientUnit: "mg" };
+  }
+  if (lower.includes("bsa")) {
+    return { unit: "mg/m²", patientUnit: "mg" };
+  }
+  if (lower.includes("ibw")) {
+    return { unit: "mg/kg", patientUnit: "mg" };
+  }
+  if (lower.includes("bmi")) {
+    return { unit: "mg", patientUnit: "mg" };
+  }
+  if (lower.includes("fixed") || lower.includes("flat")) {
+    return { unit: "mg", patientUnit: "mg" };
+  }
+
+  return { unit: "mg", patientUnit: "mg" };
+}
+
+/**
+ * Dynamically computes patient dose from protocol dose and method based on standard adult baseline metrics:
+ * BSA = 1.7 m², Weight = 70 kg, CrCl/GFR = 75 mL/min (or custom metrics).
+ */
+export function calculatePatientDoseFromTemplate(
+  dose: number | null | undefined,
+  doseCalc: string | null | undefined,
+  bsa: number = 1.7,
+  weightKg: number = 70,
+  gfr: number = 75
+): number | null {
+  if (dose == null || !Number.isFinite(dose) || dose <= 0 || !doseCalc) {
+    return null;
+  }
+
+  const lower = doseCalc.toLowerCase();
+
+  if (lower.includes("auc")) {
+    const calvert = calculateCalvertDose(dose, gfr, true, 125);
+    return calvert ? calvert.totalDoseMg : null;
+  }
+  if (lower.includes("bsa")) {
+    const raw = dose * bsa;
+    return Number(raw.toFixed(1));
+  }
+  if (lower.includes("weight") || lower.includes("kg") || lower.includes("ibw")) {
+    const raw = dose * weightKg;
+    return Number(raw.toFixed(1));
+  }
+  if (lower.includes("fixed") || lower.includes("flat")) {
+    return dose;
+  }
+
+  return dose;
+}
+

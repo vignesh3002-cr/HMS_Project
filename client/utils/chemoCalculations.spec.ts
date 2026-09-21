@@ -12,6 +12,10 @@ import {
   calculateWeightBasedDose,
   checkPediatricDosingSwitch,
   inferDosingBasisForMedicine,
+  convertUnit,
+  convertMassToVolume,
+  getRecommendedUnitsForDoseCalc,
+  calculatePatientDoseFromTemplate,
 } from "./chemoCalculations";
 
 describe("chemoCalculations - Oncology Dosage Formulas", () => {
@@ -275,6 +279,123 @@ describe("chemoCalculations - Oncology Dosage Formulas", () => {
       expect(inferDosingBasisForMedicine("Fluorouracil")).toBe("BSA");
       expect(inferDosingBasisForMedicine("Paclitaxel")).toBe("BSA");
       expect(inferDosingBasisForMedicine("Oxaliplatin")).toBe("BSA");
+    });
+  });
+
+  describe("4.8 Unit Conversion & Dynamic Dose Calculation Engine", () => {
+    describe("convertUnit", () => {
+      it("converts grams to milligrams (1 g = 1000 mg)", () => {
+        expect(convertUnit(1, "g", "mg")).toBe(1000);
+        expect(convertUnit(2.5, "g", "mg")).toBe(2500);
+      });
+
+      it("converts milligrams to grams (1000 mg = 1 g)", () => {
+        expect(convertUnit(1000, "mg", "g")).toBe(1);
+        expect(convertUnit(500, "mg", "g")).toBe(0.5);
+      });
+
+      it("converts milligrams to micrograms (1 mg = 1000 mcg)", () => {
+        expect(convertUnit(1, "mg", "mcg")).toBe(1000);
+      });
+
+      it("converts compound units (e.g. g/m² to mg/m²)", () => {
+        expect(convertUnit(1, "g/m²", "mg/m²")).toBe(1000);
+        expect(convertUnit(85, "mg/m²", "g/m²")).toBe(0.085);
+      });
+
+      it("converts volumes: mL <-> CC is 1:1 and L <-> mL is 1000:1", () => {
+        expect(convertUnit(50, "mL", "CC")).toBe(50);
+        expect(convertUnit(100, "CC", "mL")).toBe(100);
+        expect(convertUnit(1, "L", "CC")).toBe(1000);
+        expect(convertUnit(500, "CC", "L")).toBe(0.5);
+      });
+
+      it("returns same value when fromUnit and toUnit match", () => {
+        expect(convertUnit(85, "mg", "mg")).toBe(85);
+        expect(convertUnit(100, "CC", "CC")).toBe(100);
+      });
+
+      it("returns null on invalid or incompatible units", () => {
+        expect(convertUnit(null, "g", "mg")).toBeNull();
+        expect(convertUnit(100, "mg", "invalidUnit")).toBeNull();
+        expect(convertUnit(100, "mg", "L")).toBeNull();
+      });
+    });
+
+    describe("convertMassToVolume", () => {
+      it("converts mass to volume using concentration (Volume = Mass / Concentration)", () => {
+        // 300 mg at 6 mg/mL = 50 CC
+        expect(convertMassToVolume(300, "mg", "CC", 6)).toBe(50);
+        // 0.3 g at 6 mg/mL = 300 mg / 6 = 50 CC
+        expect(convertMassToVolume(0.3, "g", "CC", 6)).toBe(50);
+      });
+
+      it("assumes standard aqueous density (1 g = 1 mL = 1 CC) when concentration is omitted", () => {
+        // 1 g = 1 CC
+        expect(convertMassToVolume(1, "g", "CC")).toBe(1);
+        // 1000 mg = 1 CC
+        expect(convertMassToVolume(1000, "mg", "CC")).toBe(1);
+        // 500 mg = 0.5 CC
+        expect(convertMassToVolume(500, "mg", "CC")).toBe(0.5);
+      });
+
+      it("converts to Liters (L) accurately", () => {
+        // 1000 g = 1000 CC = 1 L
+        expect(convertMassToVolume(1000, "g", "L")).toBe(1);
+      });
+
+      it("handles null or non-positive inputs safely", () => {
+        expect(convertMassToVolume(null, "g", "CC")).toBeNull();
+        expect(convertMassToVolume(0, "g", "CC")).toBeNull();
+        expect(convertMassToVolume(-5, "g", "CC")).toBeNull();
+      });
+    });
+
+    describe("getRecommendedUnitsForDoseCalc", () => {
+      it("recommends mg/m² for BSA", () => {
+        const res = getRecommendedUnitsForDoseCalc("BSA (mg/m²)");
+        expect(res.unit).toBe("mg/m²");
+        expect(res.patientUnit).toBe("mg");
+      });
+
+      it("recommends mg/kg for Weight", () => {
+        const res = getRecommendedUnitsForDoseCalc("Weight (mg/kg)");
+        expect(res.unit).toBe("mg/kg");
+        expect(res.patientUnit).toBe("mg");
+      });
+
+      it("recommends AUC for Calvert", () => {
+        const res = getRecommendedUnitsForDoseCalc("AUC (Calvert)");
+        expect(res.unit).toBe("AUC");
+        expect(res.patientUnit).toBe("mg");
+      });
+
+      it("recommends mg for Fixed Dose", () => {
+        const res = getRecommendedUnitsForDoseCalc("Fixed Dose");
+        expect(res.unit).toBe("mg");
+        expect(res.patientUnit).toBe("mg");
+      });
+    });
+
+    describe("calculatePatientDoseFromTemplate", () => {
+      it("calculates BSA dose dynamically (dose * bsa)", () => {
+        // 85 mg/m² * 1.7 m² = 144.5 mg
+        expect(calculatePatientDoseFromTemplate(85, "BSA (mg/m²)", 1.7)).toBe(144.5);
+      });
+
+      it("calculates Weight-based dose dynamically (dose * weight)", () => {
+        // 7.5 mg/kg * 70 kg = 525 mg
+        expect(calculatePatientDoseFromTemplate(7.5, "Weight (mg/kg)", 1.7, 70)).toBe(525);
+      });
+
+      it("calculates Calvert AUC dose dynamically", () => {
+        // AUC 5, GFR 75 -> 5 * (75 + 25) = 500 mg
+        expect(calculatePatientDoseFromTemplate(5, "AUC (Calvert)", 1.7, 70, 75)).toBe(500);
+      });
+
+      it("returns identical dose for Fixed Dose", () => {
+        expect(calculatePatientDoseFromTemplate(200, "Fixed Dose")).toBe(200);
+      });
     });
   });
 });

@@ -1374,7 +1374,7 @@ const isDirty = Boolean(
 
                 {/* Patient Number (read-only after selection) */}
                 <div>
-                  <label className={labelClass}>Patient Number</label>
+                  <label className={labelClass}>Mobile Number</label>
                   <input
                   type="text"
                   className={inputClass + " bg-gray-50 text-gray-500"}

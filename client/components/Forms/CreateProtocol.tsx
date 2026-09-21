@@ -23,7 +23,13 @@ import { FormProtocolMultiSelect } from "@/components/ui/form-protocol-multisele
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { chemotherapyApi, MedicineOption, RegimenProtocolDilutionInput, DischargeInstructionInput } from "@/api/chemotherapy.api";
 import { DoseCalculationModal } from "@/components/chemo/DoseCalculationModal";
-import { inferDosingBasisForMedicine } from "@/utils/chemoCalculations";
+import {
+  inferDosingBasisForMedicine,
+  convertUnit,
+  convertMassToVolume,
+  getRecommendedUnitsForDoseCalc,
+  calculatePatientDoseFromTemplate,
+} from "@/utils/chemoCalculations";
 
 // Styling tokens - merged from the mFOLFOX6 "Protocol Builder" mockup:
 // soft grey canvas, white cards with hairline borders, muted uppercase grid
@@ -1776,6 +1782,20 @@ export default function CreateProtocol() {
                         onValueChange={(v) => {
                           const n = [...chemoPlans];
                           n[idx].doseCalc = v;
+                          const recommended = getRecommendedUnitsForDoseCalc(v);
+                          if (!n[idx].unit || v) {
+                            n[idx].unit = recommended.unit;
+                          }
+                          if (!n[idx].patientUnit || v) {
+                            n[idx].patientUnit = recommended.patientUnit;
+                          }
+                          const numDose = parseFloat(n[idx].dose);
+                          if (!isNaN(numDose) && numDose > 0) {
+                            const calcPatientDose = calculatePatientDoseFromTemplate(numDose, v);
+                            if (calcPatientDose != null) {
+                              n[idx].patientDose = String(calcPatientDose);
+                            }
+                          }
                           setChemoPlans(n);
                         }}
                         placeholder="Select dose calc"
@@ -1787,8 +1807,18 @@ export default function CreateProtocol() {
                         type="text"
                         value={row.dose}
                         onChange={(e) => {
+                          const val = e.target.value;
                           const n = [...chemoPlans];
-                          n[idx].dose = e.target.value;
+                          n[idx].dose = val;
+                          const numDose = parseFloat(val);
+                          if (!isNaN(numDose) && numDose > 0 && n[idx].doseCalc) {
+                            const calcPatientDose = calculatePatientDoseFromTemplate(numDose, n[idx].doseCalc);
+                            if (calcPatientDose != null) {
+                              n[idx].patientDose = String(calcPatientDose);
+                            }
+                          } else if (!val.trim()) {
+                            n[idx].patientDose = "";
+                          }
                           setChemoPlans(n);
                         }}
                         className={ptInput}
@@ -1797,11 +1827,19 @@ export default function CreateProtocol() {
                       />,
                       <FormProtocolDropdown
                         key="u"
-                        options={Array.from(new Set([...fieldOptions.dosage_units, row.unit].filter(Boolean)))}
+                        options={Array.from(new Set([...fieldOptions.dosage_units, row.unit, "mg/m²", "mg/kg", "AUC", "mg", "g", "mcg"].filter(Boolean)))}
                         value={row.unit}
                         onValueChange={(v) => {
                           const n = [...chemoPlans];
+                          const oldUnit = n[idx].unit;
                           n[idx].unit = v;
+                          const numDose = parseFloat(n[idx].dose);
+                          if (!isNaN(numDose) && numDose > 0 && oldUnit && oldUnit !== v) {
+                            const converted = convertUnit(numDose, oldUnit, v);
+                            if (converted != null) {
+                              n[idx].dose = String(converted);
+                            }
+                          }
                           setChemoPlans(n);
                         }}
                         placeholder="Select unit"
@@ -1827,8 +1865,17 @@ export default function CreateProtocol() {
                         type="text"
                         value={row.patientUnit}
                         onChange={(e) => {
+                          const val = e.target.value;
                           const n = [...chemoPlans];
-                          n[idx].patientUnit = e.target.value;
+                          const oldUnit = n[idx].patientUnit;
+                          n[idx].patientUnit = val;
+                          const numPatientDose = parseFloat(n[idx].patientDose);
+                          if (!isNaN(numPatientDose) && numPatientDose > 0 && oldUnit && oldUnit !== val) {
+                            const converted = convertUnit(numPatientDose, oldUnit, val);
+                            if (converted != null) {
+                              n[idx].patientDose = String(converted);
+                            }
+                          }
                           setChemoPlans(n);
                         }}
                         className={ptInput}
@@ -2077,8 +2124,17 @@ export default function CreateProtocol() {
                         type="text"
                         value={row.dose}
                         onChange={(e) => {
+                          const val = e.target.value;
                           const n = [...dilution];
-                          n[idx].dose = e.target.value;
+                          n[idx].dose = val;
+                          const numDose = parseFloat(val);
+                          if (!isNaN(numDose) && numDose > 0 && n[idx].unit) {
+                            const vol = convertMassToVolume(numDose, n[idx].unit, n[idx].volumeUnit || "CC");
+                            if (vol != null) {
+                              n[idx].volume = String(vol);
+                              if (!n[idx].volumeUnit) n[idx].volumeUnit = "CC";
+                            }
+                          }
                           setDilution(n);
                         }}
                         className={ptInput}
@@ -2087,11 +2143,27 @@ export default function CreateProtocol() {
                       />,
                       <FormProtocolDropdown
                         key="du"
-                        options={fieldOptions.dilution_dose_units}
+                        options={Array.from(new Set([...fieldOptions.dilution_dose_units, row.unit, "mg", "g", "mcg", "kg"].filter(Boolean)))}
                         value={row.unit}
                         onValueChange={(v) => {
                           const n = [...dilution];
+                          const oldUnit = n[idx].unit;
                           n[idx].unit = v;
+                          const numDose = parseFloat(n[idx].dose);
+                          if (!isNaN(numDose) && numDose > 0) {
+                            if (oldUnit && oldUnit !== v) {
+                              const convertedDose = convertUnit(numDose, oldUnit, v);
+                              if (convertedDose != null) {
+                                n[idx].dose = String(convertedDose);
+                              }
+                            }
+                            const currentDose = parseFloat(n[idx].dose) || numDose;
+                            const vol = convertMassToVolume(currentDose, v, n[idx].volumeUnit || "CC");
+                            if (vol != null) {
+                              n[idx].volume = String(vol);
+                              if (!n[idx].volumeUnit) n[idx].volumeUnit = "CC";
+                            }
+                          }
                           setDilution(n);
                         }}
                         placeholder="Select unit"
@@ -2114,11 +2186,19 @@ export default function CreateProtocol() {
                       />,
                       <FormProtocolDropdown
                         key="vu"
-                        options={fieldOptions.dilution_volume_units}
+                        options={Array.from(new Set([...fieldOptions.dilution_volume_units, row.volumeUnit, "CC", "mL", "L"].filter(Boolean)))}
                         value={row.volumeUnit}
                         onValueChange={(v) => {
                           const n = [...dilution];
+                          const oldVolUnit = n[idx].volumeUnit;
                           n[idx].volumeUnit = v;
+                          const numVol = parseFloat(n[idx].volume);
+                          if (!isNaN(numVol) && numVol > 0 && oldVolUnit && oldVolUnit !== v) {
+                            const convertedVol = convertUnit(numVol, oldVolUnit, v);
+                            if (convertedVol != null) {
+                              n[idx].volume = String(convertedVol);
+                            }
+                          }
                           setDilution(n);
                         }}
                         placeholder="Select unit"
