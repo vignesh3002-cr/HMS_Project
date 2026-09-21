@@ -2,28 +2,6 @@ import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
 import { toast } from "@/hooks/use-toast";
-import {
-  FlaskConical,
-  LayoutDashboard,
-  ShieldCheck,
-  TestTubes,
-  FileCheck2,
-  SendHorizontal,
-  Settings,
-  HelpCircle,
-  LogOut,
-  Search,
-  CheckCircle2,
-  Clock,
-  AlertCircle,
-  ArrowLeft,
-  Barcode,
-  Building2,
-  Bell,
-  Check,
-  X,
-  RefreshCw,
-} from "lucide-react";
 
 interface SampleItem {
   id: string;
@@ -105,18 +83,19 @@ export default function SampleVerification() {
     currentUser?.role_type === "LAB_TECHNICIAN"
       ? "Lab Technician"
       : currentUser?.role_type || "Lab Technician";
-  const branchName = currentUser?.branch_name || "Kavery Branch";
 
   const handleLogout = () => {
     remove();
     navigate("/", { replace: true });
   };
 
+  const [activeNav, setActiveNav] = useState("Samples Verification");
   const [samples, setSamples] = useState<SampleItem[]>(INITIAL_SAMPLES);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | "PENDING" | "VERIFIED" | "REJECTED"
   >("ALL");
+  const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
   const [barcodeInput, setBarcodeInput] = useState("");
 
   const handleVerifySample = (id: string) => {
@@ -181,113 +160,267 @@ export default function SampleVerification() {
     });
   }, [samples, searchQuery, statusFilter]);
 
+  const verifiedCount = useMemo(
+    () => samples.filter((s) => s.status === "VERIFIED").length,
+    [samples],
+  );
+  const pendingCount = useMemo(
+    () => samples.filter((s) => s.status === "PENDING").length,
+    [samples],
+  );
+  const rejectedCount = useMemo(
+    () => samples.filter((s) => s.status === "REJECTED").length,
+    [samples],
+  );
+
   return (
-    <div className="min-h-screen flex bg-[#F8FAFC] text-slate-900 antialiased font-sans">
-      {/* Sidebar */}
-      <aside className="w-[260px] bg-white flex-shrink-0 flex flex-col justify-between border-r border-slate-200 select-none min-h-screen fixed inset-y-0 left-0 z-30 shadow-2xs">
+    <div className="min-h-screen flex bg-[#f8fafd] text-[#1e293b] antialiased selection:bg-blue-100 font-sans">
+      {/* BEGIN: LeftSidebar */}
+      <aside
+        className="w-[260px] bg-[#f0f4f9] flex-shrink-0 flex flex-col justify-between border-r border-[#e2e8f0] select-none min-h-screen fixed inset-y-0 left-0 z-20"
+        data-purpose="sidebar-navigation"
+      >
+        {/* Top Part: Logo & Primary Nav */}
         <div>
-          <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-xs">
-                <FlaskConical className="w-4 h-4" />
-              </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm font-bold text-slate-900 tracking-tight">
-                    HMS LAB
-                  </span>
-                  <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200/70">
-                    LIS
-                  </span>
-                </div>
-                <span className="text-[11px] text-slate-500 font-medium leading-none mt-0.5">
-                  Laboratory Unit
-                </span>
-              </div>
-            </div>
+          {/* Brand Logo Section */}
+          <div className="px-7 pt-7 pb-6">
+            <h1 className="text-xl font-bold text-[#0b57d0] tracking-tight">
+              HMS
+            </h1>
+            <p className="text-xs text-slate-500 font-medium mt-0.5">
+              Admin Portal
+            </p>
           </div>
 
-          <div className="px-3 pt-4">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-3 mb-2">
-              Main Menu
-            </div>
-            <nav className="space-y-1">
-              <button
-                type="button"
-                onClick={() => navigate("/lab/dashboard")}
-                className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-all text-left cursor-pointer"
+          {/* Navigation Links */}
+          <nav className="mt-2 space-y-1.5 px-3">
+            {/* Dashboard */}
+            <button
+              type="button"
+              onClick={() => {
+                navigate("/lab/dashboard");
+              }}
+              className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
+                activeNav === "Dashboard"
+                  ? "bg-[#004bb5] text-white shadow-sm"
+                  : "text-[#334155] hover:bg-slate-200/60"
+              }`}
+            >
+              <svg
+                className="w-5 h-5 flex-shrink-0"
+                fill="currentColor"
+                viewBox="0 0 24 24"
               >
-                <LayoutDashboard className="w-4 h-4 flex-shrink-0" />
-                <span>Dashboard</span>
-              </button>
+                <path d="M3 3h8v8H3V3zm10 0h8v5h-8V3zm0 7h8v11h-8V10zm-10 3h8v8H3v-8z" />
+              </svg>
+              <span>Dashboard</span>
+            </button>
 
-              <button
-                type="button"
-                className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold bg-blue-600 text-white shadow-xs text-left"
+            {/* Samples Verification */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveNav("Samples Verification");
+              }}
+              className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
+                activeNav === "Samples Verification"
+                  ? "bg-[#004bb5] text-white shadow-sm"
+                  : "text-[#334155] hover:bg-slate-200/60"
+              }`}
+            >
+              <svg
+                className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                viewBox="0 0 24 24"
               >
-                <ShieldCheck className="w-4 h-4 flex-shrink-0" />
-                <span>Samples Verification</span>
-              </button>
+                <path
+                  d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>Samples Verification</span>
+            </button>
 
-              <button
-                type="button"
-                onClick={() => navigate("/lab/dashboard")}
-                className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-all text-left cursor-pointer"
+            {/* Testing Samples */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveNav("Testing Samples");
+                navigate("/lab/dashboard");
+              }}
+              className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
+                activeNav === "Testing Samples"
+                  ? "bg-[#004bb5] text-white shadow-sm"
+                  : "text-[#334155] hover:bg-slate-200/60"
+              }`}
+            >
+              <svg
+                className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                viewBox="0 0 24 24"
               >
-                <TestTubes className="w-4 h-4 flex-shrink-0" />
-                <span>Testing Samples</span>
-              </button>
+                <path
+                  d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>Testing Samples</span>
+            </button>
 
-              <button
-                type="button"
-                onClick={() => navigate("/lab/dashboard")}
-                className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-all text-left cursor-pointer"
+            {/* Report Generation */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveNav("Report Generation");
+                navigate("/lab/dashboard");
+              }}
+              className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
+                activeNav === "Report Generation"
+                  ? "bg-[#004bb5] text-white shadow-sm"
+                  : "text-[#334155] hover:bg-slate-200/60"
+              }`}
+            >
+              <svg
+                className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                viewBox="0 0 24 24"
               >
-                <FileCheck2 className="w-4 h-4 flex-shrink-0" />
-                <span>Report Generation</span>
-              </button>
+                <path
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>Report Generation</span>
+            </button>
 
-              <button
-                type="button"
-                onClick={() => navigate("/lab/dashboard")}
-                className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-all text-left cursor-pointer"
+            {/* Patient Registration */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveNav("Patient Registration");
+                navigate("/lab/dashboard");
+              }}
+              className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
+                activeNav === "Patient Registration"
+                  ? "bg-[#004bb5] text-white shadow-sm"
+                  : "text-[#334155] hover:bg-slate-200/60"
+              }`}
+            >
+              <svg
+                className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                viewBox="0 0 24 24"
               >
-                <SendHorizontal className="w-4 h-4 flex-shrink-0" />
-                <span>Report Transfer</span>
-              </button>
-            </nav>
-          </div>
+                <path
+                  d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>Patient Registration</span>
+            </button>
+
+            {/* Inventory */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveNav("Inventory");
+                navigate("/lab/dashboard");
+              }}
+              className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
+                activeNav === "Inventory"
+                  ? "bg-[#004bb5] text-white shadow-sm"
+                  : "text-[#334155] hover:bg-slate-200/60"
+              }`}
+            >
+              <svg
+                className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>Inventory</span>
+            </button>
+          </nav>
         </div>
 
-        <div className="p-3 border-t border-slate-200 bg-slate-50/50 space-y-1">
+        {/* Bottom Part: Settings & Support & Technician Profile */}
+        <div className="p-3 border-t border-[#e2e8f0] space-y-1">
           <a
-            className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-white hover:text-slate-900 rounded-lg transition-colors"
+            className="flex items-center gap-3.5 px-4 py-2 text-sm font-medium text-[#334155] hover:bg-slate-200/60 rounded-lg transition-colors"
             href="#settings"
             onClick={(e) => e.preventDefault()}
           >
-            <Settings className="w-4 h-4 text-slate-400" />
+            <svg
+              className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              viewBox="0 0 24 24"
+            >
+              <path
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
             <span>Settings</span>
           </a>
-
           <a
-            className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-white hover:text-slate-900 rounded-lg transition-colors"
+            className="flex items-center gap-3.5 px-4 py-2 text-sm font-medium text-[#334155] hover:bg-slate-200/60 rounded-lg transition-colors"
             href="#support"
             onClick={(e) => e.preventDefault()}
           >
-            <HelpCircle className="w-4 h-4 text-slate-400" />
-            <span>Help &amp; Support</span>
+            <svg
+              className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              viewBox="0 0 24 24"
+            >
+              <path
+                d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span>Support</span>
           </a>
 
-          <div className="pt-3 mt-1 border-t border-slate-200 px-1 flex items-center justify-between">
+          {/* Technician User Card & Logout */}
+          <div className="pt-4 mt-2 border-t border-slate-200/80 px-2 flex items-center justify-between">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-blue-600 text-white font-bold text-xs flex items-center justify-center shadow-xs shrink-0 ring-1 ring-blue-700/20">
+              <div className="w-8 h-8 rounded-full bg-[#0b57d0] text-white font-bold text-xs flex items-center justify-center shadow-xs shrink-0">
                 {displayName.charAt(0).toUpperCase()}
               </div>
               <div className="flex flex-col text-left truncate">
-                <span className="text-xs font-bold text-slate-900 leading-tight truncate">
+                <span className="text-xs font-semibold text-slate-800 leading-tight truncate">
                   {displayName}
                 </span>
-                <span className="text-[10px] font-semibold text-blue-600 leading-tight truncate">
+                <span className="text-[10px] text-slate-500 leading-tight truncate">
                   {displayRole}
                 </span>
               </div>
@@ -296,238 +429,571 @@ export default function SampleVerification() {
               type="button"
               onClick={handleLogout}
               title="Sign Out"
-              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors cursor-pointer shrink-0"
+              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
             >
-              <LogOut className="w-4 h-4" />
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                />
+              </svg>
             </button>
           </div>
         </div>
       </aside>
+      {/* END: LeftSidebar */}
 
-      {/* Main Content */}
-      <div className="flex-1 ml-[260px] min-h-screen flex flex-col min-w-0 bg-[#F8FAFC]">
-        {/* Top Header */}
-        <header className="h-16 border-b border-slate-200 bg-white/95 backdrop-blur-md px-8 flex items-center justify-between sticky top-0 z-20 shadow-2xs">
+      {/* Main Content Area */}
+      <div className="flex-1 ml-[260px] min-h-screen flex flex-col min-w-0 bg-[#f8fafd]">
+        {/* TopNavbar */}
+        <header
+          className="h-20 bg-white border-b border-slate-100 px-10 flex items-center justify-between sticky top-0 z-10"
+          data-purpose="dashboard-header"
+        >
+          {/* Title & Back link */}
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => navigate("/lab/dashboard")}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-all shadow-2xs cursor-pointer"
+              className="p-1.5 -ml-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+              title="Back to Dashboard"
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to Dashboard</span>
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M10 19l-7-7m0 0l7-7m-7 7h18"
+                />
+              </svg>
             </button>
-            <div className="h-4 w-[1px] bg-slate-200" />
-            <h1 className="text-base font-bold text-slate-900 tracking-tight">
-              Sample Verification Queue
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+              Samples Verification
             </h1>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-700 rounded-md text-xs font-medium border border-slate-200">
-              <Building2 className="w-3.5 h-3.5 text-slate-400" />
-              <span>{branchName}</span>
-            </div>
-
-            <div className="relative p-1.5 rounded-md hover:bg-slate-100 transition-colors cursor-pointer text-slate-600">
-              <Bell className="w-4 h-4" />
-              <span className="absolute top-0.5 right-0.5 bg-rose-600 text-white font-bold text-[9px] w-3.5 h-3.5 rounded-full flex items-center justify-center">
+          <div className="flex items-center gap-6">
+            {/* Notification Bell with Counter */}
+            <div className="relative cursor-pointer hover:opacity-80 transition-opacity">
+              <svg
+                className="w-6 h-6 text-slate-600 stroke-[1.8]"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span className="absolute -top-1.5 -right-1.5 bg-[#e05252] text-white font-bold text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
                 2
               </span>
+            </div>
+
+            {/* Role Label & Profile Avatar & Logout */}
+            <div className="flex items-center gap-3 pl-1">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-[#0b57d0] text-white font-bold text-xs flex items-center justify-center shadow-xs">
+                  {displayName.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex flex-col text-left">
+                  <span className="text-xs font-semibold text-slate-800 leading-tight">
+                    {displayName}
+                  </span>
+                  <span className="text-[10px] text-slate-500 leading-tight">
+                    {displayRole}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-red-600 hover:bg-red-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+              >
+                <svg
+                  className="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                  />
+                </svg>
+                Logout
+              </button>
             </div>
           </div>
         </header>
 
-        {/* Content Body */}
-        <main className="flex-1 p-6 lg:p-8 space-y-6 max-w-7xl w-full mx-auto">
+        {/* DashboardBody */}
+        <main className="flex-1 p-8 lg:p-10 space-y-8 max-w-[1600px] w-full mx-auto">
+          {/* StatCardsRow */}
+          <section
+            className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
+            data-purpose="kpi-metric-cards"
+          >
+            {/* Card 1: Verified Specimens */}
+            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+              <div className="w-14 h-14 rounded-full bg-[#def7ec] flex items-center justify-center shrink-0">
+                <svg
+                  className="w-6 h-6 text-[#059669] stroke-[2.5]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M5 13l4 4L19 7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              <div>
+                <span className="text-[13px] font-semibold text-[#059669]">
+                  Verified Specimens
+                </span>
+                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                  {verifiedCount}
+                </h3>
+                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                  Integrity approved &amp; ready
+                </p>
+              </div>
+            </div>
+
+            {/* Card 2: Pending Verification */}
+            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+              <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
+                <svg
+                  className="w-6 h-6 text-[#2563eb] stroke-[2.2]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              <div>
+                <span className="text-[13px] font-semibold text-[#2563eb]">
+                  Pending Verification
+                </span>
+                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                  {pendingCount}
+                </h3>
+                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                  Awaiting tube inspection
+                </p>
+              </div>
+            </div>
+
+            {/* Card 3: Total Logged */}
+            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+              <div className="w-14 h-14 rounded-full bg-[#fef3c7] flex items-center justify-center shrink-0">
+                <svg
+                  className="w-6 h-6 text-[#d97706] stroke-[2.2]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              <div>
+                <span className="text-[13px] font-semibold text-[#d97706]">
+                  Total Samples
+                </span>
+                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                  {samples.length}
+                </h3>
+                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                  Total collection queue
+                </p>
+              </div>
+            </div>
+
+            {/* Card 4: Rejected Specimens */}
+            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+              <div className="w-14 h-14 rounded-full bg-[#fee2e2] flex items-center justify-center shrink-0">
+                <svg
+                  className="w-6 h-6 text-[#dc2626] stroke-[2.2]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              <div>
+                <span className="text-[13px] font-semibold text-[#dc2626]">
+                  Rejected Samples
+                </span>
+                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                  {rejectedCount}
+                </h3>
+                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                  Recollection ordered
+                </p>
+              </div>
+            </div>
+          </section>
+
           {/* Quick Barcode Scanner Card */}
-          <section className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <Barcode className="w-4 h-4 text-blue-600" />
+              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                <svg
+                  className="w-5 h-5 text-[#0b57d0]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"
+                  />
+                </svg>
                 <span>Quick Barcode Verification Scanner</span>
               </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-slate-400 mt-0.5">
                 Scan or enter the sample tube barcode to immediately verify specimen integrity.
               </p>
             </div>
-            <form onSubmit={handleBarcodeScan} className="flex items-center gap-2 w-full sm:w-auto">
+            <form
+              onSubmit={handleBarcodeScan}
+              className="flex items-center gap-2.5 w-full sm:w-auto"
+            >
               <input
                 type="text"
                 value={barcodeInput}
                 onChange={(e) => setBarcodeInput(e.target.value)}
                 placeholder="Scan / Type Barcode (e.g. BC2405200001)..."
-                className="px-3 py-1.5 text-xs font-mono font-medium border border-slate-300 rounded-lg w-full sm:w-64 focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none shadow-2xs"
+                className="w-full sm:w-80 px-4 py-2 border border-slate-200 rounded-lg text-[13px] text-slate-700 font-mono placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all"
               />
               <button
                 type="submit"
-                className="px-4 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-xs transition-colors cursor-pointer shrink-0"
+                className="px-6 py-2 bg-[#00875A] hover:bg-[#00744E] text-white text-sm font-semibold rounded-lg shadow-sm transition-colors cursor-pointer shrink-0"
               >
                 Verify
               </button>
             </form>
           </section>
 
-          {/* Samples Table Card */}
-          <section className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-            {/* Header Controls */}
-            <div className="px-6 py-4 border-b border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+          {/* TableContainerCard */}
+          <section
+            className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
+            data-purpose="specimens-details-container"
+          >
+            {/* Header & Action Controls Bar */}
+            <div className="px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-4">
               <div>
-                <h2 className="text-base font-bold text-slate-900">
+                <h2 className="text-[20px] font-bold text-slate-800">
                   Specimens Awaiting Verification
                 </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Confirm tube volume, label alignment, and pre-analytical integrity before routing to analyzers.
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Confirm tube volume, label alignment, and pre-analytical integrity before routing to analyzers
                 </p>
               </div>
-
-              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-                <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-50 text-xs font-semibold">
-                  <button
-                    type="button"
-                    onClick={() => setStatusFilter("ALL")}
-                    className={`px-3 py-1 rounded-md transition-all ${
-                      statusFilter === "ALL"
-                        ? "bg-white text-slate-900 shadow-2xs font-bold"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    All ({samples.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStatusFilter("PENDING")}
-                    className={`px-3 py-1 rounded-md transition-all ${
-                      statusFilter === "PENDING"
-                        ? "bg-white text-amber-800 shadow-2xs font-bold"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    Pending ({samples.filter((s) => s.status === "PENDING").length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStatusFilter("VERIFIED")}
-                    className={`px-3 py-1 rounded-md transition-all ${
-                      statusFilter === "VERIFIED"
-                        ? "bg-white text-emerald-800 shadow-2xs font-bold"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    Verified ({samples.filter((s) => s.status === "VERIFIED").length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStatusFilter("REJECTED")}
-                    className={`px-3 py-1 rounded-md transition-all ${
-                      statusFilter === "REJECTED"
-                        ? "bg-white text-rose-800 shadow-2xs font-bold"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    Rejected ({samples.filter((s) => s.status === "REJECTED").length})
-                  </button>
-                </div>
-
-                <div className="relative flex-1 sm:w-56">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                {/* Search Bar */}
+                <div className="relative w-full sm:w-[320px]">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                    <svg
+                      className="w-4 h-4 text-slate-400 stroke-[2]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
                   <input
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search sample / barcode..."
+                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-[13px] text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                    placeholder="Search Patient, Barcode, Sample ID..."
                     type="text"
-                    className="w-full pl-9 pr-8 py-1.5 border border-slate-300 rounded-lg text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all shadow-2xs"
                   />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery("")}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                    >
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter Button & Dropdown */}
+                <div className="relative shrink-0">
+                  <button
+                    onClick={() => setIsFilterDropdownOpen((prev) => !prev)}
+                    className={`flex items-center gap-2 px-4 py-2 border rounded-lg text-[13px] font-medium transition-colors ${
+                      statusFilter !== "ALL"
+                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                    }`}
+                    type="button"
+                  >
+                    <svg
+                      className="w-4 h-4 text-slate-500 stroke-[2]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                    <span>
+                      {statusFilter === "ALL" ? "Filter" : statusFilter}
+                    </span>
+                  </button>
+
+                  {isFilterDropdownOpen && (
+                    <div className="absolute right-0 mt-2 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1.5 text-[13px]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStatusFilter("ALL");
+                          setIsFilterDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
+                          statusFilter === "ALL"
+                            ? "font-semibold text-blue-600 bg-blue-50/50"
+                            : "text-slate-700"
+                        }`}
+                      >
+                        <span>All ({samples.length})</span>
+                        {statusFilter === "ALL" && <span>✓</span>}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStatusFilter("PENDING");
+                          setIsFilterDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
+                          statusFilter === "PENDING"
+                            ? "font-semibold text-[#854d0e] bg-yellow-50/50"
+                            : "text-slate-700"
+                        }`}
+                      >
+                        <span>Pending ({pendingCount})</span>
+                        {statusFilter === "PENDING" && <span>✓</span>}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStatusFilter("VERIFIED");
+                          setIsFilterDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
+                          statusFilter === "VERIFIED"
+                            ? "font-semibold text-[#15803d] bg-green-50/50"
+                            : "text-slate-700"
+                        }`}
+                      >
+                        <span>Verified ({verifiedCount})</span>
+                        {statusFilter === "VERIFIED" && <span>✓</span>}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStatusFilter("REJECTED");
+                          setIsFilterDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
+                          statusFilter === "REJECTED"
+                            ? "font-semibold text-[#b91c1c] bg-red-50/50"
+                            : "text-slate-700"
+                        }`}
+                      >
+                        <span>Rejected ({rejectedCount})</span>
+                        {statusFilter === "REJECTED" && <span>✓</span>}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* Table */}
+            {/* Data Table */}
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+              <table
+                className="w-full text-left border-collapse"
+                id="samples-details-table"
+              >
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold tracking-wider text-slate-700 uppercase">
-                    <th className="py-3 px-6" scope="col">SAMPLE ID</th>
-                    <th className="py-3 px-6" scope="col">BARCODE</th>
-                    <th className="py-3 px-6" scope="col">PATIENT</th>
-                    <th className="py-3 px-6" scope="col">TEST &amp; TUBE TYPE</th>
-                    <th className="py-3 px-6" scope="col">COLLECTED TIME</th>
-                    <th className="py-3 px-6 text-center" scope="col">STATUS</th>
-                    <th className="py-3 px-6 text-right" scope="col">ACTIONS</th>
+                  <tr className="border-t border-b border-slate-200 text-[11px] font-bold tracking-wider text-slate-600 uppercase bg-transparent">
+                    <th className="py-4 px-8 font-bold" scope="col">
+                      SAMPLE ID
+                    </th>
+                    <th className="py-4 px-6 font-bold" scope="col">
+                      BARCODE
+                    </th>
+                    <th className="py-4 px-6 font-bold" scope="col">
+                      PATIENT NAME
+                    </th>
+                    <th className="py-4 px-6 font-bold" scope="col">
+                      TEST &amp; SAMPLE TUBE
+                    </th>
+                    <th
+                      className="py-4 px-6 font-bold text-center"
+                      scope="col"
+                    >
+                      COLLECTED TIME
+                    </th>
+                    <th
+                      className="py-4 px-8 font-bold text-center"
+                      scope="col"
+                    >
+                      STATUS
+                    </th>
+                    <th
+                      className="py-4 px-6 font-bold text-center"
+                      scope="col"
+                    >
+                      ACTION
+                    </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-xs font-medium">
+                <tbody className="divide-y divide-slate-100 text-[13px] font-medium text-slate-600">
                   {filteredSamples.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-10 text-center text-slate-400">
-                        No samples found matching criteria.
+                      <td
+                        colSpan={7}
+                        className="py-10 text-center text-slate-400 text-sm"
+                      >
+                        No specimen records found matching your criteria.
                       </td>
                     </tr>
                   ) : (
                     filteredSamples.map((s) => (
-                      <tr key={s.id} className="hover:bg-slate-50/70 transition-colors">
-                        <td className="py-3.5 px-6 font-mono font-bold text-slate-900">
+                      <tr
+                        key={s.id}
+                        className="hover:bg-blue-50/40 transition-colors group"
+                      >
+                        <td className="py-4 px-8 font-semibold text-slate-900 font-mono">
                           {s.sampleId}
                         </td>
-                        <td className="py-3.5 px-6 font-mono text-blue-600 font-semibold">
+                        <td className="py-4 px-6 font-semibold text-blue-600 font-mono">
                           {s.barcode}
                         </td>
-                        <td className="py-3.5 px-6">
-                          <span className="font-bold text-slate-900 block">{s.patientName}</span>
-                          <span className="text-[11px] text-slate-500 font-mono">{s.patientId}</span>
+                        <td className="py-4 px-6">
+                          <span className="font-semibold text-slate-900 block">
+                            {s.patientName}
+                          </span>
+                          <span className="text-[11px] text-slate-400 font-mono">
+                            {s.patientId}
+                          </span>
                         </td>
-                        <td className="py-3.5 px-6">
-                          <span className="font-semibold text-slate-800 block">{s.testName}</span>
-                          <span className="text-[11px] text-slate-500">{s.sampleType}</span>
+                        <td className="py-4 px-6">
+                          <span className="font-medium text-slate-800 block">
+                            {s.testName}
+                          </span>
+                          <span className="text-[11px] text-slate-500">
+                            {s.sampleType}
+                          </span>
                         </td>
-                        <td className="py-3.5 px-6 text-slate-600 font-mono">
+                        <td className="py-4 px-6 text-center text-slate-600 font-mono text-xs">
                           {s.collectionTime}
                         </td>
-                        <td className="py-3.5 px-6 text-center">
+                        <td className="py-4 px-8 text-center">
                           {s.status === "VERIFIED" ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-300">
-                              <CheckCircle2 className="w-3 h-3" />
+                            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#def7ec] text-[#03543f]">
                               VERIFIED
                             </span>
                           ) : s.status === "REJECTED" ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-300" title={s.rejectionReason}>
-                              <AlertCircle className="w-3 h-3" />
+                            <span
+                              className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#fee2e2] text-[#991b1b]"
+                              title={s.rejectionReason}
+                            >
                               REJECTED
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
-                              <Clock className="w-3 h-3" />
+                            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#fef3c7] text-[#92400e]">
                               PENDING
                             </span>
                           )}
                         </td>
-                        <td className="py-3.5 px-6 text-right space-x-2">
+                        <td className="py-4 px-6 text-center">
                           {s.status === "PENDING" && (
-                            <>
+                            <div className="flex items-center justify-center gap-2">
                               <button
                                 type="button"
                                 onClick={() => handleVerifySample(s.id)}
-                                className="px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-300 rounded hover:bg-emerald-600 hover:text-white transition-all shadow-2xs cursor-pointer"
+                                className="px-3 py-1.5 bg-[#00875A] hover:bg-[#00744E] text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
                               >
                                 Accept
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleRejectSample(s.id)}
-                                className="px-2.5 py-1 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-300 rounded hover:bg-rose-600 hover:text-white transition-all shadow-2xs cursor-pointer"
+                                className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-red-50 hover:text-red-700 hover:border-red-300 text-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
                               >
                                 Reject
                               </button>
-                            </>
-                          )}
-                          {s.status === "REJECTED" && (
-                            <span className="text-[11px] text-rose-600 font-semibold italic">
-                              Recollection Ordered
-                            </span>
+                            </div>
                           )}
                           {s.status === "VERIFIED" && (
-                            <span className="text-[11px] text-emerald-600 font-semibold">
+                            <span className="text-xs font-semibold text-[#059669]">
                               Ready for Analyzer
+                            </span>
+                          )}
+                          {s.status === "REJECTED" && (
+                            <span className="text-xs font-semibold text-[#dc2626] italic">
+                              Recollection Ordered
                             </span>
                           )}
                         </td>
@@ -543,4 +1009,3 @@ export default function SampleVerification() {
     </div>
   );
 }
-
