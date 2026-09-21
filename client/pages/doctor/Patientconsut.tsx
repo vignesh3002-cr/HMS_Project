@@ -1,4 +1,4 @@
-import React, {
+﻿import React, {
   useEffect,
   useRef,
   useState,
@@ -5604,13 +5604,37 @@ const Diagnosis: React.FC<{
             </>
           )}
 
+          {/* ICD Code */}
+          <div>
+            <label
+              htmlFor="icdCode"
+              className="mb-2 block text-sm font-semibold text-gray-600"
+            >
+              ICD Code
+            </label>
+
+            <input
+              id="icdCode"
+              name="icdCode"
+              type="text"
+              value={formData.icdCode}
+              onChange={handleChange}
+              placeholder={
+                diagnosisLoading
+                  ? "Loading diagnosis"
+                  : "Enter ICD code"
+              }
+              className="block w-full rounded-md border-gray-300 px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:ring-[#1d4ed8]"
+            />
+          </div>
+
           {/* Survivor */}
           <div>
             <label className="mb-2 block text-sm font-semibold text-gray-600">
               Survivor
             </label>
 
-            <div className="flex h-[38px] items-center gap-4 rounded-md border border-gray-300 bg-white px-3">
+            <div className="flex items-center gap-4">
               <label className="flex items-center gap-1.5 text-sm text-gray-700">
                 <input
                   type="checkbox"
@@ -5642,30 +5666,6 @@ const Diagnosis: React.FC<{
                 No
               </label>
             </div>
-          </div>
-
-          {/* ICD Code */}
-          <div>
-            <label
-              htmlFor="icdCode"
-              className="mb-2 block text-sm font-semibold text-gray-600"
-            >
-              ICD Code
-            </label>
-
-            <input
-              id="icdCode"
-              name="icdCode"
-              type="text"
-              value={formData.icdCode}
-              onChange={handleChange}
-              placeholder={
-                diagnosisLoading
-                  ? "Loading diagnosis"
-                  : "Enter ICD code"
-              }
-              className="block w-full rounded-md border-gray-300 px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:ring-[#1d4ed8]"
-            />
           </div>
         </div>
 
@@ -6799,6 +6799,8 @@ const ChemotherapyOrder: React.FC<{
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState("");
   const [discussion, setDiscussion] = useState("");
+  const [postChemoInstructions, setPostChemoInstructions] = useState("");
+  const [additionalNotes, setAdditionalNotes] = useState("");
 
   const [drugs, setDrugs] = useState<Drug[]>([]);
   const [premedicationDrugs, setPremedicationDrugs] = useState<Drug[]>(
@@ -7183,6 +7185,8 @@ const ChemotherapyOrder: React.FC<{
         premedicationDrugs?: Drug[];
         supportiveDrugs?: Drug[];
         discussion?: string;
+        postChemoInstructions?: string;
+        additionalNotes?: string;
       };
 
       if (data.cycleDay) {
@@ -7192,6 +7196,14 @@ const ChemotherapyOrder: React.FC<{
 
       if (data.discussion) {
         setDiscussion(data.discussion);
+      }
+
+      if (data.postChemoInstructions) {
+        setPostChemoInstructions(data.postChemoInstructions);
+      }
+
+      if (data.additionalNotes) {
+        setAdditionalNotes(data.additionalNotes);
       }
 
       if (data.startDate) {
@@ -7239,6 +7251,8 @@ const ChemotherapyOrder: React.FC<{
           ? supportiveDrugs
           : [],
         discussion,
+        postChemoInstructions,
+        additionalNotes,
       })
     );
   }, [
@@ -7248,6 +7262,8 @@ const ChemotherapyOrder: React.FC<{
     premedicationDrugs,
     supportiveDrugs,
     discussion,
+    postChemoInstructions,
+    additionalNotes,
     orderDraftKey,
     resolvedPatientId,
   ]);
@@ -9020,6 +9036,30 @@ const ChemotherapyOrder: React.FC<{
             value={discussion}
             onChange={(event) => setDiscussion(event.target.value)}
             placeholder="Type the discussion..."
+            className="h-28 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm leading-5 text-gray-700 outline-none focus:border-blue-500"
+          />
+        </div>
+
+        <div className="mt-6 flex flex-col gap-4 rounded-lg border border-gray-200 p-6">
+          <div className="text-base font-semibold text-gray-900">
+            Post Chemo Instructions
+          </div>
+          <textarea
+            value={postChemoInstructions}
+            onChange={(event) => setPostChemoInstructions(event.target.value)}
+            placeholder="Type the post chemo instructions..."
+            className="h-28 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm leading-5 text-gray-700 outline-none focus:border-blue-500"
+          />
+        </div>
+
+        <div className="mt-6 flex flex-col gap-4 rounded-lg border border-gray-200 p-6">
+          <div className="text-base font-semibold text-gray-900">
+            Additional Notes
+          </div>
+          <textarea
+            value={additionalNotes}
+            onChange={(event) => setAdditionalNotes(event.target.value)}
+            placeholder="Type any additional notes..."
             className="h-28 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm leading-5 text-gray-700 outline-none focus:border-blue-500"
           />
         </div>
