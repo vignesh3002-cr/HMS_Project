@@ -512,36 +512,7 @@ export default function TestingSamples() {
             className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
             data-purpose="kpi-metric-cards"
           >
-            {/* Card 1: Samples in Analyzer */}
-            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
-              <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
-                <svg
-                  className="w-6 h-6 text-[#2563eb] stroke-[2.2]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              <div>
-                <span className="text-[13px] font-semibold text-[#2563eb]">
-                  Running in Analyzer
-                </span>
-                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {runningCount}
-                </h3>
-                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Active test run batches
-                </p>
-              </div>
-            </div>
-
-            {/* Card 2: Tests Completed */}
+            {/* Card 1: Test Completed */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
               <div className="w-14 h-14 rounded-full bg-[#def7ec] flex items-center justify-center shrink-0">
                 <svg
@@ -559,22 +530,22 @@ export default function TestingSamples() {
               </div>
               <div>
                 <span className="text-[13px] font-semibold text-[#059669]">
-                  Results Completed
+                  Test Completed
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {completedCount}
+                  128
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Ready for report generation
+                  Tests completed successfully
                 </p>
               </div>
             </div>
 
-            {/* Card 3: Calibrating / Pending */}
+            {/* Card 2: Test Result Pending */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
-              <div className="w-14 h-14 rounded-full bg-[#fef3c7] flex items-center justify-center shrink-0">
+              <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
                 <svg
-                  className="w-6 h-6 text-[#d97706] stroke-[2.2]"
+                  className="w-6 h-6 text-[#2563eb] stroke-[2.2]"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -587,23 +558,23 @@ export default function TestingSamples() {
                 </svg>
               </div>
               <div>
-                <span className="text-[13px] font-semibold text-[#d97706]">
-                  Calibrating
+                <span className="text-[13px] font-semibold text-[#2563eb]">
+                  Test Result Pending
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {calibratingCount}
+                  56
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Bench instrument setup
+                  Results pending verification
                 </p>
               </div>
             </div>
 
-            {/* Card 4: Flagged / Critical */}
+            {/* Card 3: Test Overdue */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
-              <div className="w-14 h-14 rounded-full bg-[#fee2e2] flex items-center justify-center shrink-0">
+              <div className="w-14 h-14 rounded-full bg-[#fef3c7] flex items-center justify-center shrink-0">
                 <svg
-                  className="w-6 h-6 text-[#dc2626] stroke-[2.2]"
+                  className="w-6 h-6 text-[#d97706] stroke-[2.2]"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -616,14 +587,43 @@ export default function TestingSamples() {
                 </svg>
               </div>
               <div>
-                <span className="text-[13px] font-semibold text-[#dc2626]">
-                  Flagged / Critical
+                <span className="text-[13px] font-semibold text-[#d97706]">
+                  Test Overdue
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {flaggedCount}
+                  18
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Out-of-range clinical values
+                  Tests past the expected time
+                </p>
+              </div>
+            </div>
+
+            {/* Card 4: Repeat Test Required */}
+            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+              <div className="w-14 h-14 rounded-full bg-[#fee2e2] flex items-center justify-center shrink-0">
+                <svg
+                  className="w-6 h-6 text-[#dc2626] stroke-[2.2]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              <div>
+                <span className="text-[13px] font-semibold text-[#dc2626]">
+                  Repeat Test Required
+                </span>
+                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                  11
+                </h3>
+                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                  Tests need to be repeated
                 </p>
               </div>
             </div>

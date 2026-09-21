@@ -449,7 +449,7 @@ export default function ReportGeneration() {
             className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
             data-purpose="kpi-metric-cards"
           >
-            {/* Card 1: Reports Generated */}
+            {/* Card 1: Test Completed */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
               <div className="w-14 h-14 rounded-full bg-[#def7ec] flex items-center justify-center shrink-0">
                 <svg
@@ -459,7 +459,7 @@ export default function ReportGeneration() {
                   viewBox="0 0 24 24"
                 >
                   <path
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                    d="M5 13l4 4L19 7"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
@@ -467,18 +467,18 @@ export default function ReportGeneration() {
               </div>
               <div>
                 <span className="text-[13px] font-semibold text-[#059669]">
-                  Reports Ready
+                  Test Completed
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {generatedCount}
+                  128
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Certified &amp; signed off
+                  Tests completed successfully
                 </p>
               </div>
             </div>
 
-            {/* Card 2: Under Pathologist Review */}
+            {/* Card 2: Test Result Pending */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
               <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
                 <svg
@@ -488,12 +488,7 @@ export default function ReportGeneration() {
                   viewBox="0 0 24 24"
                 >
                   <path
-                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
@@ -501,51 +496,22 @@ export default function ReportGeneration() {
               </div>
               <div>
                 <span className="text-[13px] font-semibold text-[#2563eb]">
-                  Under Review
+                  Test Result Pending
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {reviewCount}
+                  56
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Awaiting pathologist sign
+                  Results pending verification
                 </p>
               </div>
             </div>
 
-            {/* Card 3: Draft Reports */}
+            {/* Card 3: Test Overdue */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
               <div className="w-14 h-14 rounded-full bg-[#fef3c7] flex items-center justify-center shrink-0">
                 <svg
                   className="w-6 h-6 text-[#d97706] stroke-[2.2]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              <div>
-                <span className="text-[13px] font-semibold text-[#d97706]">
-                  Draft Reports
-                </span>
-                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {draftCount}
-                </h3>
-                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Pending test completion
-                </p>
-              </div>
-            </div>
-
-            {/* Card 4: Critical Findings */}
-            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
-              <div className="w-14 h-14 rounded-full bg-[#fee2e2] flex items-center justify-center shrink-0">
-                <svg
-                  className="w-6 h-6 text-[#dc2626] stroke-[2.2]"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -558,14 +524,43 @@ export default function ReportGeneration() {
                 </svg>
               </div>
               <div>
-                <span className="text-[13px] font-semibold text-[#dc2626]">
-                  Critical Reports
+                <span className="text-[13px] font-semibold text-[#d97706]">
+                  Test Overdue
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {criticalCount}
+                  18
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Urgent doctor alert needed
+                  Tests past the expected time
+                </p>
+              </div>
+            </div>
+
+            {/* Card 4: Repeat Test Required */}
+            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+              <div className="w-14 h-14 rounded-full bg-[#fee2e2] flex items-center justify-center shrink-0">
+                <svg
+                  className="w-6 h-6 text-[#dc2626] stroke-[2.2]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              <div>
+                <span className="text-[13px] font-semibold text-[#dc2626]">
+                  Repeat Test Required
+                </span>
+                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                  11
+                </h3>
+                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                  Tests need to be repeated
                 </p>
               </div>
             </div>

@@ -470,7 +470,7 @@ export default function SampleVerification() {
             className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
             data-purpose="kpi-metric-cards"
           >
-            {/* Card 1: Verified Specimens */}
+            {/* Card 1: Test Completed */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
               <div className="w-14 h-14 rounded-full bg-[#def7ec] flex items-center justify-center shrink-0">
                 <svg
@@ -488,18 +488,18 @@ export default function SampleVerification() {
               </div>
               <div>
                 <span className="text-[13px] font-semibold text-[#059669]">
-                  Verified Specimens
+                  Test Completed
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {verifiedCount}
+                  128
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Integrity approved &amp; ready
+                  Tests completed successfully
                 </p>
               </div>
             </div>
 
-            {/* Card 2: Pending Verification */}
+            {/* Card 2: Test Result Pending */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
               <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
                 <svg
@@ -517,51 +517,22 @@ export default function SampleVerification() {
               </div>
               <div>
                 <span className="text-[13px] font-semibold text-[#2563eb]">
-                  Pending Verification
+                  Test Result Pending
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {pendingCount}
+                  56
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Awaiting tube inspection
+                  Results pending verification
                 </p>
               </div>
             </div>
 
-            {/* Card 3: Total Logged */}
+            {/* Card 3: Test Overdue */}
             <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
               <div className="w-14 h-14 rounded-full bg-[#fef3c7] flex items-center justify-center shrink-0">
                 <svg
                   className="w-6 h-6 text-[#d97706] stroke-[2.2]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              <div>
-                <span className="text-[13px] font-semibold text-[#d97706]">
-                  Total Samples
-                </span>
-                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {samples.length}
-                </h3>
-                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Total collection queue
-                </p>
-              </div>
-            </div>
-
-            {/* Card 4: Rejected Specimens */}
-            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
-              <div className="w-14 h-14 rounded-full bg-[#fee2e2] flex items-center justify-center shrink-0">
-                <svg
-                  className="w-6 h-6 text-[#dc2626] stroke-[2.2]"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -574,14 +545,43 @@ export default function SampleVerification() {
                 </svg>
               </div>
               <div>
-                <span className="text-[13px] font-semibold text-[#dc2626]">
-                  Rejected Samples
+                <span className="text-[13px] font-semibold text-[#d97706]">
+                  Test Overdue
                 </span>
                 <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  {rejectedCount}
+                  18
                 </h3>
                 <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Recollection ordered
+                  Tests past the expected time
+                </p>
+              </div>
+            </div>
+
+            {/* Card 4: Repeat Test Required */}
+            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+              <div className="w-14 h-14 rounded-full bg-[#fee2e2] flex items-center justify-center shrink-0">
+                <svg
+                  className="w-6 h-6 text-[#dc2626] stroke-[2.2]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              <div>
+                <span className="text-[13px] font-semibold text-[#dc2626]">
+                  Repeat Test Required
+                </span>
+                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                  11
+                </h3>
+                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                  Tests need to be repeated
                 </p>
               </div>
             </div>
