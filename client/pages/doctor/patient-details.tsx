@@ -87,6 +87,7 @@ type SummaryPlan = {
   staging_detail_id?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  doctor_name?: string | null;
   employees?: {
     first_name?: string | null;
     last_name?: string | null;
@@ -101,6 +102,7 @@ type SummaryPlan = {
     cycle_status?: string | null;
     completion_status?: string | null;
     remarks?: string | null;
+    chemotherapy_administration?: any[] | null;
   }[] | null;
   chemotherapy_plan_items: SummaryPlanItem[] | null;
   oncology_staging_detail: StagingDetailRecord | null;
@@ -3221,7 +3223,7 @@ const HistoryDashboard: React.FC<{
     if (planned > 0 && cycle > planned) cycle = planned;
     const d = new Date(start);
     d.setDate(d.getDate() + (cycle - 1) * interval);
-    return { cycle, date: fmtHistoryDate(d.toISOString()) };
+    return { cycle, day: 1, date: fmtHistoryDate(d.toISOString()) };
   })();
 
   /* Cycle-history table rows: agent/dose come from the plan's
@@ -6020,6 +6022,10 @@ const PatientNotesDocuments: React.FC<{
       createdBy: note.createdBy,
     });
     setIsEditNoteModalOpen(true);
+  };
+
+  const handlePrintNote = (_note: ClinicalNoteRecord) => {
+    window.print();
   };
 
   const handleSaveEditedNote = async (e: React.FormEvent) => {

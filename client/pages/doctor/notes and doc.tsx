@@ -259,6 +259,19 @@ function mapEncounterToClinicalNote(
   };
 }
 
+const tabs = [
+  "Summary",
+  "Pathology",
+  "Molecular",
+  "Staging",
+  "Treatment Plan",
+  "Treatment Timeline",
+  "Medications",
+  "Discharge",
+  "History",
+  "Notes & Documents",
+];
+
 const PatientNotesDocuments: React.FC<{
   embedded?: boolean;
   patientId?: string;
@@ -551,6 +564,10 @@ const PatientNotesDocuments: React.FC<{
       createdBy: note.createdBy,
     });
     setIsEditNoteModalOpen(true);
+  };
+
+  const handlePrintNote = (_note: ClinicalNoteRecord) => {
+    window.print();
   };
 
   const handleSaveEditedNote = async (e: React.FormEvent) => {

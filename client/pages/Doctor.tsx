@@ -819,7 +819,7 @@ useEffect(() => {
                     const firstBranch = r.branches?.[0];
                     const branchId = firstBranch?.branch_id || "";
                     const dateStr = format(selectedDate, "yyyy-MM-dd");
-                    const emp = realDoctors?.find((e: any) => e.employee_id === r.id);
+                    const emp = realDoctors?.find((e: any) => e.employee_id === r.id) as any;
                     const departmentId = emp?.department_id || emp?.department_master?.department_id || "";
                     return (
                       <AvailableSlotsPopover

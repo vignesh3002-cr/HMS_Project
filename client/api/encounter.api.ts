@@ -19,6 +19,8 @@ export interface EncounterRecord {
   chief_complaint: string | null;
   symptoms: string | null;
   diagnosis_id: string | null;
+  encounter_ts?: string | null;
+  diagnosis_text?: string | null;
   clinical_notes: string | null;
   advice: string | null;
   follow_up_date: string | null;

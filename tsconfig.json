@@ -34,11 +34,9 @@
     "src/**/*",
     "server/**/*",
     "shared/**/*",
-    "drizzle/**/*",
     "scripts/**/*.ts",
-    "drizzle.config.ts",
     "vite.config.ts"
   ],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist", "drizzle", "drizzle.config.ts"]
 }
 
