@@ -37,7 +37,6 @@ interface AppointmentFormData {
   patientNumber: string;
   patientType: string;
   patientVisitType: string;
-  referredBy: string;
   branchId: string;
   departmentId: string;
   doctorId: string;
@@ -47,13 +46,62 @@ interface AppointmentFormData {
   customVisitType: string;
 }
 
+// Core static master data for Patient Types
+const STATIC_PATIENT_TYPES = [
+  "Outpatient (OPD)",
+  "Inpatient (IPD)",
+  "Emergency",
+  "Day Care",
+] as const;
+
+export type PatientType = (typeof STATIC_PATIENT_TYPES)[number];
+
+/**
+ * Helper function: Returns available patient types based on runtime conditions
+ * (e.g. filtering by department, role, or context).
+ */
+function getAvailablePatientTypes(context?: {
+  departmentId?: string;
+  departmentName?: string;
+  role?: string;
+  excludeDayCare?: boolean;
+}): string[] {
+  let types: string[] = [...STATIC_PATIENT_TYPES];
+  const dept = (context?.departmentName || "").toLowerCase();
+
+  // Runtime filtering rule based on department context:
+  if (dept.includes("lab") || dept.includes("diagnostic")) {
+    // Diagnostic / Laboratory departments only take Outpatient visits
+    types = types.filter((t) => t === "Outpatient (OPD)");
+  } else if (dept.includes("emergency")) {
+    // Emergency departments do not offer elective Day Care stays
+    types = types.filter((t) => t !== "Day Care");
+  } else if (context?.excludeDayCare) {
+    types = types.filter((t) => t !== "Day Care");
+  }
+
+  return types;
+}
+
+/**
+ * Helper function: Converts Day Care → Inpatient (IPD) based on stay duration.
+ */
+function convertDayCareToIpd(
+  patientType: string,
+  stayDurationHours?: number,
+  thresholdHours: number = 24,
+): string {
+  if (patientType === "Day Care" && stayDurationHours != null && stayDurationHours >= thresholdHours) {
+    return "Inpatient (IPD)";
+  }
+  return patientType;
+}
+
 const VISIT_TYPES_BY_PATIENT_TYPE: Record<string, string[]> = {
   "Outpatient (OPD)": ["New consultation", "Follow-up", "Lab Visit", "Chemotherapy visit", "Emergency Visit", "Others"],
   "Inpatient (IPD)": ["New consultation", "Follow-up", "Lab Visit", "Chemotherapy visit", "Emergency Visit", "Others"],
   "Emergency": ["Emergency Visit", "Lab Visit", "Others"],
-  "Referral": ["Referral Visit", "New consultation", "Follow-up", "Lab Visit", "Others"],
-  "Corporate": ["New consultation", "Follow-up", "Lab Visit", "Chemotherapy visit", "Emergency Visit", "Others"],
-  "Insurance": ["New consultation", "Follow-up", "Lab Visit", "Chemotherapy visit", "Emergency Visit", "Others"],
+  "Day Care": ["New consultation", "Follow-up", "Lab Visit", "Chemotherapy visit", "Others"],
 };
 
 const emptyFormData: AppointmentFormData = {
@@ -62,7 +110,6 @@ const emptyFormData: AppointmentFormData = {
   patientNumber: "",
   patientType: "Outpatient (OPD)",
   patientVisitType: "New consultation",
-  referredBy: "",
   branchId: "",
   departmentId: "",
   doctorId: "",
@@ -336,7 +383,6 @@ export default function AddAppointment() {
           patientComment: record.reason_for_visit || "",
           patientType: record.patient_type || "Outpatient (OPD)",
           patientVisitType: record.patient_visit_type || "New visit",
-          referredBy: record.referred_by || "",
         }));
       })
       .catch((err) => {
@@ -505,20 +551,6 @@ export default function AddAppointment() {
       .finally(() => setLoadingDepartments(false));
   }, []);
 
-  // Ensure Laboratory department is automatically selected whenever visit type is Lab Visit
-  useEffect(() => {
-    if (formData.patientVisitType === "Lab Visit" && departments.length > 0) {
-      const labDept = departments.find((d) => /lab/i.test(d.department_name));
-      if (labDept && formData.departmentId !== labDept.department_id) {
-        setFormData((prev) => ({
-          ...prev,
-          departmentId: labDept.department_id,
-          doctorId: "",
-        }));
-      }
-    }
-  }, [formData.patientVisitType, departments, formData.departmentId]);
-
   useEffect(() => {
     employeeApi
       .getAll({ limit: 1000 })
@@ -583,53 +615,8 @@ export default function AddAppointment() {
     );
   }, [branchDoctors, doctors, formData.branchId, formData.doctorId]);
 
-function generateLabSlots(dateStr: string): AvailableSlot[] {
-  const slots: AvailableSlot[] = [];
-  const todayInIST = getTodayInIST();
-  const nowMinutesInIST = getNowMinutesInIST();
-  const isTodayIST = dateStr === todayInIST;
-
-  for (let hour = 8; hour <= 18; hour++) {
-    for (const minute of [0, 30]) {
-      if (hour === 18 && minute > 0) break;
-      const totalMin = hour * 60 + minute;
-      if (isTodayIST && totalMin <= nowMinutesInIST) continue;
-      const timeStr = `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
-      slots.push({
-        schedule_id: "LAB_SLOT",
-        shift_name: "Lab Hours",
-        time: timeStr,
-        is_available: true,
-      });
-    }
-  }
-  return slots;
-}
-
   // Fetch available slots when branch + doctor + date changes
   useEffect(() => {
-    const isLabVisit = formData.patientVisitType === "Lab Visit";
-
-    if (isLabVisit) {
-      if (!formData.branchId || !formData.selectDate) {
-        setAvailableSlots([]);
-        setDoctorUnavailable(false);
-        setDoctorOnLeave(false);
-        setLeaveReason(null);
-        return;
-      }
-
-      setLoadingSlots(true);
-      const labSlots = generateLabSlots(formData.selectDate);
-      setAvailableSlots(labSlots);
-      setDoctorUnavailable(labSlots.length === 0);
-      setDoctorOnLeave(false);
-      setSlotsCancelled(false);
-      setLeaveReason(null);
-      setLoadingSlots(false);
-      return;
-    }
-
     if (!formData.doctorId || !formData.branchId || !formData.selectDate) {
       setAvailableSlots([]);
       setDoctorUnavailable(false);
@@ -676,7 +663,6 @@ function generateLabSlots(dateStr: string): AvailableSlot[] {
         setAvailableSlots(futureSlots);
         // Empty slots array = the backend found no active schedule for this
         // doctor/branch/date (a fully-booked day still returns slot entries).
-        setDoctorUnavailable(slots.length === 0);
         openSlots = futureSlots;
 
         const isCancelled = res.data.data?.is_cancelled ?? false;
@@ -684,13 +670,9 @@ function generateLabSlots(dateStr: string): AvailableSlot[] {
         setSlotsCancelled(isCancelled);
         setDoctorOnLeave(isOnLeave);
         setLeaveReason(res.data.data?.leave_reason ?? null);
-        setAvailableSlots(slots.filter((s) => s.is_available));
-        // Empty slots array = the backend found no active schedule for this
-        // doctor/branch/date (a fully-booked day still returns slot entries).
         setDoctorUnavailable(
           slots.length === 0 && !isCancelled && !isOnLeave
         );
-        openSlots = slots.filter((s) => s.is_available);
 
       } catch (error) {
         fetchError = error;
@@ -872,18 +854,13 @@ function generateLabSlots(dateStr: string): AvailableSlot[] {
       { key: "patientName", label: "Patient Name" },
       { key: "branchId", label: "Branch" },
       { key: "departmentId", label: "Department" },
-      ...(formData.patientVisitType === "Lab Visit" ? [] : [{ key: "doctorId" as const, label: "Doctor Name" }]),
+      { key: "doctorId", label: "Doctor Name" },
       { key: "patientType", label: "Patient Type" },
       { key: "patientVisitType", label: "Patient Visit Type" },
       ...(formData.patientVisitType === "Others" ? [{ key: "customVisitType" as const, label: "Specify Visit Purpose" }] : []),
       { key: "selectDate", label: "Appointment Date" },
-      ...(formData.patientVisitType === "Lab Visit" ? [] : [{ key: "timeSlot" as const, label: "Available Time Slots" }]),
+      { key: "timeSlot", label: "Available Time Slots" },
     ];
-
-    // Conditionally require referredBy for Referral patient type with Referral Visit
-    if (formData.patientType === "Referral" && formData.patientVisitType === "Referral Visit") {
-      required.push({ key: "referredBy", label: "Referred By" });
-    }
 
     if (!validateRequiredFields(required, formData, toast)) return;
 
@@ -897,12 +874,6 @@ function generateLabSlots(dateStr: string): AvailableSlot[] {
     }
 
     if (isEditMode) {
-      setShowConfirm(true);
-      return;
-    }
-
-    // Direct Lab visits do not involve a doctor or doctor schedule conflicts
-    if (formData.patientVisitType === "Lab Visit") {
       setShowConfirm(true);
       return;
     }
@@ -1015,20 +986,15 @@ function generateLabSlots(dateStr: string): AvailableSlot[] {
       }
 
       if (isEditMode && appointmentId) {
-        const effectiveTime = formData.patientVisitType === "Lab Visit"
-          ? (formData.timeSlot || "09:00")
-          : formData.timeSlot;
-
         await appointmentApi.update(appointmentId, {
           employee_id: formData.doctorId,
           branch_id: formData.branchId,
           department_id: effectiveDepartmentId || undefined,
           appointment_date: formData.selectDate,
-          appointment_time: effectiveTime,
+          appointment_time: formData.timeSlot,
           reason_for_visit: formData.patientComment || undefined,
           patient_type: formData.patientType || undefined,
           patient_visit_type: formData.patientVisitType || undefined,
-          referred_by: (formData.patientType === "Referral" && formData.patientVisitType === "Referral Visit") ? formData.referredBy || undefined : undefined,
         });
 
         await appointmentApi.updateStatus(appointmentId, "RESCHEDULED");
@@ -1039,10 +1005,6 @@ function generateLabSlots(dateStr: string): AvailableSlot[] {
         });
       } else {
         // Create mode
-        const effectiveDoctorId = formData.patientVisitType === "Lab Visit"
-          ? undefined
-          : formData.doctorId;
-
         const effectiveVisitType = formData.patientVisitType === "Others" && formData.customVisitType?.trim()
           ? `Others: ${formData.customVisitType.trim()}`
           : formData.patientVisitType;
@@ -1051,23 +1013,18 @@ function generateLabSlots(dateStr: string): AvailableSlot[] {
           ? (formData.patientComment ? `${formData.customVisitType.trim()} - ${formData.patientComment}` : formData.customVisitType.trim())
           : (formData.patientComment || undefined);
 
-        const effectiveTime = formData.patientVisitType === "Lab Visit"
-          ? (formData.timeSlot || "09:00")
-          : formData.timeSlot;
-
         const res = await appointmentApi.create({
           patient_id: formData.patientId,
           patient_name: formData.patientName,
           patient_number: formData.patientNumber,
           branch_id: formData.branchId,
           department_id: effectiveDepartmentId,
-          employee_id: effectiveDoctorId,
+          employee_id: formData.doctorId,
           appointment_date: formData.selectDate,
-          appointment_time: effectiveTime,
+          appointment_time: formData.timeSlot,
           reason_for_visit: effectiveReason,
           patient_type: formData.patientType || undefined,
           patient_visit_type: effectiveVisitType || undefined,
-          referred_by: (formData.patientType === "Referral" && formData.patientVisitType === "Referral Visit") ? formData.referredBy || undefined : undefined,
         });
 
         setBookingResult(res.data.data);
@@ -1108,7 +1065,6 @@ const isDirty = Boolean(
       formData.timeSlot ||
       formData.patientType ||
       formData.patientVisitType ||
-      formData.referredBy ||
       formData.patientComment
   );
   
@@ -1165,7 +1121,6 @@ const isDirty = Boolean(
   // the doctor is assigned to the branch but has no schedule for it -- every
   // date is then disabled, exactly like any other non-working day.
   const workingWeekdays = useMemo(() => {
-    if (formData.patientVisitType === "Lab Visit") return null;
     if (!formData.doctorId || !formData.branchId) return null;
     const days = new Set(
       doctorSchedules
@@ -1178,7 +1133,7 @@ const isDirty = Boolean(
         .map((s) => s.day_of_week as string),
     );
     return days;
-  }, [doctorSchedules, formData.doctorId, formData.branchId, formData.patientVisitType]);
+  }, [doctorSchedules, formData.doctorId, formData.branchId]);
 
   // Exact-date meanings from the doctor's Day/Week view schedule changes,
   // scoped to the selected branch: ISO yyyy-mm-dd -> what was pinned there.
@@ -1197,7 +1152,6 @@ const isDirty = Boolean(
   }, [doctorChanges, formData.branchId]);
 
   const isDateDisabled = (date: Date) => {
-    if (formData.patientVisitType === "Lab Visit") return false;
     if (!formData.doctorId || !formData.branchId) return false;
 
     // Date-specific changes take priority over the weekly template: a
@@ -1447,8 +1401,6 @@ const isDirty = Boolean(
 
                   value={formData.branchId}
                   onValueChange={(val) => {
-                    const isLab = formData.patientVisitType === "Lab Visit";
-                    const labDept = departments.find((d) => /lab/i.test(d.department_name));
                     if (!val) {
                       // Doctor portal booking keeps the logged-in doctor's
                       // identity locked -- never let a branch clear wipe it.
@@ -1456,7 +1408,7 @@ const isDirty = Boolean(
                       setFormData((prev) => ({
                         ...prev,
                         branchId: "",
-                        departmentId: isLab && labDept ? labDept.department_id : "",
+                        departmentId: "",
                         doctorId: "",
                         timeSlot: "",
                       }));
@@ -1470,11 +1422,10 @@ const isDirty = Boolean(
                     // a branch change reset department/doctor, since their
                     // options depend on the branch.
                     const doctorLocked = Boolean(formData.doctorId);
-                    const defaultDept = isLab && labDept ? labDept.department_id : (doctorLocked ? formData.departmentId : "");
                     setFormData((prev) => ({
                       ...prev,
                       branchId: val,
-                      departmentId: defaultDept,
+                      departmentId: doctorLocked ? prev.departmentId : "",
                       doctorId: doctorLocked ? prev.doctorId : "",
                       timeSlot: "",
                     }));
@@ -1503,12 +1454,22 @@ const isDirty = Boolean(
                   ]}
                   value={formData.departmentId}
                   onValueChange={(val) => {
-                    setFormData((prev) => ({
-                      ...prev,
-                      departmentId: val,
-                      doctorId: isDoctorBooking ? prev.doctorId : "",
-                      timeSlot: "",
-                    }));
+                    const deptObj = departments.find((d) => d.department_id === val);
+                    const newDeptName = deptObj?.department_name || "";
+                    const allowedTypes = getAvailablePatientTypes({ departmentId: val, departmentName: newDeptName });
+                    setFormData((prev) => {
+                      const validPatientType = allowedTypes.includes(prev.patientType) ? prev.patientType : (allowedTypes[0] || "Outpatient (OPD)");
+                      const allowedVisitTypes = VISIT_TYPES_BY_PATIENT_TYPE[validPatientType] || [];
+                      const validVisitType = allowedVisitTypes.includes(prev.patientVisitType) ? prev.patientVisitType : (allowedVisitTypes[0] || "");
+                      return {
+                        ...prev,
+                        departmentId: val,
+                        doctorId: isDoctorBooking ? prev.doctorId : "",
+                        timeSlot: "",
+                        patientType: validPatientType,
+                        patientVisitType: validVisitType,
+                      };
+                    });
                     if (val !== OTHER_DEPARTMENT_VALUE) setCustomDepartment("");
                   }}
                   placeholder={
@@ -1533,74 +1494,61 @@ const isDirty = Boolean(
                   />
                 )}
               </div>
-              {/* Doctor Name - Hidden for Lab Visits */}
-              {formData.patientVisitType !== "Lab Visit" && (
-                <div>
-                  <label className={labelClass}>
-                    Doctor Name {requiredStar}
-                    {isDoctorBooking && (
-                      <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-blue-600">
-                        (you)
-                      </span>
-                    )}
-                  </label>
-                  <FormDropdown
-                    className={inputClass}
-                    disabled={isDoctorBooking}
-                    options={[
-                      { label: "None", value: "" },
-                      ...doctorsForDropdown.map((doc) => {
-                        const fullName = `Dr. ${doc.first_name}${doc.middle_name ? ` ${doc.middle_name}` : ""} ${doc.last_name}`;
-                        const specialty = doc.specialization || doc.department_master?.department_name;
-                        const statusLabel =
-                          doc.doctor_status === "LEAVE" ? " (On Leave)" : "";
-                        return {
-                          label: `${fullName}${statusLabel}${specialty ? ` (${specialty})` : ""}`,
-                          value: doc.employee_id,
-                        };
-                      }),
-                    ]}
-                    value={formData.doctorId}
-                    onValueChange={applyDoctorSelection}
-                    placeholder={
-                      formData.branchId && doctorsForDropdown.length === 0
-                        ? "No doctors available for this date (including on leave)"
-                        : "No doctors match this branch/department"
-                    }
-                  />
-                </div>
-              )}
+              {/* Doctor Name */}
+              <div>
+                <label className={labelClass}>
+                  Doctor Name {requiredStar}
+                  {isDoctorBooking && (
+                    <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-blue-600">
+                      (you)
+                    </span>
+                  )}
+                </label>
+                <FormDropdown
+                  className={inputClass}
+                  disabled={isDoctorBooking}
+                  options={[
+                    { label: "None", value: "" },
+                    ...doctorsForDropdown.map((doc) => {
+                      const fullName = `Dr. ${doc.first_name}${doc.middle_name ? ` ${doc.middle_name}` : ""} ${doc.last_name}`;
+                      const specialty = doc.specialization || doc.department_master?.department_name;
+                      const statusLabel =
+                        doc.doctor_status === "LEAVE" ? " (On Leave)" : "";
+                      return {
+                        label: `${fullName}${statusLabel}${specialty ? ` (${specialty})` : ""}`,
+                        value: doc.employee_id,
+                      };
+                    }),
+                  ]}
+                  value={formData.doctorId}
+                  onValueChange={applyDoctorSelection}
+                  placeholder={
+                    formData.branchId && doctorsForDropdown.length === 0
+                      ? "No doctors available for this date (including on leave)"
+                      : "No doctors match this branch/department"
+                  }
+                />
+              </div>
 
               {/* Patient Type */}
               <div>
                 <label className={labelClass}>Patient Type {requiredStar}</label>
                 <FormDropdown
                   className={inputClass}
-                  options={[
-                    "Outpatient (OPD)",
-                    "Inpatient (IPD)",
-                    "Emergency",
-                    "Corporate",
-                    "Insurance",
-                    "Referral",
-                  ]}
+                  options={getAvailablePatientTypes({
+                    departmentId: formData.departmentId,
+                    departmentName: departments.find((d) => d.department_id === formData.departmentId)?.department_name || customDepartment || "",
+                  })}
                   value={formData.patientType}
                   onValueChange={(val) => {
                     const allowedVisitTypes = VISIT_TYPES_BY_PATIENT_TYPE[val] || [];
                     const currentVisitType = formData.patientVisitType;
                     // Only clear visit type if current one is not valid for new patient type
                     const newVisitType = allowedVisitTypes.includes(currentVisitType) ? currentVisitType : (allowedVisitTypes[0] || "");
-                    const isLab = newVisitType === "Lab Visit";
-                    let labDeptId = formData.departmentId;
-                    if (isLab) {
-                      const labDept = departments.find((d) => /lab/i.test(d.department_name));
-                      if (labDept) labDeptId = labDept.department_id;
-                    }
                     setFormData((prev) => ({
                       ...prev,
                       patientType: val,
                       patientVisitType: newVisitType,
-                      ...(isLab ? { departmentId: labDeptId, doctorId: "" } : {}),
                     }));
                   }}
                   placeholder="Select patient type"
@@ -1615,16 +1563,9 @@ const isDirty = Boolean(
                   options={VISIT_TYPES_BY_PATIENT_TYPE[formData.patientType] || []}
                   value={formData.patientVisitType}
                   onValueChange={(val) => {
-                    const isLab = val === "Lab Visit";
-                    let labDeptId = formData.departmentId;
-                    if (isLab) {
-                      const labDept = departments.find((d) => /lab/i.test(d.department_name));
-                      if (labDept) labDeptId = labDept.department_id;
-                    }
                     setFormData((prev) => ({
                       ...prev,
                       patientVisitType: val,
-                      ...(isLab ? { departmentId: labDeptId, doctorId: "" } : {}),
                     }));
                   }}
                   placeholder="Select visit type"
@@ -1642,21 +1583,6 @@ const isDirty = Boolean(
                     className={inputClass}
                     placeholder="Enter custom visit purpose"
                     value={formData.customVisitType || ""}
-                    onChange={handleInputChange}
-                  />
-                </div>
-              )}
-
-              {/* Referred By (only for Referral patient type with Referral Visit) */}
-              {(formData.patientType === "Referral" && formData.patientVisitType === "Referral Visit") && (
-                <div>
-                  <label className={labelClass}>Referred By {requiredStar}</label>
-                  <input
-                    type="text"
-                    name="referredBy"
-                    className={inputClass}
-                    placeholder="Referred by (Doctor/Hospital name)"
-                    value={formData.referredBy}
                     onChange={handleInputChange}
                   />
                 </div>
@@ -1720,8 +1646,7 @@ const isDirty = Boolean(
               </div>
 
               {/* Available Time Slots */}
-              {formData.patientVisitType !== "Lab Visit" && (
-                <div className="lg:col-span-3 flex flex-col gap-3">
+              <div className="lg:col-span-3 flex flex-col gap-3">
                   <div className="flex items-center justify-between">
                     <label className={labelClass}>Available Time Slots {requiredStar}</label>
                     <div className="flex items-center gap-1 text-gray-400">
@@ -1787,7 +1712,6 @@ const isDirty = Boolean(
                     </div>
                   )}
                 </div>
-              )}
 
               {/* SMS Confirmation - Static */}
               <div className="lg:col-span-3">
@@ -1932,9 +1856,7 @@ const isDirty = Boolean(
               <div className="flex items-center justify-between gap-6 py-1">
                 <span className="shrink-0 text-gray-500">Doctor</span>
                 <span className="text-right font-semibold text-gray-900">
-                  {formData.patientVisitType === "Lab Visit"
-                    ? "Direct Lab Visit"
-                    : (selectedDoctorName || "-")}
+                  {selectedDoctorName || "-"}
                 </span>
               </div>
             </div>

@@ -49,6 +49,13 @@ interface ProtocolRow {
 
 
 function toRow(p: RegimenProtocol): ProtocolRow {
+  const multiCancers = (p.chemotherapy_protocol_cancers ?? [])
+    .map((c) => c.cancer_types?.cancer_type)
+    .filter(Boolean);
+  const cancerTypeDisplay = multiCancers.length > 0
+    ? Array.from(new Set(multiCancers)).join(", ")
+    : (p.cancer_types?.cancer_type ?? "—");
+
   return {
     protocol_id: p.protocol_id,
     name: p.regimen_name,
@@ -56,7 +63,7 @@ function toRow(p: RegimenProtocol): ProtocolRow {
     status: p.active_status === 1 ? "Active" : "Archive",
     updated_by: "—",
     updated_at: p.updated_at ?? p.created_at ?? new Date().toISOString(),
-    cancer_type: p.cancer_types?.cancer_type ?? "—",
+    cancer_type: cancerTypeDisplay,
     version: p.protocol_version ?? "v1",
     intent: p.treatment_intent ?? "—",
   };
