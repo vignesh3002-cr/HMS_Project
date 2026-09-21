@@ -2516,23 +2516,6 @@ const Consultation: React.FC = () => {
 
                         </div>
 
-                        <div className="flex flex-col gap-1">
-
-                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                            Reason of Visit
-                          </div>
-
-                          <textarea
-                            value={reasonOfVisit}
-                            onChange={(event) =>
-                              setReasonOfVisit(event.target.value)
-                            }
-                            placeholder="Type the reason of visit..."
-                            className="min-h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-1.5 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-                          />
-
-                        </div>
-
                         </div>
 
                     </div>
@@ -8454,8 +8437,18 @@ const ChemotherapyOrder: React.FC<{
                             />
                           </td>
 
-                          <td className="whitespace-nowrap px-3 py-3 text-base text-blue-500">
-                            {editDraft.unit}
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.unit}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "unit",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
@@ -8639,8 +8632,18 @@ const ChemotherapyOrder: React.FC<{
                             />
                           </td>
 
-                          <td className="whitespace-nowrap px-3 py-3 text-base text-blue-500">
-                            {editDraft.unit}
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.unit}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "unit",
+                                  event.target.value
+                                )
+                              }
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
@@ -8820,8 +8823,15 @@ const ChemotherapyOrder: React.FC<{
                             />
                           </td>
 
-                          <td className="whitespace-nowrap px-3 py-3 text-base text-blue-500">
-                            {editDraft.unit}
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={editDraft.unit}
+                              onChange={(event) =>
+                                updateEditDraft("unit", event.target.value)
+                              }
+                              className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
