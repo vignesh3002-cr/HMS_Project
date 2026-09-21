@@ -417,6 +417,47 @@ const bsaDoseScaleFactor = (
   return Math.round(bsa * 1000) / 1000;
 };
 
+/* Creatinine clearance by Cockcroft-Gault:
+   CrCl (mL/min) = ((140 − age) × weight_kg) / (72 × serum_creatinine),
+   multiplied by 0.85 for females. */
+const computeCockcroftGault = (
+  weightKg: number | null,
+  ageYears: number | null,
+  serumCreatinine: number | null,
+  isFemale: boolean
+): number | null => {
+  if (
+    weightKg === null ||
+    ageYears === null ||
+    serumCreatinine === null ||
+    weightKg <= 0 ||
+    ageYears <= 0 ||
+    serumCreatinine <= 0
+  ) {
+    return null;
+  }
+  const base = ((140 - ageYears) * weightKg) / (72 * serumCreatinine);
+  const value = isFemale ? base * 0.85 : base;
+  return Math.round(value * 10) / 10;
+};
+
+/* Carboplatin dose by the Calvert formula:
+   Dose (mg) = target AUC × (CrCl + 25). */
+const computeCalvertCarboplatin = (
+  auc: number | null,
+  crcl: number | null
+): number | null => {
+  if (auc === null || crcl === null || auc <= 0 || crcl <= 0) return null;
+  return Math.round(auc * (crcl + 25) * 10) / 10;
+};
+
+/* Dose calculator options shown next to the Chemotherapy Orders tab. */
+const DOSE_CALCULATOR_OPTIONS = [
+  "Body Mass Index (BMI)",
+  "Creatinine Clearance (CrCl) — Cockcroft-Gault",
+  "Carboplatin Dose — Calvert Formula",
+];
+
 const findActiveEncounter = async (
   patientId: string,
   appointmentId?: string,
@@ -6753,6 +6794,12 @@ type Drug = {
   volume: string;
   planItemId?: string;
   medicineId?: string;
+  /* Unscaled protocol dose (item.dosage / protocol_dose). Rows derived
+     from the protocol carry this so the displayed dose can be re-scaled
+     live when the dose calculator selection changes (BMI vs BSA). Rows
+     the doctor typed or edited themselves have no raw dosage and are
+     never re-scaled. */
+  rawDose?: number | null;
 };
 
 type ChemotherapyPlanItem = {
@@ -6861,13 +6908,64 @@ const ChemotherapyOrder: React.FC<{
   );
   const resolvedPatientId = patientId || statePatientId;
 
-  /* BSA dose scale factor computed from the patient's height/weight via
-     the BSA formula; used to auto-adjust chemo doses (increase/decrease)
-     across all three tabs when the factor differs from 1. */
-  const doseScaleFactor = useMemo(
-    () => bsaDoseScaleFactor(measurements),
-    [measurements]
+  /* Dose calculator dropdown (next to the Chemotherapy Orders tab):
+     selected option and the inputs used to compute the chosen value. */
+  const [doseCalculator, setDoseCalculator] = useState("");
+  const [calcAgeYears, setCalcAgeYears] = useState("");
+  const [calcSerumCreatinine, setCalcSerumCreatinine] = useState("");
+  const [calcTargetAuc, setCalcTargetAuc] = useState("");
+
+  /* Derived values for the dose-calculator dropdown. BMI uses the
+     recorded height/weight; CrCl (Cockcroft-Gault) and the Carboplatin
+     (Calvert) dose compute live from the entered age, serum creatinine
+     and target AUC. */
+  const calcHeight = parseMeasureString(measurements?.height ?? "");
+  const calcWeight = parseMeasureString(measurements?.weight ?? "");
+  const calcIsFemale = (gender ?? "").trim().toLowerCase() === "female";
+
+  const calcBmiValue = computeBmi(calcHeight, calcWeight);
+  const calcCrClValue = computeCockcroftGault(
+    calcWeight,
+    calcAgeYears ? Number(calcAgeYears) : null,
+    calcSerumCreatinine ? Number(calcSerumCreatinine) : null,
+    calcIsFemale
   );
+  const calcCarboplatinValue = computeCalvertCarboplatin(
+    calcTargetAuc ? Number(calcTargetAuc) : null,
+    calcCrClValue
+  );
+
+  const calcBmiDisplay =
+    calcBmiValue !== null
+      ? `${String(Math.round(calcBmiValue * 10) / 10)} kg/m²`
+      : "Enter height & weight";
+  const calcCrClDisplay =
+    calcCrClValue !== null
+      ? `${String(calcCrClValue)} mL/min`
+      : "Enter age & serum creatinine";
+  const calcCarboplatinDisplay =
+    calcCarboplatinValue !== null
+      ? `${String(calcCarboplatinValue)} mg`
+      : calcCrClValue !== null
+        ? "Enter target AUC"
+        : "Complete CrCl calculation first";
+
+  /* Dose scale factor used to auto-adjust drug doses (increase/decrease)
+     across all three tabs. When the "Body Mass Index (BMI)" calculator
+     is selected in the dropdown, doses scale by the patient's BMI
+     (weight kg / height m²); otherwise they scale by BSA (Mosteller)
+     derived from height/weight. Falls back to 1 (doses unchanged) when
+     the required measurements are missing. */
+  const doseScaleFactor = useMemo(() => {
+    const bsa = bsaDoseScaleFactor(measurements);
+    const height = parseMeasureString(measurements?.height ?? "");
+    const weight = parseMeasureString(measurements?.weight ?? "");
+    const bmi = computeBmi(height, weight);
+    if (doseCalculator === "Body Mass Index (BMI)") {
+      return bmi !== null ? Math.round(bmi * 1000) / 1000 : bsa;
+    }
+    return bsa;
+  }, [doseCalculator, measurements]);
 
   const [cycleDay, setCycleDay] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -6893,6 +6991,29 @@ const ChemotherapyOrder: React.FC<{
     premedication: false,
     supportive: false,
   });
+
+  /* Re-scale protocol-derived doses live whenever the dose calculator
+     selection changes: "Body Mass Index (BMI)" multiplies doses by the
+     patient's BMI (weight kg / height m²), any other selection (or none)
+     keeps the BSA (Mosteller) factor. Only rows carrying an unscaled
+     rawDose are touched; doses the doctor typed or edited are preserved. */
+  useEffect(() => {
+    const rescale = (group: Drug[]) =>
+      group.map((drug) =>
+        drug.rawDose != null
+          ? {
+              ...drug,
+              dose: String(
+                Math.round(drug.rawDose * doseScaleFactor * 10) / 10
+              ),
+            }
+          : drug
+      );
+
+    setDrugs((current) => rescale(current));
+    setPremedicationDrugs((current) => rescale(current));
+    setSupportiveDrugs((current) => rescale(current));
+  }, [doseScaleFactor]);
 
   const protocolRef = useRef<RegimenProtocolDetail | null>(null);
   const protocolDaysRef = useRef<RegimenProtocolDay[]>([]);
@@ -7185,6 +7306,7 @@ const ChemotherapyOrder: React.FC<{
     unit: item.dosage_unit || item.medicine_master?.unit || "",
     volume: "",
     medicineId: item.medicine_id,
+    rawDose: item.dosage ?? null,
   });
 
   const applyCycleDayDrugs = (
@@ -7733,6 +7855,7 @@ const ChemotherapyOrder: React.FC<{
                 ? `${item.dilution_volume}`
                 : "",
             medicineId: item.medicine_id,
+            rawDose: item.protocol_dose ?? null,
           });
 
           setDrugs(
@@ -8062,7 +8185,10 @@ const ChemotherapyOrder: React.FC<{
         );
       }
 
-      const updatedDrug: Drug = { ...editDraft };
+      const updatedDrug: Drug = {
+        ...editDraft,
+        rawDose: null,
+      };
 
       if (editingRow.kind === "drug") {
         setDrugs((current) =>
@@ -8406,18 +8532,41 @@ const ChemotherapyOrder: React.FC<{
                 const isActive = activeTab === tab;
 
                 return (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => setActiveTab(tab)}
-                    className={`whitespace-nowrap border-b-2 px-1 py-4 text-base font-medium transition-colors ${
-                      isActive
-                        ? "border-blue-600 text-blue-600"
-                        : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
-                    }`}
-                  >
-                    {tab}
-                  </button>
+                  <React.Fragment key={tab}>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab(tab)}
+                      className={`whitespace-nowrap border-b-2 px-1 py-4 text-base font-medium transition-colors ${
+                        isActive
+                          ? "border-blue-600 text-blue-600"
+                          : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                      }`}
+                    >
+                      {tab}
+                    </button>
+
+                    {/* Dose calculator dropdown placed next to the
+                        Chemotherapy Orders tab, outside the order table. */}
+                    {tab === "Chemotherapy Orders" && (
+                      <div className="flex items-end pb-3 pl-1">
+                        <select
+                          id="dose-calculator"
+                          value={doseCalculator}
+                          onChange={(event) =>
+                            setDoseCalculator(event.target.value)
+                          }
+                          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                        >
+                          <option value="">Select a calculator…</option>
+                          {DOSE_CALCULATOR_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </nav>
@@ -8438,6 +8587,107 @@ const ChemotherapyOrder: React.FC<{
             </div>
           </div>
         </div>
+
+        {/* ================= DOSE CALCULATOR RESULT ================= */}
+        {doseCalculator && (
+          <div className="mx-8 mt-6 rounded-lg border border-gray-200 bg-gray-50 p-5">
+            {doseCalculator === "Body Mass Index (BMI)" && (
+              <div className="flex flex-wrap items-center gap-6">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    BMI
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold text-gray-900">
+                    {calcBmiDisplay}
+                  </p>
+                </div>
+                <p className="max-w-md text-sm text-gray-500">
+                  Body Mass Index = weight (kg) / height (m)
+                  <sup>2</sup>. Derived from the most recent recorded
+                  height and weight for this patient.
+                </p>
+              </div>
+            )}
+
+            {doseCalculator ===
+              "Creatinine Clearance (CrCl) — Cockcroft-Gault" && (
+              <div className="flex flex-wrap items-center gap-6">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    CrCl
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold text-gray-900">
+                    {calcCrClDisplay}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
+                    Age (years)
+                    <input
+                      type="number"
+                      value={calcAgeYears}
+                      onChange={(event) =>
+                        setCalcAgeYears(event.target.value)
+                      }
+                      placeholder="e.g. 55"
+                      className="w-28 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
+                    Serum creatinine (mg/dL)
+                    <input
+                      type="number"
+                      value={calcSerumCreatinine}
+                      onChange={(event) =>
+                        setCalcSerumCreatinine(event.target.value)
+                      }
+                      placeholder="0.9"
+                      className="w-36 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                </div>
+                <p className="max-w-md text-sm text-gray-500">
+                  Cockcroft-Gault: CrCl = ((140 − age) × weight kg) / (72
+                  × serum creatinine)
+                  {calcIsFemale ? " × 0.85" : ""} mL/min.
+                </p>
+              </div>
+            )}
+
+            {doseCalculator ===
+              "Carboplatin Dose — Calvert Formula" && (
+              <div className="flex flex-wrap items-center gap-6">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Total Carboplatin Dose
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold text-gray-900">
+                    {calcCarboplatinDisplay}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
+                    Target AUC (mg/mL·min)
+                    <input
+                      type="number"
+                      value={calcTargetAuc}
+                      onChange={(event) =>
+                        setCalcTargetAuc(event.target.value)
+                      }
+                      placeholder="5"
+                      className="w-28 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                </div>
+                <p className="max-w-md text-sm text-gray-500">
+                  Calvert: Dose (mg) = AUC × (CrCl + 25). CrCl is computed
+                  by Cockcroft-Gault from the age, serum creatinine and
+                  weight entered above.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ================= ORDER TABLE ================= */}
         {activeTab === "Chemotherapy Orders" ? (
