@@ -404,6 +404,8 @@ export default function AddAppointment() {
   const [preferredTime, setPreferredTime] = useState<string | null>(preselectedSlot?.time ?? null);
   const [submitting, setSubmitting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [bookingResult, setBookingResult] = useState<AppointmentResponse | null>(null);
   const [showConflictWarning, setShowConflictWarning] = useState(false);
@@ -845,6 +847,68 @@ export default function AddAppointment() {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
+  const startVoiceRecognition = () => {
+  const SpeechRecognition =
+    (window as any).SpeechRecognition ||
+    (window as any).webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    toast({
+      title: "Voice input not supported",
+      description: "Please use Google Chrome or Microsoft Edge.",
+      variant: "destructive",
+    });
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+
+  recognition.continuous = true;
+  recognition.interimResults = false;
+  recognition.lang = "en-IN";
+
+  recognition.onstart = () => {
+    setIsListening(true);
+  };
+
+  recognition.onresult = (event: any) => {
+    let transcript = "";
+
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+
+    if (!transcript.trim()) return;
+
+    setFormData((prev) => ({
+      ...prev,
+      patientComment: prev.patientComment
+        ? `${prev.patientComment} ${transcript.trim()}`
+        : transcript.trim(),
+    }));
+  };
+
+  recognition.onerror = (event: any) => {
+    console.error("Speech recognition error:", event.error);
+    setIsListening(false);
+  };
+
+  recognition.onend = () => {
+    setIsListening(false);
+  };
+
+  recognitionRef.current = recognition;
+  recognition.start();
+};
+
+const stopVoiceRecognition = () => {
+  if (recognitionRef.current) {
+    recognitionRef.current.stop();
+    recognitionRef.current = null;
+  }
+
+  setIsListening(false);
+};
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1730,20 +1794,103 @@ const isDirty = Boolean(
               </div>
 
               {/* Patient Comment / Reason for Visit */}
-              <div className="lg:col-span-3">
-                <label className={labelClass}>Reason for Visit</label>
-                <textarea
-                  name="patientComment"
-                  rows={4}
-                  placeholder="Describe the reason for the visit (optional)"
-                  className={inputClass + " resize-none"}
-                  value={formData.patientComment}
-                  onChange={handleInputChange}
-                />
-              </div>
-            </div>
+<div className="lg:col-span-3">
+  <div className="flex items-center justify-between mb-2">
+    <label className={labelClass}>Reason for Visit</label>
 
-            {/* Actions Footer */}
+    <button
+      type="button"
+      onClick={isListening ? stopVoiceRecognition : startVoiceRecognition}
+      className={`group flex items-center gap-2 px-4 py-2 rounded-xl
+        text-sm font-medium transition-all duration-200
+        ${
+          isListening
+            ? "bg-red-50 text-red-600 border border-red-200 hover:bg-red-100"
+            : "bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100"
+        }`}
+    >
+      {/* Microphone Icon */}
+      <span
+        className={`flex items-center justify-center w-7 h-7 rounded-full
+          transition-all duration-200
+          ${
+            isListening
+              ? "bg-red-100"
+              : "bg-blue-100 group-hover:bg-blue-200"
+          }`}
+      >
+        {isListening ? (
+          /* Stop Icon */
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            className="w-4 h-4"
+          >
+            <rect x="7" y="7" width="10" height="10" rx="1.5" />
+          </svg>
+        ) : (
+          /* Microphone Icon */
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="w-4 h-4"
+          >
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+            <line x1="12" y1="19" x2="12" y2="22" />
+            <line x1="8" y1="22" x2="16" y2="22" />
+          </svg>
+        )}
+      </span>
+
+      <span>
+        {isListening ? "Listening..." : "Speak"}
+      </span>
+
+      {/* Listening animation */}
+      {isListening && (
+        <span className="flex items-center gap-1 ml-1">
+          <span className="w-1 h-1 bg-red-500 rounded-full animate-pulse" />
+          <span
+            className="w-1 h-1 bg-red-500 rounded-full animate-pulse"
+            style={{ animationDelay: "150ms" }}
+          />
+          <span
+            className="w-1 h-1 bg-red-500 rounded-full animate-pulse"
+            style={{ animationDelay: "300ms" }}
+          />
+        </span>
+      )}
+    </button>
+  </div>
+
+  <textarea
+    name="patientComment"
+    rows={4}
+    placeholder={
+      isListening
+        ? "Listening... Please speak your reason for visit."
+        : "Describe the reason for the visit (optional)"
+    }
+    className={inputClass + " resize-none"}
+    value={formData.patientComment}
+    onChange={handleInputChange}
+  />
+
+  {isListening && (
+    <p className="mt-1.5 text-xs text-red-600 flex items-center gap-1.5">
+      <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+      Voice input is active. Speak clearly.
+    </p>
+  )}
+</div>
+                       {/* Actions Footer */}
             <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-4 mt-10 pt-6 border-t border-gray-100">
               <button
                 type="button"
@@ -1753,6 +1900,7 @@ const isDirty = Boolean(
               >
                 Cancel
               </button>
+
               <button
                 type="submit"
                 disabled={submitting}
@@ -1766,6 +1914,10 @@ const isDirty = Boolean(
                 {submitting ? "Creating..." : "Confirm Appointment"}
               </button>
             </div>
+
+            {/* Close the main grid */}
+            </div>
+
           </form>
           )}
         </div>
