@@ -455,6 +455,7 @@ const computeCalvertCarboplatin = (
 const DOSE_CALCULATOR_OPTIONS = [
   "Body Surface Area (BSA)",
   "Body Mass Index (BMI)",
+  "Dosing Body Weight (Ideal & Adjusted)",
   "Creatinine Clearance (CrCl) — Cockcroft-Gault",
   "Carboplatin Dose — Calvert Formula",
 ];
@@ -6915,6 +6916,10 @@ const ChemotherapyOrder: React.FC<{
   const [calcAgeYears, setCalcAgeYears] = useState("");
   const [calcSerumCreatinine, setCalcSerumCreatinine] = useState("");
   const [calcTargetAuc, setCalcTargetAuc] = useState("");
+  /* Sub-selection inside the "Dosing Body Weight" calculator:
+     "Ideal Body Weight (IBW)" or "Adjusted Body Weight". When nothing is
+     picked the BSA factor is used instead. */
+  const [dosingWeightType, setDosingWeightType] = useState("");
 
   /* Derived values for the dose-calculator dropdown. BMI uses the
      recorded height/weight; CrCl (Cockcroft-Gault) and the Carboplatin
@@ -6937,6 +6942,30 @@ const ChemotherapyOrder: React.FC<{
     calcCrClValue
   );
 
+  /* Ideal Body Weight (IBW) by the Devine formula. Height is converted
+     from cm to inches (cm / 2.54) for:
+     Men:   IBW (kg) = 50   + 2.3 × [Height(in) − 60]
+     Women: IBW (kg) = 45.5 + 2.3 × [Height(in) − 60]
+     Used to scale the drug dose when the "Dosing Body Weight (Ideal &
+     Adjusted)" calculator is selected. */
+  const calcHeightIn =
+    calcHeight !== null ? Math.round((calcHeight / 2.54) * 100) / 100 : null;
+  const calcIbwValue =
+    calcHeightIn !== null
+      ? Math.round(
+          ((calcIsFemale ? 45.5 : 50) + 2.3 * (calcHeightIn - 60)) * 10
+        ) / 10
+      : null;
+
+  /* Adjusted Body Weight (AdjBW) for the "Adjusted Body Weight"
+     sub-selection inside the "Dosing Body Weight" calculator:
+     AdjBW (kg) = IBW + 0.4 × (Actual Weight − IBW). */
+  const calcAdjBwValue =
+    calcWeight !== null && calcIbwValue !== null
+      ? Math.round((calcIbwValue + 0.4 * (calcWeight - calcIbwValue)) * 10) /
+        10
+      : null;
+
   const calcBmiDisplay =
     calcBmiValue !== null
       ? `${String(Math.round(calcBmiValue * 10) / 10)} kg/m²`
@@ -6956,6 +6985,15 @@ const ChemotherapyOrder: React.FC<{
         ? "Enter target AUC"
         : "Complete CrCl calculation first";
 
+  const calcIbwDisplay =
+    calcIbwValue !== null
+      ? `${String(calcIbwValue)} kg`
+      : "Enter height";
+  const calcAdjBwDisplay =
+    calcAdjBwValue !== null
+      ? `${String(calcAdjBwValue)} kg`
+      : "Enter height & weight";
+
   /* Dose scale factor used to auto-adjust drug doses (increase/decrease)
      across all three tabs. When the "Body Mass Index (BMI)" calculator
      is selected in the dropdown, doses scale by the patient's BMI
@@ -6964,10 +7002,14 @@ const ChemotherapyOrder: React.FC<{
      from CrCl (mL/min) = ((140 − age) × weight kg) / (72 × serum
      creatinine), × 0.85 for women. When the "Carboplatin Dose —
      Calvert Formula" calculator is selected, doses scale by the total
-     dose (mg) = target AUC × (CrCl + 25). Any other selection (or
-     none) falls back to BSA (Mosteller) derived from height/weight.
-     Falls back to BSA (and 1 when BSA is unavailable) until the
-     selected calculator's inputs are complete. */
+     dose (mg) = target AUC × (CrCl + 25). When the "Dosing Body Weight
+     (Ideal & Adjusted)" calculator is selected, doses scale by the
+     sub-selected dosing weight: "Ideal Body Weight (IBW)" (Devine:
+     50 + 2.3 × [height(in) − 60] for men, 45.5 + 2.3 × [height(in) − 60]
+     for women) or "Adjusted Body Weight" (IBW + 0.4 × (actual weight −
+     IBW)). Any other selection (or none) falls back to BSA (Mosteller)
+     derived from height/weight. Falls back to BSA (and 1 when BSA is
+     unavailable) until the selected calculator's inputs are complete. */
   const doseScaleFactor = useMemo(() => {
     const bsa = bsaDoseScaleFactor(measurements);
     const height = parseMeasureString(measurements?.height ?? "");
@@ -6989,8 +7031,29 @@ const ChemotherapyOrder: React.FC<{
         ? Math.round(calcCarboplatinValue * 1000) / 1000
         : bsa;
     }
+    if (doseCalculator === "Dosing Body Weight (Ideal & Adjusted)") {
+      if (dosingWeightType === "Ideal Body Weight (IBW)") {
+        return calcIbwValue !== null
+          ? Math.round(calcIbwValue * 1000) / 1000
+          : bsa;
+      }
+      if (dosingWeightType === "Adjusted Body Weight") {
+        return calcAdjBwValue !== null
+          ? Math.round(calcAdjBwValue * 1000) / 1000
+          : bsa;
+      }
+      return bsa;
+    }
     return bsa;
-  }, [doseCalculator, measurements, calcCrClValue, calcCarboplatinValue]);
+  }, [
+    doseCalculator,
+    measurements,
+    calcCrClValue,
+    calcCarboplatinValue,
+    calcIbwValue,
+    calcAdjBwValue,
+    dosingWeightType,
+  ]);
 
   const [cycleDay, setCycleDay] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -7019,9 +7082,11 @@ const ChemotherapyOrder: React.FC<{
 
   /* Re-scale protocol-derived doses live whenever the dose calculator
      selection changes: "Body Mass Index (BMI)" multiplies doses by the
-     patient's BMI (weight kg / height m²), any other selection (or none)
-     keeps the BSA (Mosteller) factor. Only rows carrying an unscaled
-     rawDose are touched; doses the doctor typed or edited are preserved. */
+     patient's BMI (weight kg / height m²), "Dosing Body Weight (Ideal &
+     Adjusted)" scales by the sub-selected IBW / AdjBW, any other
+     selection (or none) keeps the BSA (Mosteller) factor. Only rows
+     carrying an unscaled rawDose are touched; doses the doctor typed or
+     edited are preserved. */
   useEffect(() => {
     const rescale = (group: Drug[]) =>
       group.map((drug) =>
@@ -8649,6 +8714,82 @@ const ChemotherapyOrder: React.FC<{
                   <sup>2</sup>. Derived from the most recent recorded
                   height and weight for this patient.
                 </p>
+              </div>
+            )}
+
+            {doseCalculator ===
+              "Dosing Body Weight (Ideal & Adjusted)" && (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-end gap-6">
+                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
+                    Dosing Weight
+                    <select
+                      id="dosing-weight-type"
+                      value={dosingWeightType}
+                      onChange={(event) =>
+                        setDosingWeightType(event.target.value)
+                      }
+                      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    >
+                      <option value="">Select dosing weight…</option>
+                      <option value="Ideal Body Weight (IBW)">
+                        Ideal Body Weight (IBW)
+                      </option>
+                      <option value="Adjusted Body Weight">
+                        Adjusted Body Weight
+                      </option>
+                    </select>
+                  </label>
+                  {dosingWeightType === "Ideal Body Weight (IBW)" && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Ideal Body Weight (IBW)
+                      </p>
+                      <p className="mt-1 text-2xl font-semibold text-gray-900">
+                        {calcIbwDisplay}
+                      </p>
+                    </div>
+                  )}
+                  {dosingWeightType === "Adjusted Body Weight" && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Adjusted Body Weight
+                      </p>
+                      <p className="mt-1 text-2xl font-semibold text-gray-900">
+                        {calcAdjBwDisplay}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <p className="max-w-md text-sm text-gray-500">
+                  Ideal and adjusted body weight formulas used for
+                  chemotherapy dosing. Pick a dosing weight and drug doses
+                  are scaled by it so larger patients receive a higher dose
+                  and smaller patients a lower one (derived from the most
+                  recent recorded height, weight and gender).
+                </p>
+                <div className="rounded-md border border-gray-200 bg-white p-4">
+                  <p className="text-sm font-semibold text-gray-900">
+                    Ideal Body Weight (IBW) — Devine formula:
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
+                    <li>
+                      Men: IBW (kg) = 50 + 2.3 × [Height(in) − 60]
+                    </li>
+                    <li>
+                      Women: IBW (kg) = 45.5 + 2.3 × [Height(in) − 60]
+                    </li>
+                  </ul>
+                </div>
+                <div className="rounded-md border border-gray-200 bg-white p-4">
+                  <p className="text-sm font-semibold text-gray-900">
+                    Adjusted Body Weight (for obese patients, used in some
+                    renal-dose/CrCl calculations):
+                  </p>
+                  <p className="mt-2 pl-5 text-sm text-gray-600">
+                    AdjBW (kg) = IBW + 0.4 × (Actual Weight − IBW)
+                  </p>
+                </div>
               </div>
             )}
 
