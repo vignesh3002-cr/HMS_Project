@@ -327,64 +327,6 @@ export default function SampleVerification() {
               </svg>
               <span>Report Transfer</span>
             </button>
-
-            {/* Patient Registration */}
-            <button
-              type="button"
-              onClick={() => {
-                setActiveNav("Patient Registration");
-                navigate("/lab/dashboard");
-              }}
-              className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
-                activeNav === "Patient Registration"
-                  ? "bg-[#004bb5] text-white shadow-sm"
-                  : "text-[#334155] hover:bg-slate-200/60"
-              }`}
-            >
-              <svg
-                className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span>Patient Registration</span>
-            </button>
-
-            {/* Inventory */}
-            <button
-              type="button"
-              onClick={() => {
-                setActiveNav("Inventory");
-                navigate("/lab/dashboard");
-              }}
-              className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
-                activeNav === "Inventory"
-                  ? "bg-[#004bb5] text-white shadow-sm"
-                  : "text-[#334155] hover:bg-slate-200/60"
-              }`}
-            >
-              <svg
-                className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span>Inventory</span>
-            </button>
           </nav>
         </div>
 
