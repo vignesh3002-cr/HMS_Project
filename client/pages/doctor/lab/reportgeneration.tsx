@@ -1,81 +1,424 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
 import { toast } from "@/hooks/use-toast";
+import LabNav from "./labnav";
 
-interface ReportItem {
+export interface QualityCheckParameter {
+  id: string;
+  parameter: string;
+  result: string;
+  unit: string;
+  referenceRange: string;
+  status: "Normal" | "Abnormal" | "Critical";
+  approved: boolean;
+}
+
+export interface ReportItem {
   id: string;
   reportId: string;
   requestId: string;
+  sampleId: string;
   patientId: string;
+  patientPid?: string;
   patientName: string;
+  patientAgeGender?: string;
+  patientAvatar?: string;
+  patientEmail: string;
   doctorName: string;
+  doctorEmail: string;
   testPanel: string;
   generatedDate: string;
+  completedDate: string;
+  completedBy: string;
+  sampleType: string;
   status: "GENERATED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL";
   findingsSummary: string;
+  parameters: QualityCheckParameter[];
+  overallDecision?: "Approved" | "Rejected" | "Pending";
+  reviewComments?: string;
+  clinicalCorrelation?: string;
+  approvalRemarks?: string;
+  approverName?: string;
+  approverRole?: string;
+  approvalDate?: string;
+  signatureUrl?: string | null;
+  sentOn?: string;
+  deliveredOn?: string;
 }
+
+export const DEFAULT_QC_PARAMETERS: QualityCheckParameter[] = [
+  {
+    id: "qc-1",
+    parameter: "WBC (White Blood Cells)",
+    result: "6.80",
+    unit: "10^3/µL",
+    referenceRange: "4.0 - 10.0",
+    status: "Normal",
+    approved: true,
+  },
+  {
+    id: "qc-2",
+    parameter: "RBC (Red Blood Cells)",
+    result: "4.82",
+    unit: "10^6/µL",
+    referenceRange: "4.2 - 5.8",
+    status: "Normal",
+    approved: true,
+  },
+  {
+    id: "qc-3",
+    parameter: "HGB (Hemoglobin)",
+    result: "14.2",
+    unit: "g/dL",
+    referenceRange: "13.0 - 17.0",
+    status: "Normal",
+    approved: true,
+  },
+  {
+    id: "qc-4",
+    parameter: "HCT (Hematocrit)",
+    result: "43.1",
+    unit: "%",
+    referenceRange: "40 - 50",
+    status: "Normal",
+    approved: true,
+  },
+  {
+    id: "qc-5",
+    parameter: "MCV (Mean Corpuscular Vol)",
+    result: "87.6",
+    unit: "fL",
+    referenceRange: "80 - 100",
+    status: "Normal",
+    approved: true,
+  },
+  {
+    id: "qc-6",
+    parameter: "MCH (Mean Corpuscular Hb)",
+    result: "29.1",
+    unit: "pg",
+    referenceRange: "27 - 34",
+    status: "Normal",
+    approved: true,
+  },
+  {
+    id: "qc-7",
+    parameter: "MCHC (MCH Concentration)",
+    result: "33.0",
+    unit: "g/dL",
+    referenceRange: "32 - 36",
+    status: "Normal",
+    approved: true,
+  },
+  {
+    id: "qc-8",
+    parameter: "PLT (Platelet Count)",
+    result: "235",
+    unit: "10^3/µL",
+    referenceRange: "150 - 450",
+    status: "Normal",
+    approved: true,
+  },
+];
 
 const INITIAL_REPORTS: ReportItem[] = [
   {
     id: "rep-1",
-    reportId: "REP-2026-001",
+    reportId: "RPT-2024-0530-001",
     requestId: "TRF1256",
+    sampleId: "SMP-2024-0530-001",
     patientId: "P000123",
+    patientPid: "PAT-2024-00045",
     patientName: "Rahul Sharma",
-    doctorName: "Dr. Sharma",
-    testPanel: "Complete Blood Count & Liver Function",
+    patientAgeGender: "Male | 34 Years",
+    patientAvatar:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuBk5rMXMyViKhrEWS3OPs4EJKp41wiYn1yNbXA5l8RDhUEQ3edVPM-3o-jLtLS6HSXMEut3cfRaSBn5s33BhP0F6OAOZX42hZbHmmdVj65-ctAIdJRbm3Zz-9zEIo0TphDh1b4CrwJP4rmrJrZbPQyyErPeQlhLum-s5Zk9lFWs5P__X5-cb4t8OtGeYjeqonWaXkVvfzOF63hf9zgtRsnWsqeDqoPZEhiBztkX6UoF4fCIy7FpeUmamA",
+    patientEmail: "Rahul.sharma@email.com",
+    doctorName: "Dr. Johnson",
+    doctorEmail: "johnson@hospital.com",
+    testPanel: "Complete Blood Count (CBC)",
     generatedDate: "20 May 2024 11:30 AM",
+    completedDate: "20 May 2024, 11:35 AM",
+    completedBy: "Lab Technician - John Doe",
+    sampleType: "Whole Blood Sample",
     status: "GENERATED",
     findingsSummary: "All parameters within normal clinical reference ranges.",
+    parameters: DEFAULT_QC_PARAMETERS,
+    overallDecision: "Approved",
+    reviewComments: "All CBC parameters verified and within acceptable limits.",
+    clinicalCorrelation:
+      "Patient is a 34-year-old male with no significant complaints. CBC results are within normal range. Correlate with clinical findings.",
+    approvalRemarks: "No abnormalities detected in the CBC parameters.",
+    approverName: "Dr. Sarah Johnson",
+    approverRole: "Senior Pathologist",
+    approvalDate: "20 May 2024, 12:10 PM",
+    signatureUrl: "certified-default",
+    sentOn: "20 May 2024, 12:12 PM",
+    deliveredOn: "20 May 2024, 12:13 PM",
   },
   {
     id: "rep-2",
-    reportId: "REP-2026-002",
+    reportId: "RPT-2024-0530-002",
     requestId: "TRF1257",
+    sampleId: "SMP-2024-0530-002",
     patientId: "P000124",
+    patientPid: "PAT-2024-00046",
     patientName: "Priya",
+    patientAgeGender: "Female | 28 Years",
+    patientAvatar:
+      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=256&h=256",
+    patientEmail: "priya.clinical@email.com",
     doctorName: "Dr. Patel",
+    doctorEmail: "patel.nephro@hospital.com",
     testPanel: "Kidney Function Test (KFT)",
     generatedDate: "30 Mar 2026 12:15 PM",
+    completedDate: "30 Mar 2026, 11:45 AM",
+    completedBy: "Lab Technician - John Doe",
+    sampleType: "Serum",
     status: "GENERATED",
     findingsSummary: "Normal Serum Creatinine and Blood Urea levels.",
+    parameters: [
+      {
+        id: "kft-1",
+        parameter: "Serum Creatinine",
+        result: "0.85",
+        unit: "mg/dL",
+        referenceRange: "0.6 - 1.2",
+        status: "Normal",
+        approved: true,
+      },
+      {
+        id: "kft-2",
+        parameter: "Blood Urea Nitrogen (BUN)",
+        result: "16.0",
+        unit: "mg/dL",
+        referenceRange: "7 - 20",
+        status: "Normal",
+        approved: true,
+      },
+      {
+        id: "kft-3",
+        parameter: "Uric Acid",
+        result: "4.8",
+        unit: "mg/dL",
+        referenceRange: "3.5 - 7.2",
+        status: "Normal",
+        approved: true,
+      },
+      {
+        id: "kft-4",
+        parameter: "eGFR",
+        result: "98",
+        unit: "mL/min/1.73m²",
+        referenceRange: "> 90",
+        status: "Normal",
+        approved: true,
+      },
+    ],
+    overallDecision: "Approved",
+    clinicalCorrelation:
+      "Renal function parameters within healthy physiological range. No signs of renal impairment.",
+    approvalRemarks: "Report certified for clinical interpretation.",
+    approverName: "Dr. Sarah Johnson",
+    approverRole: "Senior Pathologist",
+    approvalDate: "30 Mar 2026, 12:45 PM",
+    signatureUrl: "certified-default",
+    sentOn: "30 Mar 2026, 12:48 PM",
+    deliveredOn: "30 Mar 2026, 12:49 PM",
   },
   {
     id: "rep-3",
-    reportId: "REP-2026-003",
+    reportId: "RPT-2024-0530-003",
     requestId: "TRF1258",
+    sampleId: "SMP-2024-0530-004",
     patientId: "P000125",
+    patientPid: "PAT-2024-00047",
     patientName: "Praveen Singh",
+    patientAgeGender: "Male | 45 Years",
+    patientAvatar:
+      "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=256&h=256",
+    patientEmail: "praveen.singh@email.com",
     doctorName: "Dr. Rao",
+    doctorEmail: "rao.cardio@hospital.com",
     testPanel: "Lipid Profile & Glucose Fasting",
     generatedDate: "03 Apr 2026 11:50 AM",
+    completedDate: "03 Apr 2026, 11:15 AM",
+    completedBy: "Lab Technician - John Doe",
+    sampleType: "Plasma",
     status: "CRITICAL",
-    findingsSummary: "Severe hypertriglyceridemia flagged. Urgent doctor notification advised.",
+    findingsSummary:
+      "Severe hypertriglyceridemia flagged. Urgent doctor notification advised.",
+    parameters: [
+      {
+        id: "lp-1",
+        parameter: "Total Cholesterol",
+        result: "245",
+        unit: "mg/dL",
+        referenceRange: "< 200",
+        status: "Abnormal",
+        approved: true,
+      },
+      {
+        id: "lp-2",
+        parameter: "Triglycerides",
+        result: "480",
+        unit: "mg/dL",
+        referenceRange: "< 150",
+        status: "Critical",
+        approved: false,
+      },
+      {
+        id: "lp-3",
+        parameter: "HDL Cholesterol",
+        result: "32",
+        unit: "mg/dL",
+        referenceRange: "> 40",
+        status: "Abnormal",
+        approved: true,
+      },
+      {
+        id: "lp-4",
+        parameter: "LDL Cholesterol",
+        result: "165",
+        unit: "mg/dL",
+        referenceRange: "< 100",
+        status: "Abnormal",
+        approved: true,
+      },
+    ],
+    overallDecision: "Pending",
+    reviewComments: "High triglycerides require supervisor counter-sign.",
+    clinicalCorrelation:
+      "Critical elevation in serum Triglycerides (480 mg/dL). High cardiovascular risk profile. Immediate physician review recommended.",
+    approvalRemarks: "Requires stat clinical notification and fasting verification.",
+    approverName: "Dr. Sarah Johnson",
+    approverRole: "Senior Pathologist",
+    approvalDate: "03 Apr 2026, 12:20 PM",
+    sentOn: "03 Apr 2026, 12:22 PM",
+    deliveredOn: "03 Apr 2026, 12:24 PM",
   },
   {
     id: "rep-4",
-    reportId: "REP-2026-004",
+    reportId: "RPT-2024-0530-004",
     requestId: "TRF1259",
+    sampleId: "SMP-2024-0530-005",
     patientId: "P000126",
+    patientPid: "PAT-2024-00048",
     patientName: "Naziya",
-    doctorName: "Dr. Sharma",
+    patientAgeGender: "Female | 31 Years",
+    patientAvatar:
+      "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=256&h=256",
+    patientEmail: "naziya.k@email.com",
+    doctorName: "Dr. Johnson",
+    doctorEmail: "johnson@hospital.com",
     testPanel: "Thyroid Profile (T3, T4, TSH)",
     generatedDate: "05 Apr 2026 10:55 AM",
+    completedDate: "05 Apr 2026, 10:20 AM",
+    completedBy: "Lab Technician - John Doe",
+    sampleType: "Serum",
     status: "UNDER_REVIEW",
-    findingsSummary: "Awaiting Pathologist signature and hormone value confirmation.",
+    findingsSummary:
+      "Awaiting Pathologist signature and hormone value confirmation.",
+    parameters: [
+      {
+        id: "tp-1",
+        parameter: "Total T3",
+        result: "1.2",
+        unit: "ng/mL",
+        referenceRange: "0.8 - 2.0",
+        status: "Normal",
+        approved: true,
+      },
+      {
+        id: "tp-2",
+        parameter: "Total T4",
+        result: "8.5",
+        unit: "µg/dL",
+        referenceRange: "5.1 - 14.1",
+        status: "Normal",
+        approved: true,
+      },
+      {
+        id: "tp-3",
+        parameter: "TSH (Thyroid Stimulating)",
+        result: "2.85",
+        unit: "µIU/mL",
+        referenceRange: "0.4 - 4.2",
+        status: "Normal",
+        approved: true,
+      },
+    ],
+    overallDecision: "Pending",
+    clinicalCorrelation:
+      "Thyroid profile consistent with euthyroid metabolic state. Hormonal levels are concordant.",
+    approvalRemarks: "Awaiting final pathologist sign-off.",
+    approverName: "Dr. Sarah Johnson",
+    approverRole: "Senior Pathologist",
+    approvalDate: "05 Apr 2026, 11:15 AM",
+    sentOn: "05 Apr 2026, 11:18 AM",
+    deliveredOn: "05 Apr 2026, 11:20 AM",
   },
   {
     id: "rep-5",
-    reportId: "REP-2026-005",
+    reportId: "RPT-2024-0530-005",
     requestId: "TRF1260",
+    sampleId: "SMP-2024-0530-006",
     patientId: "P000127",
+    patientPid: "PAT-2024-00049",
     patientName: "Meena Kumari",
-    doctorName: "Dr. Verma",
+    patientAgeGender: "Female | 52 Years",
+    patientAvatar:
+      "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&q=80&w=256&h=256",
+    patientEmail: "meena.kumari@email.com",
+    doctorName: "Dr. Johnson",
+    doctorEmail: "johnson@hospital.com",
     testPanel: "Electrolytes & Arterial Blood Gas",
     generatedDate: "10 Apr 2026 09:40 AM",
+    completedDate: "10 Apr 2026, 09:15 AM",
+    completedBy: "Lab Technician - John Doe",
+    sampleType: "Whole Blood (Heparin)",
     status: "DRAFT",
-    findingsSummary: "Preliminary analyzer readings imported; awaiting technician review.",
+    findingsSummary:
+      "Preliminary analyzer readings imported; awaiting technician review.",
+    parameters: [
+      {
+        id: "elec-1",
+        parameter: "Sodium (Na+)",
+        result: "139",
+        unit: "mmol/L",
+        referenceRange: "135 - 145",
+        status: "Normal",
+        approved: false,
+      },
+      {
+        id: "elec-2",
+        parameter: "Potassium (K+)",
+        result: "4.2",
+        unit: "mmol/L",
+        referenceRange: "3.5 - 5.1",
+        status: "Normal",
+        approved: false,
+      },
+      {
+        id: "elec-3",
+        parameter: "Chloride (Cl-)",
+        result: "101",
+        unit: "mmol/L",
+        referenceRange: "98 - 107",
+        status: "Normal",
+        approved: false,
+      },
+    ],
+    overallDecision: "Pending",
+    clinicalCorrelation:
+      "Electrolyte panel indicates normonatremic, normokalemic status with normal anion balance.",
+    approvalRemarks: "Initial analyzer data pending pathologist approval.",
+    approverName: "Dr. Sarah Johnson",
+    approverRole: "Senior Pathologist",
+    approvalDate: "10 Apr 2026, 10:00 AM",
+    sentOn: "10 Apr 2026, 10:05 AM",
+    deliveredOn: "10 Apr 2026, 10:06 AM",
   },
 ];
 
@@ -100,6 +443,246 @@ export default function ReportGeneration() {
     "ALL" | "GENERATED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL"
   >("ALL");
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
+
+  // Workflow View Mode: "table" | "quality-check" | "approve-results" | "delivered-status"
+  const [viewMode, setViewMode] = useState<
+    "table" | "quality-check" | "approve-results" | "delivered-status"
+  >("table");
+
+  // Selected Report & Data
+  const [selectedReport, setSelectedReport] = useState<ReportItem>(
+    INITIAL_REPORTS[0],
+  );
+
+  // Quality Check State
+  const [currentParameters, setCurrentParameters] = useState<
+    QualityCheckParameter[]
+  >(DEFAULT_QC_PARAMETERS);
+  const [overallDecision, setOverallDecision] = useState<
+    "Approved" | "Rejected" | "Pending"
+  >("Approved");
+  const [reviewComments, setReviewComments] = useState("");
+
+  // Approve Results State
+  const [clinicalCorrelation, setClinicalCorrelation] = useState(
+    "Patient is a 34-year-old male with no significant complaints. CBC results are within normal range. Correlate with clinical findings.",
+  );
+  const [approvalRemarks, setApprovalRemarks] = useState(
+    "No abnormalities detected in the CBC parameters.",
+  );
+  const [approverName, setApproverName] = useState("Dr. Sarah Johnson");
+  const [approverRole, setApproverRole] = useState("Senior Pathologist");
+  const [approvalDateTime, setApprovalDateTime] = useState(
+    "20 May 2024, 12:10 PM",
+  );
+  const [digitalSignature, setDigitalSignature] = useState<string | null>(
+    "certified-default",
+  );
+  const signatureFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Handlers for Quality Check
+  const handleOpenQualityCheck = (report: ReportItem) => {
+    setSelectedReport(report);
+    if (report.parameters && report.parameters.length > 0) {
+      setCurrentParameters(report.parameters);
+    } else {
+      setCurrentParameters(DEFAULT_QC_PARAMETERS);
+    }
+    setOverallDecision(report.overallDecision || "Approved");
+    setReviewComments(report.reviewComments || "");
+    setViewMode("quality-check");
+  };
+
+  const handleToggleParameterApproval = (paramId: string) => {
+    setCurrentParameters((prev) =>
+      prev.map((p) => (p.id === paramId ? { ...p, approved: !p.approved } : p)),
+    );
+  };
+
+  const handleApproveAllParameters = () => {
+    setCurrentParameters((prev) =>
+      prev.map((p) => ({ ...p, approved: true })),
+    );
+    toast({
+      title: "All Parameters Approved",
+      description: "Marked all test parameter values as approved.",
+    });
+  };
+
+  const handleSubmitReview = (proceedToApproval = false) => {
+    const updatedStatus: "GENERATED" | "CRITICAL" | "UNDER_REVIEW" =
+      overallDecision === "Approved"
+        ? "GENERATED"
+        : overallDecision === "Rejected"
+          ? "CRITICAL"
+          : "UNDER_REVIEW";
+
+    setReports((prev) =>
+      prev.map((r) =>
+        r.id === selectedReport.id
+          ? {
+              ...r,
+              status: updatedStatus,
+              overallDecision,
+              reviewComments,
+              parameters: currentParameters,
+            }
+          : r,
+      ),
+    );
+
+    setSelectedReport((prev) => ({
+      ...prev,
+      status: updatedStatus,
+      overallDecision,
+      reviewComments,
+      parameters: currentParameters,
+    }));
+
+    if (proceedToApproval) {
+      handleOpenApproveResults({
+        ...selectedReport,
+        status: updatedStatus,
+        overallDecision,
+        reviewComments,
+        parameters: currentParameters,
+      });
+    } else {
+      toast({
+        title: "Quality Review Submitted",
+        description: `Report ${selectedReport.reportId} decision marked as "${overallDecision}".`,
+      });
+      setViewMode("table");
+    }
+  };
+
+  // Handlers for Approve Results
+  const handleOpenApproveResults = (report: ReportItem) => {
+    setSelectedReport(report);
+    setClinicalCorrelation(
+      report.clinicalCorrelation ||
+        "Patient is a 34-year-old male with no significant complaints. CBC results are within normal range. Correlate with clinical findings.",
+    );
+    setApprovalRemarks(
+      report.approvalRemarks ||
+        report.findingsSummary ||
+        "No abnormalities detected in the CBC parameters.",
+    );
+    setApproverName(report.approverName || "Dr. Sarah Johnson");
+    setApproverRole(report.approverRole || "Senior Pathologist");
+    setApprovalDateTime(report.approvalDate || "20 May 2024, 12:10 PM");
+    setDigitalSignature(report.signatureUrl || "certified-default");
+    setViewMode("approve-results");
+  };
+
+  const handleApplyDefaultSignature = () => {
+    setDigitalSignature("certified-default");
+    toast({
+      title: "Digital Signature Attached",
+      description: `Attached certified digital signature for ${approverName}.`,
+    });
+  };
+
+  const handleRemoveSignature = () => {
+    setDigitalSignature(null);
+    if (signatureFileInputRef.current) {
+      signatureFileInputRef.current.value = "";
+    }
+    toast({
+      title: "Signature Removed",
+      description: "Digital signature cleared from current report.",
+    });
+  };
+
+  const handleSignatureFileUpload = (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setDigitalSignature(event.target?.result as string);
+        toast({
+          title: "Custom Signature Uploaded",
+          description: `Uploaded digital signature image "${file.name}".`,
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleConfirmApproveAndSign = (viewDeliveredDirectly = false) => {
+    if (!digitalSignature) {
+      toast({
+        title: "Digital Signature Required",
+        description:
+          "Please attach or upload a digital signature before approving.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const nowSent = "20 May 2024, 12:12 PM";
+    const nowDelivered = "20 May 2024, 12:13 PM";
+
+    setReports((prev) =>
+      prev.map((r) =>
+        r.id === selectedReport.id
+          ? {
+              ...r,
+              status: "GENERATED",
+              clinicalCorrelation,
+              approvalRemarks,
+              approverName,
+              approverRole,
+              approvalDate: approvalDateTime,
+              signatureUrl: digitalSignature,
+              sentOn: nowSent,
+              deliveredOn: nowDelivered,
+            }
+          : r,
+      ),
+    );
+
+    const updated = {
+      ...selectedReport,
+      status: "GENERATED" as const,
+      clinicalCorrelation,
+      approvalRemarks,
+      approverName,
+      approverRole,
+      approvalDate: approvalDateTime,
+      signatureUrl: digitalSignature,
+      sentOn: nowSent,
+      deliveredOn: nowDelivered,
+    };
+
+    setSelectedReport(updated);
+
+    toast({
+      title: "Report Approved & Digitally Signed",
+      description: `Report ${selectedReport.reportId} is certified and ready for dispatch.`,
+    });
+
+    if (viewDeliveredDirectly) {
+      setViewMode("delivered-status");
+    } else {
+      setViewMode("table");
+    }
+  };
+
+  // Handlers for Delivered Status View
+  const handleOpenDeliveredStatus = (report: ReportItem) => {
+    setSelectedReport(report);
+    setViewMode("delivered-status");
+  };
+
+  const handleViewPortalReport = (portalName: string) => {
+    toast({
+      title: `Viewing in ${portalName}`,
+      description: `Opening diagnostic report ${selectedReport.reportId} portal preview.`,
+    });
+  };
 
   const handleGenerateReport = (id: string) => {
     setReports((prev) =>
@@ -153,734 +736,1559 @@ export default function ReportGeneration() {
   );
 
   return (
-    <div className="min-h-screen flex bg-[#f8fafd] text-[#1e293b] antialiased selection:bg-blue-100 font-sans">
-      {/* BEGIN: LeftSidebar */}
-      <aside
-        className="w-[260px] bg-[#f0f4f9] flex-shrink-0 flex flex-col justify-between border-r border-[#e2e8f0] select-none min-h-screen fixed inset-y-0 left-0 z-20"
-        data-purpose="sidebar-navigation"
-      >
-        {/* Top Part: Logo & Primary Nav */}
-        <div>
-          {/* Brand Logo Section */}
-          <div className="px-7 pt-7 pb-6">
-            <h1 className="text-xl font-bold text-[#0b57d0] tracking-tight">
-              HMS
-            </h1>
-            <p className="text-xs text-slate-500 font-medium mt-0.5">
-              Admin Portal
-            </p>
-          </div>
-
-          {/* Navigation Links */}
-          <nav className="mt-2 space-y-1.5 px-3">
-            {/* Dashboard */}
-            <button
-              type="button"
-              onClick={() => navigate("/lab/dashboard")}
-              className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
-                activeNav === "Dashboard"
-                  ? "bg-[#004bb5] text-white shadow-sm"
-                  : "text-[#334155] hover:bg-slate-200/60"
-              }`}
-            >
-              <svg
-                className="w-5 h-5 flex-shrink-0"
-                fill="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path d="M3 3h8v8H3V3zm10 0h8v5h-8V3zm0 7h8v11h-8V10zm-10 3h8v8H3v-8z" />
-              </svg>
-              <span>Dashboard</span>
-            </button>
-
-            {/* Samples Verification */}
-            <button
-              type="button"
-              onClick={() => navigate("/lab/sample-verification")}
-              className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
-                activeNav === "Samples Verification"
-                  ? "bg-[#004bb5] text-white shadow-sm"
-                  : "text-[#334155] hover:bg-slate-200/60"
-              }`}
-            >
-              <svg
-                className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span>Samples Verification</span>
-            </button>
-
-            {/* Testing Samples */}
-            <button
-              type="button"
-              onClick={() => navigate("/lab/testing-samples")}
-              className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
-                activeNav === "Testing Samples"
-                  ? "bg-[#004bb5] text-white shadow-sm"
-                  : "text-[#334155] hover:bg-slate-200/60"
-              }`}
-            >
-              <svg
-                className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span>Testing Samples</span>
-            </button>
-
-            {/* Report Generation */}
-            <button
-              type="button"
-              onClick={() => setActiveNav("Report Generation")}
-              className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
-                activeNav === "Report Generation"
-                  ? "bg-[#004bb5] text-white shadow-sm"
-                  : "text-[#334155] hover:bg-slate-200/60"
-              }`}
-            >
-              <svg
-                className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span>Report Generation</span>
-            </button>
-
-            {/* Report Transfer */}
-            <button
-              type="button"
-              onClick={() => navigate("/lab/report-transfer")}
-              className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
-                activeNav === "Report Transfer"
-                  ? "bg-[#004bb5] text-white shadow-sm"
-                  : "text-[#334155] hover:bg-slate-200/60"
-              }`}
-            >
-              <svg
-                className="w-5 h-5 flex-shrink-0 stroke-[#475569]"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span>Report Transfer</span>
-            </button>
-          </nav>
-        </div>
-
-        {/* Bottom Part: Settings, Support & Admin Profile */}
-        <div className="px-3 pb-6 space-y-1">
-          {/* Settings */}
-          <a
-            className="flex items-center gap-3 px-4 py-2 text-sm font-medium text-[#475569] hover:bg-slate-200/60 rounded-lg transition-colors"
-            href="#settings"
-            onClick={(e) => e.preventDefault()}
-          >
-            <svg
-              className="w-5 h-5 text-slate-500"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              viewBox="0 0 24 24"
-            >
-              <path
-                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <circle cx="12" cy="12" r="3" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span>Settings</span>
-          </a>
-
-          {/* Support */}
-          <a
-            className="flex items-center gap-3 px-4 py-2 text-sm font-medium text-[#475569] hover:bg-slate-200/60 rounded-lg transition-colors"
-            href="#support"
-            onClick={(e) => e.preventDefault()}
-          >
-            <svg
-              className="w-5 h-5 text-slate-500"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              viewBox="0 0 24 24"
-            >
-              <path
-                d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <span>Support</span>
-          </a>
-
-          {/* Technician User Card & Logout */}
-          <div className="pt-4 mt-2 border-t border-slate-200/80 px-2 flex items-center justify-between">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-full bg-[#0b57d0] text-white font-bold text-xs flex items-center justify-center shadow-xs shrink-0">
-                {displayName.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex flex-col text-left truncate">
-                <span className="text-xs font-semibold text-slate-800 leading-tight truncate">
-                  {displayName}
-                </span>
-                <span className="text-[10px] text-slate-500 leading-tight truncate">
-                  {displayRole}
-                </span>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={handleLogout}
-              title="Sign Out"
-              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </aside>
-      {/* END: LeftSidebar */}
+    <div className="min-h-screen flex bg-[#f8fafc] text-slate-800 antialiased selection:bg-blue-100 font-sans">
+      {/* Global Lab Navigation Sidebar */}
+      <LabNav
+        activeTab="Report Generation"
+        onTabChange={() => setViewMode("table")}
+      />
 
       {/* Main Content Area */}
-      <div className="flex-1 ml-[260px] min-h-screen flex flex-col min-w-0 bg-[#f8fafd]">
-        {/* TopNavbar */}
-        <header
-          className="h-20 bg-white border-b border-slate-100 px-10 flex items-center justify-end sticky top-0 z-10"
-          data-purpose="dashboard-header"
-        >
-          <div className="flex items-center gap-6">
-            {/* Notification Bell with Counter */}
-            <div className="relative cursor-pointer hover:opacity-80 transition-opacity">
-              <svg
-                className="w-6 h-6 text-slate-600 stroke-[1.8]"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span className="absolute -top-1.5 -right-1.5 bg-[#e05252] text-white font-bold text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
-                4
-              </span>
-            </div>
-
-            {/* Role Label & Profile Avatar & Logout */}
-            <div className="flex items-center gap-3 pl-1">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-[#0b57d0] text-white font-bold text-xs flex items-center justify-center shadow-xs">
-                  {displayName.charAt(0).toUpperCase()}
-                </div>
-                <div className="flex flex-col text-left">
-                  <span className="text-xs font-semibold text-slate-800 leading-tight">
-                    {displayName}
-                  </span>
-                  <span className="text-[10px] text-slate-500 leading-tight">
-                    {displayRole}
-                  </span>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-red-600 hover:bg-red-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
-              >
-                <svg
-                  className="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-                  />
-                </svg>
-                Logout
-              </button>
-            </div>
-          </div>
-        </header>
-
-        {/* DashboardBody */}
-        <main className="flex-1 p-8 lg:p-10 space-y-8 max-w-[1600px] w-full mx-auto">
-          {/* StatCardsRow */}
-          <section
-            className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
-            data-purpose="kpi-metric-cards"
+      <div className="flex-1 ml-64 min-h-screen flex flex-col min-w-0 bg-[#f8fafc]">
+        {viewMode === "delivered-status" ? (
+          /* ========================================================================= */
+          /* BEGIN: Report Delivered Successfully View                                */
+          /* ========================================================================= */
+          <main
+            className="flex-1 flex flex-col items-center pt-12 pb-24 px-8 overflow-y-auto bg-[#f8fafc]"
+            data-purpose="report-transfer-content"
           >
-            {/* Card 1: Test Completed */}
-            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
-              <div className="w-14 h-14 rounded-full bg-[#def7ec] flex items-center justify-center shrink-0">
-                <svg
-                  className="w-6 h-6 text-[#059669] stroke-[2.5]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+            <div className="w-full max-w-4xl">
+              {/* Back to Reports Navigation Link */}
+              <div className="mb-6">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("table")}
+                  className="inline-flex items-center text-[13.5px] font-semibold text-[#0284c7] hover:text-[#0369a1] transition-colors cursor-pointer"
                 >
-                  <path
-                    d="M5 13l4 4L19 7"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
+                  <svg
+                    className="w-4 h-4 mr-1 stroke-[2.5]"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="M15.75 19.5L8.25 12l7.5-7.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  Back to Reports
+                </button>
               </div>
-              <div>
-                <span className="text-[13px] font-semibold text-[#059669]">
-                  Test Completed
-                </span>
-                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  128
+
+              {/* BEGIN: Success Header Section */}
+              <div
+                className="flex items-center gap-5 mb-10 pl-1"
+                data-purpose="status-header"
+              >
+                {/* Success Badge Icon */}
+                <div className="flex items-center justify-center w-14 h-14 rounded-full bg-[#10b981] text-white shadow-[0_10px_25px_-5px_rgba(34,197,94,0.35)] shrink-0">
+                  <svg
+                    className="w-8 h-8 stroke-[3]"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="M5 13l4 4L19 7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
+                {/* Status Text */}
+                <div>
+                  <h2 className="text-[28px] font-bold text-slate-900 tracking-tight leading-none mb-2">
+                    Report Delivered Successfully!
+                  </h2>
+                  <p className="text-slate-500 text-base font-normal">
+                    The report has been sent and is now accessible.
+                  </p>
+                </div>
+              </div>
+              {/* END: Success Header Section */}
+
+              {/* BEGIN: Delivered To Card */}
+              <section
+                className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 mb-8"
+                data-purpose="recipients-card"
+              >
+                <h3 className="text-xl font-bold text-slate-900 mb-6">
+                  Delivered To
                 </h3>
-                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Tests completed successfully
-                </p>
+                {/* Recipient List */}
+                <div className="divide-y divide-slate-100">
+                  {/* Recipient 1: Patient Portal */}
+                  <div className="py-5 first:pt-0 last:pb-0 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      {/* Avatar Circle Placeholder */}
+                      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
+                        <svg
+                          className="w-6 h-6"
+                          fill="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            clipRule="evenodd"
+                            d="M12 2a5 5 0 100 10 5 5 0 000-10zm-7 18a7 7 0 0114 0H5z"
+                            fillRule="evenodd"
+                          />
+                        </svg>
+                      </div>
+                      <div>
+                        <h4 className="text-base font-bold text-slate-900 leading-tight">
+                          Patient Portal
+                        </h4>
+                        <p className="text-sm text-slate-500 mt-1 font-mono">
+                          {selectedReport.patientEmail || "Rahul.sharma@email.com"}
+                        </p>
+                      </div>
+                    </div>
+                    {/* Action & Status */}
+                    <div className="flex items-center gap-8">
+                      <span className="text-sm font-semibold text-[#16a34a]">
+                        Delivered
+                      </span>
+                      <button
+                        onClick={() => handleViewPortalReport("Patient Portal")}
+                        className="px-7 py-2 text-sm font-semibold text-blue-600 hover:text-blue-700 bg-transparent border border-slate-200 hover:border-blue-400 rounded-lg transition-colors cursor-pointer"
+                        type="button"
+                      >
+                        View
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Recipient 2: Doctor Portal */}
+                  <div className="py-5 first:pt-0 last:pb-0 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      {/* Avatar Circle Placeholder */}
+                      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
+                        <svg
+                          className="w-6 h-6"
+                          fill="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            clipRule="evenodd"
+                            d="M12 2a5 5 0 100 10 5 5 0 000-10zm-7 18a7 7 0 0114 0H5z"
+                            fillRule="evenodd"
+                          />
+                        </svg>
+                      </div>
+                      <div>
+                        <h4 className="text-base font-bold text-slate-900 leading-tight">
+                          Doctor Portal
+                        </h4>
+                        <p className="text-sm text-slate-500 mt-1 font-normal">
+                          {selectedReport.doctorName || "Dr. Johnson"}
+                        </p>
+                        <p className="text-xs text-slate-400 font-mono">
+                          {selectedReport.doctorEmail || "johnson@hospital.com"}
+                        </p>
+                      </div>
+                    </div>
+                    {/* Action & Status */}
+                    <div className="flex items-center gap-8">
+                      <span className="text-sm font-semibold text-[#16a34a]">
+                        Delivered
+                      </span>
+                      <button
+                        onClick={() => handleViewPortalReport("Doctor Portal")}
+                        className="px-7 py-2 text-sm font-semibold text-blue-600 hover:text-blue-700 bg-transparent border border-slate-200 hover:border-blue-400 rounded-lg transition-colors cursor-pointer"
+                        type="button"
+                      >
+                        View
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              {/* END: Delivered To Card */}
+
+              {/* BEGIN: Delivery Details Card */}
+              <section
+                className="bg-white rounded-xl border border-slate-200 shadow-sm p-8"
+                data-purpose="details-card"
+              >
+                <h3 className="text-xl font-bold text-slate-900 mb-6">
+                  Delivery Details
+                </h3>
+                {/* Key-Value Information Grid */}
+                <div className="space-y-4 max-w-xl">
+                  {/* Sent On */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-base font-medium text-slate-700">
+                      Sent On
+                    </span>
+                    <span className="text-base font-bold text-slate-900">
+                      {selectedReport.sentOn || "20 May 2024, 12:12 PM"}
+                    </span>
+                  </div>
+                  {/* Delivered On */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-base font-medium text-slate-700">
+                      Delivered On
+                    </span>
+                    <span className="text-base font-bold text-slate-900">
+                      {selectedReport.deliveredOn || "20 May 2024, 12:13 PM"}
+                    </span>
+                  </div>
+                  {/* Report ID */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-base font-medium text-slate-700">
+                      Report ID
+                    </span>
+                    <span className="text-base font-bold text-slate-900 font-mono">
+                      {selectedReport.reportId}
+                    </span>
+                  </div>
+                </div>
+              </section>
+              {/* END: Delivery Details Card */}
+
+              {/* Bottom Action Buttons */}
+              <div className="flex items-center justify-between pt-8">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("table")}
+                  className="px-6 py-2.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold transition-colors cursor-pointer"
+                >
+                  ← Back to Reports
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate("/lab/report-transfer")}
+                  className="px-6 py-2.5 bg-[#0b457f] hover:bg-[#093a6b] text-white text-sm font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
+                >
+                  Go to Report Transfer Log →
+                </button>
               </div>
             </div>
-
-            {/* Card 2: Test Result Pending */}
-            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
-              <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
-                <svg
-                  className="w-6 h-6 text-[#2563eb] stroke-[2.2]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              <div>
-                <span className="text-[13px] font-semibold text-[#2563eb]">
-                  Test Result Pending
-                </span>
-                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  56
-                </h3>
-                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Results pending verification
-                </p>
-              </div>
-            </div>
-
-            {/* Card 3: Test Overdue */}
-            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
-              <div className="w-14 h-14 rounded-full bg-[#fef3c7] flex items-center justify-center shrink-0">
-                <svg
-                  className="w-6 h-6 text-[#d97706] stroke-[2.2]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              <div>
-                <span className="text-[13px] font-semibold text-[#d97706]">
-                  Test Overdue
-                </span>
-                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  18
-                </h3>
-                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Tests past the expected time
-                </p>
-              </div>
-            </div>
-
-            {/* Card 4: Repeat Test Required */}
-            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
-              <div className="w-14 h-14 rounded-full bg-[#fee2e2] flex items-center justify-center shrink-0">
-                <svg
-                  className="w-6 h-6 text-[#dc2626] stroke-[2.2]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              <div>
-                <span className="text-[13px] font-semibold text-[#dc2626]">
-                  Repeat Test Required
-                </span>
-                <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                  11
-                </h3>
-                <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                  Tests need to be repeated
-                </p>
-              </div>
-            </div>
-          </section>
-
-          {/* TableContainerCard */}
-          <section
-            className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
-            data-purpose="reports-details-container"
+          </main>
+        ) : viewMode === "approve-results" ? (
+          /* ========================================================================= */
+          /* BEGIN: Approve Results View                                              */
+          /* ========================================================================= */
+          <main
+            className="flex-1 overflow-y-auto bg-white p-8 lg:p-12"
+            data-purpose="approve-results-view"
           >
-            {/* Header & Action Controls Bar */}
-            <div className="px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div>
-                <h2 className="text-[20px] font-bold text-slate-800">
-                  Report Generation Details
+            <div className="max-w-6xl mx-auto">
+              {/* Back to Reports navigation link */}
+              <div className="mb-4">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("table")}
+                  className="inline-flex items-center text-[13.5px] font-semibold text-[#0284c7] hover:text-[#0369a1] transition-colors cursor-pointer"
+                >
+                  <svg
+                    className="w-4 h-4 mr-1 stroke-[2.5]"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="M15.75 19.5L8.25 12l7.5-7.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  Back to Reports
+                </button>
+              </div>
+
+              {/* Page Title & Subtitle Header */}
+              <header className="mb-8" data-purpose="page-header">
+                <h2 className="text-2xl lg:text-3xl font-extrabold text-slate-900 tracking-tight">
+                  Approve Results
                 </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Review generated laboratory test findings, download formatted PDF reports, and approve release
+                <p className="text-sm lg:text-base text-slate-500 mt-1.5 font-normal">
+                  Add clinical correlation and approve the results.
                 </p>
-              </div>
-              <div className="flex items-center gap-3 w-full sm:w-auto">
-                {/* Search Bar */}
-                <div className="relative w-full sm:w-[320px]">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+              </header>
+
+              {/* Upper Grid: Patient Info & Clinical Correlation / Remarks */}
+              <section
+                className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6"
+                data-purpose="upper-details-grid"
+              >
+                {/* Patient Information Card */}
+                <article
+                  className="border border-slate-200 rounded-2xl p-7 flex flex-col justify-between bg-white shadow-2xs"
+                  data-purpose="patient-info-card"
+                >
+                  <div>
+                    {/* Card Section Title */}
+                    <span className="text-xs font-bold tracking-wider text-[#353ec2] uppercase">
+                      PATIENT INFORMATION
+                    </span>
+
+                    {/* Patient Profile Details */}
+                    <div className="flex items-center gap-4 mt-5 mb-8">
+                      <img
+                        alt={selectedReport.patientName}
+                        className="w-14 h-14 rounded-full object-cover border border-slate-100 ring-2 ring-slate-100"
+                        src={
+                          selectedReport.patientAvatar ||
+                          "https://lh3.googleusercontent.com/aida-public/AB6AXuBk5rMXMyViKhrEWS3OPs4EJKp41wiYn1yNbXA5l8RDhUEQ3edVPM-3o-jLtLS6HSXMEut3cfRaSBn5s33BhP0F6OAOZX42hZbHmmdVj65-ctAIdJRbm3Zz-9zEIo0TphDh1b4CrwJP4rmrJrZbPQyyErPeQlhLum-s5Zk9lFWs5P__X5-cb4t8OtGeYjeqonWaXkVvfzOF63hf9zgtRsnWsqeDqoPZEhiBztkX6UoF4fCIy7FpeUmamA"
+                        }
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src =
+                            "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256&h=256";
+                        }}
+                      />
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900 leading-snug">
+                          {selectedReport.patientName}
+                        </h3>
+                        <p className="text-xs text-slate-500 font-medium mt-0.5 font-mono">
+                          PID:{" "}
+                          {selectedReport.patientPid ||
+                            selectedReport.patientId ||
+                            "PAT-2024-00045"}
+                        </p>
+                        <p className="text-xs text-slate-400 font-normal mt-0.5">
+                          {selectedReport.patientAgeGender || "Male | 34 Years"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Meta Information List */}
+                    <div className="space-y-5">
+                      <div>
+                        <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">
+                          SAMPLE ID
+                        </p>
+                        <p className="text-sm font-bold text-slate-800 mt-1 font-mono">
+                          {selectedReport.sampleId || "SMP-2024-0530-001"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">
+                          TEST / PROFILE
+                        </p>
+                        <p className="text-sm font-semibold text-slate-800 mt-1">
+                          {selectedReport.testPanel}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">
+                          COMPLETED ON
+                        </p>
+                        <p className="text-sm font-semibold text-slate-800 mt-1">
+                          {selectedReport.completedDate ||
+                            selectedReport.generatedDate}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+
+                {/* Right Side Stack: Clinical Correlation + Remarks */}
+                <div
+                  className="flex flex-col gap-6"
+                  data-purpose="right-stack-cards"
+                >
+                  {/* Clinical Correlation Card */}
+                  <article className="border border-slate-200 rounded-2xl p-7 bg-white shadow-2xs">
+                    <span className="text-xs font-bold tracking-wider text-[#353ec2] uppercase block mb-4">
+                      CLINICAL CORRELATION
+                    </span>
+                    <div className="border border-slate-200 rounded-xl p-3.5 bg-white min-h-[110px] focus-within:border-blue-500 transition-colors">
+                      <textarea
+                        value={clinicalCorrelation}
+                        onChange={(e) => setClinicalCorrelation(e.target.value)}
+                        className="w-full h-full text-sm text-slate-700 leading-relaxed font-normal resize-none focus:outline-none bg-transparent"
+                        rows={3}
+                        placeholder="Add clinical correlation..."
+                      />
+                    </div>
+                  </article>
+
+                  {/* Remarks / Comments Card */}
+                  <article className="border border-slate-200 rounded-2xl p-7 bg-white shadow-2xs">
+                    <span className="text-xs font-bold tracking-wider text-[#353ec2] uppercase block mb-4">
+                      REMARKS / COMMENTS
+                    </span>
+                    <div className="border border-slate-200 rounded-xl p-3.5 bg-white min-h-[85px] flex items-start focus-within:border-blue-500 transition-colors">
+                      <textarea
+                        value={approvalRemarks}
+                        onChange={(e) => setApprovalRemarks(e.target.value)}
+                        className="w-full h-full text-sm text-slate-700 leading-relaxed font-normal resize-none focus:outline-none bg-transparent"
+                        rows={2}
+                        placeholder="Add comments or remarks..."
+                      />
+                    </div>
+                  </article>
+                </div>
+              </section>
+
+              {/* Bottom Card: Approval & Digital Signature */}
+              <section
+                className="border border-slate-200 rounded-2xl p-7 lg:p-8 bg-white shadow-2xs"
+                data-purpose="approval-card"
+              >
+                {/* Section Title */}
+                <span className="text-xs font-bold tracking-wider text-[#353ec2] uppercase block mb-6">
+                  APPROVAL
+                </span>
+
+                {/* Two Column Content */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start mb-6">
+                  {/* Approver Details (Left Column) */}
+                  <div className="lg:col-span-5 space-y-6">
+                    <div>
+                      <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">
+                        APPROVED BY
+                      </p>
+                      <h4 className="text-base font-bold text-[#0e3b70] mt-1">
+                        {approverName}
+                      </h4>
+                      <p className="text-xs text-slate-500 font-normal mt-0.5">
+                        {approverRole}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">
+                        APPROVAL DATE &amp; TIME
+                      </p>
+                      <p className="text-sm font-semibold text-slate-800 mt-1">
+                        {approvalDateTime}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Digital Signature Box (Right Column) */}
+                  <div className="lg:col-span-7">
+                    {/* Hidden file input for uploading custom signature */}
+                    <input
+                      type="file"
+                      ref={signatureFileInputRef}
+                      onChange={handleSignatureFileUpload}
+                      accept="image/*"
+                      className="hidden"
+                    />
+
+                    {/* Header with Actions */}
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-bold tracking-wider text-[#353ec2] uppercase">
+                        DIGITAL SIGNATURE
+                      </span>
+                      <div className="flex items-center gap-4 text-xs font-bold text-[#2e37c4]">
+                        <button
+                          type="button"
+                          onClick={handleRemoveSignature}
+                          className="hover:underline uppercase tracking-wide cursor-pointer"
+                        >
+                          REMOVE
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (signatureFileInputRef.current) {
+                              signatureFileInputRef.current.click();
+                            } else {
+                              handleApplyDefaultSignature();
+                            }
+                          }}
+                          className="hover:underline uppercase tracking-wide cursor-pointer"
+                        >
+                          ADD
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Upload Area / Dropzone */}
+                    <div
+                      onClick={() => {
+                        if (!digitalSignature) {
+                          handleApplyDefaultSignature();
+                        } else if (signatureFileInputRef.current) {
+                          signatureFileInputRef.current.click();
+                        }
+                      }}
+                      className="border border-slate-200 bg-slate-50/50 rounded-2xl h-44 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 transition-colors p-4"
+                      data-purpose="signature-dropzone"
+                      title={
+                        digitalSignature
+                          ? "Click to replace signature"
+                          : "Click to add digital signature"
+                      }
+                    >
+                      {digitalSignature === "certified-default" ? (
+                        <div className="flex flex-col items-center justify-center select-none">
+                          <span className="font-serif italic text-3xl text-[#0b4079] tracking-wider font-bold">
+                            Dr. Sarah Johnson
+                          </span>
+                          <span className="text-[11px] font-mono text-slate-400 mt-1">
+                            Digitally Signed &amp; Timestamped • SHA256: 4f8b2e...
+                          </span>
+                          <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full mt-3">
+                            <svg
+                              className="w-3.5 h-3.5 fill-current"
+                              viewBox="0 0 20 20"
+                            >
+                              <path
+                                clipRule="evenodd"
+                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                fillRule="evenodd"
+                              />
+                            </svg>
+                            Certified Pathologist Signature
+                          </span>
+                        </div>
+                      ) : digitalSignature ? (
+                        <div className="flex flex-col items-center justify-center">
+                          <img
+                            src={digitalSignature}
+                            alt="Uploaded Digital Signature"
+                            className="max-h-24 max-w-full object-contain"
+                          />
+                          <span className="text-[11px] font-mono text-slate-400 mt-2">
+                            Custom Signature Attached • Verified
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center text-slate-400">
+                          <svg
+                            className="w-12 h-12 text-slate-600 stroke-[1.5]"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                          <span className="text-xs text-slate-500 font-medium mt-2">
+                            Click to upload signature or click ADD
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card Footer / Final Action Button */}
+                <div className="flex justify-end items-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("table")}
+                    className="px-5 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleConfirmApproveAndSign(false)}
+                    className="inline-flex items-center gap-2 bg-[#12a136] hover:bg-[#0f8b2e] text-white px-7 py-3 rounded-xl font-semibold text-sm shadow-sm transition duration-150 ease-in-out cursor-pointer"
+                    data-purpose="approve-sign-button"
+                  >
+                    <span>Approve &amp; Sign</span>
                     <svg
-                      className="w-4 h-4 text-slate-400 stroke-[2]"
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M14 5l7 7m0 0l-7 7m7-7H3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleConfirmApproveAndSign(true)}
+                    className="inline-flex items-center gap-2 bg-[#0b457f] hover:bg-[#093a6b] text-white px-6 py-3 rounded-xl font-semibold text-sm shadow-sm transition duration-150 ease-in-out cursor-pointer"
+                  >
+                    <span>Approve &amp; View Delivery Status</span>
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M14 5l7 7m0 0l-7 7m7-7H3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </section>
+            </div>
+          </main>
+        ) : viewMode === "quality-check" ? (
+          /* ========================================================================= */
+          /* BEGIN: Quality Check - Review Results View                               */
+          /* ========================================================================= */
+          <main
+            className="flex-1 flex flex-col min-w-0 bg-[#f8fafc]"
+            data-purpose="quality-check-view"
+          >
+            {/* Top Header Banner */}
+            <header className="px-8 py-6 border-b border-slate-200 bg-white">
+              {/* Back to Reports navigation link */}
+              <div className="mb-2">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("table")}
+                  className="inline-flex items-center text-[13.5px] font-semibold text-[#0284c7] hover:text-[#0369a1] transition-colors cursor-pointer"
+                >
+                  <svg
+                    className="w-4 h-4 mr-1 stroke-[2.5]"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="M15.75 19.5L8.25 12l7.5-7.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  Back to Reports
+                </button>
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                    Quality Check - Review Results
+                  </h1>
+                  <p className="text-sm text-slate-500 mt-1 font-normal">
+                    Review completed test results for quality assurance
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 self-start sm:self-center">
+                  <span className="text-xs font-mono font-semibold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
+                    Report ID: {selectedReport.reportId}
+                  </span>
+                  <span className="text-xs font-mono font-semibold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200">
+                    Req: {selectedReport.requestId}
+                  </span>
+                </div>
+              </div>
+            </header>
+
+            {/* Content Body */}
+            <div className="p-8 space-y-6 max-w-7xl">
+              {/* BEGIN: Sample Information Card */}
+              <section
+                className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm"
+                data-purpose="sample-information"
+              >
+                <h2 className="text-xs font-semibold tracking-wider text-slate-400 uppercase mb-5">
+                  SAMPLE INFORMATION
+                </h2>
+                <div className="flex items-start justify-between gap-6">
+                  {/* Information Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-16 flex-1 text-sm">
+                    {/* Row 1 */}
+                    <div className="flex items-baseline">
+                      <span className="w-36 text-slate-500 font-normal shrink-0">
+                        Sample ID
+                      </span>
+                      <span className="font-semibold text-slate-900 font-mono">
+                        {selectedReport.sampleId || "SMP-2024-0530-001"}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline">
+                      <span className="w-36 text-slate-500 font-normal shrink-0">
+                        Completed Date
+                      </span>
+                      <span className="font-semibold text-slate-900">
+                        {selectedReport.completedDate ||
+                          selectedReport.generatedDate}
+                      </span>
+                    </div>
+                    {/* Row 2 */}
+                    <div className="flex items-baseline">
+                      <span className="w-36 text-slate-500 font-normal shrink-0">
+                        Patient Name
+                      </span>
+                      <span className="font-semibold text-slate-900">
+                        {selectedReport.patientName}{" "}
+                        <span className="text-xs text-slate-400 font-mono">
+                          ({selectedReport.patientId})
+                        </span>
+                      </span>
+                    </div>
+                    <div className="flex items-baseline">
+                      <span className="w-36 text-slate-500 font-normal shrink-0">
+                        Completed By
+                      </span>
+                      <span className="font-semibold text-slate-900">
+                        {selectedReport.completedBy ||
+                          "Lab Technician - John Doe"}
+                      </span>
+                    </div>
+                    {/* Row 3 */}
+                    <div className="flex items-baseline">
+                      <span className="w-36 text-slate-500 font-normal shrink-0">
+                        Sample Type
+                      </span>
+                      <span className="font-semibold text-slate-900">
+                        {selectedReport.sampleType || "Whole Blood Sample"}
+                      </span>
+                    </div>
+                    <div className="flex items-center">
+                      <span className="w-36 text-slate-500 font-normal shrink-0">
+                        Status
+                      </span>
+                      <span className="inline-flex items-center px-4 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        Completed
+                      </span>
+                    </div>
+                  </div>
+                  {/* Patient Thumbnail Image */}
+                  <div className="shrink-0 pl-4 hidden sm:block">
+                    <img
+                      alt="Patient Avatar"
+                      className="w-16 h-16 rounded-full object-cover shadow-sm ring-2 ring-slate-100"
+                      src={
+                        selectedReport.patientAvatar ||
+                        "https://lh3.googleusercontent.com/aida-public/AB6AXuAk4z0h7-yWEOs1o7LaN7X-ROakKmoi3GI35bLJZUr__bhwepPRHuMyvxGVITnjKflVerHEXQTzcB77sT_Q_o9MiVhOu4EZ7RAqagKC5Sl-zto_-zU9cMsLfJQmLpurp07c7XmxZbh2NDLfRHJv8_ATG8DOXOYdp7Mp5FXyKNJnhnY-Xy6-_rpNIRRjtG4PYCdTLRx_SkPV1X-xahW1zTcQIMlbssjBGEaE96mFFpp40AFMGskXzzn_gA"
+                      }
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src =
+                          "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256&h=256";
+                      }}
+                    />
+                  </div>
+                </div>
+              </section>
+              {/* END: Sample Information Card */}
+
+              {/* BEGIN: Parameter Results Table */}
+              <section
+                className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm"
+                data-purpose="test-parameters-table"
+              >
+                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-800">
+                      Test Parameter Analysis
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Panel: {selectedReport.testPanel}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleApproveAllParameters}
+                    className="text-xs font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                  >
+                    Approve All Parameters
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50/50 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+                        <th className="py-3.5 px-6 font-semibold w-1/4" scope="col">
+                          PARAMETER
+                        </th>
+                        <th
+                          className="py-3.5 px-6 font-semibold border-l border-slate-100"
+                          scope="col"
+                        >
+                          RESULT
+                        </th>
+                        <th
+                          className="py-3.5 px-6 font-semibold border-l border-slate-100"
+                          scope="col"
+                        >
+                          UNIT
+                        </th>
+                        <th
+                          className="py-3.5 px-6 font-semibold border-l border-slate-100"
+                          scope="col"
+                        >
+                          REFERENCE RANGE
+                        </th>
+                        <th
+                          className="py-3.5 px-6 font-semibold border-l border-slate-100 text-center"
+                          scope="col"
+                        >
+                          STATUS
+                        </th>
+                        <th
+                          className="py-3.5 px-6 font-semibold border-l border-slate-100 text-center"
+                          scope="col"
+                        >
+                          ACTION
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      {currentParameters.map((p) => (
+                        <tr
+                          key={p.id}
+                          className="hover:bg-slate-50/70 transition-colors"
+                        >
+                          <td className="py-3 px-6 font-medium text-slate-900">
+                            {p.parameter}
+                          </td>
+                          <td className="py-3 px-6 text-slate-500 font-medium border-l border-slate-100 font-mono">
+                            {p.result}
+                          </td>
+                          <td className="py-3 px-6 text-slate-600 border-l border-slate-100">
+                            {p.unit}
+                          </td>
+                          <td className="py-3 px-6 text-slate-600 border-l border-slate-100">
+                            {p.referenceRange}
+                          </td>
+                          <td className="py-3 px-6 text-center border-l border-slate-100">
+                            {p.status === "Normal" ? (
+                              <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium text-emerald-700 bg-emerald-50">
+                                Normal
+                              </span>
+                            ) : p.status === "Critical" ? (
+                              <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium text-red-700 bg-red-50">
+                                Critical
+                              </span>
+                            ) : (
+                              <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium text-amber-700 bg-amber-50">
+                                Abnormal
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-6 text-center border-l border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleToggleParameterApproval(p.id)
+                              }
+                              className={`px-4 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+                                p.approved
+                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100"
+                                  : "text-blue-600 border border-blue-200 hover:bg-blue-50"
+                              }`}
+                            >
+                              {p.approved ? "Approved ✓" : "Approve"}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+              {/* END: Parameter Results Table */}
+
+              {/* BEGIN: Review Controls & Decision Area */}
+              <section
+                className="pt-2"
+                data-purpose="quality-check-form"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
+                  {/* Overall Decision Dropdown */}
+                  <div>
+                    <label
+                      className="block text-sm font-semibold text-slate-900 mb-2.5"
+                      htmlFor="overall-quality-check"
+                    >
+                      Overall Quality Check
+                    </label>
+                    <div className="relative">
+                      <select
+                        id="overall-quality-check"
+                        value={overallDecision}
+                        onChange={(e) =>
+                          setOverallDecision(
+                            e.target.value as
+                              | "Approved"
+                              | "Rejected"
+                              | "Pending",
+                          )
+                        }
+                        className={`w-full appearance-none bg-white border border-slate-200 rounded-lg px-4 py-3 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm cursor-pointer shadow-sm ${
+                          overallDecision === "Approved"
+                            ? "text-emerald-600"
+                            : overallDecision === "Rejected"
+                              ? "text-rose-600"
+                              : "text-amber-600"
+                        }`}
+                      >
+                        <option
+                          className="text-emerald-600 font-semibold"
+                          value="Approved"
+                        >
+                          Approved
+                        </option>
+                        <option
+                          className="text-rose-600 font-semibold"
+                          value="Rejected"
+                        >
+                          Rejected
+                        </option>
+                        <option
+                          className="text-amber-600 font-semibold"
+                          value="Pending"
+                        >
+                          Pending Review
+                        </option>
+                      </select>
+                      {/* Custom Dropdown Arrow */}
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            d="M19 9l-7 7-7-7"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Comments Text Box */}
+                  <div>
+                    <label
+                      className="block text-sm font-semibold text-slate-900 mb-2.5"
+                      htmlFor="review-comments"
+                    >
+                      Comments (Optional)
+                    </label>
+                    <textarea
+                      id="review-comments"
+                      value={reviewComments}
+                      onChange={(e) => setReviewComments(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg p-3.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm resize-none"
+                      placeholder="Enter comments..."
+                      rows={4}
+                    />
+                  </div>
+                </div>
+
+                {/* Submit Review Action Button */}
+                <div className="flex flex-wrap justify-end items-center gap-3 pt-6">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("table")}
+                    className="px-5 py-2.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSubmitReview(false)}
+                    className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-2.5 rounded-lg shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm cursor-pointer"
+                  >
+                    <svg
+                      className="w-4 h-4 stroke-[2.5]"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
                     >
                       <path
-                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                        d="M5 13l4 4L19 7"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                    <span>Submit Review</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSubmitReview(true)}
+                    className="inline-flex items-center gap-2 bg-[#12a136] hover:bg-[#0f8b2e] text-white font-medium px-6 py-2.5 rounded-lg shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-[#12a136] text-sm cursor-pointer"
+                  >
+                    <span>Proceed to Approve &amp; Sign</span>
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M14 5l7 7m0 0l-7 7m7-7H3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </section>
+              {/* END: Review Controls & Decision Area */}
+            </div>
+          </main>
+        ) : (
+          /* ========================================================================= */
+          /* BEGIN: Table & Catalog View                                              */
+          /* ========================================================================= */
+          <>
+            {/* TopNavbar */}
+            <header
+              className="h-20 bg-white border-b border-slate-100 px-10 flex items-center justify-end sticky top-0 z-10"
+              data-purpose="dashboard-header"
+            >
+              <div className="flex items-center gap-6">
+                {/* Notification Bell with Counter */}
+                <div className="relative cursor-pointer hover:opacity-80 transition-opacity">
+                  <svg
+                    className="w-6 h-6 text-slate-600 stroke-[1.8]"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  <span className="absolute -top-1.5 -right-1.5 bg-[#e05252] text-white font-bold text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
+                    4
+                  </span>
+                </div>
+
+                {/* Role Label & Profile Avatar & Logout */}
+                <div className="flex items-center gap-3 pl-1">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-[#0b57d0] text-white font-bold text-xs flex items-center justify-center shadow-xs">
+                      {displayName.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex flex-col text-left">
+                      <span className="text-xs font-semibold text-slate-800 leading-tight">
+                        {displayName}
+                      </span>
+                      <span className="text-[10px] text-slate-500 leading-tight">
+                        {displayRole}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-red-600 hover:bg-red-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <svg
+                      className="w-3.5 h-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                      />
+                    </svg>
+                    Logout
+                  </button>
+                </div>
+              </div>
+            </header>
+
+            {/* DashboardBody */}
+            <main className="flex-1 p-8 lg:p-10 space-y-8 max-w-[1600px] w-full mx-auto">
+              {/* StatCardsRow */}
+              <section
+                className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
+                data-purpose="kpi-metric-cards"
+              >
+                {/* Card 1: Test Completed */}
+                <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+                  <div className="w-14 h-14 rounded-full bg-[#def7ec] flex items-center justify-center shrink-0">
+                    <svg
+                      className="w-6 h-6 text-[#059669] stroke-[2.5]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M5 13l4 4L19 7"
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       />
                     </svg>
                   </div>
-                  <input
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-[13px] text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                    placeholder="Search Patient, Report ID, Doctor..."
-                    type="text"
-                  />
-                  {searchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setSearchQuery("")}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
-                    >
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d="M6 18L18 6M6 6l12 12"
-                        />
-                      </svg>
-                    </button>
-                  )}
+                  <div>
+                    <span className="text-[13px] font-semibold text-[#059669]">
+                      Test Completed
+                    </span>
+                    <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                      128
+                    </h3>
+                    <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                      Tests completed successfully
+                    </p>
+                  </div>
                 </div>
 
-                {/* Filter Button & Dropdown */}
-                <div className="relative shrink-0">
-                  <button
-                    onClick={() => setIsFilterDropdownOpen((prev) => !prev)}
-                    className={`flex items-center gap-2 px-4 py-2 border rounded-lg text-[13px] font-medium transition-colors ${
-                      statusFilter !== "ALL"
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
-                        : "border-slate-200 text-slate-700 hover:bg-slate-50"
-                    }`}
-                    type="button"
-                  >
+                {/* Card 2: Test Result Pending */}
+                <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+                  <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
                     <svg
-                      className="w-4 h-4 text-slate-500 stroke-[2]"
+                      className="w-6 h-6 text-[#2563eb] stroke-[2.2]"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
                     >
                       <path
-                        d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       />
                     </svg>
-                    <span>
-                      {statusFilter === "ALL" ? "Filter" : statusFilter}
+                  </div>
+                  <div>
+                    <span className="text-[13px] font-semibold text-[#2563eb]">
+                      Test Result Pending
                     </span>
-                  </button>
-
-                  {isFilterDropdownOpen && (
-                    <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1.5 text-[13px]">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setStatusFilter("ALL");
-                          setIsFilterDropdownOpen(false);
-                        }}
-                        className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
-                          statusFilter === "ALL"
-                            ? "font-semibold text-blue-600 bg-blue-50/50"
-                            : "text-slate-700"
-                        }`}
-                      >
-                        <span>All Statuses</span>
-                        {statusFilter === "ALL" && <span>✓</span>}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setStatusFilter("GENERATED");
-                          setIsFilterDropdownOpen(false);
-                        }}
-                        className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
-                          statusFilter === "GENERATED"
-                            ? "font-semibold text-[#15803d] bg-green-50/50"
-                            : "text-slate-700"
-                        }`}
-                      >
-                        <span>Generated ({generatedCount})</span>
-                        {statusFilter === "GENERATED" && <span>✓</span>}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setStatusFilter("UNDER_REVIEW");
-                          setIsFilterDropdownOpen(false);
-                        }}
-                        className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
-                          statusFilter === "UNDER_REVIEW"
-                            ? "font-semibold text-blue-600 bg-blue-50/50"
-                            : "text-slate-700"
-                        }`}
-                      >
-                        <span>Under Review ({reviewCount})</span>
-                        {statusFilter === "UNDER_REVIEW" && <span>✓</span>}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setStatusFilter("CRITICAL");
-                          setIsFilterDropdownOpen(false);
-                        }}
-                        className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
-                          statusFilter === "CRITICAL"
-                            ? "font-semibold text-[#b91c1c] bg-red-50/50"
-                            : "text-slate-700"
-                        }`}
-                      >
-                        <span>Critical ({criticalCount})</span>
-                        {statusFilter === "CRITICAL" && <span>✓</span>}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setStatusFilter("DRAFT");
-                          setIsFilterDropdownOpen(false);
-                        }}
-                        className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
-                          statusFilter === "DRAFT"
-                            ? "font-semibold text-[#854d0e] bg-yellow-50/50"
-                            : "text-slate-700"
-                        }`}
-                      >
-                        <span>Draft ({draftCount})</span>
-                        {statusFilter === "DRAFT" && <span>✓</span>}
-                      </button>
-                    </div>
-                  )}
+                    <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                      56
+                    </h3>
+                    <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                      Results pending verification
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            {/* Data Table */}
-            <div className="overflow-x-auto">
-              <table
-                className="w-full text-left border-collapse"
-                id="reports-catalog-table"
+                {/* Card 3: Test Overdue */}
+                <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+                  <div className="w-14 h-14 rounded-full bg-[#fef3c7] flex items-center justify-center shrink-0">
+                    <svg
+                      className="w-6 h-6 text-[#d97706] stroke-[2.2]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                  <div>
+                    <span className="text-[13px] font-semibold text-[#d97706]">
+                      Test Overdue
+                    </span>
+                    <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                      18
+                    </h3>
+                    <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                      Tests past the expected time
+                    </p>
+                  </div>
+                </div>
+
+                {/* Card 4: Repeat Test Required */}
+                <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+                  <div className="w-14 h-14 rounded-full bg-[#fee2e2] flex items-center justify-center shrink-0">
+                    <svg
+                      className="w-6 h-6 text-[#dc2626] stroke-[2.2]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                  <div>
+                    <span className="text-[13px] font-semibold text-[#dc2626]">
+                      Repeat Test Required
+                    </span>
+                    <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                      11
+                    </h3>
+                    <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                      Tests need to be repeated
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              {/* TableContainerCard */}
+              {/* BEGIN: MainContainer */}
+              <section
+                className="w-full bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden"
+                data-purpose="report-generation-card"
               >
-                <thead>
-                  <tr className="border-t border-b border-slate-200 text-[11px] font-bold tracking-wider text-slate-600 uppercase bg-transparent">
-                    <th className="py-4 px-8 font-bold" scope="col">
-                      REPORT &amp; REQUISITION
-                    </th>
-                    <th className="py-4 px-6 font-bold" scope="col">
-                      PATIENT NAME
-                    </th>
-                    <th className="py-4 px-6 font-bold" scope="col">
-                      DOCTOR
-                    </th>
-                    <th className="py-4 px-6 font-bold" scope="col">
-                      TEST PANEL &amp; FINDINGS
-                    </th>
-                    <th
-                      className="py-4 px-6 font-bold text-center"
-                      scope="col"
+                {/* BEGIN: HeaderSection */}
+                <header
+                  className="px-8 pt-7 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4"
+                  data-purpose="table-controls"
+                >
+                  {/* Title */}
+                  <h1
+                    className="text-2xl font-bold text-slate-800 tracking-tight"
+                    data-purpose="page-title"
+                  >
+                    Report Generation Details
+                  </h1>
+                  {/* Top Right Actions: Search and Filter */}
+                  <div
+                    className="flex items-center gap-3 w-full md:w-auto"
+                    data-purpose="search-and-filter-group"
+                  >
+                    {/* Search Input Container */}
+                    <div
+                      className="relative flex-1 md:w-80"
+                      data-purpose="search-input-wrapper"
                     >
-                      DATE GENERATED
-                    </th>
-                    <th
-                      className="py-4 px-8 font-bold text-center"
-                      scope="col"
-                    >
-                      STATUS
-                    </th>
-                    <th
-                      className="py-4 px-4 font-bold text-center"
-                      scope="col"
-                    >
-                      ACTION
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-[13px] font-medium text-slate-600">
-                  {filteredReports.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={7}
-                        className="py-10 text-center text-slate-400 text-sm"
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                        <svg
+                          className="w-4 h-4 text-slate-600"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </div>
+                      <input
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2.5 bg-white text-sm text-slate-800 placeholder-slate-400 border border-slate-300 rounded-lg focus:outline-none focus:border-slate-500 focus:ring-1 focus:ring-slate-500 transition-colors"
+                        placeholder="Search Patient, Report ID, Doctor..."
+                        type="text"
+                      />
+                      {searchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setSearchQuery("")}
+                          className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                        >
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M6 18L18 6M6 6l12 12"
+                            />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Filter Button */}
+                    <div className="relative shrink-0">
+                      <button
+                        onClick={() => setIsFilterDropdownOpen((prev) => !prev)}
+                        className={`inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-50 border rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+                          statusFilter !== "ALL"
+                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                            : "border-slate-300 text-slate-700"
+                        }`}
+                        data-purpose="filter-trigger"
+                        type="button"
                       >
-                        No diagnostic reports found matching your search.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredReports.map((r) => (
-                      <tr
-                        key={r.id}
-                        className="hover:bg-blue-50/40 transition-colors group"
-                      >
-                        <td className="py-5 px-8">
-                          <span className="font-semibold text-slate-900 font-mono block">
-                            {r.reportId}
-                          </span>
-                          <span className="font-mono text-blue-600 text-xs font-semibold">
-                            {r.requestId}
-                          </span>
-                        </td>
-                        <td className="py-5 px-6">
-                          <span className="font-semibold text-slate-900 block">
-                            {r.patientName}
-                          </span>
-                          <span className="text-[11px] text-slate-400 font-mono">
-                            {r.patientId}
-                          </span>
-                        </td>
-                        <td className="py-5 px-6 text-slate-700 font-normal text-xs">
-                          {r.doctorName}
-                        </td>
-                        <td className="py-5 px-6">
-                          <span className="font-medium text-slate-800 block">
-                            {r.testPanel}
-                          </span>
-                          <span className="text-[11px] text-slate-500 block truncate max-w-xs">
-                            {r.findingsSummary}
-                          </span>
-                        </td>
-                        <td className="py-5 px-6 text-center text-slate-600 font-normal">
-                          {r.generatedDate}
-                        </td>
-                        <td className="py-5 px-8 text-center">
-                          {r.status === "GENERATED" ? (
-                            <span className="inline-block px-4 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#bbf7d0] text-[#15803d]">
-                              GENERATED
-                            </span>
-                          ) : r.status === "UNDER_REVIEW" ? (
-                            <span className="inline-block px-4 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#bfdbfe] text-[#1d4ed8]">
-                              UNDER REVIEW
-                            </span>
-                          ) : r.status === "CRITICAL" ? (
-                            <span className="inline-block px-4 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#fecaca] text-[#991b1b]">
-                              CRITICAL
-                            </span>
-                          ) : (
-                            <span className="inline-block px-4 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#fef08a] text-[#854d0e]">
-                              DRAFT
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-5 px-4 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            {r.status === "DRAFT" || r.status === "UNDER_REVIEW" ? (
-                              <button
-                                type="button"
-                                onClick={() => handleGenerateReport(r.id)}
-                                className="px-3 py-1.5 bg-[#00875A] hover:bg-[#00744E] text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
-                              >
-                                Certify
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handlePrintReport(r)}
-                                className="px-3 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-600 hover:text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
-                              >
-                                PDF
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => navigate("/lab/report-transfer")}
-                              className="px-2.5 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
-                              title="Transfer to Doctor / EMR"
-                            >
-                              Dispatch
-                            </button>
-                          </div>
-                        </td>
+                        <svg
+                          className="w-4 h-4 text-slate-600"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            d="M3 6h18M6 12h12M9 18h6"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                        <span>
+                          {statusFilter === "ALL" ? "Filter" : statusFilter}
+                        </span>
+                      </button>
+
+                      {isFilterDropdownOpen && (
+                        <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1.5 text-[13px]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setStatusFilter("ALL");
+                              setIsFilterDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between cursor-pointer ${
+                              statusFilter === "ALL"
+                                ? "font-semibold text-blue-600 bg-blue-50/50"
+                                : "text-slate-700"
+                            }`}
+                          >
+                            <span>All Statuses</span>
+                            {statusFilter === "ALL" && <span>✓</span>}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setStatusFilter("GENERATED");
+                              setIsFilterDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between cursor-pointer ${
+                              statusFilter === "GENERATED"
+                                ? "font-semibold text-[#15803d] bg-green-50/50"
+                                : "text-slate-700"
+                            }`}
+                          >
+                            <span>Generated ({generatedCount})</span>
+                            {statusFilter === "GENERATED" && <span>✓</span>}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setStatusFilter("UNDER_REVIEW");
+                              setIsFilterDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between cursor-pointer ${
+                              statusFilter === "UNDER_REVIEW"
+                                ? "font-semibold text-[#715e17] bg-[#faecc5]/30"
+                                : "text-slate-700"
+                            }`}
+                          >
+                            <span>Under Review ({reviewCount})</span>
+                            {statusFilter === "UNDER_REVIEW" && <span>✓</span>}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setStatusFilter("CRITICAL");
+                              setIsFilterDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between cursor-pointer ${
+                              statusFilter === "CRITICAL"
+                                ? "font-semibold text-[#b91c1c] bg-red-50/50"
+                                : "text-slate-700"
+                            }`}
+                          >
+                            <span>Critical ({criticalCount})</span>
+                            {statusFilter === "CRITICAL" && <span>✓</span>}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setStatusFilter("DRAFT");
+                              setIsFilterDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between cursor-pointer ${
+                              statusFilter === "DRAFT"
+                                ? "font-semibold text-slate-700 bg-slate-100"
+                                : "text-slate-700"
+                            }`}
+                          >
+                            <span>Draft ({draftCount})</span>
+                            {statusFilter === "DRAFT" && <span>✓</span>}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </header>
+                {/* END: HeaderSection */}
+
+                {/* BEGIN: TableContent */}
+                <div
+                  className="overflow-x-auto w-full"
+                  data-purpose="table-scroll-container"
+                >
+                  <table
+                    className="w-full border-collapse text-left"
+                    id="reports-catalog-table"
+                  >
+                    <thead>
+                      <tr className="bg-[#f8fafc] border-y border-slate-200/90 text-[13px] font-bold text-slate-600 tracking-wider">
+                        <th className="py-5 px-8 font-bold" scope="col">
+                          REPORT &amp; REQUISITION
+                        </th>
+                        <th className="py-5 px-6 font-bold" scope="col">
+                          PATIENT NAME
+                        </th>
+                        <th className="py-5 px-6 font-bold" scope="col">
+                          DOCTOR
+                        </th>
+                        <th className="py-5 px-6 font-bold" scope="col">
+                          TEST PANEL &amp; FINDINGS
+                        </th>
+                        <th
+                          className="py-5 px-6 font-bold text-center"
+                          scope="col"
+                        >
+                          DATE GENERATED
+                        </th>
+                        <th
+                          className="py-5 px-8 font-bold text-center"
+                          scope="col"
+                        >
+                          STATUS
+                        </th>
+                        <th
+                          className="py-5 px-4 font-bold text-center"
+                          scope="col"
+                        >
+                          ACTION
+                        </th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </main>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-[14px] text-slate-600">
+                      {filteredReports.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={7}
+                            className="py-10 text-center text-slate-400 text-sm"
+                          >
+                            No diagnostic reports found matching your search.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredReports.map((r) => (
+                          <tr
+                            key={r.id}
+                            onClick={() => handleOpenQualityCheck(r)}
+                            className="hover:bg-slate-50/60 transition-colors cursor-pointer"
+                          >
+                            <td className="py-5 px-8 whitespace-nowrap">
+                              <span className="font-semibold text-slate-900 font-mono block">
+                                {r.reportId}
+                              </span>
+                              <span className="font-mono text-blue-600 text-xs font-semibold">
+                                {r.requestId}
+                              </span>
+                            </td>
+                            <td className="py-5 px-6 whitespace-nowrap">
+                              <span className="font-semibold text-slate-900 block">
+                                {r.patientName}
+                              </span>
+                              <span className="text-[11px] text-slate-400 font-mono">
+                                {r.patientPid || r.patientId}
+                              </span>
+                            </td>
+                            <td className="py-5 px-6 text-slate-700 font-normal text-xs whitespace-nowrap">
+                              {r.doctorName}
+                            </td>
+                            <td className="py-5 px-6 whitespace-nowrap">
+                              <span className="font-medium text-slate-800 block">
+                                {r.testPanel}
+                              </span>
+                              <span className="text-[11px] text-slate-500 block truncate max-w-xs">
+                                {r.findingsSummary}
+                              </span>
+                            </td>
+                            <td className="py-5 px-6 text-center text-slate-600 font-normal whitespace-nowrap">
+                              {r.generatedDate}
+                            </td>
+                            <td className="py-5 px-8 text-center whitespace-nowrap">
+                              {r.status === "GENERATED" ? (
+                                <span className="inline-block px-4 py-1.5 rounded-full text-xs font-bold tracking-wider bg-[#bbf7d0] text-[#15803d]">
+                                  GENERATED
+                                </span>
+                              ) : r.status === "UNDER_REVIEW" ? (
+                                <span className="inline-block px-4 py-1.5 rounded-full text-xs font-bold tracking-wider bg-[#faecc5] text-[#715e17]">
+                                  UNDER REVIEW
+                                </span>
+                              ) : r.status === "CRITICAL" ? (
+                                <span className="inline-block px-4 py-1.5 rounded-full text-xs font-bold tracking-wider bg-[#fee2e2] text-[#991b1b]">
+                                  CRITICAL
+                                </span>
+                              ) : (
+                                <span className="inline-block px-4 py-1.5 rounded-full text-xs font-bold tracking-wider bg-slate-200 text-slate-700">
+                                  DRAFT
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-5 px-4 text-center whitespace-nowrap">
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenQualityCheck(r);
+                                  }}
+                                  className="px-3 py-1.5 bg-[#0b57a4] hover:bg-[#094c94] text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                                >
+                                  QC Review
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenApproveResults(r);
+                                  }}
+                                  className="px-3 py-1.5 bg-[#12a136] hover:bg-[#0f8b2e] text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                                >
+                                  Approve &amp; Sign
+                                </button>
+                                {r.status === "GENERATED" && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleOpenDeliveredStatus(r);
+                                      }}
+                                      className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-[#16a34a] border border-emerald-200 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                                      title="View Delivery Confirmation"
+                                    >
+                                      Delivery
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handlePrintReport(r);
+                                      }}
+                                      className="px-3 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-600 hover:text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                                    >
+                                      PDF
+                                    </button>
+                                  </>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate("/lab/report-transfer");
+                                  }}
+                                  className="px-2.5 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                                  title="Transfer to Doctor / EMR"
+                                >
+                                  Dispatch
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                {/* END: TableContent */}
+              </section>
+            </main>
+          </>
+        )}
       </div>
     </div>
   );
