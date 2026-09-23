@@ -13,6 +13,7 @@ import { employeeApi } from "../../api/employee.api";
 import { appointmentApi } from "../../api/appointment.api";
 import { getUser } from "../../utils/token";
 import { computeBmi, computeBsa } from "../../utils/vitals";
+import VoiceToText from "@/components/ui/Voicetotext";
 import { clinicalDetailsApi } from "../../api/clinicalDetails.api";
 import {
   doctorDashboardApi,
@@ -1298,9 +1299,9 @@ const Consultation: React.FC = () => {
    ============================================================ */
 
   useEffect(() => {
-    setHistoryOfPresentIllness(encounter?.symptoms ?? "");
-    setChiefComplaint(encounter?.chief_complaint ?? "");
-    setPatientHistory(encounter?.chief_complaint ?? "");
+    setHistoryOfPresentIllness("");
+    setChiefComplaint("");
+    setPatientHistory("");
 
     /* Consultation Notes and Past History share the encounter's
        clinical_notes column, separated by a [Past History] marker
@@ -1319,8 +1320,8 @@ const Consultation: React.FC = () => {
     }
 
     if (draftNotes) {
-      setConsultationNotes(draftNotes);
-      setPastHistory(draftPast);
+      setConsultationNotes("");
+      setPastHistory("");
       return;
     }
 
@@ -2481,17 +2482,16 @@ const Consultation: React.FC = () => {
                     <div className="flex flex-col gap-2">
 
                       <label className="text-xs font-bold leading-4 text-slate-500">
-                        Consultation Notes
-                      </label>
+      Consultation Notes
+    </label>
 
-                      <textarea
-                        value={consultationNotes}
-                        onChange={(e) =>
-                          setConsultationNotes(e.target.value)
-                        }
-                        className="h-40 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-300"
-                      />
+                      <VoiceToText
+  value={consultationNotes}
+  onChange={(text) => setConsultationNotes(text)}
+  placeholder="Enter consultation notes..."
+/>
 
+                     
                       {/* CHIEF COMPLAINT (free text) + REASON OF VISIT.
                           Styled like the Symptoms / Allergies sections in
                           ClinicalDetailsSection (uppercase tracked label +
@@ -2505,14 +2505,11 @@ const Consultation: React.FC = () => {
                             Chief Complaint
                           </div>
 
-                          <textarea
-                            value={chiefComplaint}
-                            onChange={(event) =>
-                              setChiefComplaint(event.target.value)
-                            }
-                            placeholder="Type the chief complaint..."
-                            className="min-h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-1.5 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-                          />
+                          <VoiceToText
+  value={chiefComplaint}
+  onChange={(text) => setChiefComplaint(text)}
+  placeholder="Type the chief complaint..."
+/>
 
                         </div>
 
@@ -2521,19 +2518,17 @@ const Consultation: React.FC = () => {
                           <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
                             Reason of Visit
                           </div>
+                          <VoiceToText
+  value={reasonOfVisit}
+  onChange={(text) => setReasonOfVisit(text)}
+  placeholder="Type the reason of visit..."
+/>
 
-                          <textarea
-                            value={reasonOfVisit}
-                            onChange={(event) =>
-                              setReasonOfVisit(event.target.value)
-                            }
-                            placeholder="Type the reason of visit..."
-                            className="min-h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-1.5 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-                          />
+                          
 
                         </div>
 
-                        </div>
+                    </div>
 
                     </div>
 
@@ -2550,6 +2545,7 @@ const Consultation: React.FC = () => {
                           <div className="text-xs font-medium leading-4 text-red-700">
                             {encounterError}
                           </div>
+                          
                         </div>
                       )}
 
@@ -2731,14 +2727,11 @@ const Consultation: React.FC = () => {
                         Patient History (Reason of Visit)
                       </label>
 
-                      <textarea
-                        value={patientHistory}
-                        onChange={(event) =>
-                          setPatientHistory(event.target.value)
-                        }
-                        placeholder="Type the patient's history..."
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
-                      />
+                       <VoiceToText
+          value={reasonOfVisit}
+          onChange={(text) => setReasonOfVisit(text)}
+          placeholder="Type the reason of visit..."
+        />
 
                     </div>
 
@@ -2876,15 +2869,11 @@ className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-
                       <label className="text-xs font-bold leading-4 text-slate-500">
                         History of Present Illness(HOPI)
                       </label>
-
-                      <textarea
-                        value={historyOfPresentIllness}
-                        onChange={(event) =>
-                          setHistoryOfPresentIllness(event.target.value)
-                        }
-                        placeholder="Type the history of present illness..."
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
-                      />
+                      <VoiceToText
+  value={historyOfPresentIllness}
+  onChange={(text) => setHistoryOfPresentIllness(text)}
+  placeholder="Type the history of present illness..."
+/>
 
                     </div>
 
@@ -2986,12 +2975,11 @@ className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-
 
                         </div>
 
-                      <textarea
-                        value={reportsText}
-                        onChange={(event) => setReportsText(event.target.value)}
-                        placeholder="Type previous reports..."
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
-                      />
+                      <VoiceToText
+  value={reportsText}
+  onChange={(text) => setReportsText(text)}
+  placeholder="Type previous reports..."
+/>
 
                     </div>
 
@@ -3072,16 +3060,11 @@ className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-
                                 <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
                                   Enter Brief Note
                                 </label>
-                                <textarea
-                                  value={pastHistoryTreatmentNote}
-                                  onChange={(event) =>
-                                    setPastHistoryTreatmentNote(
-                                      event.target.value
-                                    )
-                                  }
-                                  placeholder="Type a brief note..."
-                                  className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-                                />
+                                <VoiceToText
+  value={pastHistoryTreatmentNote}
+  onChange={(text) => setPastHistoryTreatmentNote(text)}
+  placeholder="Type a brief note..."
+/>
                               </div>
 
                               <div className="flex flex-col gap-1.5">
@@ -3104,14 +3087,11 @@ className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-
 
                         </div>
 
-                      <textarea
-                        value={pastHistory}
-                        onChange={(event) =>
-                          setPastHistory(event.target.value)
-                        }
-                        placeholder="Type the patient's past history..."
-                        className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
-                      />
+                      <VoiceToText
+  value={pastHistory}
+  onChange={(text) => setPastHistory(text)}
+  placeholder="Type the patient's past history..."
+/>
 
                     </div>
 
@@ -3974,15 +3954,11 @@ const LabReview: React.FC<{
             Observations & Notes
           </label>
 
-          <textarea
-            id="observations"
-            name="observations"
-            value={observations}
-            onChange={(event) => setObservations(event.target.value)}
-            placeholder="Enter clinical observations based on the laboratory reports..."
-            rows={6}
-            className="block w-full resize-y rounded-xl border-[#E5E7EB] bg-[#F8FAFC] p-4 text-[15px] text-gray-700 shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500"
-          />
+          <VoiceToText
+  value={observations}
+  onChange={(text) => setObservations(text)}
+  placeholder="Enter clinical observations based on the laboratory reports..."
+/>
         </div>
 
         {saved && (
@@ -5585,13 +5561,12 @@ className="block w-full appearance-none rounded-md border-gray-300 bg-white py-3
             Notes
           </label>
 
-          <textarea
-            id="notes"
-            name="notes"
+          <VoiceToText
             value={formData.notes}
-            onChange={handleChange}
-            rows={3}
-            className="block w-full resize-none rounded-md border border-gray-300 px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:ring-[#1d4ed8]"
+            onChange={(text) =>
+              setFormData((previous) => ({ ...previous, notes: text }))
+            }
+            placeholder="Enter notes..."
           />
         </div>
 
@@ -8916,11 +8891,10 @@ const ChemotherapyOrder: React.FC<{
           <div className="text-base font-semibold text-gray-900">
             Discussion
           </div>
-          <textarea
+          <VoiceToText
             value={discussion}
-            onChange={(event) => setDiscussion(event.target.value)}
+            onChange={setDiscussion}
             placeholder="Type the discussion..."
-            className="h-28 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm leading-5 text-gray-700 outline-none focus:border-blue-500"
           />
         </div>
       </div>
@@ -9613,14 +9587,10 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
               Notes
             </label>
 
-            <textarea
-              id="notes"
-              rows={4}
+            <VoiceToText
               value={notes}
-              onChange={(event) =>
-                setNotes(event.target.value)
-              }
-              className="block w-full resize-none rounded-lg border border-gray-300 bg-white p-4 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              onChange={setNotes}
+              placeholder="Enter notes..."
             />
           </div>
         </form>
@@ -10736,14 +10706,10 @@ const TreatmentPlan: React.FC<{
             Remarks
           </label>
 
-          <textarea
-            id="remarks"
-            rows={3}
+          <VoiceToText
             value={remarks}
-            onChange={(event) =>
-              setRemarks(event.target.value)
-            }
-            className="block w-full resize-none rounded-lg border border-slate-300 bg-white p-4 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            onChange={setRemarks}
+            placeholder="Enter remarks..."
           />
 
         </div>

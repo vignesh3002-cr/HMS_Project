@@ -686,14 +686,16 @@ const AppointmentSchedule: React.FC = () => {
                   { key: "tokenId", label: "TokenId", className: "!whitespace-normal", render: (r: Appointment) => (
                     <span className="hms-id-text font-bold !text-blue-600 !text-[13px]">{r.tokenId}</span>
                   )},
-                  { key: "patient", label: "Patient", className: "!whitespace-normal", render: (r: Appointment) => {
+                  { key: "patient", label: "Patient", className: "!whitespace-normal relative", render: (r: Appointment) => {
                     const crit = getCriticalInfo(r.patientId);
                     return (
-                    <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+                    <>
                       <CriticalCorner reasons={crit.reasons} />
-                      <div className="w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0" style={{ backgroundColor: r.avatarBg, color: r.avatarColor }}>{r.patientInitial}</div>
-                      <div><div className="hms-name-text capitalize">{r.patient}</div><div className="hms-id-text flex items-center">{r.patientId}<CriticalDot reasons={crit.reasons} /></div></div>
-                    </CriticalWrapper>
+                      <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+                        <div data-critical-avatar className="w-7 h-7 rounded-xl flex items-center justify-center hms-avatar-text shrink-0" style={{ backgroundColor: r.avatarBg, color: r.avatarColor }}>{r.patientInitial}</div>
+                        <div><div className="hms-name-text capitalize">{r.patient}</div><div className="hms-id-text flex items-center">{r.patientId}<CriticalDot reasons={crit.reasons} /></div></div>
+                      </CriticalWrapper>
+                    </>
                     );
                   }},
                   { key: "branch", label: "Branch", className: "!whitespace-normal", render: (r: Appointment) => <span className="hms-content-text text-[#191C1E]">{r.branch}</span> },
@@ -762,7 +764,7 @@ const AppointmentSchedule: React.FC = () => {
                 rowKey={(r: Appointment, i: number) => r.id + i}
                 rowClassName={(r: Appointment) => {
                   const crit = getCriticalInfo(r.patientId);
-                  return crit.isCritical ? "relative" : "";
+                   return "";
                 }}
               />
             )}

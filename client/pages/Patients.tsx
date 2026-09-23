@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from 'react-router-dom';
 import CalendarPicker from "@/components/hms/Calender";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
@@ -204,7 +205,7 @@ function mapToListPatient(p: PatientRecord, assignedDoctors: Record<string, Assi
 
 // 1. Avatar
 const Avatar = ({ text, color, bg }: { text: string; color: string; bg: string }) => (
-  <div className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text" style={{ backgroundColor: bg, color: color }}>
+  <div data-critical-avatar className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text" style={{ backgroundColor: bg, color: color }}>
     {text}
   </div>
 );
@@ -215,7 +216,7 @@ const Avatar = ({ text, color, bg }: { text: string; color: string; bg: string }
 
 // 3. Photo avatar with fallback
 const PatientPhoto = ({ photo, name }: { photo: string; name: string }) => (
-  <div className="w-16 h-16 rounded-full overflow-hidden bg-[#E5E7EB] flex items-center justify-center flex-shrink-0">
+  <div data-critical-avatar className="w-16 h-16 rounded-full overflow-hidden bg-[#E5E7EB] flex items-center justify-center flex-shrink-0">
     {photo ? (
       <img src={photo} alt={name} className="w-full h-full object-cover" />
     ) : (
@@ -227,38 +228,79 @@ const PatientPhoto = ({ photo, name }: { photo: string; name: string }) => (
 // 4. Three-dot card menu
 function CardMenu({ onView, onEdit }: { onView: () => void; onEdit: () => void }) {
   const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [openUp, setOpenUp] = useState(false);
+  const [anchor, setAnchor] = useState<{ top: number; right: number; bottom: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const { can } = usePermission();
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const isInside =
+        (buttonRef.current && buttonRef.current.contains(target)) ||
+        (menuRef.current && menuRef.current.contains(target));
+      if (!isInside) setOpen(false);
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    const handleScroll = () => setOpen(false);
+    document.addEventListener("mousedown", handleMouseDown);
+    window.addEventListener("scroll", handleScroll, true);
+    window.addEventListener("resize", handleScroll);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      window.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("resize", handleScroll);
+    };
   }, []);
+
+  // Rendered through a portal to document.body (fixed coordinates) so the
+  // menu always paints above the scrollable grid/table instead of being
+  // clipped behind it. Flips upward near the bottom of the viewport.
+  const handleToggle = () => {
+    const btn = buttonRef.current;
+    if (btn) {
+      const rect = btn.getBoundingClientRect();
+      setOpenUp(window.innerHeight - rect.bottom < 180);
+      setAnchor({
+        top: rect.bottom + 4,
+        bottom: window.innerHeight - rect.top + 4,
+        right: window.innerWidth - rect.right,
+      });
+    }
+    setOpen((o) => !o);
+  };
 
   if (!can("patient.read") && !can("patient.update")) return null;
 
   return (
-    <div className="relative" ref={wrapperRef}>
-      <button onClick={() => setOpen((o) => !o)} className="p-1 rounded hover:bg-[#F2F4F6] transition-colors">
+    <>
+      <button ref={buttonRef} onClick={handleToggle} className="p-1 rounded hover:bg-[#F2F4F6] transition-colors">
         <MoreVertical className="w-4 h-4 text-[#6B7280]" />
       </button>
-      <div className={`absolute right-0 top-full mt-1 w-28 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
-          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
-        }`}
-      >
-        {can("patient.read") && (
-          <button onClick={() => { onView(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">View</button>
+      {open &&
+        anchor &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{
+              position: "fixed",
+              top: openUp ? undefined : anchor.top,
+              bottom: openUp ? anchor.bottom : undefined,
+              right: anchor.right,
+              zIndex: 9999,
+            }}
+            className="w-28 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden transition-all duration-150"
+          >
+            {can("patient.read") && (
+              <button onClick={() => { onView(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">View</button>
+            )}
+            {can("patient.update") && (
+              <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
+            )}
+          </div>,
+          document.body,
         )}
-        {can("patient.update") && (
-          <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
-        )}
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -507,9 +549,12 @@ export default function PatientsManagement() {
     }
   }, [searchQuery, appliedValues]);
 
+  // Grid view has no page-navigation controls (unlike the list view's
+  // HmsTable), so it must show every patient matching the current
+  // search/filters rather than just the first `rowsPerPage` of them.
   const displayCards = infiniteScroll
     ? filteredData.slice(0, visibleCount)
-    : currentRows;
+    : filteredData;
 
   // ---- ACTION HANDLERS ----
   const handleView = (id: string) => navigate(`/patients/view/${id}`);
@@ -713,14 +758,16 @@ export default function PatientsManagement() {
             ) : viewMode === "list" ? (
               <HmsTable
                 columns={[
-                  { key: "name", label: "Name", render: (r: any) => {
+                  { key: "name", label: "Name", className: "relative", render: (r: any) => {
                     const crit = getCriticalInfo(String(r.id));
                     return (
-                    <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+                    <>
                       <CriticalCorner reasons={crit.reasons} />
-                      <Avatar text={String(r.name)[0]} color={String(r.patientAvatarColor ?? "#00488D")} bg={String(r.patientAvatarBg ?? "#D6E3FF")} />
-                      <div><div className="hms-name-text">{String(r.name)}</div><div className="hms-id-text flex items-center">{String(r.id)}<CriticalDot reasons={crit.reasons} /></div></div>
-                    </CriticalWrapper>
+                      <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+                        <Avatar text={String(r.name)[0]} color={String(r.patientAvatarColor ?? "#00488D")} bg={String(r.patientAvatarBg ?? "#D6E3FF")} />
+                        <div><div className="hms-name-text">{String(r.name)}</div><div className="hms-id-text flex items-center">{String(r.id)}<CriticalDot reasons={crit.reasons} /></div></div>
+                      </CriticalWrapper>
+                    </>
                     );
                   }},
                   { key: "age/gender", label: "Age/Gender", render: (r: any) => <span className="text-[#191C1E] hms-content-text">{r.age} / {String(r.gender)}</span> },
@@ -777,12 +824,12 @@ export default function PatientsManagement() {
                 rowKey={(r: any, i: number) => String(r.id) + i}
                 rowClassName={(r: any) => {
                   const crit = getCriticalInfo(String(r.id));
-                  return crit.isCritical ? "relative" : "";
+                   return "";
                 }}
               />
             ) : (
               <>
-              <div className="flex-1 p-5 hide-scrollbar max-h-[450px]">
+              <div className={`flex-1 p-5 hide-scrollbar overflow-y-auto ${infiniteScroll ? "max-h-[500px]" : "max-h-[450px]"}`}>
                 {displayCards.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     {displayCards.map((patient: any) => {
@@ -790,13 +837,18 @@ export default function PatientsManagement() {
                       return (
                       <CriticalWrapper
                         key={patient.id}
-                        className="flex items-start gap-4 p-4 border border-[#E5E7EB] rounded-xl hover:shadow-md hover:border-[#D6E3FF] transition-all duration-200 group"
+                        className={`flex items-start gap-4 p-4 border border-[#E5E7EB] rounded-xl hover:shadow-md hover:border-[#D6E3FF] transition-all duration-200 group`}
                       >
                         <CriticalCorner reasons={crit.reasons} />
                         <PatientPhoto photo={patient.photo} name={patient.name} />
 
                         <div className="flex-1 min-w-0">
-                          <p className="hms-name-text truncate">{patient.name}</p>
+                          <p
+                            onClick={() => handleView(patient.id)}
+                            className="hms-name-text truncate cursor-pointer hover:underline hover:text-[#00488D]"
+                          >
+                            {patient.name}
+                          </p>
                           <p className="hms-id-text flex items-center">{patient.id}<CriticalDot reasons={crit.reasons} /></p>
                           <p className="hms-content-text text-[#191C1E] mt-1">
                             {patient.age}/{patient.gender}
@@ -839,27 +891,9 @@ export default function PatientsManagement() {
                 )}
               </div>
               <div className="mt-auto shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-t border-[rgba(194,198,212,0.10)] bg-[rgba(242,244,246,0.95)] backdrop-blur gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
-                    {infiniteScroll
-                      ? `Showing ${Math.min(visibleCount, totalRecords)} of ${totalRecords} patients`
-                      : `Showing ${visibleStart} to ${visibleEnd} of ${totalRecords} patients`}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button disabled={currentPage <= 1} onClick={() => setCurrentPage((prev) => prev - 1)} className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors">
-                    <svg width="5" height="8" viewBox="0 0 5 8" fill="none"><path d="M4 8L0 4L4 0L4.93333.933333L1.86667 4L4.93333 7.06667L4 8Z" fill="#424752"/></svg>
-                  </button>
-                  {Array.from({ length: Math.min(totalPages, 5) }, (_, index) => (
-                    <button key={index} onClick={() => setCurrentPage(index + 1)} className={`w-6 h-6 flex items-center justify-center rounded-md text-[10px] font-semibold transition-colors ${currentPage === index + 1 ? "bg-[#004785] text-white" : "text-[#1D1A1A] hover:bg-[#F2F4F6]"}`}>
-                      {index + 1}
-                    </button>
-                  ))}
-                  {totalPages > 5 && <span className="text-[#6B7280] text-xs">...</span>}
-                  <button disabled={currentPage >= totalPages} onClick={() => setCurrentPage((prev) => prev + 1)} className="w-6 h-6 flex items-center justify-center rounded-md disabled:opacity-30 hover:bg-[#E5E7EB] transition-colors">
-                    <svg width="5" height="8" viewBox="0 0 5 8" fill="none"><path d="M1 8L5 4L1 0L.0666656.933333L3.13333 4L.0666656 7.06667L1 8Z" fill="#424752"/></svg>
-                  </button>
-                </div>
+                <span className="text-[10px] font-semibold text-[#424752] tracking-[0.8px] capitalize">
+                  {infiniteScroll ? `Showing ${Math.min(visibleCount, totalRecords)} of ${totalRecords} patients` : `Showing all ${totalRecords} patients`}
+                </span>
               </div>
               </>
             )}

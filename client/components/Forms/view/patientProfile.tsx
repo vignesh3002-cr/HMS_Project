@@ -36,14 +36,16 @@ import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { useCriticalPatients } from "@/hooks/useCriticalPatients";
 import { CriticalDot } from "@/components/hms/CriticalPatientIndicator";
 
-const statusVariant: Record<string, "blue" | "green" | "rose" | "amber" | "purple" | "teal"> = {
-  Schedule: "blue",
-  Rescheduled: "teal",
-  "Reschedule Required": "amber",
-  "Checked In": "amber",
-  "In Consultation": "purple",
-  Completed: "green",
-  Cancelled: "rose",
+const STATUS_LABELS: Record<string, string> = {
+  SCHEDULED: "Scheduled",
+  CHECKED_IN: "Checked In",
+  IN_CONSULTATION: "In Consultation",
+  COMPLETED: "Completed",
+  CANCELLED: "Cancelled",
+  NO_SHOW: "No Show",
+  RESCHEDULED: "Rescheduled",
+  RESCHEDULE_REQUIRED: "Reschedule Required",
+  TRANSFER_REVIEW_REQUIRED: "Transfer Review Required",
 };
 
 // appointment_time is stored as a UTC-anchored wall-time value, so it must
@@ -75,15 +77,8 @@ function mapAppointment(a: AppointmentRecord) {
     }
   }
 
-  const statusRaw = (a.status || "").toLowerCase();
-  const status =
-    statusRaw === "completed" ? "Completed" :
-    statusRaw === "cancelled" ? "Cancelled" :
-    statusRaw === "checked_in" ? "Checked In" :
-    statusRaw === "in_consultation" ? "In Consultation" :
-    statusRaw === "rescheduled" ? "Rescheduled" :
-    statusRaw === "reschedule_required" ? "Reschedule Required" :
-    "Schedule";
+  const rawKey = (a.status || "").toUpperCase();
+  const status = STATUS_LABELS[rawKey] ?? (a.status || "Scheduled");
 
   return {
     id: a.appointment_id,
@@ -92,7 +87,7 @@ function mapAppointment(a: AppointmentRecord) {
     doctor: doctorName,
     doctorId: a.employee_id || "—",
     department: a.department_master?.department_name || a.department || "—",
-    status: status as "Schedule" | "Rescheduled" | "Reschedule Required" | "Completed" | "Cancelled",
+    status,
     appointmentDateISO: a.appointment_date,
   };
 }
@@ -196,11 +191,12 @@ export default function PatientProfile() {
     { id: "doctor", label: "Doctor Name", type: "text", placeholder: "Search doctor" },
     { id: "department", label: "Department", type: "text", placeholder: "Search department" },
     { id: "status", label: "Status", type: "multiselect", options: [
-      { label: "Schedule", value: "Schedule" },
+      { label: "Scheduled", value: "Scheduled" },
       { label: "Rescheduled", value: "Rescheduled" },
       { label: "Reschedule Required", value: "Reschedule Required" },
       { label: "Completed", value: "Completed" },
       { label: "Cancelled", value: "Cancelled" },
+      { label: "No Show", value: "No Show" },
     ]},
   ];
 
@@ -373,6 +369,13 @@ export default function PatientProfile() {
 
           {/* Patient Header Card */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-2 relative overflow-hidden">
+            {crit.isCritical && (
+              <span className="absolute top-0 left-0 z-10 pointer-events-none">
+                <svg width="24" height="24" viewBox="0 0 20 20" className="block">
+                  <polygon points="0,0 20,0 0,20" fill="#DC2626" />
+                </svg>
+              </span>
+            )}
             <div className="absolute top-0 right-0 w-1/3 h-full bg-slate-50 opacity-50 rounded-l-full transform translate-x-1/4 -translate-y-1/4 pointer-events-none" />
             <div className="relative z-10 flex flex-col items-start gap-6 p-4 md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-6">
@@ -565,7 +568,7 @@ export default function PatientProfile() {
                 { key: "department", label: "Department", sortable: true, render: (apt) => <span className="hms-content-text text-[#191C1E]">{(apt as any).department}</span> },
                 { key: "status", label: "Status", sortable: true, render: (apt) => {
                   const a = apt as any;
-                  return <StatusBadge tone={statusVariant[a.status]}>{a.status}</StatusBadge>;
+                  return <StatusBadge status={a.status} />;
                 }},
                 { key: "actions", label: "Actions", sortable: false, render: (apt) => {
                   const a = apt as ReturnType<typeof mapAppointment>;
