@@ -1,4 +1,4 @@
-import React, {
+﻿import React, {
   useEffect,
   useRef,
   useState,
@@ -13988,113 +13988,7 @@ const Summary: React.FC<{
               </div>
             )}
 
-            {reportMessage && (
-              <div className="mb-4 text-sm font-medium text-slate-600">
-                {reportMessage}
-              </div>
-            )}
 
-            <div className="mb-6 grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold leading-4 text-slate-500">
-                  Lab Test
-                </label>
-                <select
-                  value={reportForm.lab_test_id}
-                  onChange={(event) =>
-                    setReportForm((previous) => ({
-                      ...previous,
-                      lab_test_id: event.target.value,
-                    }))
-                  }
-                  className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm text-slate-700 outline-none focus:border-slate-400"
-                >
-                  <option value="">Select lab test</option>
-                  {reportLabTests.map((test) => (
-                    <option key={test.lab_test_id} value={test.lab_test_id}>
-                      {test.test_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold leading-4 text-slate-500">
-                  Completed Date
-                </label>
-                <input
-                  type="date"
-                  value={reportForm.report_completed_date}
-                  onChange={(event) =>
-                    setReportForm((previous) => ({
-                      ...previous,
-                      report_completed_date: event.target.value,
-                    }))
-                  }
-                  className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm text-slate-700 outline-none focus:border-slate-400"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold leading-4 text-slate-500">
-                  Result
-                </label>
-                <input
-                  type="text"
-                  value={reportForm.result}
-                  onChange={(event) =>
-                    setReportForm((previous) => ({
-                      ...previous,
-                      result: event.target.value,
-                    }))
-                  }
-                  placeholder="Enter result..."
-                  className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm text-slate-700 outline-none focus:border-slate-400"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1 sm:col-span-2">
-                <label className="text-xs font-bold leading-4 text-slate-500">
-                  Impression
-                </label>
-                <input
-                  type="text"
-                  value={reportForm.impression}
-                  onChange={(event) =>
-                    setReportForm((previous) => ({
-                      ...previous,
-                      impression: event.target.value,
-                    }))
-                  }
-                  placeholder="Enter impression..."
-                  className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm text-slate-700 outline-none focus:border-slate-400"
-                />
-              </div>
-
-              <div className="flex items-end gap-2">
-                <button
-                  type="button"
-                  onClick={handleSaveReport}
-                  disabled={reportSaving}
-                  className="rounded-md bg-[#5624D0] px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#4a1fb5] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {reportSaving
-                    ? "Saving…"
-                    : reportForm.encounter_report_id
-                      ? "Update Report"
-                      : "Add Report"}
-                </button>
-                {reportForm.encounter_report_id && (
-                  <button
-                    type="button"
-                    onClick={resetReportForm}
-                    className="rounded-md border border-slate-300 px-5 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50"
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-            </div>
 
             <div className="overflow-x-auto">
               <table className="w-full min-w-[650px] text-left text-sm">
@@ -14112,7 +14006,6 @@ const Summary: React.FC<{
                     <th className="w-1/4 pb-3 font-medium text-slate-900">
                       Impression
                     </th>
-                    <th className="pb-3 font-medium text-slate-900">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="text-slate-800">
@@ -14135,26 +14028,6 @@ const Summary: React.FC<{
                         </td>
                         <td className="py-3">{report.result || "—"}</td>
                         <td className="py-3">{report.impression || "—"}</td>
-                        <td className="py-3">
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleEditReport(report)}
-                              className="text-blue-600 hover:underline"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleDeleteReport(report.encounter_report_id)
-                              }
-                              className="text-red-600 hover:underline"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
                       </tr>
                     ))
                   )}
