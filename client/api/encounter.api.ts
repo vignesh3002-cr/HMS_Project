@@ -27,6 +27,18 @@ export interface EncounterRecord {
   cvs_examination: string | null;
   per_abdomen_examination: string | null;
   clinical_findings: string | null;
+  respiratory_examination: string | null;
+  general_examination_icterus: boolean | null;
+  general_examination_pallor: boolean | null;
+  general_examination_clubbing: boolean | null;
+  general_examination_cyanosis: boolean | null;
+  general_examination_oedema: boolean | null;
+  general_examination_lymphadenopathy: boolean | null;
+  past_history_treatment_type: string | null;
+  past_history_treatment_date: string | null;
+  past_history_treatment_note: string | null;
+  past_history_treatment_response: string | null;
+  previous_reports: string | null;
    height: number | null;
    weight: number | null;
    pulse: number | null;

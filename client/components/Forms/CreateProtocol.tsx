@@ -13,13 +13,23 @@ import {
   ChevronDown,
   ChevronUp,
   Eye,
-  Calendar,
+  Plus,
+  Copy,
+  Calculator,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormProtocolDropdown } from "@/components/ui/form-protocol-dropdown";
+import { FormProtocolMultiSelect } from "@/components/ui/form-protocol-multiselect";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { chemotherapyApi, MedicineOption, RegimenProtocolDilutionInput, DischargeInstructionInput } from "@/api/chemotherapy.api";
-import { format, addDays, parseISO, isValid } from "date-fns";
+import { DoseCalculationModal } from "@/components/chemo/DoseCalculationModal";
+import {
+  inferDosingBasisForMedicine,
+  convertUnit,
+  convertMassToVolume,
+  getRecommendedUnitsForDoseCalc,
+  calculatePatientDoseFromTemplate,
+} from "@/utils/chemoCalculations";
 
 // Styling tokens - merged from the mFOLFOX6 "Protocol Builder" mockup:
 // soft grey canvas, white cards with hairline borders, muted uppercase grid
@@ -30,10 +40,10 @@ const inputCls =
 const labelCls = "block text-[12.5px] font-semibold text-[#5b6b7c] mb-[7px]";
 const Req = () => <span className="text-[#c0374a] ml-0.5">*</span>;
 
-const ptGridWrap = "overflow-x-auto w-full px-5 pt-4";
-const ptGridBox = "min-w-[900px] border border-[#edf1f5] rounded-xl bg-white";
+const ptGridWrap = "overflow-x-auto w-full px-5 pt-4 scrollbar-hide";
+const ptGridBox = "min-w-[1300px] border border-[#edf1f5] rounded-xl bg-white";
 const ptGridHead =
-  "grid items-center gap-2.5 px-4 py-3 bg-[#f7f9fb] border-b border-[#edf1f5] text-[10.5px] font-bold uppercase tracking-[0.05em] text-[#8a97a6]";
+  "grid items-center gap-2.5 px-4 py-3 bg-[#f7f9fb] border-b border-[#edf1f5] text-[10.5px] font-bold uppercase tracking-[0.05em] text-[#8a97a6] whitespace-nowrap";
 const ptGridRow =
   "grid items-center gap-2.5 px-4 py-3 border-b border-[#edf1f5] last:border-0 hover:bg-[#f8f9fb] transition-colors";
 const ptInput =
@@ -60,11 +70,11 @@ function ProtocolGridTable({
 }) {
   return (
     <>
-      <div className={ptGridWrap}>
+      <div className={ptGridWrap} style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
         <div className={boxClassName}>
           <div className={ptGridHead} style={{ gridTemplateColumns: template }}>
             {columns.map((c, i) => (
-              <div key={i} className={i === 0 ? "text-center" : ""}>
+              <div key={i} className={`${i === 0 ? "text-center" : ""} whitespace-nowrap`}>
                 {c}
               </div>
             ))}
@@ -94,6 +104,7 @@ interface DilutionDetail {
   dilutionId: string;
   id: string;
   medication: string;
+  brandName?: string;
   form: string;
   dose: string;
   unit: string;
@@ -111,6 +122,7 @@ const isLegacyDilution = (item: any) =>
 interface Premed {
   id: string;
   medication: string;
+  brandName?: string;
   dose: string;
   unit: string;
   adminNotes: string;
@@ -120,6 +132,7 @@ interface Premed {
 interface ChemoPlan {
   id: string;
   medication: string;
+  brandName?: string;
   doseCalc: string;
   dose: string;
   unit: string;
@@ -133,6 +146,7 @@ interface ChemoPlan {
 interface SupportiveCare {
   id: string;
   medication: string;
+  brandName?: string;
   adminNotes: string;
   remarks: string;
   dilutions?: DilutionDetail[];
@@ -141,17 +155,59 @@ interface PostTreatment {
   id: string;
   form: string;
   medication: string;
+  brandName?: string;
   dose: string;
   unit: string;
   frequency: string;
   instructions: string;
   duration: string;
+  durationDays?: string;
   remarks: string;
 }
 
+const getDurationUnitCode = (unit?: string | null): string => {
+  if (!unit) return "D";
+  const u = unit.trim().toLowerCase();
+  if (u === "d" || u === "day" || u === "days" || u === "day's") return "D";
+  if (u === "wk" || u === "wks" || u === "week" || u === "weeks" || u === "week's") return "Wk";
+  if (u === "mo" || u === "mos" || u === "month" || u === "months" || u === "month's") return "Mo";
+  return unit;
+};
 
+const getDurationUnitOptions = (
+  durationValue: string | number | undefined | null,
+  currentUnit?: string | null
+) => {
+  const num = parseInt(String(durationValue ?? "").trim(), 10);
+  const isSingular = num === 1;
+  const options = [
+    { value: "D", label: isSingular ? "Day" : "Days" },
+    { value: "Wk", label: isSingular ? "Week" : "Weeks" },
+    { value: "Mo", label: isSingular ? "Month" : "Months" },
+  ];
+  const unit = currentUnit?.trim();
+  if (unit) {
+    const code = getDurationUnitCode(unit);
+    if (!options.some((o) => o.value === code)) {
+      options.push({ value: unit, label: unit });
+    }
+  }
+  return options;
+};
 
-const DOSE_CALC_OPTIONS = ["BSA", "IBW", "BMI", "AUC 1.5", "AUC 2", "AUC 5", "KG", "Fixed Dose"];
+const DOSE_CALC_OPTIONS = [
+  "BSA (mg/m²)",
+  "Weight (mg/kg)",
+  "AUC (Calvert)",
+  "Fixed Dose",
+  "BSA",
+  "IBW",
+  "BMI",
+  "AUC 1.5",
+  "AUC 2",
+  "AUC 5",
+  "KG",
+];
 
 export default function CreateProtocol() {
   const navigate = useNavigate();
@@ -164,24 +220,36 @@ export default function CreateProtocol() {
   const isCreateMode = !protocolId && !isViewMode && !isEditMode;
   const disabled = isViewMode;
 
+  // Calculation Modal State
+  const [calcModalOpen, setCalcModalOpen] = useState(false);
+  const [calcTargetRow, setCalcTargetRow] = useState<{
+    index: number;
+    drug: string;
+    dose: string;
+    doseCalc: string;
+  } | null>(null);
+
   // --- Protocol header fields --- regimen_code = Regime_name, regimen_name = Protocol Title (original_protocol)
   const [regimenCode, setRegimenCode] = useState("");
   const [regimenName, setRegimenName] = useState("");
-  const [cancerTypeId, setCancerTypeId] = useState("");
-  const [subtypeId, setSubtypeId] = useState("");
+  const [cancerTypeIds, setCancerTypeIds] = useState<string[]>([]);
+  const [subtypeIds, setSubtypeIds] = useState<string[]>([]);
+  const [loadingSubtypes, setLoadingSubtypes] = useState(false);
+  const [treatmentIntent, setTreatmentIntent] = useState("");
+  const [treatmentIntentOptions, setTreatmentIntentOptions] = useState<string[]>([]);
+  const [loadingTreatmentIntents, setLoadingTreatmentIntents] = useState(false);
   
   const [standardCycles, setStandardCycles] = useState<number>(6);
   const [cycleIntervalDays, setCycleIntervalDays] = useState<number>(21);
-  const [scheduleDate, setScheduleDate] = useState("");
   const [notes, setNotes] = useState("");
-  const [days, setDays] = useState<Array<{ dayNumber: number; date: string; protocolDayId?: string }>>([{ dayNumber: 1, date: "" }]);
+  const [days, setDays] = useState<Array<{ dayNumber: number; protocolDayId?: string; sameAsDay?: number }>>([{ dayNumber: 1 }]);
   const [activeDay, setActiveDay] = useState(1);
 
-  const emptyPremed = (): Premed => ({ id: "", medication: "", dose: "", unit: "", adminNotes: "", remarks: "", dilutions: [] });
-    const emptyChemo = (): ChemoPlan => ({ id: "", medication: "", doseCalc: "", dose: "", unit: "", patientDose: "", patientUnit: "", adminNotes: "", toxicity: "", remarks: "", dilutions: [] });
-    const emptySupportive = (): SupportiveCare => ({ id: "", medication: "", adminNotes: "", remarks: "", dilutions: [] });
-    const emptyDilution = (): DilutionDetail => ({ dilutionId: "", id: "", medication: "", form: "", dose: "", unit: "", volume: "", volumeUnit: "", diluent: "" });
-    const emptyPost = (): PostTreatment => ({ id: "", form: "", medication: "", dose: "", unit: "", frequency: "", instructions: "", duration: "", remarks: "" });
+  const emptyPremed = (): Premed => ({ id: "", medication: "", brandName: "", dose: "", unit: "", adminNotes: "", remarks: "", dilutions: [] });
+  const emptyChemo = (): ChemoPlan => ({ id: "", medication: "", brandName: "", doseCalc: "", dose: "", unit: "", patientDose: "", patientUnit: "", adminNotes: "", toxicity: "", remarks: "", dilutions: [] });
+  const emptySupportive = (): SupportiveCare => ({ id: "", medication: "", brandName: "", adminNotes: "", remarks: "", dilutions: [] });
+    const emptyDilution = (): DilutionDetail => ({ dilutionId: "", id: "", medication: "", brandName: "", form: "", dose: "", unit: "", volume: "", volumeUnit: "", diluent: "" });
+    const emptyPost = (): PostTreatment => ({ id: "", form: "", medication: "", brandName: "", dose: "", unit: "", frequency: "", instructions: "", duration: "", durationDays: "D", remarks: "" });
 
     // Per-day maps for protocol items (each day owns its own rows; preserves
     // administration_day per item so repeated edits never re-stamp items onto
@@ -189,33 +257,42 @@ export default function CreateProtocol() {
     const [premedsByDay, setPremedsByDay] = useState<Record<number, Premed[]>>({ 1: [emptyPremed()] });
     const [chemoPlansByDay, setChemoPlansByDay] = useState<Record<number, ChemoPlan[]>>({ 1: [emptyChemo()] });
     const [supportiveByDay, setSupportiveByDay] = useState<Record<number, SupportiveCare[]>>({ 1: [emptySupportive()] });
-    const [dilutionByDay, setDilutionByDay] = useState<Record<number, DilutionDetail[]>>({ 1: [emptyDilution()] });
-    const [postByDay, setPostByDay] = useState<Record<number, PostTreatment[]>>({ 1: [emptyPost()] });
+    const [dilution, setDilution] = useState<DilutionDetail[]>([emptyDilution()]);
+    const [post, setPost] = useState<PostTreatment[]>([emptyPost()]);
 
-  // Active-day views + setters - the existing table JSX and row handlers keep
-  // operating on `premeds`/`chemoPlans`/`supportive`/`dilution`, which now
-  // resolve to the currently-selected day's rows.
+  // Active-day views + setters - Pre-medications, Primary Chemo, and Supportive
+  // Care are partitioned per day. Dilution Details and Post-treatment (On Discharge)
+  // medications are protocol-level (not tied to any administration day).
   const premeds = premedsByDay[activeDay] ?? [];
   const setPremeds = (list: Premed[]) => setPremedsByDay((prev) => ({ ...prev, [activeDay]: list }));
   const chemoPlans = chemoPlansByDay[activeDay] ?? [];
   const setChemoPlans = (list: ChemoPlan[]) => setChemoPlansByDay((prev) => ({ ...prev, [activeDay]: list }));
   const supportive = supportiveByDay[activeDay] ?? [];
-    const setSupportive = (list: SupportiveCare[]) => setSupportiveByDay((prev) => ({ ...prev, [activeDay]: list }));
-    const dilution = dilutionByDay[activeDay] ?? [];
-    const setDilution = (list: DilutionDetail[]) => setDilutionByDay((prev) => ({ ...prev, [activeDay]: list }));
-    const post = postByDay[activeDay] ?? [];
-    const setPost = (list: PostTreatment[]) => setPostByDay((prev) => ({ ...prev, [activeDay]: list }));
+  const setSupportive = (list: SupportiveCare[]) => setSupportiveByDay((prev) => ({ ...prev, [activeDay]: list }));
 
   const [cancerTypes, setCancerTypes] = useState<Array<{ cancer_type_id: string; cancer_type: string }>>([]);
   const [subtypes, setSubtypes] = useState<Array<{ subtype_id: string; subtype_name: string }>>([]);
+  const [filterByCancerAndSubtype, setFilterByCancerAndSubtype] = useState(true);
+  const [allHospitalMeds, setAllHospitalMeds] = useState<MedicineOption[]>([]);
+  const [loadingAllMeds, setLoadingAllMeds] = useState(false);
   const [premedMeds, setPremedMeds] = useState<MedicineOption[]>([]);
   const [chemoMeds, setChemoMeds] = useState<MedicineOption[]>([]);
   const [supportiveMeds, setSupportiveMeds] = useState<MedicineOption[]>([]);
+  const [dischargeMeds, setDischargeMeds] = useState<MedicineOption[]>([]);
   const [dilutionMeds, setDilutionMeds] = useState<MedicineOption[]>([]);
   const [loadingPremedMeds, setLoadingPremedMeds] = useState(false);
   const [loadingChemoMeds, setLoadingChemoMeds] = useState(false);
   const [loadingSupportiveMeds, setLoadingSupportiveMeds] = useState(false);
+  const [loadingDischargeMeds, setLoadingDischargeMeds] = useState(false);
   const [loadingDilutionMeds, setLoadingDilutionMeds] = useState(false);
+
+  const getDropdownOptions = (meds: MedicineOption[], selectedVal?: string, brandVal?: string) => {
+    const opts = meds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }));
+    if (selectedVal && !opts.some((o) => o.value === selectedVal)) {
+      opts.unshift({ label: brandVal || selectedVal, value: selectedVal });
+    }
+    return opts;
+  };
   const [fieldOptions, setFieldOptions] = useState<{
     dosage_units: string[];
     dilution_forms: string[];
@@ -255,40 +332,8 @@ export default function CreateProtocol() {
       .finally(() => setLoadingCancerTypes(false));
   }, []);
 
-  // Fetch medicines once on mount. PREMEDICATION and PRIMARY (chemo plan)
-  // dropdowns use ALL active medicines; SUPPORTIVE uses only medicines that
-  // appear as SUPPORTIVE drugs in existing protocols; DILUTION uses only
-  // medicines referenced in the dilution table.
+  // Fetch dilution medicines once on mount - NOT filtered by cancer types.
   useEffect(() => {
-    setLoadingPremedMeds(true);
-    setLoadingChemoMeds(true);
-    chemotherapyApi
-      .listMedicines()
-      .then((res) => {
-        const data = (res.data as any)?.data ?? res.data;
-        const list: MedicineOption[] = Array.isArray(data) ? data : [];
-        setPremedMeds(list);
-        setChemoMeds(list);
-      })
-      .catch(() => {
-        setPremedMeds([]);
-        setChemoMeds([]);
-      })
-      .finally(() => {
-        setLoadingPremedMeds(false);
-        setLoadingChemoMeds(false);
-      });
-
-    setLoadingSupportiveMeds(true);
-    chemotherapyApi
-      .listMedicinesByRole("SUPPORTIVE")
-      .then((res) => {
-        const data = (res.data as any)?.data ?? res.data;
-        setSupportiveMeds(Array.isArray(data) ? data : []);
-      })
-      .catch(() => setSupportiveMeds([]))
-      .finally(() => setLoadingSupportiveMeds(false));
-
     setLoadingDilutionMeds(true);
     chemotherapyApi
       .listDilutionMedicines()
@@ -298,12 +343,12 @@ export default function CreateProtocol() {
       })
       .catch(() => setDilutionMeds([]))
       .finally(() => setLoadingDilutionMeds(false));
-
   }, []);
 
   // Fetch distinct option values (FORM / DOSE UNIT / VOLUME UNIT / dosage
-  // unit) from the backend for the protocol-builder dropdowns.
+  // unit / treatment intents) from the backend for the protocol-builder dropdowns.
   useEffect(() => {
+    setLoadingTreatmentIntents(true);
     chemotherapyApi
       .getProtocolFieldOptions()
       .then((res) => {
@@ -315,31 +360,142 @@ export default function CreateProtocol() {
           dilution_volume_units: Array.isArray(data?.dilution_volume_units) ? data.dilution_volume_units : [],
           diluents: Array.isArray(data?.diluents) ? data.diluents : [],
         });
+        if (Array.isArray(data?.treatment_intents) && data.treatment_intents.length > 0) {
+          setTreatmentIntentOptions(data.treatment_intents);
+        } else {
+          chemotherapyApi
+            .listTreatmentIntents()
+            .then((r) => {
+              const intents = (r.data as any)?.data ?? r.data;
+              if (Array.isArray(intents)) setTreatmentIntentOptions(intents);
+            })
+            .catch(() => {});
+        }
       })
-      .catch(() => setFieldOptions({ dosage_units: [], dilution_forms: [], dilution_dose_units: [], dilution_volume_units: [], diluents: [] }));
+      .catch(() => {
+        setFieldOptions({ dosage_units: [], dilution_forms: [], dilution_dose_units: [], dilution_volume_units: [], diluents: [] });
+        chemotherapyApi
+          .listTreatmentIntents()
+          .then((r) => {
+            const intents = (r.data as any)?.data ?? r.data;
+            if (Array.isArray(intents)) setTreatmentIntentOptions(intents);
+          })
+          .catch(() => {});
+      })
+      .finally(() => setLoadingTreatmentIntents(false));
   }, []);
 
-  // Fetch subtypes when cancer type changes - don't clear subtypeId during edit/view initial load
+  // Fetch subtypes for all selected cancer types. Subtypes belonging to
+  // unselected cancer types are excluded. Prunes any selected subtypeIds
+  // that no longer belong to the active cancer types.
   useEffect(() => {
-    if (!cancerTypeId) {
+    if (!cancerTypeIds || cancerTypeIds.length === 0) {
       setSubtypes([]);
+      setSubtypeIds([]);
       return;
     }
+    setLoadingSubtypes(true);
+    Promise.all(
+      cancerTypeIds.map((typeId) =>
+        chemotherapyApi
+          .listCancerSubtypes(typeId)
+          .then((res) => {
+            const data = (res.data as any)?.data ?? res.data;
+            return Array.isArray(data) ? data : [];
+          })
+          .catch(() => [])
+      )
+    )
+      .then((results) => {
+        const flattened = results.flat();
+        const seen = new Map<string, any>();
+        for (const s of flattened) {
+          if (!seen.has(s.subtype_id)) seen.set(s.subtype_id, s);
+        }
+        const combined = Array.from(seen.values());
+        setSubtypes(combined);
+        setSubtypeIds((prev) => prev.filter((id) => combined.some((s) => s.subtype_id === id)));
+      })
+      .finally(() => setLoadingSubtypes(false));
+  }, [cancerTypeIds]);
+
+  // Fetch all hospital medicines on demand when filter is disabled
+  useEffect(() => {
+    if (!filterByCancerAndSubtype && allHospitalMeds.length === 0) {
+      setLoadingAllMeds(true);
+      chemotherapyApi
+        .listMedicines()
+        .then((res) => {
+          const data = (res.data as any)?.data ?? res.data;
+          setAllHospitalMeds(Array.isArray(data) ? data : []);
+        })
+        .catch(() => setAllHospitalMeds([]))
+        .finally(() => setLoadingAllMeds(false));
+    }
+  }, [filterByCancerAndSubtype, allHospitalMeds.length]);
+
+  // Fetch medicines dynamically based on selected cancer types & subtypes for
+  // PREMEDICATION, PRIMARY (chemo), SUPPORTIVE, and DISCHARGE (post-treatment).
+  useEffect(() => {
+    if (!filterByCancerAndSubtype) {
+      if (allHospitalMeds.length > 0) {
+        setPremedMeds(allHospitalMeds);
+        setChemoMeds(allHospitalMeds);
+        setSupportiveMeds(allHospitalMeds);
+        setDischargeMeds(allHospitalMeds);
+      }
+      return;
+    }
+
+    if (!cancerTypeIds || cancerTypeIds.length === 0) {
+      setPremedMeds([]);
+      setChemoMeds([]);
+      setSupportiveMeds([]);
+      setDischargeMeds([]);
+      return;
+    }
+
+    setLoadingPremedMeds(true);
     chemotherapyApi
-      .listCancerSubtypes(cancerTypeId)
+      .listMedicinesByCancerSubtype(cancerTypeIds, subtypeIds, "PREMEDICATION")
       .then((res) => {
         const data = (res.data as any)?.data ?? res.data;
-        if (Array.isArray(data)) setSubtypes(data);
+        setPremedMeds(Array.isArray(data) ? data : []);
       })
-      .catch(() => setSubtypes([]));
-  }, [cancerTypeId]);
+      .catch(() => setPremedMeds([]))
+      .finally(() => setLoadingPremedMeds(false));
 
-  // Keep scheduleDate synced with Day 1
-  useEffect(() => {
-    if (scheduleDate) {
-      setDays((prev) => prev.map((d, i) => (i === 0 ? { ...d, date: scheduleDate } : d)));
-    }
-  }, [scheduleDate]);
+    setLoadingChemoMeds(true);
+    chemotherapyApi
+      .listMedicinesByCancerSubtype(cancerTypeIds, subtypeIds, "PRIMARY")
+      .then((res) => {
+        const data = (res.data as any)?.data ?? res.data;
+        setChemoMeds(Array.isArray(data) ? data : []);
+      })
+      .catch(() => setChemoMeds([]))
+      .finally(() => setLoadingChemoMeds(false));
+
+    setLoadingSupportiveMeds(true);
+    chemotherapyApi
+      .listMedicinesByCancerSubtype(cancerTypeIds, subtypeIds, "SUPPORTIVE")
+      .then((res) => {
+        const data = (res.data as any)?.data ?? res.data;
+        setSupportiveMeds(Array.isArray(data) ? data : []);
+      })
+      .catch(() => setSupportiveMeds([]))
+      .finally(() => setLoadingSupportiveMeds(false));
+
+    setLoadingDischargeMeds(true);
+    chemotherapyApi
+      .listMedicinesByCancerSubtype(cancerTypeIds, subtypeIds, "DISCHARGE")
+      .then((res) => {
+        const data = (res.data as any)?.data ?? res.data;
+        setDischargeMeds(Array.isArray(data) ? data : []);
+      })
+      .catch(() => setDischargeMeds([]))
+      .finally(() => setLoadingDischargeMeds(false));
+
+  }, [cancerTypeIds, subtypeIds, filterByCancerAndSubtype, allHospitalMeds]);
 
   // Load existing protocol for edit/view
   useEffect(() => {
@@ -352,8 +508,28 @@ export default function CreateProtocol() {
         if (!p) return;
         setRegimenCode(p.regimen_code ?? "");
         setRegimenName(p.regimen_name ?? (p as any).original_protocol ?? "");
-        setCancerTypeId(p.cancer_type_id ?? "");
-        setSubtypeId(p.subtype_id ?? "");
+        if (p.treatment_intent) {
+          setTreatmentIntent(p.treatment_intent);
+          setTreatmentIntentOptions((prev) =>
+            prev.includes(p.treatment_intent) ? prev : [p.treatment_intent, ...prev]
+          );
+        } else {
+          setTreatmentIntent("");
+        }
+        const loadedCancerTypeIds = Array.isArray(p.cancer_type_ids) && p.cancer_type_ids.length > 0
+          ? p.cancer_type_ids
+          : Array.isArray(p.chemotherapy_protocol_cancers) && p.chemotherapy_protocol_cancers.length > 0
+            ? Array.from(new Set(p.chemotherapy_protocol_cancers.map((c: any) => c.cancer_type_id).filter(Boolean)))
+            : (p.cancer_type_id ? [p.cancer_type_id] : []);
+
+        const loadedSubtypeIds = Array.isArray(p.subtype_ids) && p.subtype_ids.length > 0
+          ? p.subtype_ids
+          : Array.isArray(p.chemotherapy_protocol_cancers) && p.chemotherapy_protocol_cancers.length > 0
+            ? Array.from(new Set(p.chemotherapy_protocol_cancers.map((c: any) => c.subtype_id).filter(Boolean)))
+            : (p.subtype_id ? [p.subtype_id] : []);
+
+        setCancerTypeIds(loadedCancerTypeIds);
+        setSubtypeIds(loadedSubtypeIds);
         setStandardCycles(p.standard_cycles ?? 6);
         setCycleIntervalDays(p.cycle_interval_days ?? p.no_of_days ?? 21);
         setNotes(p.notes ?? (p as any).guideline_source ?? "");
@@ -361,30 +537,28 @@ export default function CreateProtocol() {
         const items: any[] = p.chemotherapy_regimen_protocol_items ?? [];
         const protocolDilutions: any[] = p.protocol_dilutions ?? [];
         const protocolDischarge: any[] = p.protocol_discharge_instructions ?? p.chemotherapy_discharge_instructions ?? [];
+        const uniqueDayNumbers = Array.from(
+          new Set(
+            dbDays
+              .map((d: any) => d.day_number)
+              .filter((n: any) => typeof n === "number" && n >= 1)
+          )
+        ).sort((a: number, b: number) => a - b);
         const maxAdminDay = items.reduce((m: number, x: any) => Math.max(m, x.administration_day ?? 1), 1);
-        const maxDilutionDay = Math.max(
-          1,
-          ...protocolDilutions.map((d: any) => d.administration_day ?? 1),
-          ...items.flatMap((x: any) => (x.chemotherapy_protocol_dilutions ?? []).map((d: any) => d.administration_day ?? x.administration_day ?? 1)),
+        const numDaysFromDb = Math.max(
+          p.no_of_days ?? 1,
+          uniqueDayNumbers.length > 0 ? Math.max(...uniqueDayNumbers) : 1
         );
-        const maxDischargeDay = Math.max(1, ...protocolDischarge.map((d: any) => d.administration_day ?? 1));
-        const dayCount = Math.max(1, Math.min(
-          Math.max(p.no_of_days ?? 1, dbDays.length, maxAdminDay, maxDilutionDay, maxDischargeDay),
-          30,
-        ));
-        const baseDateStr = p.created_at ? format(new Date(p.created_at), "yyyy-MM-dd") : "";
+        const dayCount = Math.max(1, Math.min(Math.max(numDaysFromDb, maxAdminDay), 30));
         const loadedDays = Array.from({ length: dayCount }, (_, i) => {
-          let d = "";
-          if (baseDateStr) {
-            try {
-              d = format(addDays(parseISO(baseDateStr), i), "yyyy-MM-dd");
-            } catch {}
-          }
           const dbDay = dbDays.find((x: any) => x.day_number === i + 1);
-          return { dayNumber: i + 1, date: d, protocolDayId: dbDay?.protocol_day_id ?? "" };
+          return {
+            dayNumber: i + 1,
+            protocolDayId: dbDay?.protocol_day_id ?? "",
+            sameAsDay: dbDay?.same_as_day_one ? 1 : undefined,
+          };
         });
         setDays(loadedDays);
-        if (loadedDays[0]?.date) setScheduleDate(loadedDays[0].date);
         loadedItemIdsRef.current = items.filter((x: any) => x.protocol_item_id).map((x: any) => x.protocol_item_id as string);
         if (items.length || protocolDilutions.length || protocolDischarge.length) {
                   const dayOf = (x: any) => Math.min(x.administration_day ?? 1, dayCount);
@@ -398,6 +572,7 @@ export default function CreateProtocol() {
                       (premedsM[dayIndex] = premedsM[dayIndex] ?? []).push({
                         id: (x.protocol_item_id as string) ?? "",
                         medication: x.medicine_id ?? x.medicine_master?.medicine_name ?? "",
+                        brandName: x.drug_brand_name ?? "",
                         dose: (x.patient_dose as any) ?? "",
                         unit: x.patient_dose_unit ?? "",
                         adminNotes: x.administration_detail ?? "",
@@ -419,6 +594,7 @@ export default function CreateProtocol() {
                       (chemoM[dayIndex] = chemoM[dayIndex] ?? []).push({
                         id: (x.protocol_item_id as string) ?? "",
                         medication: x.medicine_id ?? "",
+                        brandName: x.drug_brand_name ?? "",
                         doseCalc: (x as any).dose_calculation_method ?? "",
                         dose: (x.dosage as any) ?? "",
                         unit: x.dosage_unit ?? "",
@@ -445,6 +621,7 @@ export default function CreateProtocol() {
                         (suppM[dayIndex] = suppM[dayIndex] ?? []).push({
                           id: (x.protocol_item_id as string) ?? "",
                           medication: x.medicine_id ?? "",
+                          brandName: x.drug_brand_name ?? "",
                           adminNotes: x.administration_detail ?? "",
                           remarks: x.remarks ?? "",
                           dilutions: xs.map((d) => ({
@@ -466,6 +643,7 @@ export default function CreateProtocol() {
                         (suppM[dayIndex] = suppM[dayIndex] ?? []).push({
                           id: (x.protocol_item_id as string) ?? "",
                           medication: x.medicine_id ?? "",
+                          brandName: x.drug_brand_name ?? "",
                           adminNotes: x.administration_detail ?? "",
                           remarks: x.remarks ?? "",
                           dilutions: [{
@@ -484,6 +662,7 @@ export default function CreateProtocol() {
                         (suppM[dayIndex] = suppM[dayIndex] ?? []).push({
                           id: (x.protocol_item_id as string) ?? "",
                           medication: x.medicine_id ?? "",
+                          brandName: x.drug_brand_name ?? "",
                           adminNotes: x.administration_detail ?? "",
                           remarks: x.remarks ?? "",
                           dilutions: [],
@@ -497,66 +676,82 @@ export default function CreateProtocol() {
                   // switch still carry them as POSTMEDICATION items - fall back to
                   // those so nothing disappears on edit.
                   const dischargeRows: any[] = protocolDischarge;
-                  const postM: Record<number, PostTreatment[]> = {};
+                  const loadedPost: PostTreatment[] = [];
                   if (dischargeRows.length) {
                     for (const d of dischargeRows) {
-                      const dayIndex = Math.min(d.administration_day ?? 1, dayCount);
-                      (postM[dayIndex] = postM[dayIndex] ?? []).push({
+                      loadedPost.push({
                         id: (d.discharge_instruction_id as string) ?? "",
                         form: d.drug_from ?? "Tab",
                         medication: d.medicine_id ?? "",
+                        brandName: d.drug_brand_name ?? "",
                         dose: d.patient_dose != null ? String(d.patient_dose) : "",
                         unit: d.patient_dose_unit ?? "",
                         frequency: d.frequency ?? "",
                         instructions: d.administration_detail ?? "",
-                        duration: d.duration ?? "",
+                        duration: d.duration != null ? String(d.duration) : "",
+                        durationDays: d.duration_days != null ? getDurationUnitCode(String(d.duration_days)) : "D",
                         remarks: d.comment ?? "",
                       });
                     }
                   } else {
                     for (const x of items.filter((x: any) => x.drug_role === "POSTMEDICATION")) {
-                      const dayIndex = Math.min(x.administration_day ?? 1, dayCount);
-                      (postM[dayIndex] = postM[dayIndex] ?? []).push({
+                      loadedPost.push({
                         id: (x.protocol_item_id as string) ?? "",
                         form: "Tab",
                         medication: x.medicine_id ?? "",
+                        brandName: x.drug_brand_name ?? "",
                         dose: (x.dosage as any) ?? "",
                         unit: x.dosage_unit ?? "",
                         frequency: x.frequency ?? "",
                         instructions: x.administration_detail ?? "",
                         duration: x.administration_day != null ? "Day " + x.administration_day : "",
+                        durationDays: "D",
                         remarks: typeof x.remarks === "string" ? x.remarks : "",
                       });
                     }
                   }
+
                   const protoDils: any[] = protocolDilutions;
+                  const loadedDilutions: DilutionDetail[] = [];
                   if (protoDils.length) {
-                    // Legacy protocol-level dilutions (not attached to items) - attach to supportive care for now
                     for (const d of protoDils) {
-                      const dilutionDay = Math.min(d.administration_day ?? 1, dayCount);
-                      (suppM[dilutionDay] = suppM[dilutionDay] ?? []).push({
+                      loadedDilutions.push({
+                        dilutionId: (d.protocol_dilution_id as string) ?? "",
                         id: (d.protocol_item_id as string) ?? "",
                         medication: d.medicine_id ?? "",
-                        adminNotes: "",
-                        remarks: "",
-                        dilutions: [{
+                        brandName: d.drug_brand_name ?? "",
+                        form: d.form ?? "",
+                        dose: d.dose != null ? String(d.dose) : "",
+                        unit: d.dose_unit ?? "",
+                        volume: d.dilution_volume != null ? String(d.dilution_volume) : "",
+                        volumeUnit: d.dilution_volume_unit ?? "",
+                        diluent: d.diluent ?? "",
+                      });
+                    }
+                  } else {
+                    for (const x of items) {
+                      for (const d of (x.chemotherapy_protocol_dilutions ?? [])) {
+                        loadedDilutions.push({
                           dilutionId: (d.protocol_dilution_id as string) ?? "",
                           id: (d.protocol_item_id as string) ?? "",
-                          medication: d.medicine_id ?? "",
+                          medication: d.medicine_id ?? x.medicine_id ?? "",
+                          brandName: d.drug_brand_name ?? "",
                           form: d.form ?? "",
                           dose: d.dose != null ? String(d.dose) : "",
                           unit: d.dose_unit ?? "",
                           volume: d.dilution_volume != null ? String(d.dilution_volume) : "",
                           volumeUnit: d.dilution_volume_unit ?? "",
                           diluent: d.diluent ?? "",
-                        }],
-                      });
+                        });
+                      }
                     }
                   }
+
                   setPremedsByDay(premedsM);
                   setChemoPlansByDay(chemoM);
                   setSupportiveByDay(suppM);
-                  if (Object.keys(postM).length) setPostByDay(postM);
+                  setDilution(loadedDilutions.length > 0 ? loadedDilutions : [emptyDilution()]);
+                  setPost(loadedPost.length > 0 ? loadedPost : [emptyPost()]);
                 }
       })
       .catch((e: any) => {
@@ -569,14 +764,14 @@ export default function CreateProtocol() {
     !disabled &&
     (regimenCode.trim() !== "" ||
       regimenName.trim() !== "" ||
-      cancerTypeId !== "" ||
+      cancerTypeIds.length > 0 ||
       notes.trim() !== "" ||
-      days.some((d) => d.date !== "") ||
+      days.length > 1 ||
       Object.values(premedsByDay).some((r) => r.some((rd) => rd.medication.trim() !== "")) ||
       Object.values(chemoPlansByDay).some((r) => r.some((rd) => rd.medication.trim() !== "")) ||
       Object.values(supportiveByDay).some((r) => r.some((rd) => rd.medication.trim() !== "")) ||
-      Object.values(dilutionByDay).some((r) => r.some((rd) => rd.medication.trim() !== "")) ||
-      Object.values(postByDay).some((r) => r.some((rd) => rd.medication.trim() !== "")));
+      dilution.some((r) => r.medication.trim() !== "") ||
+      post.some((r) => r.medication.trim() !== ""));
 
   const handleBack = () => {
     if (isDirty) setShowLeaveConfirm(true);
@@ -586,28 +781,58 @@ export default function CreateProtocol() {
   const handleAddDay = () => {
     if (disabled) return;
     const nextNum = days.length + 1;
-    let nextDate = "";
-    const base = days[0]?.date;
-    if (base && isValid(parseISO(base))) {
-      try {
-        nextDate = format(addDays(parseISO(base), nextNum - 1), "yyyy-MM-dd");
-      } catch {}
-    } else if (scheduleDate && isValid(parseISO(scheduleDate))) {
-      try {
-        nextDate = format(addDays(parseISO(scheduleDate), nextNum - 1), "yyyy-MM-dd");
-      } catch {}
-    }
-    setDays([...days, { dayNumber: nextNum, date: nextDate }]);
+    setDays([...days, { dayNumber: nextNum }]);
     setPremedsByDay((prev) => ({ ...prev, [nextNum]: [emptyPremed()] }));
     setChemoPlansByDay((prev) => ({ ...prev, [nextNum]: [emptyChemo()] }));
-      setSupportiveByDay((prev) => ({ ...prev, [nextNum]: [emptySupportive()] }));
-      setPostByDay((prev) => ({ ...prev, [nextNum]: [emptyPost()] }));
-      setActiveDay(nextNum);
+    setSupportiveByDay((prev) => ({ ...prev, [nextNum]: [emptySupportive()] }));
+    setActiveDay(nextNum);
   };
-  const handleDayDateChange = (dayNumber: number, newDate: string) => {
-    if (disabled) return;
-    setDays((prev) => prev.map((d) => (d.dayNumber === dayNumber ? { ...d, date: newDate } : d)));
-    if (dayNumber === 1) setScheduleDate(newDate);
+
+  const handleCopyFromDay = (sourceDay: number, targetDay: number) => {
+    if (disabled || sourceDay === targetDay) return;
+
+    const srcPremeds = premedsByDay[sourceDay] ?? [];
+    const clonedPremeds: Premed[] = srcPremeds.map((p) => ({
+      ...p,
+      id: "",
+      dilutions: (p.dilutions ?? []).map((d) => ({ ...d, dilutionId: "", id: "" })),
+    }));
+
+    const srcChemo = chemoPlansByDay[sourceDay] ?? [];
+    const clonedChemo: ChemoPlan[] = srcChemo.map((c) => ({
+      ...c,
+      id: "",
+      dilutions: (c.dilutions ?? []).map((d) => ({ ...d, dilutionId: "", id: "" })),
+    }));
+
+    const srcSupportive = supportiveByDay[sourceDay] ?? [];
+    const clonedSupportive: SupportiveCare[] = srcSupportive.map((s) => ({
+      ...s,
+      id: "",
+      dilutions: (s.dilutions ?? []).map((d) => ({ ...d, dilutionId: "", id: "" })),
+    }));
+
+    setPremedsByDay((prev) => ({
+      ...prev,
+      [targetDay]: clonedPremeds.length > 0 ? clonedPremeds : [emptyPremed()],
+    }));
+    setChemoPlansByDay((prev) => ({
+      ...prev,
+      [targetDay]: clonedChemo.length > 0 ? clonedChemo : [emptyChemo()],
+    }));
+    setSupportiveByDay((prev) => ({
+      ...prev,
+      [targetDay]: clonedSupportive.length > 0 ? clonedSupportive : [emptySupportive()],
+    }));
+
+    setDays((prev) =>
+      prev.map((d) => (d.dayNumber === targetDay ? { ...d, sameAsDay: sourceDay } : d))
+    );
+
+    toast({
+      title: "Medications Copied",
+      description: `Copied all medications from Day ${sourceDay} to Day ${targetDay}.`,
+    });
   };
   const handleRemoveDay = (dayNumber: number) => {
     if (disabled || days.length === 1) return;
@@ -618,9 +843,8 @@ export default function CreateProtocol() {
       Object.fromEntries(oldNumbers.map((old, i) => [i + 1, map[old] ?? []]));
     setPremedsByDay((prev) => shift(prev));
     setChemoPlansByDay((prev) => shift(prev));
-      setSupportiveByDay((prev) => shift(prev));
-      setPostByDay((prev) => shift(prev));
-      if (activeDay === dayNumber) setActiveDay(filtered[0].dayNumber);
+    setSupportiveByDay((prev) => shift(prev));
+    if (activeDay === dayNumber) setActiveDay(filtered[0].dayNumber);
     else if (activeDay > dayNumber) setActiveDay(activeDay - 1);
   };
 
@@ -640,6 +864,7 @@ export default function CreateProtocol() {
         patient_dose_unit?: string | null;
         administration_detail?: string | null;
         previous_toxicity?: string | null;
+        drug_brand_name?: string | null;
         administration_day?: number | null;
         dilutions?: RegimenProtocolDilutionInput[];
       }> = [];
@@ -651,6 +876,7 @@ export default function CreateProtocol() {
           items.push({
             protocol_item_id: row.id || undefined,
             medicine_id: row.medication.trim(),
+            drug_brand_name: row.brandName?.trim() || null,
             drug_role: "PREMEDICATION",
             drug_type: "PREMEDICATION",
             drug_sequence: seq++,
@@ -662,6 +888,7 @@ export default function CreateProtocol() {
             dilutions: (row.dilutions ?? []).map((d) => ({
               protocol_dilution_id: d.dilutionId || undefined,
               medicine_id: d.medication.trim(),
+              drug_brand_name: d.brandName?.trim() || null,
               form: d.form || null,
               dose: d.dose || null,
               dose_unit: d.unit || null,
@@ -677,6 +904,7 @@ export default function CreateProtocol() {
           items.push({
             protocol_item_id: row.id || undefined,
             medicine_id: row.medication.trim(),
+            drug_brand_name: row.brandName?.trim() || null,
             drug_role: "PRIMARY",
             drug_type: "PRIMARY",
             drug_sequence: seq++,
@@ -692,6 +920,7 @@ export default function CreateProtocol() {
             dilutions: (row.dilutions ?? []).map((d) => ({
               protocol_dilution_id: d.dilutionId || undefined,
               medicine_id: d.medication.trim(),
+              drug_brand_name: d.brandName?.trim() || null,
               form: d.form || null,
               dose: d.dose || null,
               dose_unit: d.unit || null,
@@ -707,6 +936,7 @@ export default function CreateProtocol() {
           items.push({
             protocol_item_id: row.id || undefined,
             medicine_id: row.medication.trim(),
+            drug_brand_name: row.brandName?.trim() || null,
             drug_role: "SUPPORTIVE",
             drug_type: "SUPPORTIVE",
             drug_sequence: seq++,
@@ -716,6 +946,7 @@ export default function CreateProtocol() {
             dilutions: (row.dilutions ?? []).map((d) => ({
               protocol_dilution_id: d.dilutionId || undefined,
               medicine_id: d.medication.trim(),
+              drug_brand_name: d.brandName?.trim() || null,
               form: d.form || null,
               dose: d.dose || null,
               dose_unit: d.unit || null,
@@ -734,28 +965,39 @@ export default function CreateProtocol() {
     };
 
   const buildDischargeInstructions = (): DischargeInstructionInput[] => {
-    const instructions: DischargeInstructionInput[] = [];
-    let seq = 1;
-    for (const day of days) {
-      const dayNum = day.dayNumber;
-      for (const row of postByDay[dayNum] ?? []) {
-        if (!row.medication.trim()) continue;
-        instructions.push({
-          discharge_instruction_id: row.id || undefined,
-          medicine_id: row.medication.trim(),
-          drug_sequence: seq++,
-          administration_day: dayNum,
-          drug_from: row.form || null,
-          frequency: row.frequency || null,
-          duration: row.duration || null,
-          patient_dose: row.dose ? Number(row.dose) : null,
-          patient_dose_unit: row.unit || null,
-          administration_detail: row.instructions || null,
-          comment: row.remarks || null,
-        });
-      }
-    }
-    return instructions;
+    return post
+      .filter((row) => row.medication?.trim())
+      .map((row, idx) => ({
+        discharge_instruction_id: row.id || undefined,
+        medicine_id: row.medication.trim(),
+        drug_brand_name: row.brandName?.trim() || null,
+        drug_sequence: idx + 1,
+        drug_from: row.form || null,
+        frequency: row.frequency || null,
+        duration: row.duration || null,
+        duration_days: getDurationUnitCode(row.durationDays) || "D",
+        patient_dose: row.dose ? Number(row.dose) : null,
+        patient_dose_unit: row.unit || null,
+        administration_detail: row.instructions || null,
+        comment: row.remarks || null,
+      }));
+  };
+
+  const buildDilutions = (): RegimenProtocolDilutionInput[] => {
+    return dilution
+      .filter((row) => row.medication?.trim())
+      .map((row) => ({
+        protocol_dilution_id: row.dilutionId || undefined,
+        medicine_id: row.medication.trim(),
+        drug_brand_name: row.brandName?.trim() || null,
+        form: row.form || null,
+        dose: row.dose || null,
+        dose_unit: row.unit || null,
+        dilution_volume: row.volume || null,
+        dilution_volume_unit: row.volumeUnit || null,
+        diluent: row.diluent || null,
+        comment: row.diluent || null,
+      }));
   };
 
   const handleSave = async () => {
@@ -767,8 +1009,8 @@ export default function CreateProtocol() {
       toast({ title: "Missing required field", description: "Protocol Title (Regimen Name / Original Protocol) is required.", variant: "destructive" });
       return;
     }
-    if (!cancerTypeId) {
-      toast({ title: "Missing required field", description: "Please select a cancer type.", variant: "destructive" });
+    if (cancerTypeIds.length === 0) {
+      toast({ title: "Missing required field", description: "Please select at least one cancer type.", variant: "destructive" });
       return;
     }
     const items = buildItems();
@@ -776,6 +1018,7 @@ export default function CreateProtocol() {
       toast({ title: "Missing drugs", description: "Add at least one drug with Medication filled.", variant: "destructive" });
       return;
     }
+    const dilutions = buildDilutions();
     const dischargeInstructions = buildDischargeInstructions();
     setIsSubmitting(true);
     try {
@@ -783,14 +1026,22 @@ export default function CreateProtocol() {
         regimen_name: regimenName.trim(),
         original_protocol: regimenName.trim(),
         ...(isEditMode ? { regimen_code: regimenCode.trim() } : {}),
-        cancer_type_id: cancerTypeId,
-        subtype_id: subtypeId || null,
+        cancer_type_id: cancerTypeIds[0] || null,
+        cancer_type_ids: cancerTypeIds,
+        subtype_id: subtypeIds[0] || null,
+        subtype_ids: subtypeIds,
+        treatment_intent: treatmentIntent.trim() || null,
         standard_cycles: standardCycles || null,
         cycle_interval_days: cycleIntervalDays || null,
         no_of_days: days.length,
-        days: days.map((d) => ({ protocol_day_id: d.protocolDayId || undefined, day_number: d.dayNumber })),
+        days: days.map((d) => ({
+          protocol_day_id: d.protocolDayId || undefined,
+          day_number: d.dayNumber,
+          same_as_day_one: d.sameAsDay === 1,
+        })),
         notes: notes || null,
         items,
+        dilutions,
         discharge_instructions: dischargeInstructions,
       };
       let res: any;
@@ -838,11 +1089,63 @@ export default function CreateProtocol() {
   const removeSupportive = (idx: number) => setSupportive(supportive.filter((_, i) => i !== idx));
   const addDilution = () => setDilution([...dilution, { dilutionId: "", id: "", medication: "", form: "", dose: "", unit: "", volume: "", volumeUnit: "", diluent: "" }]);
   const removeDilution = (idx: number) => setDilution(dilution.filter((_, i) => i !== idx));
-  const addPost = () => 
-    setPost([...post, { id: "", form: "", medication: "", dose: "", unit: "", frequency: "", instructions: "", duration: "", remarks: "" }]);
+  const addPost = () => setPost([...post, emptyPost()]);
   const removePost = (idx: number) => setPost(post.filter((_, i) => i !== idx));
 
-  const selectedCancerTypeName = cancerTypes.find((c) => c.cancer_type_id === cancerTypeId)?.cancer_type || "—";
+  const handleApplyDoseFromModal = (calcDose: string, calcUnit: string, doseCalcMethod: string) => {
+    if (calcTargetRow !== null && calcTargetRow.index >= 0) {
+      const idx = calcTargetRow.index;
+      const n = [...chemoPlans];
+      if (n[idx]) {
+        n[idx].patientDose = calcDose;
+        n[idx].patientUnit = calcUnit;
+        if (doseCalcMethod) {
+          n[idx].doseCalc = doseCalcMethod;
+        }
+        setChemoPlans(n);
+        toast({
+          title: "Calculated Dose Applied",
+          description: `Applied ${calcDose} ${calcUnit} to row #${idx + 1}.`,
+        });
+      }
+    }
+  };
+
+  const allAvailableDilutionMeds = (() => {
+    const map = new Map<string, string>();
+    for (const m of dilutionMeds) {
+      if (m?.medicine_id && m?.medicine_name) map.set(m.medicine_id, m.medicine_name);
+    }
+    for (const dayNum of Object.keys(premedsByDay)) {
+      for (const row of premedsByDay[Number(dayNum)] ?? []) {
+        if (row.id && row.medication) map.set(row.id, row.medication);
+      }
+    }
+    for (const dayNum of Object.keys(chemoPlansByDay)) {
+      for (const row of chemoPlansByDay[Number(dayNum)] ?? []) {
+        if (row.id && row.medication) map.set(row.id, row.medication);
+      }
+    }
+    for (const dayNum of Object.keys(supportiveByDay)) {
+      for (const row of supportiveByDay[Number(dayNum)] ?? []) {
+        if (row.id && row.medication) map.set(row.id, row.medication);
+      }
+    }
+    for (const m of chemoMeds) {
+      if (m?.medicine_id && m?.medicine_name && !map.has(m.medicine_id)) map.set(m.medicine_id, m.medicine_name);
+    }
+    for (const m of premedMeds) {
+      if (m?.medicine_id && m?.medicine_name && !map.has(m.medicine_id)) map.set(m.medicine_id, m.medicine_name);
+    }
+    return Array.from(map.entries())
+      .map(([value, label]) => ({ label, value }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  })();
+
+  const selectedCancerTypeName = cancerTypes
+    .filter((c) => cancerTypeIds.includes(c.cancer_type_id))
+    .map((c) => c.cancer_type)
+    .join(", ") || "—";
   const pageTitle = isViewMode ? "View Protocol" : isEditMode ? "Edit Protocol" : "Create Protocol";
   const pageSubtitle = isViewMode
     ? "View chemotherapy regimen details (read-only)."
@@ -880,25 +1183,39 @@ export default function CreateProtocol() {
               <p className="text-[#5b6b7c] text-[13.5px] mt-[5px] max-w-[46ch]">{pageSubtitle}</p>
             </div>
           </div>
-          <button
-            onClick={handleSave}
-            disabled={isSubmitting}
-            className="bg-[#12335c] text-white border-none rounded-xl px-[22px] py-3 text-[13.5px] font-semibold flex items-center gap-2 shadow-[0_1px_2px_rgba(18,51,92,0.15)] hover:bg-[#0e2848] transition-colors disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Saving...
-              </>
-            ) : isViewMode ? (
-              <>
-                <Eye className="h-4 w-4" /> {saveLabel}
-              </>
-            ) : (
-              <>
-                <Save className="h-4 w-4" /> {saveLabel}
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setCalcTargetRow(null);
+                setCalcModalOpen(true);
+              }}
+              className="bg-white border border-[#dde4ec] text-[#12335c] rounded-xl px-4 py-3 text-[13.5px] font-semibold flex items-center gap-2 shadow-xs hover:bg-[#f8fafc] hover:border-[#c7d2dd] transition-colors whitespace-nowrap"
+              title="Open Medicine Dosage Calculator & Clinical Reference Info"
+            >
+              <Calculator className="h-4 w-4 text-[#12335c]" />
+              <span>Calculation Info & Calculator</span>
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={isSubmitting}
+              className="bg-[#12335c] text-white border-none rounded-xl px-[22px] py-3 text-[13.5px] font-semibold flex items-center gap-2 shadow-[0_1px_2px_rgba(18,51,92,0.15)] hover:bg-[#0e2848] transition-colors disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Saving...
+                </>
+              ) : isViewMode ? (
+                <>
+                  <Eye className="h-4 w-4" /> {saveLabel}
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4" /> {saveLabel}
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Info Bar - dynamic */}
@@ -941,23 +1258,52 @@ export default function CreateProtocol() {
             <div className={cardCls + " mb-5"}>
               <div className="px-[26px] py-6 w-full">
                 <div className="border-b border-[#edf1f5] pb-5 mb-[22px] w-full">
-                  <div className="flex items-center justify-between mb-2">
-                    <label className={labelCls + " mb-0"}>Protocol Days</label>
-                    {!disabled && <span className="text-[11px] text-[#8a97a6]">{days.length} day(s) — Day 1 date drives subsequent days</span>}
+                  <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <label className={labelCls + " mb-0"}>Protocol Days</label>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#f1f5f9] text-[#64748b]">
+                        {days.length} day{days.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    {activeDay > 1 && days.length > 1 && !disabled && (
+                      <div className="flex items-center gap-2 bg-[#f8fafc] border border-[#dde4ec] rounded-lg px-2.5 py-1">
+                        <Copy className="w-3.5 h-3.5 text-[#12335c]" />
+                        <span className="text-xs font-semibold text-[#5b6b7c]">Same as:</span>
+                        <select
+                          value={days.find((d) => d.dayNumber === activeDay)?.sameAsDay ?? ""}
+                          onChange={(e) => {
+                            const src = Number(e.target.value);
+                            if (src) handleCopyFromDay(src, activeDay);
+                          }}
+                          className="text-xs bg-white border border-[#c7d2dd] rounded-md px-2 py-0.5 text-[#12335c] font-semibold focus:outline-none focus:ring-1 focus:ring-[#12335c] cursor-pointer"
+                        >
+                          <option value="" disabled>Select day...</option>
+                          {days
+                            .filter((d) => d.dayNumber !== activeDay)
+                            .map((d) => (
+                              <option key={d.dayNumber} value={d.dayNumber}>
+                                Day {d.dayNumber}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-stretch gap-3 flex-wrap">
+                  <div className="flex items-center gap-2.5 flex-wrap">
                     {days.map((d) => {
                       const isActive = d.dayNumber === activeDay;
-                      const hasDate = d.date && isValid(parseISO(d.date));
                       return (
-                        <div key={d.dayNumber} className="relative group flex flex-col">
+                        <div key={d.dayNumber} className="relative group">
                           {days.length > 1 && !disabled && (
                             <button
                               type="button"
-                              onClick={() => handleRemoveDay(d.dayNumber)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveDay(d.dayNumber);
+                              }}
                               title={`Remove Day ${d.dayNumber}`}
                               aria-label={`Remove Day ${d.dayNumber}`}
-                              className="absolute -top-2 -right-2 z-10 w-5 h-5 rounded-full bg-white border border-[#e3e8ee] shadow-sm flex items-center justify-center text-[#c0374a] text-[13px] leading-none opacity-0 group-hover:opacity-100 hover:bg-[#c0374a] hover:border-[#c0374a] hover:text-white hover:scale-110 transition-all duration-150"
+                              className="absolute -top-1.5 -right-1.5 z-10 w-4 h-4 rounded-full bg-white border border-[#e3e8ee] shadow-xs flex items-center justify-center text-[#c0374a] text-[11px] leading-none opacity-0 group-hover:opacity-100 hover:bg-[#c0374a] hover:border-[#c0374a] hover:text-white hover:scale-110 transition-all duration-150"
                             >
                               ×
                             </button>
@@ -965,26 +1311,27 @@ export default function CreateProtocol() {
                           <button
                             type="button"
                             onClick={() => setActiveDay(d.dayNumber)}
-                            className={`w-[118px] flex flex-col items-center px-3 pt-2.5 pb-2 rounded-xl border transition-all duration-200 ${isActive ? "border-[#12335c] bg-gradient-to-b from-[#1c4a80] to-[#12335c] shadow-md shadow-[#12335c]/25" : "border-[#e3e8ee] bg-white hover:border-[#9db4cc] hover:shadow-sm hover:-translate-y-0.5"}`}
+                            className={`w-[74px] h-[44px] flex flex-col items-center justify-center rounded-xl border transition-all duration-200 ${
+                              isActive
+                                ? "border-[#12335c] bg-gradient-to-b from-[#1c4a80] to-[#12335c] text-white shadow-sm shadow-[#12335c]/25"
+                                : "border-[#e3e8ee] bg-white text-[#1b2530] hover:border-[#9db4cc] hover:bg-[#f8fafc] hover:-translate-y-0.5"
+                            }`}
                           >
-                            <span className={`text-[9px] font-bold uppercase tracking-[0.18em] leading-none ${isActive ? "text-blue-100/80" : "text-[#8a97a6]"}`}>
+                            <span
+                              className={`text-[9px] font-bold uppercase tracking-[0.14em] leading-none ${
+                                isActive ? "text-blue-100/80" : "text-[#8a97a6]"
+                              }`}
+                            >
                               Day
                             </span>
-                            <span className={`mt-1 text-[20px] font-extrabold leading-none ${isActive ? "text-white" : "text-[#1b2530]"}`}>
+                            <span
+                              className={`mt-0.5 text-[17px] font-extrabold leading-tight ${
+                                isActive ? "text-white" : "text-[#1b2530]"
+                              }`}
+                            >
                               {d.dayNumber}
                             </span>
-                            <span className={`mt-1.5 text-[10px] font-semibold leading-none ${hasDate ? (isActive ? "text-blue-100" : "text-[#5b6b7c]") : "text-[#b6c0cb] italic font-normal"}`}>
-                              {hasDate ? format(parseISO(d.date), "dd MMM yyyy") : "no date"}
-                            </span>
                           </button>
-                          <input
-                            type="date"
-                            value={d.date}
-                            onChange={(e) => handleDayDateChange(d.dayNumber, e.target.value)}
-                            disabled={disabled}
-                            title={`Day ${d.dayNumber} date`}
-                            className={`w-[118px] h-7 mt-1.5 px-1.5 text-[11px] rounded-lg border text-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[#12335c]/15 focus:border-[#12335c] ${isActive ? "border-[#12335c]/50 bg-[#f2f6fb] text-[#12335c] font-semibold" : "border-[#e3e8ee] bg-white text-[#5b6b7c] hover:border-[#9db4cc]"} disabled:bg-gray-50 disabled:text-gray-400`}
-                          />
                         </div>
                       );
                     })}
@@ -992,15 +1339,14 @@ export default function CreateProtocol() {
                       <button
                         type="button"
                         onClick={handleAddDay}
-                        className="w-[118px] rounded-xl border border-dashed border-[#9db4cc] text-[#12335c] bg-[#f8fafc] hover:bg-[#eef2f6] hover:border-[#12335c] transition-all duration-200 flex flex-col items-center justify-center gap-1"
+                        className="h-[44px] px-3.5 rounded-xl border border-dashed border-[#9db4cc] text-[#12335c] bg-[#f8fafc] hover:bg-[#eef2f6] hover:border-[#12335c] transition-all duration-200 flex items-center justify-center gap-1.5 font-bold text-xs"
+                        title="Add next protocol day"
                       >
-                        <Calendar className="w-4 h-4" />
-                        <span className="text-xs font-bold">Add Day</span>
-                        <span className="text-[10px] text-[#8a97a6] leading-none">auto-fills date</span>
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add Day</span>
                       </button>
                     )}
                   </div>
-                  <p className="text-[11px] text-[#8a97a6] mt-2">Day 1 empty → new days start empty. If Day 1 has a date, Add Day auto-fills as Day 1 + (n-1) days (tomorrow, etc.). Edit any day’s calendar to override.</p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 w-full">
                   <div className="lg:col-span-1">
@@ -1035,25 +1381,38 @@ export default function CreateProtocol() {
                   )}
                   <div>
                     <label className={labelCls}>
-                      Cancer Type <Req />
+                      Cancer Type(s) <Req />
                     </label>
-                    <FormProtocolDropdown
+                    <FormProtocolMultiSelect
                       options={cancerTypes.map((c) => ({ label: c.cancer_type, value: c.cancer_type_id }))}
-                      value={cancerTypeId}
-                      onValueChange={setCancerTypeId}
-                      placeholder={loadingCancerTypes ? "Loading..." : "Select cancer type"}
+                      values={cancerTypeIds}
+                      onValuesChange={setCancerTypeIds}
+                      placeholder={loadingCancerTypes ? "Loading..." : "Select cancer type(s)"}
                       disabled={disabled || loadingCancerTypes}
                     />
                   </div>
                   <div>
-                    <label className={labelCls}>Cancer Subtype</label>
-                    <FormProtocolDropdown
+                    <label className={labelCls}>Cancer Subtype(s)</label>
+                    <FormProtocolMultiSelect
                       options={subtypes.map((s) => ({ label: s.subtype_name, value: s.subtype_id }))}
-                      value={subtypeId}
-                      onValueChange={setSubtypeId}
-                      placeholder={!cancerTypeId ? "Select cancer type first" : subtypes.length ? "Select subtype" : "No subtypes"}
-                      disabled={disabled || !cancerTypeId || subtypes.length === 0}
+                      values={subtypeIds}
+                      onValuesChange={setSubtypeIds}
+                      placeholder={cancerTypeIds.length === 0 ? "Select cancer type(s) first" : loadingSubtypes ? "Loading subtypes..." : subtypes.length ? "Select subtype(s)" : "No subtypes"}
+                      disabled={disabled || cancerTypeIds.length === 0 || loadingSubtypes || subtypes.length === 0}
                     />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Treatment Plan</label>
+                    <FormProtocolDropdown
+                      options={treatmentIntentOptions.map((t) => ({ label: t, value: t }))}
+                      value={treatmentIntent}
+                      onValueChange={setTreatmentIntent}
+                      placeholder={loadingTreatmentIntents ? "Loading..." : "Select treatment plan"}
+                      emptyMessage="No treatment plans found"
+                      disabled={disabled}
+                      loading={loadingTreatmentIntents}
+                    />
+                    <p className="text-[11px] text-[#8a97a6] mt-1">DB: treatment_intent</p>
                   </div>
                   <div>
                     <label className={labelCls}>Standard Cycles</label>
@@ -1099,10 +1458,6 @@ export default function CreateProtocol() {
                       </button>
                     </div>
                   </div>
-                  <div>
-                    <label className={labelCls}>Schedule Date (Day 1) {days[0]?.date && isValid(parseISO(days[0].date)) ? <span className="text-[#8a97a6] font-normal">— {format(parseISO(days[0].date), "dd-MM-yyyy")}</span> : null}</label>
-                    <input type="date" value={days[0]?.date || scheduleDate} onChange={(e) => handleDayDateChange(1, e.target.value)} className={inputCls} disabled={disabled} />
-                  </div>
                   <div className="lg:col-span-3">
                     <label className={labelCls}>Notes / Guideline Source</label>
                     <input
@@ -1113,6 +1468,42 @@ export default function CreateProtocol() {
                       placeholder="e.g. NCCN 2024, optional"
                       disabled={disabled}
                     />
+                  </div>
+
+                  <div className="lg:col-span-3 flex flex-wrap items-center justify-between gap-2 pt-3 mt-1 border-t border-[#edf1f5] text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-[#5b6b7c]">Medicine Dropdowns:</span>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold ${
+                        filterByCancerAndSubtype
+                          ? "bg-[#eaf0f7] text-[#12335c] border border-[#d2dfef]"
+                          : "bg-[#fef3c7] text-[#92400e] border border-[#fde68a]"
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${filterByCancerAndSubtype ? "bg-[#12335c]" : "bg-[#d97706]"}`} />
+                        {filterByCancerAndSubtype
+                          ? subtypeIds.length > 0
+                            ? `Strictly filtered by Subtype (${subtypes.filter(s => subtypeIds.includes(s.subtype_id)).map(s => s.subtype_name).join(", ")})`
+                            : cancerTypeIds.length > 0
+                            ? `Filtered by Cancer Type (${cancerTypes.filter(c => cancerTypeIds.includes(c.cancer_type_id)).map(c => c.cancer_type).join(", ") || "Selected"})`
+                            : "Select cancer type & subtype to filter medicines"
+                          : `Showing ALL hospital medicines (${allHospitalMeds.length || "inventory"})`}
+                      </span>
+                    </div>
+                    {cancerTypeIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => !disabled && setFilterByCancerAndSubtype(!filterByCancerAndSubtype)}
+                        disabled={disabled || loadingAllMeds}
+                        className="text-xs font-medium text-[#12335c] hover:underline"
+                      >
+                        {loadingAllMeds ? (
+                          <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Loading all medicines...</span>
+                        ) : filterByCancerAndSubtype ? (
+                          "Need an uncatalogued drug? Show all hospital medicines"
+                        ) : (
+                          "← Switch back to strictly filtered cancer/subtype medicines"
+                        )}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1144,19 +1535,23 @@ export default function CreateProtocol() {
                   <div className="text-sm font-bold text-[#1b2530]">{selectedCancerTypeName}</div>
                 </div>
                 <div className="py-4 border-b border-[#e3e8ee]">
+                  <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">TREATMENT PLAN</div>
+                  <div className="text-sm font-bold text-[#1b2530] truncate">{treatmentIntent || "—"}</div>
+                </div>
+                <div className="py-4 border-b border-[#e3e8ee]">
                   <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">CYCLE SCHEDULE</div>
                   <div className="text-sm font-bold text-[#1b2530]">
                     {standardCycles} cycle{standardCycles !== 1 ? "s" : ""} × {cycleIntervalDays} days
                   </div>
                 </div>
                 <div className="py-4 border-b border-[#e3e8ee]">
-                  <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">SCHEDULE DATE</div>
-                  <div className="text-sm font-bold text-[#1b2530]">{(days[0]?.date || scheduleDate) ? format(parseISO(days[0]?.date || scheduleDate), "dd-MM-yyyy") : "—"}</div>
+                  <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">PROTOCOL DAYS</div>
+                  <div className="text-sm font-bold text-[#1b2530]">{days.length} day{days.length !== 1 ? "s" : ""}</div>
                 </div>
                 <div className="py-4">
                   <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">TOTAL DRUGS</div>
                   <div className="text-sm font-bold text-[#1b2530]">
-                    {[...premeds, ...chemoPlans, ...supportive, ...dilution, ...post, ...days.flatMap((d) => (d.dayNumber === activeDay ? [] : [...(premedsByDay[d.dayNumber] ?? []), ...(chemoPlansByDay[d.dayNumber] ?? []), ...(supportiveByDay[d.dayNumber] ?? []), ...(dilutionByDay[d.dayNumber] ?? []), ...(postByDay[d.dayNumber] ?? [])]))].filter((r: any) => (r.medication || r.item)?.trim()).length} item(s)
+                    {[...premeds, ...chemoPlans, ...supportive, ...dilution, ...post, ...days.flatMap((d) => (d.dayNumber === activeDay ? [] : [...(premedsByDay[d.dayNumber] ?? []), ...(chemoPlansByDay[d.dayNumber] ?? []), ...(supportiveByDay[d.dayNumber] ?? [])]))].filter((r: any) => (r.medication || r.item)?.trim()).length} item(s)
                   </div>
                 </div>
               </div>
@@ -1178,8 +1573,8 @@ export default function CreateProtocol() {
               {sections.premeds && (
                 <>
                   <ProtocolGridTable
-                    columns={["#", "MEDICATION / DRUG *", "DOSE", "UNIT", "ADMIN NOTES", "REMARKS", "ACTIONS"]}
-                    template="44px 2fr 1fr 100px 1.5fr 1.5fr 40px"
+                    columns={["#", "MEDICATION / DRUG *", "BRAND", "DOSE", "UNIT", "ADMIN NOTES", "REMARKS", "ACTIONS"]}
+                    template="44px 1.5fr 1.2fr 1fr 140px 1.5fr 1.5fr 40px"
                     addLabel="+ Add Row"
                     onAdd={addPremed}
                     disabled={disabled}
@@ -1187,18 +1582,43 @@ export default function CreateProtocol() {
                       idx + 1,
                       <FormProtocolDropdown
                         key="m"
-                        options={premedMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
+                        options={getDropdownOptions(premedMeds, row.medication, row.brandName)}
                         value={row.medication}
                         onValueChange={(v) => {
                           const n = [...premeds];
                           n[idx].medication = v;
                           setPremeds(n);
                         }}
-                        placeholder={loadingPremedMeds ? "Loading medicines..." : "Select medicine"}
-                        emptyMessage="No medicines found"
+                        placeholder={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : loadingPremedMeds
+                            ? "Loading medicines..."
+                            : "Select medicine"
+                        }
+                        emptyMessage={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : subtypeIds.length > 0 && filterByCancerAndSubtype
+                            ? "No premedications found for selected subtype"
+                            : "No premedications found"
+                        }
                         loading={loadingPremedMeds}
-                        disabled={disabled}
+                        disabled={disabled || cancerTypeIds.length === 0}
                         className="h-8"
+                      />,
+                      <input
+                        key="b"
+                        type="text"
+                        value={row.brandName ?? ""}
+                        onChange={(e) => {
+                          const n = [...premeds];
+                          n[idx].brandName = e.target.value;
+                          setPremeds(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Brand name"
+                        disabled={disabled}
                       />,
                       <input
                         key="d"
@@ -1269,20 +1689,40 @@ export default function CreateProtocol() {
 
             {/* Chemotherapy plan */}
             <div className={cardCls + " mb-5"}>
-              <div
-                className="flex items-center justify-between px-6 py-[17px] cursor-pointer hover:bg-[#f8f9fb] transition-colors"
-                onClick={() => toggleSection("chemo")}
-              >
-                <div className="flex items-center gap-2.5 text-[13.5px] font-bold text-[#17212e]">
+              <div className="flex items-center justify-between px-6 py-[17px] hover:bg-[#f8f9fb] transition-colors">
+                <div
+                  className="flex items-center gap-2.5 text-[13.5px] font-bold text-[#17212e] cursor-pointer flex-1"
+                  onClick={() => toggleSection("chemo")}
+                >
                   <Syringe className="w-4 h-4 text-[#12335c]" /> Chemotherapy Plan
                 </div>
-                {sections.chemo ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCalcTargetRow(null);
+                      setCalcModalOpen(true);
+                    }}
+                    className="text-xs font-semibold text-[#12335c] bg-[#eaf0f7] hover:bg-[#dbe7f4] px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors"
+                    title="Open Medicine Dosage Calculator & Formulas Reference"
+                  >
+                    <Calculator className="w-3.5 h-3.5" />
+                    <span>Formulas & Dose Calculator</span>
+                  </button>
+                  <div
+                    className="cursor-pointer p-1"
+                    onClick={() => toggleSection("chemo")}
+                  >
+                    {sections.chemo ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
+                  </div>
+                </div>
               </div>
               {sections.chemo && (
                 <>
                   <ProtocolGridTable
-                    columns={["#", "MEDICATION *", "DOSE CALC", "DOSE", "UNIT", "PATIENT DOSE", "UNIT", "ADMIN NOTES", "TOXICITY", "REMARKS", "ACTIONS"]}
-                    template="44px 1.8fr 1.1fr 1fr 0.8fr 1fr 0.7fr 1.4fr 1.3fr 1.3fr 40px"
+                    columns={["#", "MEDICATION *", "BRAND", "DOSE CALC", "DOSE", "UNIT", "PATIENT DOSE", "UNIT", "ADMIN NOTES", "TOXICITY", "REMARKS", "ACTIONS"]}
+                    template="44px 1.8fr 1.2fr 1.1fr 0.7fr 1.2fr 0.7fr 1.0fr 1.4fr 0.9fr 0.9fr 68px"
                     addLabel="+ Add Row"
                     onAdd={addChemoPlan}
                     disabled={disabled}
@@ -1290,18 +1730,50 @@ export default function CreateProtocol() {
                       idx + 1,
                       <FormProtocolDropdown
                         key="m"
-                        options={chemoMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
+                        options={getDropdownOptions(chemoMeds, row.medication, row.brandName)}
                         value={row.medication}
                         onValueChange={(v) => {
                           const n = [...chemoPlans];
                           n[idx].medication = v;
+                          const medObj = chemoMeds.find((m) => m.medicine_id === v);
+                          if (medObj && !n[idx].doseCalc) {
+                            const inferred = inferDosingBasisForMedicine(medObj.medicine_name);
+                            if (inferred === "AUC") n[idx].doseCalc = "AUC (Calvert)";
+                            else if (inferred === "Weight") n[idx].doseCalc = "Weight (mg/kg)";
+                            else n[idx].doseCalc = "BSA (mg/m²)";
+                          }
                           setChemoPlans(n);
                         }}
-                        placeholder={loadingChemoMeds ? "Loading medicines..." : "Select medicine"}
-                        emptyMessage="No medicines found"
+                        placeholder={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : loadingChemoMeds
+                            ? "Loading medicines..."
+                            : "Select medicine"
+                        }
+                        emptyMessage={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : subtypeIds.length > 0 && filterByCancerAndSubtype
+                            ? "No chemo medicines found for selected subtype"
+                            : "No chemo medicines found"
+                        }
                         loading={loadingChemoMeds}
-                        disabled={disabled}
+                        disabled={disabled || cancerTypeIds.length === 0}
                         className="h-8"
+                      />,
+                      <input
+                        key="b"
+                        type="text"
+                        value={row.brandName ?? ""}
+                        onChange={(e) => {
+                          const n = [...chemoPlans];
+                          n[idx].brandName = e.target.value;
+                          setChemoPlans(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Brand name"
+                        disabled={disabled}
                       />,
                       <FormProtocolDropdown
                         key="dc"
@@ -1310,6 +1782,20 @@ export default function CreateProtocol() {
                         onValueChange={(v) => {
                           const n = [...chemoPlans];
                           n[idx].doseCalc = v;
+                          const recommended = getRecommendedUnitsForDoseCalc(v);
+                          if (!n[idx].unit || v) {
+                            n[idx].unit = recommended.unit;
+                          }
+                          if (!n[idx].patientUnit || v) {
+                            n[idx].patientUnit = recommended.patientUnit;
+                          }
+                          const numDose = parseFloat(n[idx].dose);
+                          if (!isNaN(numDose) && numDose > 0) {
+                            const calcPatientDose = calculatePatientDoseFromTemplate(numDose, v);
+                            if (calcPatientDose != null) {
+                              n[idx].patientDose = String(calcPatientDose);
+                            }
+                          }
                           setChemoPlans(n);
                         }}
                         placeholder="Select dose calc"
@@ -1321,21 +1807,39 @@ export default function CreateProtocol() {
                         type="text"
                         value={row.dose}
                         onChange={(e) => {
+                          const val = e.target.value;
                           const n = [...chemoPlans];
-                          n[idx].dose = e.target.value;
+                          n[idx].dose = val;
+                          const numDose = parseFloat(val);
+                          if (!isNaN(numDose) && numDose > 0 && n[idx].doseCalc) {
+                            const calcPatientDose = calculatePatientDoseFromTemplate(numDose, n[idx].doseCalc);
+                            if (calcPatientDose != null) {
+                              n[idx].patientDose = String(calcPatientDose);
+                            }
+                          } else if (!val.trim()) {
+                            n[idx].patientDose = "";
+                          }
                           setChemoPlans(n);
                         }}
                         className={ptInput}
-                        placeholder="80 mg/m²"
+                        placeholder="8"
                         disabled={disabled}
                       />,
                       <FormProtocolDropdown
                         key="u"
-                        options={Array.from(new Set([...fieldOptions.dosage_units, row.unit].filter(Boolean)))}
+                        options={Array.from(new Set([...fieldOptions.dosage_units, row.unit, "mg/m²", "mg/kg", "AUC", "mg", "g", "mcg"].filter(Boolean)))}
                         value={row.unit}
                         onValueChange={(v) => {
                           const n = [...chemoPlans];
+                          const oldUnit = n[idx].unit;
                           n[idx].unit = v;
+                          const numDose = parseFloat(n[idx].dose);
+                          if (!isNaN(numDose) && numDose > 0 && oldUnit && oldUnit !== v) {
+                            const converted = convertUnit(numDose, oldUnit, v);
+                            if (converted != null) {
+                              n[idx].dose = String(converted);
+                            }
+                          }
                           setChemoPlans(n);
                         }}
                         placeholder="Select unit"
@@ -1353,7 +1857,7 @@ export default function CreateProtocol() {
                           setChemoPlans(n);
                         }}
                         className={ptInput}
-                        placeholder="Patient dose"
+                        placeholder="8"
                         disabled={disabled}
                       />,
                       <input
@@ -1361,8 +1865,17 @@ export default function CreateProtocol() {
                         type="text"
                         value={row.patientUnit}
                         onChange={(e) => {
+                          const val = e.target.value;
                           const n = [...chemoPlans];
-                          n[idx].patientUnit = e.target.value;
+                          const oldUnit = n[idx].patientUnit;
+                          n[idx].patientUnit = val;
+                          const numPatientDose = parseFloat(n[idx].patientDose);
+                          if (!isNaN(numPatientDose) && numPatientDose > 0 && oldUnit && oldUnit !== val) {
+                            const converted = convertUnit(numPatientDose, oldUnit, val);
+                            if (converted != null) {
+                              n[idx].patientDose = String(converted);
+                            }
+                          }
                           setChemoPlans(n);
                         }}
                         className={ptInput}
@@ -1408,14 +1921,34 @@ export default function CreateProtocol() {
                         placeholder="Remarks"
                         disabled={disabled}
                       />,
-                      <button
-                        key="del"
-                        onClick={() => removeChemoPlan(idx)}
-                        disabled={disabled}
-                        className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6b7280] hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>,
+                      <div key="act" className="flex items-center justify-center gap-1">
+                        <button
+                          key="calc"
+                          type="button"
+                          onClick={() => {
+                            const selectedMed = chemoMeds.find((m) => m.medicine_id === row.medication)?.medicine_name || row.medication;
+                            setCalcTargetRow({
+                              index: idx,
+                              drug: selectedMed || row.brandName || "",
+                              dose: row.dose || "",
+                              doseCalc: row.doseCalc || "",
+                            });
+                            setCalcModalOpen(true);
+                          }}
+                          title="Calculate Dose (BSA / Weight / Calvert AUC)"
+                          className="p-1.5 rounded-lg hover:bg-[#eaf0f7] text-[#12335c] hover:text-[#0e2848] transition-colors"
+                        >
+                          <Calculator className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          key="del"
+                          onClick={() => removeChemoPlan(idx)}
+                          disabled={disabled}
+                          className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6b7280] hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>,
                     ])}
                   />
                 </>
@@ -1436,8 +1969,8 @@ export default function CreateProtocol() {
               {sections.supportive && (
                 <>
                   <ProtocolGridTable
-                    columns={["#", "SUPPORTIVE MEDICINE *", "ADMIN NOTES", "REMARKS", "ACTIONS"]}
-                    template="44px 2fr 1.5fr 1.5fr 40px"
+                    columns={["#", "SUPPORTIVE MEDICINE *", "BRAND", "ADMIN NOTES", "REMARKS", "ACTIONS"]}
+                    template="44px 2fr 1.2fr 1.5fr 1.5fr 40px"
                     addLabel="+ Add Row"
                     onAdd={addSupportive}
                     disabled={disabled}
@@ -1445,18 +1978,43 @@ export default function CreateProtocol() {
                       idx + 1,
                       <FormProtocolDropdown
                         key="m"
-                        options={supportiveMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
+                        options={getDropdownOptions(supportiveMeds, row.medication, row.brandName)}
                         value={row.medication}
                         onValueChange={(v) => {
                           const n = [...supportive];
                           n[idx].medication = v;
                           setSupportive(n);
                         }}
-                        placeholder={loadingSupportiveMeds ? "Loading medicines..." : "Select medicine"}
-                        emptyMessage="No supportive medicines found"
+                        placeholder={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : loadingSupportiveMeds
+                            ? "Loading medicines..."
+                            : "Select medicine"
+                        }
+                        emptyMessage={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : subtypeIds.length > 0 && filterByCancerAndSubtype
+                            ? "No supportive medicines found for selected subtype"
+                            : "No supportive medicines found"
+                        }
                         loading={loadingSupportiveMeds}
-                        disabled={disabled}
+                        disabled={disabled || cancerTypeIds.length === 0}
                         className="h-8"
+                      />,
+                      <input
+                        key="b"
+                        type="text"
+                        value={row.brandName ?? ""}
+                        onChange={(e) => {
+                          const n = [...supportive];
+                          n[idx].brandName = e.target.value;
+                          setSupportive(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Brand name"
+                        disabled={disabled}
                       />,
                       <input
                         key="an"
@@ -1467,7 +2025,7 @@ export default function CreateProtocol() {
                           n[idx].adminNotes = e.target.value;
                           setSupportive(n);
                         }}
-                        className={`${ptInput} col-span-2`}
+                        className={ptInput}
                         placeholder="Enter notes"
                         disabled={disabled}
                       />,
@@ -1512,8 +2070,8 @@ export default function CreateProtocol() {
               {sections.dilution && (
                 <>
                   <ProtocolGridTable
-                    columns={["#", "MEDICATION", "FORM", "DOSE", "DOSE UNIT", "DILUTION VOLUME", "VOLUME UNIT", "DILUENT", "ACTIONS"]}
-                    template="44px 1.8fr 1.1fr 0.8fr 1.1fr 1fr 1.1fr 1.5fr 40px"
+                    columns={["#", "MEDICATION", "BRAND", "FORM", "DOSE", "DOSE UNIT", "DILUTION VOLUME", "VOLUME UNIT", "DILUENT", "ACTIONS"]}
+                    template="44px 1.8fr 1.2fr 1.1fr 0.8fr 1.1fr 1fr 1.1fr 1.5fr 40px"
                     addLabel="+ Add Row"
                     onAdd={addDilution}
                     disabled={disabled}
@@ -1521,7 +2079,7 @@ export default function CreateProtocol() {
                       idx + 1,
                       <FormProtocolDropdown
                         key="m"
-                        options={dilutionMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
+                        options={allAvailableDilutionMeds}
                         value={row.medication}
                         onValueChange={(v) => {
                           const n = [...dilution];
@@ -1529,10 +2087,23 @@ export default function CreateProtocol() {
                           setDilution(n);
                         }}
                         placeholder={loadingDilutionMeds ? "Loading medicines..." : "Select medicine"}
-                        emptyMessage="No dilution medicines found"
+                        emptyMessage="No medicines found"
                         loading={loadingDilutionMeds}
                         disabled={disabled}
                         className="h-8"
+                      />,
+                      <input
+                        key="b"
+                        type="text"
+                        value={row.brandName ?? ""}
+                        onChange={(e) => {
+                          const n = [...dilution];
+                          n[idx].brandName = e.target.value;
+                          setDilution(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Brand"
+                        disabled={disabled}
                       />,
                       <FormProtocolDropdown
                         key="f"
@@ -1553,8 +2124,17 @@ export default function CreateProtocol() {
                         type="text"
                         value={row.dose}
                         onChange={(e) => {
+                          const val = e.target.value;
                           const n = [...dilution];
-                          n[idx].dose = e.target.value;
+                          n[idx].dose = val;
+                          const numDose = parseFloat(val);
+                          if (!isNaN(numDose) && numDose > 0 && n[idx].unit) {
+                            const vol = convertMassToVolume(numDose, n[idx].unit, n[idx].volumeUnit || "CC");
+                            if (vol != null) {
+                              n[idx].volume = String(vol);
+                              if (!n[idx].volumeUnit) n[idx].volumeUnit = "CC";
+                            }
+                          }
                           setDilution(n);
                         }}
                         className={ptInput}
@@ -1563,11 +2143,27 @@ export default function CreateProtocol() {
                       />,
                       <FormProtocolDropdown
                         key="du"
-                        options={fieldOptions.dilution_dose_units}
+                        options={Array.from(new Set([...fieldOptions.dilution_dose_units, row.unit, "mg", "g", "mcg", "kg"].filter(Boolean)))}
                         value={row.unit}
                         onValueChange={(v) => {
                           const n = [...dilution];
+                          const oldUnit = n[idx].unit;
                           n[idx].unit = v;
+                          const numDose = parseFloat(n[idx].dose);
+                          if (!isNaN(numDose) && numDose > 0) {
+                            if (oldUnit && oldUnit !== v) {
+                              const convertedDose = convertUnit(numDose, oldUnit, v);
+                              if (convertedDose != null) {
+                                n[idx].dose = String(convertedDose);
+                              }
+                            }
+                            const currentDose = parseFloat(n[idx].dose) || numDose;
+                            const vol = convertMassToVolume(currentDose, v, n[idx].volumeUnit || "CC");
+                            if (vol != null) {
+                              n[idx].volume = String(vol);
+                              if (!n[idx].volumeUnit) n[idx].volumeUnit = "CC";
+                            }
+                          }
                           setDilution(n);
                         }}
                         placeholder="Select unit"
@@ -1590,11 +2186,19 @@ export default function CreateProtocol() {
                       />,
                       <FormProtocolDropdown
                         key="vu"
-                        options={fieldOptions.dilution_volume_units}
+                        options={Array.from(new Set([...fieldOptions.dilution_volume_units, row.volumeUnit, "CC", "mL", "L"].filter(Boolean)))}
                         value={row.volumeUnit}
                         onValueChange={(v) => {
                           const n = [...dilution];
+                          const oldVolUnit = n[idx].volumeUnit;
                           n[idx].volumeUnit = v;
+                          const numVol = parseFloat(n[idx].volume);
+                          if (!isNaN(numVol) && numVol > 0 && oldVolUnit && oldVolUnit !== v) {
+                            const convertedVol = convertUnit(numVol, oldVolUnit, v);
+                            if (convertedVol != null) {
+                              n[idx].volume = String(convertedVol);
+                            }
+                          }
                           setDilution(n);
                         }}
                         placeholder="Select unit"
@@ -1644,14 +2248,16 @@ export default function CreateProtocol() {
               {sections.post && (
                 <>
                   <ProtocolGridTable
-                    columns={["#", "FORM", "MEDICATION", "DOSE", "UNIT", "FREQUENCY", "INSTRUCTIONS", "DURATION", "REMARKS", "ACTIONS"]}
-                    template="44px 0.9fr 1.8fr 1fr 0.8fr 1.1fr 1.4fr 1.1fr 1.4fr 40px"
+                    columns={["#", "FORM", "MEDICATION", "BRAND", "DOSE", "UNIT", "FREQUENCY", "INSTRUCTIONS", "DURATION", "DAYS", "REMARKS", "ACTIONS"]}
+                    template="44px 85px 200px 130px 75px 70px 105px 140px 75px 120px 120px 60px"
                     addLabel="+ Add Row"
                     onAdd={addPost}
                     disabled={disabled}
                     addClassName="text-[#c0374a] hover:bg-[#fbecef]"
-                    rows={post.map((row, idx) => [
-                      idx + 1,
+                    rows={post.map((row, idx) => {
+                      const isDurationFilledWithNumber = /^\d+(\.\d+)?$/.test(String(row.duration ?? "").trim());
+                      return [
+                        idx + 1,
                       <input
                         key="f"
                         type="text"
@@ -1667,18 +2273,43 @@ export default function CreateProtocol() {
                       />,
                       <FormProtocolDropdown
                         key="m"
-                        options={premedMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
+                        options={getDropdownOptions(dischargeMeds.length > 0 ? dischargeMeds : premedMeds, row.medication, row.brandName)}
                         value={row.medication}
                         onValueChange={(v) => {
                           const n = [...post];
                           n[idx].medication = v;
                           setPost(n);
                         }}
-                        placeholder={loadingPremedMeds ? "Loading medicines..." : "Select medicine"}
-                        emptyMessage="No medicines found"
-                        loading={loadingPremedMeds}
-                        disabled={disabled}
+                        placeholder={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : loadingDischargeMeds
+                            ? "Loading medicines..."
+                            : "Select medicine"
+                        }
+                        emptyMessage={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : subtypeIds.length > 0 && filterByCancerAndSubtype
+                            ? "No discharge medicines found for selected subtype"
+                            : "No discharge medicines found"
+                        }
+                        loading={loadingDischargeMeds}
+                        disabled={disabled || cancerTypeIds.length === 0}
                         className="h-8"
+                      />,
+                      <input
+                        key="b"
+                        type="text"
+                        value={row.brandName ?? ""}
+                        onChange={(e) => {
+                          const n = [...post];
+                          n[idx].brandName = e.target.value;
+                          setPost(n);
+                        }}
+                        className={ptInput}
+                        placeholder="Brand"
+                        disabled={disabled}
                       />,
                       <input
                         key="d"
@@ -1728,23 +2359,36 @@ export default function CreateProtocol() {
                           n[idx].instructions = e.target.value;
                           setPost(n);
                         }}
-                        className={`${ptInput} col-span-2`}
+                        className={ptInput}
                         placeholder="Enter notes"
                         disabled={disabled}
                       />,
                       <input
-                        key="r"
+                        key="dur"
                         type="text"
-                        value={row.remarks}
+                        value={row.duration}
                         onChange={(e) => {
-                          const n = [...premeds];
-                          n[idx].remarks = e.target.value;
-                          setPremeds(n);
+                          const n = [...post];
+                          n[idx].duration = e.target.value;
+                          setPost(n);
                         }}
                         className={ptInput}
-                        placeholder="Enter remarks"
+                        placeholder="Duration"
                         disabled={disabled}
                       />,
+                      <FormProtocolDropdown
+                        key="days"
+                        options={getDurationUnitOptions(row.duration, row.durationDays)}
+                        value={getDurationUnitCode(row.durationDays)}
+                        onValueChange={(v) => {
+                          const n = [...post];
+                          n[idx].durationDays = v;
+                          setPost(n);
+                        }}
+                        placeholder={parseInt(String(row.duration ?? "").trim(), 10) === 1 ? "Day" : "Days"}
+                        disabled={disabled || !isDurationFilledWithNumber}
+                        className="h-8"
+                      />, 
                       <input
                         key="r"
                         type="text"
@@ -1766,7 +2410,8 @@ export default function CreateProtocol() {
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>,
-                    ])}
+                    ];
+                  })}
                   />
                 </>
               )}
@@ -1786,6 +2431,15 @@ export default function CreateProtocol() {
           navigate(-1);
         }}
         onCancel={() => setShowLeaveConfirm(false)}
+      />
+
+      <DoseCalculationModal
+        open={calcModalOpen}
+        onOpenChange={setCalcModalOpen}
+        initialDrugName={calcTargetRow?.drug ?? ""}
+        initialDose={calcTargetRow?.dose ?? ""}
+        initialDoseCalc={calcTargetRow?.doseCalc ?? ""}
+        onApplyDose={handleApplyDoseFromModal}
       />
     </div>
   );

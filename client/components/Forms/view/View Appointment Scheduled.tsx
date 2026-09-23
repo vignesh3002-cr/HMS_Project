@@ -241,8 +241,7 @@ const AppointmentDetails: React.FC = () => {
       appointment.department ??
       ""
     ).toLowerCase();
-    const hasDoctor = Boolean(appointment.employee_id || appointment.employees);
-    return visitTypeRaw === "lab_visit" || deptRaw === "laboratory" || !hasDoctor;
+    return visitTypeRaw.includes("lab") || deptRaw.includes("laboratory");
   }, [appointment]);
 
   // Unified medications list
@@ -430,7 +429,7 @@ const AppointmentDetails: React.FC = () => {
     downloadPrescriptionPdf(rxData);
   };
 
-  const handleViewPrescription = (p: any) => {
+  const handleViewPrescription = async (p: any) => {
     const rxData: PrescriptionData = {
       prescription_id: p.prescription_id,
       prescription_date: p.prescription_date,
@@ -472,7 +471,7 @@ const AppointmentDetails: React.FC = () => {
       })),
     };
 
-    const { url } = generatePrescriptionPdf(rxData);
+    const { url } = await generatePrescriptionPdf(rxData);
     window.open(url, "_blank");
   };
 
@@ -717,7 +716,7 @@ const AppointmentDetails: React.FC = () => {
                 {isLabVisit ? (
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">
                     <FlaskConical className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                    Direct Lab Visit
+                    Lab Visit
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
@@ -772,7 +771,7 @@ const AppointmentDetails: React.FC = () => {
                   <h2 className="text-base font-bold text-slate-900">Clinical Provider</h2>
                 </div>
 
-                {appointment.employee_id && !isLabVisit ? (
+                {appointment.employee_id ? (
                   <button
                     type="button"
                     onClick={() => navigate(`/doctor/view/${appointment.employee_id}`)}
@@ -785,53 +784,31 @@ const AppointmentDetails: React.FC = () => {
               </div>
 
               <div className="mt-5 flex items-start gap-4">
-                {isLabVisit ? (
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-purple-100 text-purple-700">
-                    <FlaskConical className="h-7 w-7" />
-                  </div>
-                ) : (
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#D6E3FF] text-[#00488D] text-lg font-bold shadow-inner">
-                    {getInitials(doctorName)}
-                  </div>
-                )}
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#D6E3FF] text-[#00488D] text-lg font-bold shadow-inner">
+                  {getInitials(doctorName)}
+                </div>
 
                 <div className="space-y-1 min-w-0">
-                  {isLabVisit ? (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <h3 className="hms-name-text text-base font-bold text-slate-900">Direct Lab Visit</h3>
-                        <span className="rounded bg-purple-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-purple-700">
-                          Laboratory
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-500">
-                        No doctor consultation assigned for this direct laboratory test.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="hms-name-text text-base font-bold text-slate-900 truncate">
-                          {doctorName}
-                        </h3>
-                        {appointment.employee_id && (
-                          <span className="hms-id-text rounded bg-slate-100 px-1.5 py-0.5">
-                            ID: {appointment.employee_id}
-                          </span>
-                        )}
-                      </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="hms-name-text text-base font-bold text-slate-900 truncate">
+                      {doctorName}
+                    </h3>
+                    {appointment.employee_id && (
+                      <span className="hms-id-text rounded bg-slate-100 px-1.5 py-0.5">
+                        ID: {appointment.employee_id}
+                      </span>
+                    )}
+                  </div>
 
-                      <p className="text-xs font-medium text-slate-600">
-                        {appointment.employees?.specialization ?? "General Physician"}
-                      </p>
+                  <p className="text-xs font-medium text-slate-600">
+                    {appointment.employees?.specialization ?? "General Physician"}
+                  </p>
 
-                      <div className="pt-1">
-                        <span className="inline-block rounded-md border border-blue-100 bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700">
-                          {deptName}
-                        </span>
-                      </div>
-                    </>
-                  )}
+                  <div className="pt-1">
+                    <span className="inline-block rounded-md border border-blue-100 bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700">
+                      {deptName}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>

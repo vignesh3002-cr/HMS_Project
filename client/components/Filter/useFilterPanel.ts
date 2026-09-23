@@ -35,6 +35,11 @@ export function useFilterPanel(fields?: FilterField[]) {
     setAppliedValues(defaults);
   };
 
+  const setAppliedFilter = (name: string, value: any) => {
+    setDraftValues((prev) => ({ ...prev, [name]: value }));
+    setAppliedValues((prev) => ({ ...prev, [name]: value }));
+  };
+
   return {
     values: draftValues,
     appliedValues,
@@ -43,5 +48,6 @@ export function useFilterPanel(fields?: FilterField[]) {
     handleChange,
     handleApply,
     handleClear,
+    setAppliedFilter,
   };
 }

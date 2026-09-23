@@ -673,9 +673,9 @@ function PatientCard({
   const crit = getCriticalInfo(patient.patientId);
 
   return (
-    <CriticalWrapper className="flex items-start gap-4 p-4 border border-[#E5E7EB] rounded-xl hover:shadow-md hover:border-[#D6E3FF] transition-all duration-200 group" reasons={crit.reasons}>
+    <CriticalWrapper className={`flex items-start gap-4 p-4 border border-[#E5E7EB] rounded-xl hover:shadow-md hover:border-[#D6E3FF] transition-all duration-200 group`} reasons={crit.reasons}>
       <CriticalCorner reasons={crit.reasons} />
-      <div className="w-16 h-16 rounded-full overflow-hidden bg-[#E5E7EB] flex items-center justify-center flex-shrink-0">
+      <div data-critical-avatar className="w-16 h-16 rounded-full overflow-hidden bg-[#E5E7EB] flex items-center justify-center flex-shrink-0">
         {patient.avatarUrl ? (
           <img src={patient.avatarUrl} alt={patient.name} className="w-full h-full object-cover" />
         ) : (
@@ -1294,19 +1294,22 @@ export default function AppointmentPage() {
         key: "name",
         label: "Name",
         sortable: true,
+        className: "relative",
         render: (r: any) => {
           const crit = getCriticalInfo(String(r.patientId));
           return (
-          <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+          <>
             <CriticalCorner reasons={crit.reasons} />
-            <div className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text bg-[#D6E3FF] text-[#00488D]">
-              {String(r.name).charAt(0)}
-            </div>
-            <div>
-              <div className="hms-name-text">{String(r.name)}</div>
-              <div className="hms-id-text flex items-center">{String(r.patientCode)}<CriticalDot reasons={crit.reasons} /></div>
-            </div>
-          </CriticalWrapper>
+            <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+              <div data-critical-avatar className="flex items-center justify-center w-7 h-7 rounded-xl flex-shrink-0 hms-avatar-text bg-[#D6E3FF] text-[#00488D]">
+                {String(r.name).charAt(0)}
+              </div>
+              <div>
+                <div className="hms-name-text">{String(r.name)}</div>
+                <div className="hms-id-text flex items-center">{String(r.patientCode)}<CriticalDot reasons={crit.reasons} /></div>
+              </div>
+            </CriticalWrapper>
+          </>
           );
         },
       },
@@ -1567,7 +1570,7 @@ export default function AppointmentPage() {
                 rowKey={(r: any, i: number) => String(r.id) + i}
                 rowClassName={(r: any) => {
                   const crit = getCriticalInfo(String(r.patientId));
-                  return crit.isCritical ? "relative" : "";
+                   return "";
                 }}
               />
             ) : (
