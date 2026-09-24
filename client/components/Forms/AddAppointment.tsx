@@ -10,6 +10,7 @@ import CalendarPicker from "@/components/hms/Calender";
 import { PatientConflictWarningDialog, type PatientConflictAppointment } from "@/components/hms/PatientConflictWarningDialog";
 import { AddWardDialog } from "@/components/hms/AddWardDialog";
 import { AddBedDialog } from "@/components/hms/AddBedDialog";
+import VoiceToText from "@/components/ui/voicetotext";
 import { branchApi, Branch } from "@/api/branch.api";
 
 interface DoctorAssignedBranch {
@@ -502,6 +503,8 @@ export default function AddAppointment() {
   const [preferredTime, setPreferredTime] = useState<string | null>(preselectedSlot?.time ?? null);
   const [submitting, setSubmitting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [bookingResult, setBookingResult] = useState<AppointmentResponse | null>(null);
 
@@ -1051,6 +1054,68 @@ export default function AddAppointment() {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
+  const startVoiceRecognition = () => {
+  const SpeechRecognition =
+    (window as any).SpeechRecognition ||
+    (window as any).webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    toast({
+      title: "Voice input not supported",
+      description: "Please use Google Chrome or Microsoft Edge.",
+      variant: "destructive",
+    });
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+
+  recognition.continuous = true;
+  recognition.interimResults = false;
+  recognition.lang = "en-IN";
+
+  recognition.onstart = () => {
+    setIsListening(true);
+  };
+
+  recognition.onresult = (event: any) => {
+    let transcript = "";
+
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+
+    if (!transcript.trim()) return;
+
+    setFormData((prev) => ({
+      ...prev,
+      patientComment: prev.patientComment
+        ? `${prev.patientComment} ${transcript.trim()}`
+        : transcript.trim(),
+    }));
+  };
+
+  recognition.onerror = (event: any) => {
+    console.error("Speech recognition error:", event.error);
+    setIsListening(false);
+  };
+
+  recognition.onend = () => {
+    setIsListening(false);
+  };
+
+  recognitionRef.current = recognition;
+  recognition.start();
+};
+
+const stopVoiceRecognition = () => {
+  if (recognitionRef.current) {
+    recognitionRef.current.stop();
+    recognitionRef.current = null;
+  }
+
+  setIsListening(false);
+};
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -2313,22 +2378,22 @@ const isDirty = Boolean(
                   Email confirmation will be sent to the patient's registered email address upon booking.
                 </div>
               </div>
+{/* Patient Comment / Reason for Visit */}
+<div className="lg:col-span-3">
+  <label className={labelClass}>Reason for Visit</label>
 
-              {/* Patient Comment / Reason for Visit */}
-              <div className="lg:col-span-3">
-                <label className={labelClass}>Reason for Visit</label>
-                <textarea
-                  name="patientComment"
-                  rows={4}
-                  placeholder="Describe the reason for the visit (optional)"
-                  className={inputClass + " resize-none"}
-                  value={formData.patientComment}
-                  onChange={handleInputChange}
-                />
-              </div>
-            </div>
-
-            {/* Actions Footer */}
+  <VoiceToText
+    value={formData.patientComment}
+    onChange={(text) =>
+      setFormData((prev) => ({
+        ...prev,
+        patientComment: text,
+      }))
+    }
+    placeholder="Describe the reason for the visit (optional)"
+  />
+</div>
+                       {/* Actions Footer */}
             <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-4 mt-10 pt-6 border-t border-gray-100">
               <button
                 type="button"
@@ -2338,6 +2403,7 @@ const isDirty = Boolean(
               >
                 Cancel
               </button>
+
               <button
                 type="submit"
                 disabled={submitting}
@@ -2351,6 +2417,10 @@ const isDirty = Boolean(
                 {submitting ? "Creating..." : isIpdBooking || isAdmissionEditMode ? "Confirm Admission Request" : "Confirm Appointment"}
               </button>
             </div>
+
+            {/* Close the main grid */}
+            </div>
+
           </form>
           )}
         </div>

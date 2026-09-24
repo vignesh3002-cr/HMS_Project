@@ -43,16 +43,6 @@ export function QuickAddFab() {
   }, [open]);
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  useEffect(() => {
     setOpen(false);
   }, [location.pathname]);
 
@@ -85,12 +75,12 @@ export function QuickAddFab() {
   return (
     <div
       ref={wrapperRef}
-      className={`fixed bottom-6 right-6 z-50 flex items-end gap-3 ${openUpward ? "flex-col" : "flex-col-reverse"}`}
+      className={`fixed bottom-28 right-6 z-[60] flex items-end gap-3 ${openUpward ? "flex-col" : "flex-col-reverse"}`}
     >
       {open && (
         <div
           ref={dropdownRef}
-          className="w-52 bg-white border border-[#E5E7EB] rounded-xl shadow-lg overflow-y-auto animate-in fade-in duration-150"
+          className="w-52 bg-white border border-[#E5E7EB] rounded-xl shadow-lg overflow-y-auto animate-in fade-in duration-150 relative z-[60]"
           style={{ maxHeight: maxDropdownHeight }}
         >
           {menuItems.map(({ key, label, icon: Icon }) => (
@@ -111,14 +101,14 @@ export function QuickAddFab() {
       <button
         ref={buttonRef}
         onClick={() => setOpen((o) => !o)}
-        className="w-12 h-12 bg-[#00488D] rounded-2xl flex items-center justify-center shadow-lg hover:bg-[#003a6b] transition-all duration-200"
+        className="w-14 h-14 bg-[#00488D] rounded-full flex items-center justify-center shadow-lg hover:bg-[#003a6b] transition-all duration-200"
         aria-label={open ? "Close quick add menu" : "Open quick add menu"}
         aria-expanded={open}
       >
         {open ? (
-          <X className="w-5 h-5 text-white" />
+          <X className="w-6 h-6 text-white" />
         ) : (
-          <Plus className="w-5 h-5 text-white" />
+          <Plus className="w-6 h-6 text-white" />
         )}
       </button>
     </div>

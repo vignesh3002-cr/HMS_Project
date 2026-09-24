@@ -101,9 +101,17 @@ type SummaryPlan = {
     cycle_status?: string | null;
     completion_status?: string | null;
     remarks?: string | null;
+    chemotherapy_administration?: {
+      administration_day?: number | null;
+      administration_date?: string | null;
+      administration_status?: string | null;
+      infusion_completed?: boolean | null;
+      administered_by?: string | null;
+    }[] | null;
   }[] | null;
   chemotherapy_plan_items: SummaryPlanItem[] | null;
   oncology_staging_detail: StagingDetailRecord | null;
+  doctor_name?: string | null;
 };
 
 /* ============================================================
@@ -743,6 +751,9 @@ interface StagingDetailRecord {
   icd_o3_morpho?: string | null;
   staging_system?: string | null;
   clinical_stage?: string | null;
+  pre_diagnosis?: string | null;
+  disease_status?: string | null;
+  notes?: string | null;
   t_stage?: string | null;
   n_stage?: string | null;
   m_stage?: string | null;
@@ -2907,6 +2918,82 @@ const HistoryDashboard: React.FC<{
   const [activeCycleIndex, setActiveCycleIndex] = useState<number>(0);
   const timelineScrollRef = useRef<HTMLDivElement>(null);
 
+  /* Patient 360: every saved staging detail for THIS patient (newest first
+     from GET /oncology/staging-details?patient_id=). The first entry is the
+     latest visit shown on the card; the popup lists all of them ascending. */
+  const [stagingDetails, setStagingDetails] = useState<StagingDetailRecord[]>([]);
+  const [stagingDetailsLoading, setStagingDetailsLoading] = useState(false);
+  const [stagingHistoryOpen, setStagingHistoryOpen] = useState(false);
+  const stagingHistoryScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!patientId) return;
+    let cancelled = false;
+    setStagingDetailsLoading(true);
+    const branchId = getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
+
+    const attempts: { params: Record<string, unknown> }[] = [
+      { params: { patient_id: patientId, limit: 100, branchId } },
+      { params: { patient_id: patientId, limit: 100 } },
+    ];
+
+    (async () => {
+      for (const attempt of attempts) {
+        try {
+          const res = await API.get<{
+            success: boolean;
+            data: StagingDetailRecord[];
+          }>("/oncology/staging-details", attempt);
+          const rows = res.data?.data ?? [];
+          /* An empty body is not proof of absence: the branch-scoped
+             attempt filters by the caller's active branch, so rows saved
+             under a different branch legitimately come back empty. Fall
+             through to the branchless attempt before declaring none. */
+          if (rows.length === 0) continue;
+          if (!cancelled) setStagingDetails(rows);
+          return;
+        } catch (err: any) {
+          const message =
+            err?.response?.data?.message || err?.message || "";
+          const isScopeBlock = /select a branch|branch has been assigned/i.test(
+            message
+          );
+          if (isScopeBlock) continue;
+          if (!cancelled) {
+            console.warn("Failed to load Patient 360 staging history:", err);
+            setStagingDetails([]);
+          }
+          return;
+        }
+      }
+      if (!cancelled) setStagingDetails([]);
+    })().finally(() => {
+      if (!cancelled) setStagingDetailsLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
+
+  /* Oldest-first list for the popup (the API returns newest first by
+     created_at - the save date - which is the approved 'visited date'). */
+  const stagingHistoryAscending = [...stagingDetails].sort((a, b) =>
+    (a.created_at || a.visit_date || "").localeCompare(
+      b.created_at || b.visit_date || ""
+    )
+  );
+  const latestStaging = stagingDetails[0] ?? null;
+
+  /* Default focus on the most recent record when the popup opens: the list is
+     ascending so the newest card sits at the bottom - scroll it into view. */
+  useEffect(() => {
+    if (!stagingHistoryOpen) return;
+    const el = stagingHistoryScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [stagingHistoryOpen, stagingDetails]);
+
   useEffect(() => {
     const protocolId = plan?.source_protocol_id;
     if (!protocolId) {
@@ -3219,9 +3306,16 @@ const HistoryDashboard: React.FC<{
     );
     let cycle = daysElapsed < 0 ? 1 : Math.floor(daysElapsed / interval) + 1;
     if (planned > 0 && cycle > planned) cycle = planned;
+    // Day-within-current-cycle: 1-based offset from this cycle's start,
+    // clamped to at least 1 (also valid pre-treatment).
+    const cycleStartOffset = (cycle - 1) * interval;
+    const day =
+      daysElapsed < cycleStartOffset
+        ? 1
+        : (daysElapsed - cycleStartOffset) % interval + 1;
     const d = new Date(start);
-    d.setDate(d.getDate() + (cycle - 1) * interval);
-    return { cycle, date: fmtHistoryDate(d.toISOString()) };
+    d.setDate(d.getDate() + cycleStartOffset);
+    return { cycle, day, date: fmtHistoryDate(d.toISOString()) };
   })();
 
   /* Cycle-history table rows: agent/dose come from the plan's
@@ -3927,6 +4021,97 @@ const HistoryDashboard: React.FC<{
 
         {/* RIGHT */}
         <div className="space-y-6">
+          {/* PATIENT 360 */}
+          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+            <h2 className="text-base font-bold text-gray-900 mb-4">
+              Patient 360
+            </h2>
+
+            {stagingDetailsLoading ? (
+              <div className="flex items-center text-sm text-gray-500">
+                <i className="fa-solid fa-circle-notch fa-spin mr-2" />
+                Loading staging details...
+              </div>
+            ) : latestStaging ? (
+              <>
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-start">
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 shrink-0 mr-3">
+                      <i className="fa-regular fa-calendar text-sm" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+                        Visited date
+                      </p>
+                      <p className="font-semibold text-gray-800">
+                        {fmtHistoryDate(
+                          latestStaging.created_at || latestStaging.visit_date
+                        ) || "—"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start">
+                    <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center text-violet-600 shrink-0 mr-3">
+                      <i className="fa-solid fa-disease text-sm" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+                        Diagnosis name
+                      </p>
+                      <p className="font-semibold text-gray-800">
+                        {latestStaging.cancer_subtypes?.subtype_name ||
+                          latestStaging.pre_diagnosis ||
+                          latestStaging.cancer_types?.cancer_type ||
+                          "—"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start">
+                    <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 shrink-0 mr-3">
+                      <i className="fa-regular fa-note-sticky text-sm" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+                        Notes
+                      </p>
+                      <p className="text-gray-700 line-clamp-3">
+                        {latestStaging.notes || "—"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0 mr-3">
+                      <i className="fa-solid fa-heart-pulse text-sm" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+                        Disease Status
+                      </p>
+                      <p className="font-semibold text-gray-800">
+                        {latestStaging.disease_status || "—"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setStagingHistoryOpen(true)}
+                  className="mt-4 w-full py-2.5 rounded-lg bg-[#004785] hover:bg-[#003A6B] active:scale-[0.98] text-white text-sm font-semibold transition-all shadow-sm"
+                >
+                  View History
+                </button>
+              </>
+            ) : (
+              <p className="text-sm text-gray-500">
+                No staging details saved for this patient yet.
+              </p>
+            )}
+          </div>
+
           {/* VITAL TREND */}
           <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
             <h2 className="text-base font-bold text-gray-900 mb-4">
@@ -4395,6 +4580,148 @@ const HistoryDashboard: React.FC<{
           Submit Review
         </button>
       </div>
+
+      {/* PATIENT 360 - STAGING HISTORY POPUP */}
+      {stagingHistoryOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-slate-900/50 backdrop-blur-sm p-4 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Staging history"
+          onClick={() => setStagingHistoryOpen(false)}
+        >
+          <div
+            className="mt-6 w-full max-w-xl animate-[p360-pop_0.25s_ease-out]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="rounded-2xl bg-white shadow-2xl overflow-hidden border border-gray-200">
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-[#F7F9FB]">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#004785] text-white flex items-center justify-center">
+                    <i className="fa-solid fa-user" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900">
+                      Patient 360 Staging History
+                    </h3>
+                    <p className="text-xs text-gray-500">
+                      {stagingHistoryAscending.length} visit
+                      {stagingHistoryAscending.length === 1 ? "" : "s"} · oldest
+                      first
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setStagingHistoryOpen(false)}
+                  className="w-8 h-8 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-800 flex items-center justify-center transition-colors"
+                  aria-label="Close staging history"
+                >
+                  <i className="fa-solid fa-xmark" />
+                </button>
+              </div>
+
+              {/* Scrollable list - max 4 in view, scroll up (or down) the Y
+                  axis to browse, default scroll lands on the most recent. */}
+              <div
+                ref={stagingHistoryScrollRef}
+                className="max-h-[330px] overflow-y-auto px-4 py-4 space-y-3 bg-gray-50/60"
+                style={{ scrollbarWidth: "thin" }}
+              >
+                {stagingHistoryAscending.length === 0 ? (
+                  <p className="text-sm text-gray-500 py-6 text-center">
+                    No staging details saved for this patient yet.
+                  </p>
+                ) : (
+                  stagingHistoryAscending.map((record, index) => {
+                    const isLatest = index === stagingHistoryAscending.length - 1;
+                    return (
+                      <div
+                        key={record.staging_detail_id || `${record.visit_date}-${index}`}
+                        className={`rounded-xl border bg-white p-4 shadow-sm transition-all ${
+                          isLatest
+                            ? "border-[#004785] ring-1 ring-[#004785]/30"
+                            : "border-gray-200"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs ${
+                                isLatest
+                                  ? "bg-[#004785] text-white"
+                                  : "bg-[#D6E3FF] text-[#00488D]"
+                              }`}
+                            >
+                              <i className="fa-regular fa-calendar" />
+                            </div>
+                            <span className="text-sm font-bold text-gray-900">
+                              {fmtHistoryDate(
+                                record.created_at || record.visit_date
+                              ) || "—"}
+                            </span>
+                          </div>
+                          {isLatest && (
+                            <span className="text-[10px] uppercase tracking-wide font-bold px-2 py-1 rounded-full bg-[#004785] text-white">
+                              Most recent
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="space-y-2 text-sm">
+                          <div className="flex">
+                            <span className="w-32 shrink-0 text-[11px] uppercase tracking-wide text-gray-400 font-semibold pt-0.5">
+                              Diagnosis name
+                            </span>
+                            <span className="font-semibold text-gray-800">
+                              {record.cancer_subtypes?.subtype_name ||
+                                record.pre_diagnosis ||
+                                record.cancer_types?.cancer_type ||
+                                "—"}
+                            </span>
+                          </div>
+                          <div className="flex">
+                            <span className="w-32 shrink-0 text-[11px] uppercase tracking-wide text-gray-400 font-semibold pt-0.5">
+                              Notes
+                            </span>
+                            <span className="text-gray-700">
+                              {record.notes || "—"}
+                            </span>
+                          </div>
+                          <div className="flex">
+                            <span className="w-32 shrink-0 text-[11px] uppercase tracking-wide text-gray-400 font-semibold pt-0.5">
+                              Disease Status
+                            </span>
+                            <span className="font-semibold text-gray-800">
+                              {record.disease_status || "—"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-5 py-3 border-t border-gray-100 bg-[#F7F9FB] flex items-center justify-between text-xs text-gray-500">
+                <span>
+                  <i className="fa-solid fa-arrow-up mr-1" />
+                  Scroll up to see older visits
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setStagingHistoryOpen(false)}
+                  className="px-4 py-1.5 rounded-lg border border-gray-300 text-gray-700 font-semibold hover:bg-gray-100 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 
@@ -6020,6 +6347,26 @@ const PatientNotesDocuments: React.FC<{
       createdBy: note.createdBy,
     });
     setIsEditNoteModalOpen(true);
+  };
+
+  const handlePrintNote = (note: ClinicalNoteRecord) => {
+    const noteHeader = `${note.title}${note.encounterNo ? ` (#${note.encounterNo})` : ""}`;
+    const printText = `${noteHeader}\n\nDate & Time: ${note.dateTime}\nEncounter: ${note.encounter}\nDoctor: ${note.doctor}\nDepartment: ${note.department}\nBranch: ${note.branch}\n\nChief Complaint\n${note.chiefComplaint}\n\nClinical Assessment\n${note.clinicalAssessment.join("\n")}\n\nExamination\n${note.examination.join("\n")}\n\nDiagnosis\n${note.diagnosis}\n\nTreatment / Plan\n${note.treatmentPlan.map((p) => `• ${p}`).join("\n")}\n\nMedications\n${note.medications}\n\nInvestigations\n${note.investigations.join("\n")}\n\nFollow-up\n${note.followUp}\n\nStatus: ${note.status}\nCreated by: ${note.createdBy}`;
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      window.alert("Please allow pop-ups to print this note.");
+      return;
+    }
+    printWindow.document.write(
+      `<html><head><title>${noteHeader}</title></head><body style="font-family:Inter,Arial,sans-serif;font-size:13px;color:#1e293b;line-height:1.6;padding:2rem;white-space:pre-wrap;max-width:760px;margin:0 auto;">${printText
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")}</body></html>`,
+    );
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
   };
 
   const handleSaveEditedNote = async (e: React.FormEvent) => {

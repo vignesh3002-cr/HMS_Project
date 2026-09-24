@@ -15,7 +15,7 @@ import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import API from "@/api/axios";
 import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { encounterApi, type EncounterRecord } from "@/api/encounter.api";
-import { patientApi } from "@/api/patient.api";
+import { patientApi, type PatientRecord } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { ipdApi } from "@/api/ipd.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
@@ -29,6 +29,43 @@ import { getUser } from "@/utils/token";
 
 import { useCriticalPatients } from "@/hooks/useCriticalPatients";
 import { CriticalDot, CriticalCorner, CriticalWrapper } from "@/components/hms/CriticalPatientIndicator";
+import type { CriticalInfo } from "@/components/hms/CriticalPatientIndicator";
+
+function getVitalsCriticalReasons(enc: EncounterRecord): string[] {
+  const reasons: string[] = [];
+  if (enc.pain_score != null) {
+    const ps = Number(enc.pain_score);
+    if (ps >= 7) reasons.push(`Pain Score: ${ps}/10`);
+  }
+  if (enc.systolic_bp != null && enc.diastolic_bp != null) {
+    const sys = Number(enc.systolic_bp);
+    const dia = Number(enc.diastolic_bp);
+    if (sys > 180 || dia > 120) reasons.push(`High BP: ${sys}/${dia}`);
+    else if (sys < 90 || dia < 60) reasons.push(`Low BP: ${sys}/${dia}`);
+  }
+  if (enc.spo2 != null) {
+    const spo2 = Number(enc.spo2);
+    if (spo2 < 90) reasons.push(`SpO2: ${spo2}%`);
+  }
+  if (enc.temperature != null) {
+    const temp = Number(enc.temperature);
+    if (temp > 39.5) reasons.push(`Temp: ${temp}\u00B0F`);
+  }
+  if (enc.pulse != null) {
+    const pulse = Number(enc.pulse);
+    if (pulse > 120 || pulse < 40) reasons.push(`Pulse: ${pulse} bpm`);
+  }
+  const notes = (enc.clinical_notes || "").toLowerCase();
+  if (
+    notes.includes("not doing well") ||
+    notes.includes("critical") ||
+    notes.includes("deteriorating") ||
+    notes.includes("urgent")
+  ) {
+    reasons.push("Clinical Status: Not Doing Well");
+  }
+  return reasons;
+}
 import { getKpiPreferences, saveKpiPreferences } from "@/api/userPreferences.api";
 
 const navItems = [
@@ -327,6 +364,7 @@ function CountUp({ target, duration = 900 }: { target: number; duration?: number
 const ALL_KPI_IDS = [
   "doctors",
   "patients",
+  "critical-patients",
   "staff",
   "appointments",
   "prescriptions",
@@ -533,15 +571,112 @@ export default function Dashboard() {
 
   const appointmentPatientIds = useMemo(() => {
     if (!realAppointments) return [];
-    const ids = (realAppointments as any[]).map((r) => r.patientId).filter(Boolean);
+    const ids = (realAppointments as any[])
+      .map((r) => String(r.patientId ?? "").trim())
+      .filter(Boolean);
     return [...new Set(ids)];
   }, [realAppointments]);
 
+  // Same patient universe as Patients.tsx (full branch list with age/DOB),
+  // not just today's appointments — so a critical sign on Patients always
+  // counts on this KPI too.
+  const canReadPatients = permissions.includes("patient.read");
+  const criticalPatientsQuery = useQuery({
+    queryKey: ["dashboard-critical-patients", isAllBranches ? "all" : selectedBranchId],
+    queryFn: async () => {
+      const res = await patientApi.getAll({
+        branchId: isAllBranches ? undefined : selectedBranchId,
+      });
+      return (res.data?.data?.patients || []) as PatientRecord[];
+    },
+    enabled: canReadPatients,
+    refetchOnWindowFocus: false,
+    staleTime: 1000 * 60 * 2,
+  });
 
+  const patientAgeData = useMemo(() => {
+    return (criticalPatientsQuery.data ?? []).map((p) => ({
+      patientId: String(p.patient_id),
+      age: p.patient_age,
+      dob: p.patient_dob,
+    }));
+  }, [criticalPatientsQuery.data]);
 
-  const { getCriticalInfo } = useCriticalPatients(
-    appointmentPatientIds.map((id) => ({ patientId: id }))
+  // Hook input = full patient list (age/DOB) + any appointment-only patients
+  // so table critical dots still resolve if a row is missing from the list.
+  const criticalHookInput = useMemo(() => {
+    const listed = new Set(patientAgeData.map((p) => p.patientId));
+    const extras = appointmentPatientIds
+      .filter((id) => !listed.has(id))
+      .map((id) => ({ patientId: id }));
+    return [...patientAgeData, ...extras];
+  }, [patientAgeData, appointmentPatientIds]);
+
+  // Count from the full patient list when loaded; fall back to appointments
+  // only if the patient list is unavailable (no permission / not yet fetched).
+  const criticalCountIds = useMemo(() => {
+    if (criticalPatientsQuery.data) {
+      return patientAgeData.map((p) => p.patientId);
+    }
+    return appointmentPatientIds;
+  }, [criticalPatientsQuery.data, patientAgeData, appointmentPatientIds]);
+
+  const { getCriticalInfo } = useCriticalPatients(criticalHookInput);
+
+  const [freshEncounters, setFreshEncounters] = useState<Record<string, EncounterRecord>>({});
+
+  const refreshCriticalEncounters = useCallback(async () => {
+    // Live vitals for appointment rows; full-list vitals come from the hook.
+    const ids = appointmentPatientIds;
+    if (ids.length === 0) {
+      setFreshEncounters({});
+      return;
+    }
+    const results = await Promise.allSettled(
+      ids.map(async (patientId) => {
+        try {
+          const res = await encounterApi.getLatest(patientId, 1);
+          const enc = res.data?.data?.encounters?.[0];
+          if (enc) return { patientId, enc };
+        } catch { /* silent */ }
+        return null;
+      })
+    );
+    const map: Record<string, EncounterRecord> = {};
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value) {
+        map[String(r.value.patientId)] = r.value.enc;
+      }
+    }
+    setFreshEncounters(map);
+  }, [appointmentPatientIds]);
+
+  useEffect(() => {
+    void refreshCriticalEncounters();
+  }, [refreshCriticalEncounters]);
+
+  const getLiveCriticalInfo = useCallback(
+    (patientId: string): CriticalInfo => {
+      const pid = String(patientId ?? "").trim();
+      if (!pid) return { isCritical: false, reasons: [] };
+      const base = getCriticalInfo(pid);
+      const ageReasons = base.reasons.filter(
+        (r) => r.startsWith("Age <") || r.startsWith("Age >")
+      );
+      const enc = freshEncounters[pid];
+      if (enc) {
+        const vitalsReasons = getVitalsCriticalReasons(enc);
+        const reasons = [...ageReasons, ...vitalsReasons];
+        return { isCritical: reasons.length > 0, reasons };
+      }
+      return base;
+    },
+    [getCriticalInfo, freshEncounters]
   );
+
+  const criticalPatientCount = useMemo(() => {
+    return criticalCountIds.filter((id) => getLiveCriticalInfo(id).isCritical).length;
+  }, [criticalCountIds, getLiveCriticalInfo]);
 
   useEffect(() => {
     if (!appointmentsQuery.error) return;
@@ -556,11 +691,12 @@ export default function Dashboard() {
 
   // Stable refetch helper reused by check-in/check-out + onVitalsSaved, now
   // backed by React Query so repeated calls avoid redundant network requests.
+  // Also refreshes critical encounter data so the Critical Patients KPI stays live.
   const fetchAppointments = useCallback(() => {
     appointmentsQuery.refetch();
-  }, [appointmentsQuery.refetch]);
+    void refreshCriticalEncounters();
+  }, [appointmentsQuery.refetch, refreshCriticalEncounters]);
 
-  const canReadPatients = permissions.includes("patient.read");
   const dateStr = format(selectedDate, "yyyy-MM-dd");
   const patientsQuery = useQuery({
     queryKey: ["dashboard-patients", isAllBranches ? "all" : selectedBranchId, dateStr],
@@ -1339,10 +1475,12 @@ export default function Dashboard() {
     realDoctors,
     realStaff,
     patientCount,
+    criticalPatientCount,
     appointmentCount,
     prescriptionCount,
     isEmployeesLoading,
     isAppointmentsLoading,
+    criticalPatientsQuery.isLoading,
     isPrescriptionsLoading,
     patientLoading,
     ipdOverview,
@@ -1934,8 +2072,12 @@ export default function Dashboard() {
                 <RefreshButton
                   onClick={() => {
                     if (activeTab === "appointments") fetchAppointments();
-                    else employeesQuery.refetch();
+                    else {
+                      employeesQuery.refetch();
+                      void refreshCriticalEncounters();
+                    }
                     patientsQuery.refetch();
+                    void criticalPatientsQuery.refetch();
                     prescriptionsQuery.refetch();
                     ipdOverviewQuery.refetch();
                   }}
@@ -1956,7 +2098,7 @@ export default function Dashboard() {
                 scrollable={false}
                 columns={activeTab === "appointments" ? [
                   { key: "patientName", label: "Patient Name", className: "relative", render: (r: any) => {
-                    const crit = getCriticalInfo(r.patientId);
+                    const crit = getLiveCriticalInfo(r.patientId);
                     return (
                     <>
                       <CriticalCorner reasons={crit.reasons} />
@@ -2077,7 +2219,7 @@ export default function Dashboard() {
                 rowKey={(r) => String((r as any).id)}
                 rowClassName={(r: any) => {
                   if (activeTab !== "appointments") return "";
-                  const crit = getCriticalInfo(r.patientId);
+                  const crit = getLiveCriticalInfo(r.patientId);
                    return "";
                 }}
               />
