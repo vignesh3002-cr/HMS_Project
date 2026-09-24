@@ -9,6 +9,7 @@ import {
   type LabOrderItemRecord,
 } from "../../../api/labOrder.api";
 import { UserProfileDropdown } from "../../../components/ui/User_profile_dropdown";
+import VoiceToText from "@/components/ui/voicetotext";
 import { findActiveEncounter } from "./helpers";
 import { BackIcon, CheckIcon } from "./icons";
 
@@ -449,14 +450,10 @@ const LabReview: React.FC<{
             Observations & Notes
           </label>
 
-          <textarea
-            id="observations"
-            name="observations"
+          <VoiceToText
             value={observations}
-            onChange={(event) => setObservations(event.target.value)}
+            onChange={(text) => setObservations(text)}
             placeholder="Enter clinical observations based on the laboratory reports..."
-            rows={6}
-            className="block w-full resize-y rounded-xl border-[#E5E7EB] bg-[#F8FAFC] p-4 text-[15px] text-gray-700 shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500"
           />
         </div>
 

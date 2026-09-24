@@ -9,6 +9,7 @@ import {
   PopoverTrigger,
 } from "../../../components/ui/popover";
 import { UserProfileDropdown } from "../../../components/ui/User_profile_dropdown";
+import VoiceToText from "@/components/ui/voicetotext";
 import type { ConsultationState, MeasurementValues } from "./types";
 import {
   createChemotherapyPlanForPatient,
@@ -876,14 +877,10 @@ const TreatmentPlan: React.FC<{
             Remarks
           </label>
 
-          <textarea
-            id="remarks"
-            rows={3}
+          <VoiceToText
             value={remarks}
-            onChange={(event) =>
-              setRemarks(event.target.value)
-            }
-            className="block w-full resize-none rounded-lg border border-slate-300 bg-white p-4 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            onChange={setRemarks}
+            placeholder="Enter remarks..."
           />
 
         </div>

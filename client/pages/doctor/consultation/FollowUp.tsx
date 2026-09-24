@@ -10,6 +10,7 @@ import {
   PopoverTrigger,
 } from "../../../components/ui/popover";
 import { UserProfileDropdown } from "../../../components/ui/User_profile_dropdown";
+import VoiceToText from "@/components/ui/voicetotext";
 import type {
   ConsultationState,
   MeasurementValues,
@@ -589,14 +590,10 @@ const displayedValue = treatmentEnds ? "Treatment ends" : nextCycle;
               Notes
             </label>
 
-            <textarea
-              id="notes"
-              rows={4}
+            <VoiceToText
               value={notes}
-              onChange={(event) =>
-                setNotes(event.target.value)
-              }
-              className="block w-full resize-none rounded-lg border border-gray-300 bg-white p-4 text-base text-gray-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              onChange={setNotes}
+              placeholder="Enter notes..."
             />
           </div>
         </form>

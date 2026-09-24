@@ -10,6 +10,7 @@ import {
   PopoverTrigger,
 } from "../../../components/ui/popover";
 import { UserProfileDropdown } from "../../../components/ui/User_profile_dropdown";
+import VoiceToText from "@/components/ui/voicetotext";
 import type {
   ConsultationState,
   Drug,
@@ -2989,11 +2990,10 @@ const ChemotherapyOrder: React.FC<{
           <div className="text-base font-semibold text-gray-900">
             Discussion
           </div>
-          <textarea
+          <VoiceToText
             value={discussion}
-            onChange={(event) => setDiscussion(event.target.value)}
+            onChange={setDiscussion}
             placeholder="Type the discussion..."
-            className="h-28 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm leading-5 text-gray-700 outline-none focus:border-blue-500"
           />
         </div>
 
@@ -3001,11 +3001,10 @@ const ChemotherapyOrder: React.FC<{
           <div className="text-base font-semibold text-gray-900">
             Post Chemo Instructions
           </div>
-          <textarea
+          <VoiceToText
             value={postChemoInstructions}
-            onChange={(event) => setPostChemoInstructions(event.target.value)}
+            onChange={setPostChemoInstructions}
             placeholder="Type the post chemo instructions..."
-            className="h-28 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm leading-5 text-gray-700 outline-none focus:border-blue-500"
           />
         </div>
 
@@ -3013,11 +3012,10 @@ const ChemotherapyOrder: React.FC<{
           <div className="text-base font-semibold text-gray-900">
             Additional Notes
           </div>
-          <textarea
+          <VoiceToText
             value={additionalNotes}
-            onChange={(event) => setAdditionalNotes(event.target.value)}
+            onChange={setAdditionalNotes}
             placeholder="Type any additional notes..."
-            className="h-28 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm leading-5 text-gray-700 outline-none focus:border-blue-500"
           />
         </div>
       </div>

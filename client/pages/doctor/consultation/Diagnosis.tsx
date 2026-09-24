@@ -5,6 +5,7 @@ import { getUser } from "../../../utils/token";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import { MultiSelectDropdown } from "../../../components/ui/multi-select-dropdown";
 import { UserProfileDropdown } from "../../../components/ui/User_profile_dropdown";
+import VoiceToText from "@/components/ui/voicetotext";
 import type { ConsultationState, FormData } from "./types";
 import {
   formatPickedDate,
@@ -1782,13 +1783,12 @@ const Diagnosis: React.FC<{
             Notes
           </label>
 
-          <textarea
-            id="notes"
-            name="notes"
+          <VoiceToText
             value={formData.notes}
-            onChange={handleChange}
-            rows={3}
-            className="block w-full resize-none rounded-md border border-gray-300 px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:ring-[#1d4ed8]"
+            onChange={(text) =>
+              setFormData((previous) => ({ ...previous, notes: text }))
+            }
+            placeholder="Enter notes..."
           />
         </div>
 

@@ -20,6 +20,7 @@ import {
   PopoverTrigger,
 } from "../../../components/ui/popover";
 import { MultiSelectDropdown } from "../../../components/ui/multi-select-dropdown";
+import VoiceToText from "@/components/ui/voicetotext";
 import AdviceSection, {
   type AdviceSaveResult,
   type AdviceSectionHandle,
@@ -970,12 +971,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
           Consultation Notes
         </label>
 
-        <textarea
+        <VoiceToText
           value={consultationNotes}
-          onChange={(e) =>
-            setConsultationNotes(e.target.value)
-          }
-          className="h-40 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-300"
+          onChange={(text) => setConsultationNotes(text)}
+          placeholder="Enter consultation notes..."
         />
 
         {/* CHIEF COMPLAINT (free text) + REASON OF VISIT.
@@ -991,13 +990,24 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
               Chief Complaint
             </div>
 
-            <textarea
+            <VoiceToText
               value={chiefComplaint}
-              onChange={(event) =>
-                setChiefComplaint(event.target.value)
-              }
+              onChange={(text) => setChiefComplaint(text)}
               placeholder="Type the chief complaint..."
-              className="min-h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-1.5 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+            />
+
+          </div>
+
+          <div className="flex flex-col gap-1">
+
+            <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+              Reason of Visit
+            </div>
+
+            <VoiceToText
+              value={reasonOfVisit}
+              onChange={(text) => setReasonOfVisit(text)}
+              placeholder="Type the reason of visit..."
             />
 
           </div>
@@ -1171,13 +1181,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
           Patient History (Reason of Visit)
         </label>
 
-        <textarea
-          value={patientHistory}
-          onChange={(event) =>
-            setPatientHistory(event.target.value)
-          }
-          placeholder="Type the patient's history..."
-          className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
+        <VoiceToText
+          value={reasonOfVisit}
+          onChange={(text) => setReasonOfVisit(text)}
+          placeholder="Type the reason of visit..."
         />
 
       </div>
@@ -1331,13 +1338,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
           History of Present Illness(HOPI)
         </label>
 
-        <textarea
+        <VoiceToText
           value={historyOfPresentIllness}
-          onChange={(event) =>
-            setHistoryOfPresentIllness(event.target.value)
-          }
+          onChange={(text) => setHistoryOfPresentIllness(text)}
           placeholder="Type the history of present illness..."
-          className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
         />
 
       </div>
@@ -1440,11 +1444,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
           </div>
 
-        <textarea
+        <VoiceToText
           value={reportsText}
-          onChange={(event) => setReportsText(event.target.value)}
+          onChange={(text) => setReportsText(text)}
           placeholder="Type previous reports..."
-          className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
         />
 
       </div>
@@ -1526,15 +1529,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                   <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
                     Enter Brief Note
                   </label>
-                  <textarea
+                  <VoiceToText
                     value={pastHistoryTreatmentNote}
-                    onChange={(event) =>
-                      setPastHistoryTreatmentNote(
-                        event.target.value
-                      )
-                    }
+                    onChange={(text) => setPastHistoryTreatmentNote(text)}
                     placeholder="Type a brief note..."
-                    className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
                   />
                 </div>
 
@@ -1558,13 +1556,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
           </div>
 
-        <textarea
+        <VoiceToText
           value={pastHistory}
-          onChange={(event) =>
-            setPastHistory(event.target.value)
-          }
+          onChange={(text) => setPastHistory(text)}
           placeholder="Type the patient's past history..."
-          className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-slate-400"
         />
 
       </div>
