@@ -52,9 +52,8 @@ interface UseClinicalDetailsResult {
   saving: boolean;
   saveError: string | null;
   saveSuccess: boolean;
-  saveClinicalDetails: (
-    draft: ClinicalDetailsDraft,
-  ) => Promise<EncounterClinicalDetails | null>;
+  /* Resolves true when every write succeeded, false otherwise. */
+  saveClinicalDetails: (draft: ClinicalDetailsDraft) => Promise<boolean>;
 
   createSymptom: (name: string) => Promise<SymptomOption | null>;
   createAllergy: (substanceName: string) => Promise<AllergyOption | null>;
@@ -201,13 +200,13 @@ export function useClinicalDetails({
      are patient-level and saved through their own endpoints.
   ============================================================ */
   const saveClinicalDetails = useCallback(
-    async (draft: ClinicalDetailsDraft): Promise<EncounterClinicalDetails | null> => {
+    async (draft: ClinicalDetailsDraft): Promise<boolean> => {
       if (!patientId || !encounterNo) {
         setSaveError("Missing patient or encounter context.");
-        return null;
+        return false;
       }
 
-      if (saveInFlight.current) return null;
+      if (saveInFlight.current) return false;
       saveInFlight.current = true;
 
       setSaving(true);
@@ -445,14 +444,14 @@ export function useClinicalDetails({
         } else {
           setSaveSuccess(true);
         }
-        return freshData;
+        return writeErrors.length === 0;
       } catch (err) {
         console.error(
           "[useClinicalDetails] Failed to save clinical details:",
           err,
         );
         setSaveError(getApiErrorMessage(err));
-        return null;
+        return false;
       } finally {
         saveInFlight.current = false;
         setSaving(false);

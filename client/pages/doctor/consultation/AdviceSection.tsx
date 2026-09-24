@@ -935,21 +935,19 @@ export interface AdviceSectionHandle {
 
 interface AdviceSectionProps {
   encounter: EncounterRecord | null;
-  encounterError: string;
   /* Unsaved draft rows are only restored for the patient they belong to. */
   patientId?: string;
   onToast: (message: string) => void;
 }
 
 /* The Consultation step's Advice section: the medicines table and the
-   Discussion. The step saves it through the handle so Save Clinical
-   Details and Proceed to Next persist it with the rest of the
-   consultation. */
+   Discussion. It has no save button of its own: the step saves it
+   through the handle when the doctor clicks Proceed to Next. */
 const AdviceSection = forwardRef<
   AdviceSectionHandle,
   AdviceSectionProps
 >(function AdviceSection(
-  { encounter, encounterError, patientId, onToast: showToast },
+  { encounter, patientId, onToast: showToast },
   ref,
 ) {
   /* Advice (OPD prescription). The refs mirror what an in-flight save
@@ -1439,9 +1437,8 @@ const AdviceSection = forwardRef<
   };
 
   /* Saves the whole section: the medicines as the encounter's
-     prescription, then the Discussion. Serialised (Save Advice, Save
-     Clinical Details and Proceed to Next can overlap) so one encounter
-     never gets two prescriptions. */
+     prescription, then the Discussion. Serialised so overlapping calls
+     can never give one encounter two prescriptions. */
   const saveAdviceSection = async (
     targetEncounter: EncounterRecord
   ): Promise<AdviceSaveResult> => {
@@ -1475,29 +1472,29 @@ const AdviceSection = forwardRef<
     }
   };
 
-  const handleSaveAdvice = async () => {
-    if (!encounter) {
-      showToast(
-        encounterError ||
-          "No active encounter found. Cannot save the Advice."
-      );
-      return;
-    }
-    const result = await saveAdviceSection(encounter);
-    if (result === "saved" || result === "unchanged") {
-      showToast("Advice saved");
-    } else if (result === "cleared") {
-      showToast("Prescription removed");
-    } else if (result === "empty") {
-      showToast("Add a medicine or a discussion to save");
-    }
-  };
-
   const adviceFilledRows = adviceRows.filter((row) => !isAdviceRowEmpty(row));
   const adviceDirty =
     (adviceFilledRows.length > 0 || Boolean(advicePrescriptionId)) &&
     adviceSnapshot(adviceFilledRows) !== adviceSavedSnapshotRef.current;
   const discussionDirty = discussion.trim() !== savedDiscussion.trim();
+
+  /* Save feedback for the section; saving itself happens on Proceed to
+     Next, so failures are explained here. */
+  const adviceStatus = adviceError ? (
+    <span className="text-red-600">{adviceError}</span>
+  ) : adviceSaving ? (
+    <span className="text-slate-500">Saving...</span>
+  ) : adviceDirty || discussionDirty ? (
+    <span className="text-slate-500">
+      Unsaved changes, saved when you click Proceed to Next
+    </span>
+  ) : advicePrescriptionId ? (
+    <span className="text-green-600">
+      Saved to prescription {advicePrescriptionId}
+    </span>
+  ) : savedDiscussion.trim() ? (
+    <span className="text-green-600">Discussion saved</span>
+  ) : null;
 
   const renderAdviceOptionField = (
     row: AdviceMedicineRow,
@@ -1717,53 +1714,9 @@ const AdviceSection = forwardRef<
 
       </div>
 
-      {!adviceLoading && (
-        <div className="flex w-full items-center justify-end gap-3">
-
-          <div className="mr-auto text-xs font-medium leading-4">
-            {adviceError ? (
-              <span className="text-red-600">{adviceError}</span>
-            ) : adviceDirty || discussionDirty ? (
-              <span className="text-slate-500">Unsaved changes</span>
-            ) : advicePrescriptionId ? (
-              <span className="text-green-600">
-                Saved to prescription {advicePrescriptionId}
-              </span>
-            ) : savedDiscussion.trim() ? (
-              <span className="text-green-600">Discussion saved</span>
-            ) : null}
-          </div>
-
-          <button
-            type="button"
-            onClick={handleSaveAdvice}
-            disabled={adviceSaving}
-            className="flex h-9 w-fit items-center justify-center gap-2 rounded-lg border-0 bg-blue-700 px-[25px] py-[9px] text-sm font-bold leading-5 text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-          >
-            {adviceSaving && (
-              <svg
-                className="h-4 w-4 animate-spin text-white"
-                viewBox="0 0 24 24"
-                fill="none"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                />
-              </svg>
-            )}
-            {adviceSaving ? "Saving..." : "Save Advice"}
-          </button>
-
+      {!adviceLoading && adviceStatus && (
+        <div className="text-xs font-medium leading-4">
+          {adviceStatus}
         </div>
       )}
 

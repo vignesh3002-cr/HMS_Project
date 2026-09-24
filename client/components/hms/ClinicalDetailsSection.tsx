@@ -57,7 +57,9 @@ export interface ClinicalDetailsSectionSaveState {
 }
 
 export interface ClinicalDetailsSectionHandle {
-  handleSave: () => void;
+  /* Resolves true when the clinical details were saved (or there was
+     nothing editable to save yet), false when any write failed. */
+  handleSave: () => Promise<boolean>;
 }
 
 const ChevronDownIcon = () => (
@@ -457,9 +459,10 @@ export const ClinicalDetailsSection = forwardRef<
      Save: controlled operation sending the current local state to
      the backend (ordered diff-based sync inside the hook).
   ============================================================ */
-  const handleSave = async () => {
-    if (disabled) return;
-    await saveClinicalDetails({
+  const handleSave = async (): Promise<boolean> => {
+    // Still loading, or no patient/encounter: nothing editable to save.
+    if (disabled) return true;
+    return saveClinicalDetails({
       performanceStatusId: ecogId ? Number(ecogId) : null,
       symptoms: symptomSelections.map((selection) => ({
         symptomId: Number(selection.symptomId),
@@ -509,11 +512,10 @@ export const ClinicalDetailsSection = forwardRef<
   }, [saveSuccess, toast]);
 
   /* ============================================================
-     Expose the save action so the parent (Patientconsut) can
-     invoke it from the "Save Clinical Details" button rendered
-     next to the "Reports (Previous)" field, and report the live
-     save state (saving/disabled/messages) up so that button can
-     re-render with it (a ref alone would never trigger re-renders).
+     Expose the save action so the Consultation step can run it
+     from "Proceed to Next", and report the live save state
+     (saving/disabled/messages) to an optional listener (a ref
+     alone would never trigger re-renders).
   ============================================================ */
   useImperativeHandle(ref, () => ({
     handleSave,

@@ -166,13 +166,6 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
   const [proceeding, setProceeding] = useState(false);
 
   const clinicalDetailsRef = useRef<ClinicalDetailsSectionHandle>(null);
-  const [clinicalSaveState, setClinicalSaveState] = useState<{
-    saving: boolean;
-    disabled: boolean;
-    saveError: string | null;
-    saveSuccess: boolean;
-  }>({ saving: false, disabled: true, saveError: null, saveSuccess: false });
-  const [savingClinicalAll, setSavingClinicalAll] = useState(false);
 
   /* ============================================================
      SYNC HISTORY OF PRESENT ILLNESS FROM ACTIVE ENCOUNTER
@@ -526,7 +519,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
   ============================================================ */
 
   /* ============================================================
-     CONSULTATION PERSIST (shared by Next + Save Clinical Details)
+     CONSULTATION PERSIST (run by Proceed to Next)
      Builds the encounter update payload from the Consultation step
      form and writes it + personal history + reason of visit.
   ============================================================ */
@@ -689,47 +682,15 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     }
   };
 
-  /* SAVE CLINICAL DETAILS
-     Persists the entire consultation step: the Clinical Details section,
-     the encounter fields (notes/HOPI/chief complaint/systemic + general
-     exam/clinical findings/past-history treatment/previous reports),
-     personal history, reason of visit, and the Reports (Previous) form. */
-  const handleSaveClinicalDetails = async () => {
-    if (savingClinicalAll || proceeding) return;
-
-    if (!encounter) {
-      showToast(
-        encounterError ||
-          "No active encounter found. Cannot save consultation details."
-      );
-      return;
-    }
-
-    setSavingClinicalAll(true);
-    try {
-      await clinicalDetailsRef.current?.handleSave();
-      await persistConsultation(encounter);
-      await persistReportsPrevious(encounter.encounter_no);
-      const adviceResult = await saveAdvice(encounter);
-      showToast(
-        adviceResult === "failed"
-          ? "Clinical details saved, but the Advice prescription could not be saved."
-          : "Clinical details saved"
-      );
-    } catch (error: any) {
-      console.error("Failed to save clinical details:", error);
-      showToast(
-        error?.response?.data?.message ||
-          error?.message ||
-          "Failed to save clinical details."
-      );
-    } finally {
-      setSavingClinicalAll(false);
-    }
-  };
-
   /* ============================================================
      NEXT
+     Saves the whole Consultation step, then moves on: the Clinical
+     Details section (ECOG, symptoms, allergies, comorbidities), the
+     encounter fields + personal history + reason of visit, the
+     Reports (Previous) form, and the Advice section (medicines +
+     Discussion). Every part is attempted; the step stays open when
+     the clinical details or the Advice could not be saved so
+     nothing is lost.
   ============================================================ */
 
   const proceedNext = async () => {
@@ -746,15 +707,21 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     try {
       setProceeding(true);
 
+      const clinicalSaved =
+        (await clinicalDetailsRef.current?.handleSave()) ?? true;
       await persistConsultation(encounter);
       await persistReportsPrevious(encounter.encounter_no);
-
-      /* Stay on this step when the Advice medicines could not be saved
-         so the prescription is not lost. */
       const adviceResult = await saveAdvice(encounter);
-      if (adviceResult === "failed") {
+
+      const failedParts = [
+        ...(clinicalSaved ? [] : ["clinical details"]),
+        ...(adviceResult === "failed" ? ["Advice"] : []),
+      ];
+      if (failedParts.length > 0) {
         showToast(
-          "Consultation saved, but the Advice prescription could not be saved."
+          `Consultation saved, but the ${failedParts.join(
+            " and "
+          )} could not be saved.`
         );
         return;
       }
@@ -1038,7 +1005,6 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
             ref={clinicalDetailsRef}
             patientId={consultationState?.patientId}
             encounterNo={encounter.encounter_no}
-            onSaveStateChange={setClinicalSaveState}
           />
         ) : (
           !encounterError && (
@@ -1455,7 +1421,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       </div>
 
-      {/* RIGHT COLUMN: PAST HISTORY + SAVE */}
+      {/* RIGHT COLUMN: PAST HISTORY */}
 
       <div className="flex w-full flex-col gap-4">
 
@@ -1562,58 +1528,6 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
           onChange={(text) => setPastHistory(text)}
           placeholder="Type the patient's past history..."
         />
-
-      </div>
-
-      {/* SAVE CLINICAL DETAILS (next to Reports) */}
-
-      <div className="flex flex-col justify-end gap-2">
-
-        <button
-          type="button"
-          onClick={handleSaveClinicalDetails}
-          disabled={clinicalSaveState.disabled || savingClinicalAll}
-          className="flex h-9 w-fit items-center justify-center gap-2 rounded-lg border-0 bg-blue-700 px-[25px] py-[9px] text-sm font-bold leading-5 text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-        >
-          {(clinicalSaveState.saving || savingClinicalAll) && (
-            <svg
-              className="h-4 w-4 animate-spin text-white"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              />
-            </svg>
-          )}
-          {clinicalSaveState.saving || savingClinicalAll
-            ? "Saving..."
-            : "Save Clinical Details"}
-        </button>
-
-        {clinicalSaveState.saveError && (
-          <div className="text-xs font-medium leading-4 text-red-600">
-            {clinicalSaveState.saveError}
-          </div>
-        )}
-
-        {clinicalSaveState.saveSuccess &&
-          !clinicalSaveState.saveError && (
-            <div className="text-xs font-medium leading-4 text-green-600">
-              Clinical details saved successfully.
-            </div>
-          )}
 
       </div>
 
@@ -1802,11 +1716,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     ================================================= */}
 
     <AdviceSection
-    ref={adviceSectionRef}
-    encounter={encounter}
-    encounterError={encounterError}
-    patientId={consultationState?.patientId}
-    onToast={showToast}
+      ref={adviceSectionRef}
+      encounter={encounter}
+      patientId={consultationState?.patientId}
+      onToast={showToast}
     />
 
     {/* =================================================
