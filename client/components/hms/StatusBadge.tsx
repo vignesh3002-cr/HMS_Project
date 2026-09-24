@@ -53,6 +53,10 @@ const statusToneMap: Record<string, StatusTone> = {
   "transfer review required": "indigo",
   pending: "amber",
   assigned: "blue",
+  planned: "amber",
+  admitted: "green",
+  discharged: "slate",
+  transferred: "blue",
 };
 
 // CHECKED_IN is no longer surfaced as its own state anywhere in the UI --
