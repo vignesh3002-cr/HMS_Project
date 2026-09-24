@@ -8,6 +8,10 @@ import React, {
 } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useClinicalDetails } from "@/hooks/useClinicalDetails";
+import {
+  MultiSelectDropdown,
+  type MultiSelectOption,
+} from "@/components/ui/multi-select-dropdown";
 
 /* ============================================================
    Severity choices mirror the backend enums
@@ -33,8 +37,9 @@ interface AllergySelection {
 }
 
 interface ComorbiditySelection {
-  diagnosisId: string;
-  diagnosisName: string;
+  /* comorbidity_master.id */
+  comorbidityId: string;
+  comorbidityName: string;
 }
 
 interface ClinicalDetailsSectionProps {
@@ -188,8 +193,8 @@ export const ClinicalDetailsSection = forwardRef<
       );
       setComorbiditySelections(
         saved.comorbidities.map((comorbidity) => ({
-          diagnosisId: comorbidity.diagnosisId,
-          diagnosisName: comorbidity.diagnosisName,
+          comorbidityId: String(comorbidity.comorbidityId),
+          comorbidityName: comorbidity.comorbidityName,
         })),
       );
     } else {
@@ -226,16 +231,27 @@ export const ClinicalDetailsSection = forwardRef<
     [allergyOptions, allergySelections],
   );
 
-  const availableComorbidities = useMemo(
-    () =>
-      comorbidityOptions.filter(
-        (option) =>
-          !comorbiditySelections.some(
-            (selection) => selection.diagnosisId === option.diagnosis_id,
-          ),
-      ),
-    [comorbidityOptions, comorbiditySelections],
-  );
+  /* Comorbidity picker options (search, multi-select, category + ICD-10
+     hint). A saved comorbidity missing from the active list (e.g. since
+     deactivated) is kept so its chip still shows its name. */
+  const comorbidityDropdownOptions = useMemo<MultiSelectOption[]>(() => {
+    const options: MultiSelectOption[] = comorbidityOptions.map((option) => ({
+      value: String(option.id),
+      label: option.comorbidity_name,
+      hint:
+        [option.category, option.icd_code].filter(Boolean).join(" · ") ||
+        undefined,
+    }));
+    for (const selection of comorbiditySelections) {
+      if (!options.some((option) => option.value === selection.comorbidityId)) {
+        options.push({
+          value: selection.comorbidityId,
+          label: selection.comorbidityName,
+        });
+      }
+    }
+    return options;
+  }, [comorbidityOptions, comorbiditySelections]);
 
   /* ============================================================
      Local selection handlers (no backend writes until Save)
@@ -320,30 +336,22 @@ export const ClinicalDetailsSection = forwardRef<
     );
   };
 
-  const addComorbidity = (diagnosisId: string) => {
-    if (!diagnosisId) return;
-    setComorbiditySelections((previous) => {
-      if (
-        previous.some((selection) => selection.diagnosisId === diagnosisId)
-      ) {
-        return previous;
-      }
-      const option = comorbidityOptions.find(
-        (item) => item.diagnosis_id === diagnosisId,
-      );
-      return [
-        ...previous,
-        {
-          diagnosisId,
-          diagnosisName: option?.diagnosis_name ?? diagnosisId,
-        },
-      ];
-    });
-  };
-
-  const removeComorbidity = (diagnosisId: string) => {
+  /* The picker reports the full list of ticked ids; keep each name. */
+  const handleComorbidityChange = (comorbidityIds: string[]) => {
     setComorbiditySelections((previous) =>
-      previous.filter((selection) => selection.diagnosisId !== diagnosisId),
+      comorbidityIds.map((comorbidityId) => {
+        const existing = previous.find(
+          (selection) => selection.comorbidityId === comorbidityId,
+        );
+        if (existing) return existing;
+        const option = comorbidityOptions.find(
+          (item) => String(item.id) === comorbidityId,
+        );
+        return {
+          comorbidityId,
+          comorbidityName: option?.comorbidity_name ?? comorbidityId,
+        };
+      }),
     );
   };
 
@@ -418,29 +426,26 @@ export const ClinicalDetailsSection = forwardRef<
   };
 
   const handleCreateComorbidity = async () => {
-    const diagnosisName = otherComorbidityName.trim();
-    if (!diagnosisName || otherComorbidityBusy || disabled) return;
+    const comorbidityName = otherComorbidityName.trim();
+    if (!comorbidityName || otherComorbidityBusy || disabled) return;
     setOtherComorbidityBusy(true);
     try {
-      const category = comorbidityCategories.find(
-        (item) => item.diagnosis_catogory_id === otherComorbidityCategory,
-      );
+      // Adds it to comorbidity_master (or returns the existing entry with
+      // the same name) and ticks it.
       const created = await createComorbidity({
-        diagnosisName,
-        diagnosisCatogoryId: category?.diagnosis_catogory_id || undefined,
-        diagnosisCategory: category?.diagnosis_category || undefined,
+        comorbidityName,
+        category: otherComorbidityCategory || undefined,
       });
       if (created) {
+        const createdId = String(created.id);
         setComorbiditySelections((previous) =>
-          previous.some(
-            (selection) => selection.diagnosisId === created.diagnosis_id,
-          )
+          previous.some((selection) => selection.comorbidityId === createdId)
             ? previous
             : [
                 ...previous,
                 {
-                  diagnosisId: created.diagnosis_id,
-                  diagnosisName: created.diagnosis_name,
+                  comorbidityId: createdId,
+                  comorbidityName: created.comorbidity_name,
                 },
               ],
         );
@@ -478,7 +483,7 @@ export const ClinicalDetailsSection = forwardRef<
         reaction: selection.reaction || undefined,
       })),
       comorbidities: comorbiditySelections.map((selection) => ({
-        diagnosisId: selection.diagnosisId,
+        comorbidityId: selection.comorbidityId,
         clinicalNotes: consultationNotes || undefined,
       })),
     });
@@ -842,60 +847,29 @@ export const ClinicalDetailsSection = forwardRef<
 
       {/* ======================================================
           COMORBIDITIES
-          Existing active comorbidities shown separately from the
-          available diagnosis reference options (longitudinal data).
+          Patient-level (longitudinal) comorbidities picked from
+          comorbidity_master: type to search, tick several. A search
+          with no match offers "+ Add", which opens the panel below.
       ====================================================== */}
       <div className="flex flex-col gap-1">
         <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
           Comorbidities
         </div>
 
-        <div className="flex min-h-[38px] w-full flex-wrap items-start gap-1.5 rounded-md border border-slate-200 bg-white p-1.5">
-          {comorbiditySelections.map((selection) => (
-            <div
-              key={selection.diagnosisId}
-              className="flex h-[26px] items-center gap-1 rounded border border-blue-100 bg-blue-50 px-[9px] py-[3px] text-xs leading-4 text-blue-700"
-            >
-              <span>{selection.diagnosisName}</span>
+        <MultiSelectDropdown
+          options={comorbidityDropdownOptions}
+          value={comorbiditySelections.map((selection) => selection.comorbidityId)}
+          onValueChange={handleComorbidityChange}
+          onCreateOption={(typed) => {
+            setOtherComorbidityName(typed);
+            setOtherComorbidity(true);
+          }}
+          placeholder="Search and select comorbidities..."
+          disabled={disabled}
+          className="h-[38px] rounded-md border-slate-200 text-xs shadow-none"
+        />
 
-              <button
-                type="button"
-                onClick={() => removeComorbidity(selection.diagnosisId)}
-                disabled={disabled}
-                className="bg-transparent p-0 text-blue-700 disabled:cursor-not-allowed disabled:text-blue-300"
-              >
-                ×
-              </button>
-            </div>
-          ))}
-
-          <select
-            value=""
-            onChange={(event) => {
-              if (event.target.value === "__OTHER__") {
-                setOtherComorbidity(true);
-              } else {
-                addComorbidity(event.target.value);
-              }
-            }}
-            disabled={disabled}
-            className="h-[26px] w-full appearance-none rounded border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-500 outline-none sm:w-40 disabled:cursor-not-allowed disabled:bg-slate-50"
-          >
-            <option value="">
-              {availableComorbidities.length === 0
-                ? "No more comorbidities"
-                : "Add comorbidity..."}
-            </option>
-            {availableComorbidities.map((option) => (
-              <option key={option.diagnosis_id} value={option.diagnosis_id}>
-                {option.diagnosis_name}
-              </option>
-            ))}
-            <option value="__OTHER__">Others...</option>
-          </select>
-        </div>
-
-        {/* "Others" free-text input for Comorbidities */}
+        {/* "+ Add" panel: new comorbidity for the master, with a category */}
         {otherComorbidity && (
           <div className="flex w-full flex-col gap-2">
             <div className="flex w-full items-center gap-2">
@@ -904,7 +878,7 @@ export const ClinicalDetailsSection = forwardRef<
                 value={otherComorbidityName}
                 onChange={(event) => setOtherComorbidityName(event.target.value)}
                 disabled={disabled}
-                placeholder="Enter new comorbidity / diagnosis"
+                placeholder="Enter new comorbidity"
                 className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-xs leading-4 text-slate-600 outline-none disabled:bg-slate-50"
               />
               <select
@@ -917,11 +891,8 @@ export const ClinicalDetailsSection = forwardRef<
               >
                 <option value="">Select category</option>
                 {comorbidityCategories.map((category) => (
-                  <option
-                    key={category.diagnosis_catogory_id}
-                    value={category.diagnosis_catogory_id}
-                  >
-                    {category.diagnosis_category}
+                  <option key={category} value={category}>
+                    {category}
                   </option>
                 ))}
               </select>
