@@ -8,7 +8,8 @@ import React, {
   useImperativeHandle,
 } from "react";
 import API from "../../../api/axios";
-import type { EncounterRecord } from "../../../api/encounter.api";
+import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
+import VoiceToText from "@/components/ui/voicetotext";
 
 /* ============================================================
    ADVICE (OPD PRESCRIPTION)
@@ -923,10 +924,13 @@ const AdviceDrugNameField: React.FC<{
 };
 
 export interface AdviceSectionHandle {
-  /* Saves the Advice rows as this encounter's prescription. */
+  /* Saves the Advice rows as this encounter's prescription and the
+     Discussion on the encounter. */
   save: (targetEncounter: EncounterRecord) => Promise<AdviceSaveResult>;
   /* Filled rows without saved ids, for Save as Draft. */
   getDraftRows: () => Omit<AdviceMedicineRow, "itemId" | "savedKey">[];
+  /* Current Discussion text, for Save as Draft. */
+  getDraftDiscussion: () => string;
 }
 
 interface AdviceSectionProps {
@@ -937,9 +941,10 @@ interface AdviceSectionProps {
   onToast: (message: string) => void;
 }
 
-/* The Consultation step's Advice table. The step saves it through the
-   handle so Save Clinical Details and Proceed to Next persist it with
-   the rest of the consultation. */
+/* The Consultation step's Advice section: the medicines table and the
+   Discussion. The step saves it through the handle so Save Clinical
+   Details and Proceed to Next persist it with the rest of the
+   consultation. */
 const AdviceSection = forwardRef<
   AdviceSectionHandle,
   AdviceSectionProps
@@ -962,6 +967,19 @@ const AdviceSection = forwardRef<
   const [adviceCustomOptions, setAdviceCustomOptions] = useState(
     loadAdviceCustomOptions
   );
+
+  /* Discussion: the doctor's remarks for this visit. Saved on the
+     encounter (encounter.notes), independent of the medicines. */
+  const [discussion, setDiscussion] = useState("");
+  const discussionRef = useRef("");
+  discussionRef.current = discussion;
+  const [savedDiscussion, setSavedDiscussion] = useState("");
+  const savedDiscussionRef = useRef("");
+
+  const markDiscussionSaved = (value: string) => {
+    savedDiscussionRef.current = value;
+    setSavedDiscussion(value);
+  };
 
   /* ============================================================
      ADVICE ROWS
@@ -1068,6 +1086,32 @@ const AdviceSection = forwardRef<
     adviceRowsRef.current = merge(adviceRowsRef.current);
     setAdviceRows(merge);
   };
+
+  /* Seed the Discussion from the encounter. With nothing saved yet,
+     restore this patient's unsaved draft text. */
+  useEffect(() => {
+    if (!encounter?.encounter_no) return;
+    const saved = encounter.notes ?? "";
+    markDiscussionSaved(saved);
+    let initial = saved;
+    if (!saved) {
+      try {
+        const draft = JSON.parse(
+          localStorage.getItem("hms_consultation_draft") ?? "{}"
+        );
+        if (
+          draft.patientId &&
+          draft.patientId === patientId &&
+          typeof draft.adviceDiscussion === "string"
+        ) {
+          initial = draft.adviceDiscussion;
+        }
+      } catch {
+        // Malformed draft - start from the saved value.
+      }
+    }
+    setDiscussion(initial);
+  }, [encounter?.encounter_no]);
 
   /* ============================================================
      LOAD ADVICE PRESCRIPTION
@@ -1253,7 +1297,6 @@ const AdviceSection = forwardRef<
       return "unchanged";
     }
 
-    setAdviceSaving(true);
     const updates: Record<string, Partial<AdviceMedicineRow>> = {};
     try {
       let serverItems: AdvicePrescriptionItemRecord[] = [];
@@ -1370,21 +1413,60 @@ const AdviceSection = forwardRef<
           "Failed to save the prescription."
       );
       return "failed";
-    } finally {
-      setAdviceSaving(false);
     }
   };
 
-  /* Serialises saves (Save Prescription, Save Clinical Details and
-     Proceed to Next can overlap) so one encounter never gets two
-     prescriptions. */
-  const saveAdvicePrescription = async (
+  /* Saves the Discussion to the encounter when it changed since the
+     last save/load. */
+  const saveDiscussion = async (
+    targetEncounter: EncounterRecord
+  ): Promise<"saved" | "unchanged" | "failed"> => {
+    const value = discussionRef.current.trim();
+    if (value === savedDiscussionRef.current.trim()) return "unchanged";
+    try {
+      await encounterApi.update(targetEncounter.encounter_no, { notes: value });
+      markDiscussionSaved(value);
+      return "saved";
+    } catch (error: any) {
+      console.error("Failed to save the Advice discussion:", error);
+      setAdviceError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to save the discussion."
+      );
+      return "failed";
+    }
+  };
+
+  /* Saves the whole section: the medicines as the encounter's
+     prescription, then the Discussion. Serialised (Save Advice, Save
+     Clinical Details and Proceed to Next can overlap) so one encounter
+     never gets two prescriptions. */
+  const saveAdviceSection = async (
     targetEncounter: EncounterRecord
   ): Promise<AdviceSaveResult> => {
     while (adviceSaveRef.current) {
       await adviceSaveRef.current;
     }
-    const run = runAdviceSave(targetEncounter);
+    const run = (async (): Promise<AdviceSaveResult> => {
+      setAdviceSaving(true);
+      try {
+        const medicines = await runAdviceSave(targetEncounter);
+        const discussionResult = await saveDiscussion(targetEncounter);
+        if (medicines === "failed" || discussionResult === "failed") {
+          return "failed";
+        }
+        if (
+          discussionResult === "saved" &&
+          (medicines === "empty" || medicines === "unchanged")
+        ) {
+          return "saved";
+        }
+        return medicines;
+      } finally {
+        setAdviceSaving(false);
+      }
+    })();
     adviceSaveRef.current = run;
     try {
       return await run;
@@ -1397,23 +1479,25 @@ const AdviceSection = forwardRef<
     if (!encounter) {
       showToast(
         encounterError ||
-          "No active encounter found. Cannot save the prescription."
+          "No active encounter found. Cannot save the Advice."
       );
       return;
     }
-    const result = await saveAdvicePrescription(encounter);
+    const result = await saveAdviceSection(encounter);
     if (result === "saved" || result === "unchanged") {
-      showToast("Prescription saved");
+      showToast("Advice saved");
     } else if (result === "cleared") {
       showToast("Prescription removed");
     } else if (result === "empty") {
-      showToast("Add at least one medicine to save the prescription");
+      showToast("Add a medicine or a discussion to save");
     }
   };
 
   const adviceFilledRows = adviceRows.filter((row) => !isAdviceRowEmpty(row));
   const adviceDirty =
+    (adviceFilledRows.length > 0 || Boolean(advicePrescriptionId)) &&
     adviceSnapshot(adviceFilledRows) !== adviceSavedSnapshotRef.current;
+  const discussionDirty = discussion.trim() !== savedDiscussion.trim();
 
   const renderAdviceOptionField = (
     row: AdviceMedicineRow,
@@ -1443,11 +1527,12 @@ const AdviceSection = forwardRef<
   );
 
   useImperativeHandle(ref, () => ({
-    save: saveAdvicePrescription,
+    save: saveAdviceSection,
     getDraftRows: () =>
       adviceRowsRef.current
         .filter((row) => !isAdviceRowEmpty(row))
         .map(({ itemId: _itemId, savedKey: _savedKey, ...row }) => row),
+    getDraftDiscussion: () => discussionRef.current,
   }));
 
   return (
@@ -1616,19 +1701,36 @@ const AdviceSection = forwardRef<
         </table>
       )}
 
-      {!adviceLoading &&
-        (adviceRows.length > 0 || advicePrescriptionId) && (
+      {/* DISCUSSION */}
+
+      <div className="flex w-full flex-col gap-2">
+
+        <label className="text-xs font-bold leading-4 text-slate-500">
+          Discussion
+        </label>
+
+        <VoiceToText
+          value={discussion}
+          onChange={(text) => setDiscussion(text)}
+          placeholder="Type the discussion with the patient..."
+        />
+
+      </div>
+
+      {!adviceLoading && (
         <div className="flex w-full items-center justify-end gap-3">
 
           <div className="mr-auto text-xs font-medium leading-4">
             {adviceError ? (
               <span className="text-red-600">{adviceError}</span>
-            ) : adviceDirty ? (
+            ) : adviceDirty || discussionDirty ? (
               <span className="text-slate-500">Unsaved changes</span>
             ) : advicePrescriptionId ? (
               <span className="text-green-600">
                 Saved to prescription {advicePrescriptionId}
               </span>
+            ) : savedDiscussion.trim() ? (
+              <span className="text-green-600">Discussion saved</span>
             ) : null}
           </div>
 
@@ -1659,7 +1761,7 @@ const AdviceSection = forwardRef<
                 />
               </svg>
             )}
-            {adviceSaving ? "Saving..." : "Save Prescription"}
+            {adviceSaving ? "Saving..." : "Save Advice"}
           </button>
 
         </div>

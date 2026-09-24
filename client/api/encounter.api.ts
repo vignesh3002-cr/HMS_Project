@@ -23,6 +23,8 @@ export interface EncounterRecord {
   diagnosis_id: string | null;
   clinical_notes: string | null;
   advice: string | null;
+  /* Consultation > Advice > Discussion: the doctor's remarks for the visit. */
+  notes?: string | null;
   follow_up_date: string | null;
   history_of_present_illness: string | null;
   cns_examination: string | null;

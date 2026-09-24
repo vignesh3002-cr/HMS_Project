@@ -495,6 +495,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
       consultationNotes,
       pastHistory,
       adviceRows: adviceSectionRef.current?.getDraftRows() ?? [],
+      adviceDiscussion: adviceSectionRef.current?.getDraftDiscussion() ?? "",
       investigations: selectedInvestigations,
     };
 
