@@ -14,6 +14,17 @@ export interface CreateAppointmentPayload {
   patient_type?: string;
   patient_visit_type?: string;
   referred_by?: string;
+
+  // IPD admission-request fields (book-first flow). Sent only for
+  // Inpatient (IPD) bookings with an Admission/Daycare visit type; the
+  // backend ignores unknown keys today and a real `admission` row is
+  // created separately at admit time.
+  requested_ward_id?: string;
+  requested_bed_id?: string;
+  ipd_payment_mode?: string;
+  expected_stay_days?: number;
+  advance_amount?: number;
+  provisional_diagnosis?: string;
 }
 
 export interface AvailableSlot {

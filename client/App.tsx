@@ -40,6 +40,7 @@ import AddAppointment from "@/components/Forms/AddAppointment";
 import PatientProfile from "@/components/Forms/view/patientProfile";
 import PatientDetailView from "@/components/Forms/view/viewpatient";
 import ViewAppointmentScheduled from "@/components/Forms/view/View Appointment Scheduled";
+import AdmissionDetails from "@/components/Forms/view/Admission Details";
 import Profile from "@/components/Forms/view/view profile ";
 import Security from "@/components/Forms/view/Security";
 
@@ -55,6 +56,7 @@ import Notifications from "./pages/Notifications";
 import Patients from "./pages/Patients";
 import ProtocolMaster from "./pages/ProtocolMaster";
 import OrderMaster from "./pages/OrderMaster";
+import PharmacySlip from "./pages/PharmacySlip";
 import Chat from "./pages/Chat";
 import CreateProtocol from "@/components/Forms/CreateProtocol";
 import ProtectedRoute from "./routes/ProtectedRoute";
@@ -323,6 +325,22 @@ const protectedRoutes = [
   },
 
   // ----------------------------------------------------------
+  // Inpatient (IPD)
+  // ----------------------------------------------------------
+
+  {
+    path: "/ipd",
+    element: <Appointments defaultTab="ipd" />,
+    permission: "admission.read",
+  },
+
+  {
+    path: "/admissions/view/:ipNumber",
+    element: <AdmissionDetails />,
+    permission: "admission.read",
+  },
+
+  // ----------------------------------------------------------
   // Departments
   // ----------------------------------------------------------
 
@@ -431,6 +449,11 @@ const protectedRoutes = [
   {
     path: "/orders",
     element: <OrderMaster />,
+    permission: "chemo.plan.read",
+  },
+  {
+    path: "/orders/:planId/pharmacy-slip",
+    element: <PharmacySlip />,
     permission: "chemo.plan.read",
   },
 
