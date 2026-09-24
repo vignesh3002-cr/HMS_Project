@@ -1,0 +1,3 @@
+HEADING_LINE:2 count:1
+1:HEADING_LINE:1
+2:1: const fs=require('fs');const lines=fs.readFileSync(process.argv[1],'utf8').split('\n');let li=0;while(li<lines.length&&lines[li].indexOf('Vitals Trend History')<0)li++;let out=[];out.push('HEADING_...[x]

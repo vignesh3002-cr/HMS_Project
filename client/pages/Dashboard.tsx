@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2, Activity, AlertCircle, AlertTriangle, FlaskConical, CheckCircle2, XCircle, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
@@ -65,6 +65,7 @@ function getVitalsCriticalReasons(enc: EncounterRecord): string[] {
   }
   return reasons;
 }
+import { getKpiPreferences, saveKpiPreferences } from "@/api/userPreferences.api";
 
 const navItems = [
   {
@@ -164,7 +165,7 @@ function getInitials(name: string): string {
 }
 
 function formatBranch(branch: EmployeeRecord["branch"]): string {
-  if (!branch?.branch_name) return "â€”";
+  if (!branch?.branch_name) return "";
   return branch.branch_area ? `${branch.branch_name} (${branch.branch_area})` : branch.branch_name;
 }
 
@@ -251,12 +252,12 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
   const doctor = doc.employees;
   const doctorName = doctor
     ? `${doctor.first_name} ${doctor.middle_name ? doctor.middle_name + " " : ""}${doctor.last_name}`.trim()
-    : (doc.doctor_name && doc.doctor_name !== "Laboratory" && doc.doctor_name !== "Unassigned" ? doc.doctor_name : "â€”");
+    : (doc.doctor_name && doc.doctor_name !== "Laboratory" && doc.doctor_name !== "Unassigned" ? doc.doctor_name : "");
   const branchName = doc.branch
     ? doc.branch.branch_area
       ? `${doc.branch.branch_name} (${doc.branch.branch_area})`
       : doc.branch.branch_name
-    : doc.branch_id || "â€”";
+    : doc.branch_id || "";
 
   return {
     id: doc.appointment_id,
@@ -267,13 +268,13 @@ function mapAppointmentRecord(doc: AppointmentRecord, index: number) {
     avatarColor: patientPalette.avatarColor,
     avatarBg: patientPalette.initBg,
     doctorName,
-    doctorId: doc.employee_id ? doc.employee_id : "â€”",
+    doctorId: doc.employee_id ? doc.employee_id : "",
     doctorAvatar: getInitials(doctorName),
     doctorAvatarcolor: doctorPalette.avatarColor,
     doctorAvatarBg: doctorPalette.initBg,
     branch: branchName,
-    branchId: doc.branch_id ?? "â€”",
-    reason: doc.reason_for_visit || "â€”",
+    branchId: doc.branch_id ?? "",
+    reason: doc.reason_for_visit || "",
     date: formatDateOnly(doc.appointment_date),
     time: formatTimeOnly(doc.appointment_time),
     status: formatAppointmentStatus(doc.status ?? ""),
@@ -359,8 +360,24 @@ function CountUp({ target, duration = 900 }: { target: number; duration?: number
   return <>{formatStatValue(count)}</>;
 }
 
+const ALL_KPI_IDS = [
+  "doctors",
+  "patients",
+  "critical-patients",
+  "staff",
+  "appointments",
+  "prescriptions",
+  "bills",
+  "total-op",
+  "chemo-delivered",
+  "chemo-cancelled",
+  "lab-visits",
+];
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("doctors");
+  const [selectedKpis, setSelectedKpis] = useState<string[]>(ALL_KPI_IDS);
+  const [isKpiShowerOpen, setIsKpiShowerOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { toast } = useToast();
   // Aliased -- this page already has its own local `branches` state below
@@ -370,6 +387,35 @@ export default function Dashboard() {
   const { selectedBranchId, isAllBranches, branches: branchDirectory } = useBranchFilter();
   const { can, canAny, permissions, loading: permissionsLoading } = usePermission();
 
+  // Track if KPI preferences have been loaded from backend
+  const kpiHydratedRef = useRef(false);
+
+  // Fetch saved KPI preferences from backend (once after permissions load)
+  useEffect(() => {
+    if (permissionsLoading) return;
+    if (kpiHydratedRef.current) return;
+
+    getKpiPreferences()
+      .then((saved) => {
+        if (saved.length > 0) {
+          setSelectedKpis(saved);
+        }
+        kpiHydratedRef.current = true;
+      })
+      .catch(() => {
+        kpiHydratedRef.current = true;
+      });
+  }, [permissionsLoading]);
+
+  // Debounced auto-save when user changes KPI selection
+  useEffect(() => {
+    if (!kpiHydratedRef.current) return; // don't save before initial load
+    const timer = setTimeout(() => {
+      saveKpiPreferences(selectedKpis).catch(() => {});
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [selectedKpis]);
+
  
   const [realDoctors, setRealDoctors] = useState<Record<string, unknown>[] | null>(null);
   const [realStaff, setRealStaff] = useState<Record<string, unknown>[] | null>(null);
@@ -378,7 +424,7 @@ export default function Dashboard() {
   const [patientCount, setPatientCount] = useState<number>(0);
   const [patientLoading, setPatientLoading] = useState(false);
 
-  // Real appointments fetched from the backend. No dummy fallback â€” an
+  // Real appointments fetched from the backend. No dummy fallback  an
   // empty/failed fetch just leaves this null and the tab shows no rows.
   const [realAppointments, setRealAppointments] = useState<Record<string, unknown>[] | null>(null);
   const [isAppointmentsLoading, setIsAppointmentsLoading] = useState(true);
@@ -929,7 +975,7 @@ export default function Dashboard() {
   };
 
   // Doctor rows always route to the real Edit Doctor page, regardless of
-  // which page/tab they're clicked from â€” role drives the destination, not
+  // which page/tab they're clicked from  role drives the destination, not
   // the page. (Staff/Appointments keep the placeholder handler above.)
   const handleEditDoctor = (id: string | number) => {
     navigate(`/doctor/edit/${id}`);
@@ -1402,14 +1448,18 @@ export default function Dashboard() {
     return allKpiItems.filter((stat) => !stat.permission || can(stat.permission));
   }, [allKpiItems, can]);
 
+  const displayedStats = useMemo(() => {
+    return visibleStats.filter((stat) => selectedKpis.includes(stat.id));
+  }, [visibleStats, selectedKpis]);
+
   useEffect(() => {
     const timer = setTimeout(updateScrollButtons, 150);
     return () => clearTimeout(timer);
-  }, [visibleStats.length, updateScrollButtons]);
+  }, [displayedStats.length, updateScrollButtons]);
 
   // Only the very first load (waiting on permissions) shows the full-page
   // skeleton. Branch/date changes and manual refreshes just flip
-  // isEmployeesLoading/isAppointmentsLoading â€” those are handled inline
+  // isEmployeesLoading/isAppointmentsLoading  those are handled inline
   // (stat cards + table spinner below) so the shell never unmounts, same
   // as the Staff page.
   if (permissionsLoading) {
@@ -1483,9 +1533,135 @@ export default function Dashboard() {
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                <span className="text-xs font-medium text-slate-500 hidden sm:inline-block">
-                  {format(selectedDate, "MMM d, yyyy")}
-                </span>
+                {/* KPI Shower - Multi-select and Selected KPI display */}
+                <Popover open={isKpiShowerOpen} onOpenChange={setIsKpiShowerOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex items-center h-[28px] px-2.5 bg-white border border-[#E5E7EB] rounded-lg shadow-sm hover:bg-[#F2F4F6] transition-colors gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer select-none"
+                      title="KPI Shower - Click to select and view KPIs"
+                    >
+                      <Activity className="w-3.5 h-3.5 text-slate-500" />
+                      {selectedKpis.length === 0 ? (
+                        <span className="text-slate-500 font-normal">Select KPIs</span>
+                      ) : selectedKpis.length === 1 ? (
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className="w-2 h-2 rounded-full"
+                            style={{
+                              backgroundColor:
+                                visibleStats.find((s) => s.id === selectedKpis[0])?.valueColor || "#00488D",
+                            }}
+                          />
+                          <span className="truncate max-w-[130px] sm:max-w-[160px]">
+                            {visibleStats.find((s) => s.id === selectedKpis[0])?.label || "1 Selected"}
+                          </span>
+                        </div>
+                      ) : selectedKpis.length === visibleStats.length ? (
+                        <span className="text-slate-700 font-semibold">
+                          All KPIs ({visibleStats.length})
+                        </span>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <div className="flex -space-x-1">
+                            {visibleStats
+                              .filter((s) => selectedKpis.includes(s.id))
+                              .slice(0, 3)
+                              .map((s) => (
+                                <span
+                                  key={s.id}
+                                  className="w-2 h-2 rounded-full border border-white"
+                                  style={{ backgroundColor: s.valueColor }}
+                                />
+                              ))}
+                          </div>
+                          <span>{selectedKpis.length} KPIs Selected</span>
+                        </div>
+                      )}
+                      <ChevronDown
+                        className={`w-3 h-3 text-slate-400 transition-transform duration-200 ${
+                          isKpiShowerOpen ? "rotate-180" : ""
+                        }`}
+                      />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="end"
+                    sideOffset={6}
+                    className="w-72 p-0 shadow-xl rounded-xl z-50 bg-white border border-gray-100 text-[#1c1e21]"
+                  >
+                    {/* Header */}
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-800">KPI Shower</span>
+                        <span className="text-[11px] font-medium text-slate-500">
+                          ({selectedKpis.length}/{visibleStats.length})
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedKpis(visibleStats.map((s) => s.id))}
+                          className="text-[11px] text-[#00488D] hover:underline font-semibold cursor-pointer"
+                        >
+                          Select All
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedKpis([])}
+                          className="text-[11px] text-slate-500 hover:text-slate-700 hover:underline font-medium cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* KPI Multi-select List */}
+                    <div className="max-h-64 overflow-y-auto p-1 space-y-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                      {visibleStats.map((stat) => {
+                        const isChecked = selectedKpis.includes(stat.id);
+                        return (
+                          <div
+                            key={stat.id}
+                            onClick={() => {
+                              setSelectedKpis((prev) =>
+                                prev.includes(stat.id)
+                                  ? prev.filter((id) => id !== stat.id)
+                                  : [...prev, stat.id]
+                              );
+                            }}
+                            className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors text-xs select-none ${
+                              isChecked ? "bg-slate-50 font-medium" : "hover:bg-slate-50 text-slate-600"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {}}
+                                className="w-3.5 h-3.5 rounded border-slate-300 text-[#00488D] focus:ring-0 cursor-pointer"
+                              />
+                              <div
+                                style={{ background: stat.iconBg }}
+                                className="w-6 h-6 rounded flex items-center justify-center shrink-0"
+                              >
+                                {stat.icon}
+                              </div>
+                              <span className="truncate text-xs text-slate-800">{stat.label}</span>
+                            </div>
+                            <span
+                              className="text-[11px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ml-2"
+                              style={{ color: stat.valueColor, background: stat.bg }}
+                            >
+                              {stat.value}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
 
@@ -1515,23 +1691,32 @@ export default function Dashboard() {
                 ref={trackRef}
                 className="flex gap-[14px] overflow-x-auto scroll-smooth py-[6px] px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               >
-                {visibleStats.map((card) => (
-                  <div
-                    key={card.id}
-                    onClick={card.onClick}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        card.onClick();
-                      }
-                    }}
-                    style={{ background: card.bg }}
-                    className={`flex-[0_0_206px] min-w-[206px] rounded-[12px] p-[14px_16px] flex flex-col gap-[10px] cursor-pointer transition-all duration-200 select-none shadow-[0_2px_10px_rgba(0,0,0,0.06)] hover:-translate-y-[2px] hover:shadow-[0_6px_20px_rgba(0,0,0,0.10)] ${
-                      card.isActive ? "ring-2 ring-offset-2 ring-current shadow-md" : ""
-                    }`}
-                  >
+                {displayedStats.length === 0 ? (
+                  <div className="flex items-center justify-center w-full py-8 text-xs text-slate-500 font-medium">
+                    No KPIs selected. Select KPIs from the dropdown above to display them.
+                  </div>
+                ) : (
+                  displayedStats.map((card) => (
+                    <div
+                      key={card.id}
+                      onClick={card.onClick}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          card.onClick();
+                        }
+                      }}
+                      style={{
+                        background: card.bg,
+                        border: card.isActive ? `2.5px solid ${card.valueColor}` : "2.5px solid transparent",
+                        boxShadow: card.isActive
+                          ? `0 0 0 1px ${card.valueColor}20, 0 6px 18px ${card.valueColor}28`
+                          : "0 2px 10px rgba(0,0,0,0.06)",
+                      }}
+                      className="flex-[0_0_206px] min-w-[206px] rounded-[12px] p-[14px_16px] flex flex-col gap-[10px] cursor-pointer transition-all duration-200 select-none hover:-translate-y-[2px] hover:shadow-[0_6px_20px_rgba(0,0,0,0.10)]"
+                    >
                     <div className="flex items-center justify-between">
                       <div
                         style={{ background: card.iconBg }}
@@ -1580,7 +1765,7 @@ export default function Dashboard() {
                                   </button>
                                 )}
                               </div>
-                              <div className="flex flex-col gap-0.5 max-h-60 overflow-y-auto">
+                              <div className="flex flex-col gap-0.5 max-h-60 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                                 <button
                                   type="button"
                                   onClick={() => handleSelectAppointmentStatus(null)}
@@ -1684,8 +1869,9 @@ export default function Dashboard() {
                       </span>
                     </div>
                   </div>
-                ))}
-              </div>
+                ))
+              )}
+            </div>
 
               {/* Right Fade Gradient */}
               <div
@@ -1705,7 +1891,7 @@ export default function Dashboard() {
                   <ChevronRight className="w-4 h-4" />
                 </button>
               )}
-            </div>
+          </div>
           </div>
 
 {/* Overview Header */}
@@ -1739,6 +1925,7 @@ export default function Dashboard() {
                     data-tab={tab.key}
                     onClick={() => {
                       setActiveTab(tab.key);
+                      setSelectedKpis((prev) => prev.includes(tab.key) ? prev : [...prev, tab.key]);
                       setCurrentPage(1);
                     }}
                     className="relative pb-2 text-xs font-semibold tracking-[1.2px] capitalize transition-colors duration-200"

@@ -273,6 +273,7 @@ const PatientNotesDocuments: React.FC<{
     "";
 
   const [activeTab, setActiveTab] = useState("Notes & Documents");
+  const tabs = ["Clinical Notes", "Signatures", "Encounter Summary", "Order Summary"];
   const [labTab, setLabTab] = useState("Chemistry");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -551,6 +552,23 @@ const PatientNotesDocuments: React.FC<{
       createdBy: note.createdBy,
     });
     setIsEditNoteModalOpen(true);
+  };
+
+  const handlePrintNote = (note: ClinicalNoteRecord) => {
+    const noteHeader = `${note.title}${note.encounterNo ? ` (#${note.encounterNo})` : ""}`;
+    const printText = `${noteHeader}\n\nDate & Time: ${note.dateTime}\nEncounter: ${note.encounter}\nDoctor: ${note.doctor}\nDepartment: ${note.department}\nBranch: ${note.branch}\n\nChief Complaint\n${note.chiefComplaint}\n\nClinical Assessment\n${note.clinicalAssessment.join("\n")}\n\nExamination\n${note.examination.join("\n")}\n\nDiagnosis\n${note.diagnosis}\n\nTreatment / Plan\n${note.treatmentPlan.map((p) => `• ${p}`).join("\n")}\n\nMedications\n${note.medications}\n\nInvestigations\n${note.investigations.join("\n")}\n\nFollow-up\n${note.followUp}\n\nStatus: ${note.status}\nCreated by: ${note.createdBy}`;
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      window.alert("Please allow pop-ups to print this note.");
+      return;
+    }
+    printWindow.document.write(
+      `<html><head><title>${noteHeader}</title></head><body style="font-family:Inter,Arial,sans-serif;font-size:13px;color:#1e293b;line-height:1.6;padding:32px;white-space:pre-wrap;">${printText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</body></html>`,
+    );
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
   };
 
   const handleSaveEditedNote = async (e: React.FormEvent) => {

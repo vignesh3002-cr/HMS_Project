@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import CalendarPicker from "@/components/hms/Calender";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
@@ -95,52 +96,93 @@ const SlotProgress = memo(function SlotProgress({ booked, total, loading }: { bo
 // Three-dot card menu (grid only)
 function CardMenu({ onView, onEdit, onDelete, onTransfer, onRestore, deactivated }: { onView: () => void; onEdit: () => void; onDelete: () => void; onTransfer: () => void; onRestore: () => void; deactivated?: boolean }) {
   const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [openUp, setOpenUp] = useState(false);
+  const [anchor, setAnchor] = useState<{ top: number; right: number; bottom: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const { can } = usePermission();
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const isInside =
+        (buttonRef.current && buttonRef.current.contains(target)) ||
+        (menuRef.current && menuRef.current.contains(target));
+      if (!isInside) setOpen(false);
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    const handleScroll = () => setOpen(false);
+    document.addEventListener("mousedown", handleMouseDown);
+    window.addEventListener("scroll", handleScroll, true);
+    window.addEventListener("resize", handleScroll);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      window.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("resize", handleScroll);
+    };
   }, []);
+
+  // Rendered through a portal to document.body (fixed coordinates) so the
+  // menu always paints above the scrollable grid/table instead of being
+  // clipped behind it. Flips upward near the bottom of the viewport.
+  const handleToggle = () => {
+    const btn = buttonRef.current;
+    if (btn) {
+      const rect = btn.getBoundingClientRect();
+      setOpenUp(window.innerHeight - rect.bottom < 240);
+      setAnchor({
+        top: rect.bottom + 4,
+        bottom: window.innerHeight - rect.top + 4,
+        right: window.innerWidth - rect.right,
+      });
+    }
+    setOpen((o) => !o);
+  };
 
   if (!can("doctor.read") && !can("doctor.update") && !can("doctor.transfer") && !can("employee.delete")) return null;
 
   return (
-    <div className="relative" ref={wrapperRef}>
-      <button onClick={() => setOpen((o) => !o)} className="p-1 rounded hover:bg-[#F2F4F6] transition-colors">
+    <>
+      <button ref={buttonRef} onClick={handleToggle} className="p-1 rounded hover:bg-[#F2F4F6] transition-colors">
         <MoreVertical className="w-4 h-4 text-[#6B7280]" />
       </button>
-      <div className={`absolute right-0 top-full mt-1 w-28 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden z-20 transition-all duration-150 ${
-          open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
-        }`}
-      >
-        {can("doctor.read") && (
-          <button onClick={() => { onView(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">View</button>
-        )}
-        {can("doctor.update") && (
-          <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
-        )}
-        {deactivated ? (
-          can("doctor.update") && (
-            <button onClick={() => { onRestore(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-green-600 hover:bg-green-50">Activate</button>
-          )
-        ) : (
-          <>
-            {can("doctor.transfer") && (
-              <button onClick={() => { onTransfer(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Transfer</button>
+      {open &&
+        anchor &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{
+              position: "fixed",
+              top: openUp ? undefined : anchor.top,
+              bottom: openUp ? anchor.bottom : undefined,
+              right: anchor.right,
+              zIndex: 9999,
+            }}
+            className="w-28 bg-white border border-[#E5E7EB] rounded-md shadow-lg overflow-hidden transition-all duration-150"
+          >
+            {can("doctor.read") && (
+              <button onClick={() => { onView(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">View</button>
             )}
-            {can("employee.delete") && (
-              <button onClick={() => { onDelete(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">Deactivate</button>
+            {can("doctor.update") && (
+              <button onClick={() => { onEdit(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Edit</button>
             )}
-          </>
+            {deactivated ? (
+              can("doctor.update") && (
+                <button onClick={() => { onRestore(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-green-600 hover:bg-green-50">Activate</button>
+              )
+            ) : (
+              <>
+                {can("doctor.transfer") && (
+                  <button onClick={() => { onTransfer(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-[#374151] hover:bg-[#F2F4F6]">Transfer</button>
+                )}
+                {can("employee.delete") && (
+                  <button onClick={() => { onDelete(); setOpen(false); }} className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50">Deactivate</button>
+                )}
+              </>
+            )}
+          </div>,
+          document.body,
         )}
-      </div>
-    </div>
+    </>
   );
 }
  

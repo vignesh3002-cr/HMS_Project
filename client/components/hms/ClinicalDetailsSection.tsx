@@ -40,6 +40,7 @@ interface ComorbiditySelection {
 interface ClinicalDetailsSectionProps {
   patientId?: string;
   encounterNo?: string | null;
+  consultationNotes?: string;
   onSaveStateChange?: (state: {
     saving: boolean;
     disabled: boolean;
@@ -98,7 +99,7 @@ export const ClinicalDetailsSection = forwardRef<
   ClinicalDetailsSectionHandle,
   ClinicalDetailsSectionProps
 >(function ClinicalDetailsSection(
-  { patientId, encounterNo, onSaveStateChange },
+  { patientId, encounterNo,consultationNotes, onSaveStateChange },
   ref,
 ) {
   const { toast } = useToast();
@@ -475,6 +476,7 @@ export const ClinicalDetailsSection = forwardRef<
       })),
       comorbidities: comorbiditySelections.map((selection) => ({
         diagnosisId: selection.diagnosisId,
+        clinicalNotes: consultationNotes || undefined,
       })),
     });
   };
