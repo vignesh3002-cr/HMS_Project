@@ -21,19 +21,28 @@ export interface MeasurementValues {
 }
 
 export type FormData = {
+  /* DD-MM-YYYY, picked from the calendar popovers. */
+  diagnosisDate: string;
+  progressionDate: string;
+  relapseDate: string;
   preDiagnosis: string;
   molecularTesting: string;
   molecularTestingNote: string;
   molecularTestingDate: string;
   diseaseStatus: string;
-  laterality: string;
-  bodySite: string;
+  /* Laterality / Body Site / Grade / Score are grouped per selected cancer
+     type like T/N/M; values are qualified as `${cancerType}|${label}`. */
+  laterality: string[];
+  bodySite: string[];
   survivor: string;
+  /* Primary (first) cancer type, plus the full multi-select list. */
   type: string;
+  cancerTypes: string[];
   subType: string[];
   histomorphology: string;
   cancerStage: string[];
-  grade: string;
+  grade: string[];
+  score: string[];
   tStage: string[];
   nStage: string[];
   mStage: string[];
