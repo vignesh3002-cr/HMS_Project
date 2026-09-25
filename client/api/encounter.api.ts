@@ -5,6 +5,10 @@ export interface CreateEncounterPayload {
   appointment_id: string;
 }
 
+export interface CreateIpdEncounterPayload {
+  admission_id: string;
+}
+
 export interface EncounterRecord {
   encounter_id: string;
   encounter_no: string;
@@ -15,12 +19,14 @@ export interface EncounterRecord {
   employee_id: string;
   schedule_id: string | number;
   encounter_type: string;
+  encounter_ts?: string | null;
   status: string;
   encounter_ts?: string | null;
   diagnosis_text?: string | null;
   chief_complaint: string | null;
   symptoms: string | null;
   diagnosis_id: string | null;
+  diagnosis_text?: string | null;
   clinical_notes: string | null;
   advice: string | null;
   /* Consultation > Advice > Discussion: the doctor's remarks for the visit. */
@@ -148,6 +154,12 @@ export const encounterApi = {
   create: (data: CreateEncounterPayload) =>
     API.post<{ success: boolean; message: string; data: EncounterRecord }>("/encounters", data),
 
+  createIpd: (data: CreateIpdEncounterPayload) =>
+    API.post<{ success: boolean; message: string; data: EncounterRecord }>(
+      "/encounters/ipd",
+      data,
+    ),
+
   getAll: (params?: GetEncountersParams, config?: AxiosRequestConfig) =>
     API.get<{
       success: boolean;
@@ -172,6 +184,14 @@ export const encounterApi = {
   getByAppointment: (appointmentId: string) =>
     API.get<{ success: boolean; data: EncounterRecord }>(
       `/encounters/by-appointment/${appointmentId}`,
+    ),
+
+  // Direct lookup by encounter number (GET /encounters/:encounterNo) -- used
+  // where there's no appointment to key off, e.g. an IPD encounter created
+  // from an admission rather than a check-in.
+  getByEncounterNo: (encounterNo: string) =>
+    API.get<{ success: boolean; data: EncounterRecord }>(
+      `/encounters/${encounterNo}`,
     ),
 
   /**
