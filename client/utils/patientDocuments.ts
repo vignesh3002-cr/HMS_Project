@@ -11,7 +11,9 @@ import { getToken, getUser } from "./token";
 export interface PatientDocumentItem {
   id: string;
   patientId: string;
-  name: string;
+  name: string; // Stored file name (custom title + original extension)
+  title: string; // Document name entered in "Title name" (no extension)
+  originalName: string; // Original uploaded file name
   size: number;
   type: string;
   url: string; // Active blob object URL or backend stream URL
@@ -27,6 +29,7 @@ interface StoredDocumentRecord {
   id: string;
   patientId: string;
   name: string;
+  originalName?: string;
   size: number;
   type: string;
   uploadDate: string;
@@ -50,6 +53,14 @@ interface BackendDocumentRecord {
 const DB_NAME = "HMS_PatientDocumentsDB";
 const STORE_NAME = "documents";
 const DB_VERSION = 1;
+
+/**
+ * Strip the extension from a file name to get the document title
+ */
+function stripExtension(fileName: string): string {
+  const dot = fileName.lastIndexOf(".");
+  return dot > 0 ? fileName.slice(0, dot) : fileName;
+}
 
 /**
  * Format raw byte size into human readable string (B, KB, MB)
@@ -199,6 +210,8 @@ async function loadPatientDocumentsFromIndexedDB(
             id: rec.id,
             patientId: rec.patientId,
             name: rec.name,
+            title: stripExtension(rec.name),
+            originalName: rec.originalName || rec.name,
             size: rec.size,
             type: rec.type,
             url,
@@ -229,7 +242,8 @@ async function loadPatientDocumentsFromIndexedDB(
 async function savePatientDocumentToIndexedDB(
   patientId: string,
   file: File,
-  customId?: string
+  customId?: string,
+  displayName: string = file.name
 ): Promise<PatientDocumentItem> {
   const id = customId || `doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const now = new Date();
@@ -245,7 +259,8 @@ async function savePatientDocumentToIndexedDB(
   const storedRecord: StoredDocumentRecord = {
     id,
     patientId,
-    name: file.name,
+    name: displayName,
+    originalName: file.name,
     size: file.size,
     type: file.type || "application/octet-stream",
     uploadDate,
@@ -266,8 +281,8 @@ async function savePatientDocumentToIndexedDB(
     console.warn("Could not write document to IndexedDB:", err);
   }
 
-  const { icon, color, hover } = getDocumentIconAndColors(file.name, file.type);
-  const ext = file.name.split(".").pop()?.toUpperCase() || "FILE";
+  const { icon, color, hover } = getDocumentIconAndColors(displayName, file.type);
+  const ext = displayName.split(".").pop()?.toUpperCase() || "FILE";
   const formattedSize = formatFileSize(file.size);
   const dateOnly = uploadDate.split(",")[0] || uploadDate;
   const url = URL.createObjectURL(file);
@@ -275,7 +290,9 @@ async function savePatientDocumentToIndexedDB(
   return {
     id,
     patientId,
-    name: file.name,
+    name: displayName,
+    title: stripExtension(displayName),
+    originalName: file.name,
     size: file.size,
     type: file.type || "application/octet-stream",
     url,
@@ -357,6 +374,8 @@ export async function loadPatientDocuments(
           id: docId,
           patientId: rec.patient_id || patientId,
           name: fileName,
+          title: stripExtension(fileName),
+          originalName: rec.original_name || fileName,
           size: fileSize,
           type: fileType,
           url: viewUrl,
@@ -378,13 +397,30 @@ export async function loadPatientDocuments(
 }
 
 /**
+ * Build the stored file name from a user-entered title, keeping the original
+ * extension so downloads still open with the right application.
+ */
+function buildDocumentName(file: File, title?: string): string {
+  const trimmed = title?.trim();
+  if (!trimmed) return file.name;
+  const dot = file.name.lastIndexOf(".");
+  const ext = dot > 0 ? file.name.slice(dot) : "";
+  return ext && trimmed.toLowerCase().endsWith(ext.toLowerCase())
+    ? trimmed
+    : `${trimmed}${ext}`;
+}
+
+/**
  * Save an uploaded file for a patient into PostgreSQL Database via backend API,
  * and caches into IndexedDB for offline capability and immediate previews.
+ * An optional title replaces the file name shown in the Document Library.
  */
 export async function savePatientDocument(
   patientId: string,
-  file: File
+  file: File,
+  title?: string
 ): Promise<PatientDocumentItem> {
+  const displayName = buildDocumentName(file, title);
   const backendBase = (
     (import.meta as any).env?.VITE_BACKEND_URL || "http://localhost:5000/api"
   ).replace(/\/+$/, "");
@@ -392,7 +428,12 @@ export async function savePatientDocument(
   const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : "";
 
   // 1. Prepare local item with live blob URL immediately
-  const localItem = await savePatientDocumentToIndexedDB(patientId, file);
+  const localItem = await savePatientDocumentToIndexedDB(
+    patientId,
+    file,
+    undefined,
+    displayName
+  );
 
   try {
     // 2. Read file as Base64 for database storage
@@ -407,7 +448,7 @@ export async function savePatientDocument(
       data: BackendDocumentRecord;
     }>("/patient-documents/upload", {
       patient_id: patientId,
-      file_name: file.name,
+      file_name: displayName,
       original_name: file.name,
       file_type: file.type || "application/octet-stream",
       file_size: file.size,
@@ -421,7 +462,7 @@ export async function savePatientDocument(
       const docId = serverDoc.document_id || serverDoc.id;
 
       // Update indexedDB record with server document_id
-      await savePatientDocumentToIndexedDB(patientId, file, docId);
+      await savePatientDocumentToIndexedDB(patientId, file, docId, displayName);
 
       const { icon, color, hover } = getDocumentIconAndColors(
         serverDoc.file_name,
@@ -445,6 +486,8 @@ export async function savePatientDocument(
         id: docId,
         patientId: serverDoc.patient_id,
         name: serverDoc.file_name,
+        title: stripExtension(serverDoc.file_name),
+        originalName: serverDoc.original_name || file.name,
         size: Number(serverDoc.file_size),
         type: serverDoc.file_type,
         url: localItem.url || viewUrl,

@@ -30,6 +30,8 @@ import {
   deletePatientDocument,
   downloadDocument,
   downloadAllDocuments,
+  formatFileSize,
+  getDocumentIconAndColors,
 } from "../../utils/patientDocuments";
 
 interface ConsultationState {
@@ -6097,6 +6099,8 @@ const PatientNotesDocuments: React.FC<{
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [docSuccessMsg, setDocSuccessMsg] = useState<string | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [docTitle, setDocTitle] = useState("");
   const [previewDoc, setPreviewDoc] = useState<PatientDocumentItem | null>(null);
 
   /* Load stored patient documents from IndexedDB */
@@ -6245,17 +6249,39 @@ const PatientNotesDocuments: React.FC<{
   const prescriptionsCount = (notesPlan?.chemotherapy_plan_items ?? []).length;
   const activities = notesActivities;
 
-  const handleFileUpload = async (files: FileList | File[] | null) => {
+  /* Stage picked/dropped files; nothing is saved until Upload is clicked. */
+  const stageFiles = (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return;
+    const incoming = Array.from(files);
+    setPendingFiles((prev) => [...prev, ...incoming]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const removePendingFile = (index: number) => {
+    setPendingFiles((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      if (next.length === 0) setDocTitle("");
+      return next;
+    });
+  };
+
+  const handleFileUpload = async (files: File[], title: string) => {
+    if (files.length === 0) return;
     setIsUploadingDoc(true);
     const targetPatientId = patientId || "unknown";
+    const baseTitle = title.trim();
 
     const newItems: PatientDocumentItem[] = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (!file) continue;
+      // Multiple files share the title, numbered so they stay distinguishable.
+      const fileTitle =
+        files.length > 1 && baseTitle ? `${baseTitle} (${i + 1})` : baseTitle;
       try {
-        const savedDoc = await savePatientDocument(targetPatientId, file);
+        const savedDoc = await savePatientDocument(targetPatientId, file, fileTitle);
         newItems.push(savedDoc);
       } catch (err) {
         console.error("Failed to save document:", file.name, err);
@@ -6269,17 +6295,21 @@ const PatientNotesDocuments: React.FC<{
         `${newItems.length === 1 ? `"${newItems[0].name}"` : `${newItems.length} documents`} uploaded to Document Library!`
       );
       setTimeout(() => setDocSuccessMsg(null), 4000);
+      setPendingFiles([]);
+      setDocTitle("");
     }
     setIsUploadingDoc(false);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+  };
+
+  const handleUploadClick = () => {
+    if (!docTitle.trim() || pendingFiles.length === 0) return;
+    handleFileUpload(pendingFiles, docTitle);
   };
 
   const handleFileChange = (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
-    handleFileUpload(event.target.files);
+    stageFiles(event.target.files);
   };
 
   const handleSelectFiles = () => {
@@ -6303,7 +6333,7 @@ const PatientNotesDocuments: React.FC<{
     e.stopPropagation();
     setIsDraggingFile(false);
     if (e.dataTransfer?.files?.length) {
-      handleFileUpload(e.dataTransfer.files);
+      stageFiles(e.dataTransfer.files);
     }
   };
 
@@ -7031,18 +7061,23 @@ const PatientNotesDocuments: React.FC<{
                   </button>
 
                   {/* Icon */}
-                  <div
-                    className={`mb-3 text-2xl ${document.color}`}
-                  >
-                    <i className={`fa-solid ${document.icon}`} />
+                  <div className="mb-3 flex items-center gap-2 pr-6">
+                    <i className={`fa-solid ${document.icon} text-2xl ${document.color}`} />
+                    {/* Document name (custom title) */}
+                    <span
+                      className="truncate text-sm font-bold text-emerald-600"
+                      title={document.title}
+                    >
+                      {document.title}
+                    </span>
                   </div>
 
-                  {/* Name */}
+                  {/* File name (original upload) */}
                   <h4
                     className="mb-1 truncate text-sm font-bold text-slate-900"
-                    title={document.name}
+                    title={document.originalName}
                   >
-                    {document.name}
+                    {document.originalName}
                   </h4>
 
                   {/* Details */}
@@ -7187,6 +7222,70 @@ const PatientNotesDocuments: React.FC<{
               Drag & Drop or click to browse files (PDF, JPG, PNG, DOCX)
             </p>
 
+            {pendingFiles.length > 0 && (
+              <div
+                className="mb-4 flex w-full flex-col gap-3 text-left"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <ul className="flex flex-col gap-2">
+                  {pendingFiles.map((file, index) => {
+                    const { icon, color } = getDocumentIconAndColors(file.name, file.type);
+                    return (
+                      <li
+                        key={`${file.name}-${index}`}
+                        className="flex items-center gap-3 rounded-lg border border-blue-100 bg-white/80 px-3 py-2"
+                      >
+                        <i className={`fa-solid ${icon} ${color} text-xl`} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-slate-800">
+                            {file.name}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {formatFileSize(file.size)}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isUploadingDoc}
+                          onClick={() => removePendingFile(index)}
+                          aria-label={`Remove ${file.name}`}
+                          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-700 disabled:opacity-50"
+                        >
+                          <i className="fa-solid fa-xmark text-xs" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm font-medium text-slate-700">
+                    Title name
+                  </span>
+                  <input
+                    type="text"
+                    value={docTitle}
+                    onChange={(event) => setDocTitle(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") handleUploadClick();
+                    }}
+                    placeholder="Enter title name"
+                    disabled={isUploadingDoc}
+                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:opacity-50"
+                  />
+                </label>
+
+                <button
+                  type="button"
+                  disabled={isUploadingDoc || !docTitle.trim()}
+                  onClick={handleUploadClick}
+                  className="w-full rounded-md bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isUploadingDoc ? "Uploading..." : "Upload"}
+                </button>
+              </div>
+            )}
+
             <button
               type="button"
               disabled={isUploadingDoc}
@@ -7196,7 +7295,7 @@ const PatientNotesDocuments: React.FC<{
               }}
               className="rounded-md border border-blue-600 bg-white px-6 py-2 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50"
             >
-              {isUploadingDoc ? "Uploading..." : "Select Files"}
+              Select Files
             </button>
 
             <input

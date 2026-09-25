@@ -1265,18 +1265,23 @@ const PatientNotesDocuments: React.FC<{
                         </button>
 
                         {/* Icon */}
-                        <div
-                          className={`mb-3 text-2xl ${document.color}`}
-                        >
-                          <i className={`fa-solid ${document.icon}`} />
+                        <div className="mb-3 flex items-center gap-2 pr-6">
+                          <i className={`fa-solid ${document.icon} text-2xl ${document.color}`} />
+                          {/* Document name (custom title) */}
+                          <span
+                            className="truncate text-sm font-bold text-emerald-600"
+                            title={document.title}
+                          >
+                            {document.title}
+                          </span>
                         </div>
 
-                        {/* Name */}
+                        {/* File name (original upload) */}
                         <h4
                           className="mb-1 truncate text-sm font-bold text-slate-900"
-                          title={document.name}
+                          title={document.originalName}
                         >
-                          {document.name}
+                          {document.originalName}
                         </h4>
 
                         {/* Details */}
