@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 export interface MultiSelectOption {
   label: string;
   value: string;
+  /* Optional muted detail shown beside the label; also searchable. */
+  hint?: string;
 }
 
 export interface MultiSelectDropdownProps {
@@ -15,6 +17,8 @@ export interface MultiSelectDropdownProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  /* When set, a search with no exact match offers "+ Add '<typed>'". */
+  onCreateOption?: (typed: string) => void;
 }
 
 function normalizeOptions(
@@ -34,6 +38,7 @@ export function MultiSelectDropdown({
   placeholder = "Select...",
   disabled,
   className,
+  onCreateOption,
 }: MultiSelectDropdownProps) {
   const normalized = React.useMemo(() => normalizeOptions(options), [options]);
   const [open, setOpen] = React.useState(false);
@@ -42,8 +47,18 @@ export function MultiSelectDropdown({
   const filtered = React.useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return normalized;
-    return normalized.filter((option) => option.label.toLowerCase().includes(query));
+    return normalized.filter(
+      (option) =>
+        option.label.toLowerCase().includes(query) ||
+        (option.hint?.toLowerCase().includes(query) ?? false),
+    );
   }, [normalized, search]);
+
+  const typed = search.trim();
+  const canCreate =
+    Boolean(onCreateOption) &&
+    typed.length > 0 &&
+    !normalized.some((option) => option.label.toLowerCase() === typed.toLowerCase());
 
   const toggleOption = (optionValue: string) => {
     const next = value.includes(optionValue)
@@ -153,14 +168,31 @@ export function MultiSelectDropdown({
                   type="checkbox"
                   checked={isSelected}
                   onChange={() => toggleOption(opt.value)}
-                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  className="h-4 w-4 shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
-                {opt.label}
+                <span className="min-w-0 flex-1">{opt.label}</span>
+                {opt.hint && (
+                  <span className="shrink-0 text-xs text-gray-400">{opt.hint}</span>
+                )}
               </label>
             );
           })}
-          {filtered.length === 0 && (
+          {filtered.length === 0 && !canCreate && (
             <p className="px-3 py-2 text-sm text-gray-400">No options</p>
+          )}
+          {canCreate && (
+            <button
+              type="button"
+              onClick={() => {
+                onCreateOption?.(typed);
+                setOpen(false);
+                setSearch("");
+              }}
+              className="flex w-full items-center gap-1 rounded-lg border-t border-gray-100 px-3 py-2 text-left text-sm font-semibold text-blue-600 transition-colors hover:bg-blue-50"
+            >
+              <span className="shrink-0">+ Add</span>
+              <span className="truncate">"{typed}"</span>
+            </button>
           )}
         </div>
       </PopoverContent>

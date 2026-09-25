@@ -3,7 +3,7 @@ import API from "./axios";
 /* ============================================================
    MASTER / REFERENCE OPTIONS
    These come from the reference tables (performance_status_master,
-   symptom_master, allergy_master, diagnosis). The snake_case fields
+   symptom_master, allergy_master, comorbidity_master). The snake_case fields
    match the raw Prisma records returned by the backend master lists.
 ============================================================ */
 
@@ -47,17 +47,15 @@ export interface AllergyOption {
   updated_at?: string;
 }
 
-export interface DiagnosisCategory {
-  diagnosis_catogory_id: string;
-  diagnosis_category: string;
-  count: number;
-}
-
+/* A comorbidity_master row (ids are BigInt, serialised as strings). */
 export interface ComorbidityOption {
-  diagnosis_id: string;
-  diagnosis_name: string;
+  id: string;
+  code: string;
+  comorbidity_name: string;
+  category: string | null;
   icd_code: string | null;
-  diagnosis_description: string | null;
+  is_custom: boolean;
+  is_active: boolean;
 }
 
 /* ============================================================
@@ -106,8 +104,10 @@ export interface PatientAllergy {
 
 export interface PatientComorbidity {
   id: string;
-  diagnosisId: string;
-  diagnosisName: string;
+  comorbidityId: string;
+  comorbidityCode: string;
+  comorbidityName: string;
+  category: string | null;
   icdCode: string | null;
   status: string;
   onsetDate: string | null;
@@ -172,7 +172,7 @@ export interface UpdatePatientAllergyPayload {
 }
 
 export interface AddPatientComorbidityPayload {
-  diagnosisId: string;
+  comorbidityId: string;
   status?: string;
   onsetDate?: string;
   identifiedAtEncounterNo?: string;
@@ -194,9 +194,8 @@ export interface CreateCustomAllergyPayload {
 }
 
 export interface CreateCustomComorbidityPayload {
-  diagnosisName: string;
-  diagnosisCatogoryId?: string;
-  diagnosisCategory?: string;
+  comorbidityName: string;
+  category?: string;
   icdCode?: string;
 }
 
@@ -244,16 +243,9 @@ export const clinicalDetailsApi = {
       { params: { page: 1, limit: 100, isActive: true } },
     ),
 
-  getDiagnosisCategories: () =>
-    API.get<ApiResponse<{ categories: DiagnosisCategory[] }>>(
-      "/diagnosis/categories",
-      { params: { activeOnly: true, page: 1, limit: 100 } },
-    ),
-
-  getDiagnosesByCategory: (categoryId: string) =>
-    API.get<ApiResponse<{ diagnoses: ComorbidityOption[] }>>(
-      `/diagnosis/categories/${categoryId}/diagnoses`,
-      { params: { activeOnly: true, page: 1, limit: 100 } },
+  getComorbidityMaster: () =>
+    API.get<ApiResponse<ComorbidityOption[]>>(
+      "/clinical-details/master/comorbidities",
     ),
 
   // ---------------- Consolidated GET ----------------
