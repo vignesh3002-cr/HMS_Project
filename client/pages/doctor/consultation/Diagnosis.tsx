@@ -6,6 +6,12 @@ import { BellNotificationButton } from "@/components/hms/BellNotificationButton"
 import { MultiSelectDropdown } from "../../../components/ui/multi-select-dropdown";
 import { UserProfileDropdown } from "../../../components/ui/User_profile_dropdown";
 import VoiceToText from "@/components/ui/voicetotext";
+import { Calendar } from "../../../components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../../../components/ui/popover";
 import type { ConsultationState, FormData } from "./types";
 import {
   formatPickedDate,
@@ -14,7 +20,13 @@ import {
   resolveStagingDetailId,
   toIsoDate,
 } from "./helpers";
-import { BackIcon, CheckIcon, ChevronDownIcon, DoubleArrowIcon } from "./icons";
+import {
+  BackIcon,
+  CalendarIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  DoubleArrowIcon,
+} from "./icons";
 
 /* ============================================================
    DIAGNOSIS COMPONENT
@@ -45,22 +57,32 @@ const hasDraftContent = (raw: string): boolean => {
   try {
     const data = JSON.parse(raw) as Record<string, unknown>;
     const scalarKeys = [
+      "diagnosisDate",
+      "progressionDate",
+      "relapseDate",
       "preDiagnosis",
       "molecularTesting",
       "molecularTestingNote",
       "molecularTestingDate",
       "diseaseStatus",
-      "laterality",
-      "bodySite",
       "survivor",
       "type",
       "histomorphology",
-      "grade",
       "icdCode",
       "notes",
     ];
     if (scalarKeys.some((key) => Boolean(data[key]))) return true;
-    const arrayKeys = ["subType", "cancerStage", "tStage", "nStage", "mStage"];
+    const arrayKeys = [
+      "laterality",
+      "bodySite",
+      "grade",
+      "score",
+      "subType",
+      "cancerStage",
+      "tStage",
+      "nStage",
+      "mStage",
+    ];
     return arrayKeys.some((key) => {
       const value = data[key];
       return Array.isArray(value)
@@ -87,10 +109,18 @@ const MOLECULAR_TESTS = [
   "BRCA1/BRCA2 and HRR testing",
 ];
 
-/* Standard options for the single-select Diagnosis fields that had no
-   dropdown list defined (the old <select> rendered only the placeholder). */
+/* Laterality has no per-cancer-type master; the same list is offered under
+   every selected cancer type. */
+const LATERALITY_OPTIONS = [
+  "Left",
+  "Right",
+  "Bilateral",
+  "Midline",
+  "Not Applicable",
+];
 
-
+/* Fallback Body Site list for cancer types with no anatomical_site_master
+   rows. */
 const BODY_SITE_OPTIONS = [
   "Breast",
   "Lung",
@@ -429,6 +459,323 @@ const DiagnosisCheckboxSelect: React.FC<{
   );
 };
 
+/* Text date field (DD-MM-YYYY) with a clickable calendar icon that opens a
+   date picker, same pattern as the Treatment Plan "Planned Start Date".
+   Future dates are disabled - these are clinical event dates. */
+const DiagnosisDateField: React.FC<{
+  id: string;
+  title: string;
+  value: string;
+  onChange: (value: string) => void;
+}> = ({ id, title, value, onChange }) => {
+  const [open, setOpen] = React.useState(false);
+  const picked = parsePickedDate(value);
+
+  return (
+    <div>
+      <label
+        htmlFor={id}
+        className="mb-2 block text-sm font-semibold text-gray-600"
+      >
+        {title}
+      </label>
+
+      <Popover open={open} onOpenChange={setOpen}>
+        <div className="relative">
+          <input
+            id={id}
+            type="text"
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="DD-MM-YYYY"
+            className="block w-full rounded-md border border-gray-300 bg-white py-3 pl-4 pr-12 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
+          />
+
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              aria-label={`Select ${title}`}
+              className="absolute inset-y-0 right-0 flex items-center pr-4 text-gray-400 transition-colors hover:text-[#1d4ed8] focus:outline-none"
+            >
+              <CalendarIcon />
+            </button>
+          </PopoverTrigger>
+        </div>
+
+        <PopoverContent className="w-auto p-0" align="end">
+          <Calendar
+            mode="single"
+            selected={picked}
+            defaultMonth={picked}
+            disabled={(date) => date > new Date()}
+            onSelect={(date) => {
+              if (date instanceof Date) {
+                onChange(formatPickedDate(date));
+                setOpen(false);
+              }
+            }}
+          />
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+};
+
+type ScoreOption = {
+  cancerType: string;
+  system: string;
+  value: string;
+};
+
+/* Score field: a text input with a dropdown of the cancer_score values for
+   the selected cancer type(s), grouped by cancer type then score system.
+   Typing filters the list; Enter picks an exact match or adds the typed
+   text as a custom score (e.g. an exact Ki-67 %). Selected scores show as
+   removable chips. */
+const DiagnosisScoreList: React.FC<{
+  title: string;
+  options: ScoreOption[];
+  selected: string[];
+  onToggle: (value: string, select?: boolean) => void;
+  onAddCustom: (text: string) => void;
+  loading?: boolean;
+}> = ({ title, options, selected, onToggle, onAddCustom, loading }) => {
+  const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState("");
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  const needle = query.trim().toLowerCase();
+  const filtered = needle
+    ? options.filter(
+        (option) =>
+          option.value.toLowerCase().includes(needle) ||
+          option.system.toLowerCase().includes(needle)
+      )
+    : options;
+
+  /* cancerType -> score system -> options, in load order. */
+  const groups = new Map<string, Map<string, ScoreOption[]>>();
+  filtered.forEach((option) => {
+    const systems = groups.get(option.cancerType) ?? new Map();
+    const list = systems.get(option.system) ?? [];
+    list.push(option);
+    systems.set(option.system, list);
+    groups.set(option.cancerType, systems);
+  });
+
+  const commitQuery = () => {
+    const text = query.trim();
+    if (!text) return;
+    const exact = options.find(
+      (option) => option.value.toLowerCase() === text.toLowerCase()
+    );
+    if (exact) {
+      onToggle(`${exact.cancerType}|${exact.value}`, true);
+    } else {
+      onAddCustom(text);
+    }
+    setQuery("");
+  };
+
+  return (
+    <div>
+      <label
+        htmlFor="scoreInput"
+        className="mb-2 block text-sm font-semibold text-gray-600"
+      >
+        {title}
+      </label>
+
+      <div className="relative" ref={containerRef}>
+        {/* Trigger: selected chips + free-text input. */}
+        <div
+          onClick={() => setOpen(true)}
+          className="flex min-h-[46px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-900 shadow-sm focus-within:border-transparent focus-within:ring-2 focus-within:ring-blue-500"
+        >
+          {selected.map((value) => {
+            const label = splitQualified(value).raw || value;
+            return (
+              <span
+                key={value}
+                className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700"
+              >
+                {label}
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Remove ${label}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggle(value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onToggle(value);
+                    }
+                  }}
+                  className="inline-flex cursor-pointer items-center justify-center leading-none hover:text-blue-900"
+                >
+                  ×
+                </span>
+              </span>
+            );
+          })}
+
+          <input
+            id="scoreInput"
+            type="text"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            onKeyDown={(event) => {
+              /* Keep Enter from submitting the Diagnosis form. */
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commitQuery();
+              } else if (event.key === "Escape") {
+                setOpen(false);
+              }
+            }}
+            placeholder={selected.length === 0 ? "Type or select score" : ""}
+            className="min-w-[8rem] flex-1 border-0 bg-transparent p-0 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0"
+          />
+
+          <button
+            type="button"
+            aria-label={open ? "Close score list" : "Open score list"}
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen((current) => !current);
+            }}
+            className={
+              "ml-auto h-4 w-4 flex-shrink-0 text-gray-400 transition-transform duration-200 " +
+              (open ? "rotate-180" : "")
+            }
+          >
+            <ChevronDownIcon />
+          </button>
+        </div>
+
+        {open && (
+          <div className="absolute left-0 right-0 top-full z-20 mt-2 block w-full max-h-72 overflow-y-auto rounded-md border border-gray-300 bg-white p-3 text-sm text-gray-800 shadow-lg slim-scrollbar">
+            {query.trim() &&
+              !options.some(
+                (option) =>
+                  option.value.toLowerCase() === query.trim().toLowerCase()
+              ) && (
+                <button
+                  type="button"
+                  onClick={commitQuery}
+                  className="mb-2 w-full rounded-md bg-blue-50 px-2 py-1.5 text-left text-xs font-medium text-blue-700 hover:bg-blue-100"
+                >
+                  Add “{query.trim()}” as score
+                </button>
+              )}
+
+            {filtered.length === 0 && (
+              <p className="text-sm text-gray-400">
+                {loading
+                  ? "Loading..."
+                  : options.length === 0
+                    ? "No score options for the selected cancer type(s) / histopathology"
+                    : "No matching scores"}
+              </p>
+            )}
+
+            {Array.from(groups.entries()).map(([cancerType, systems]) => (
+              <div key={cancerType} className="mb-3 last:mb-0">
+                <div className="mb-1.5 border-b border-gray-100 pb-1 text-[11px] font-bold uppercase tracking-wide text-[#1d4ed8]">
+                  {cancerType}
+                </div>
+
+                {Array.from(systems.entries()).map(([system, list]) => (
+                  <div key={system} className="mb-2 last:mb-0">
+                    <div className="mb-1 text-xs font-semibold text-gray-500">
+                      {system}
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                      {list.map((option) => {
+                        const qualified = `${option.cancerType}|${option.value}`;
+                        return (
+                          <label
+                            key={qualified}
+                            className="flex cursor-pointer items-center gap-1.5 text-sm text-gray-700"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selected.includes(qualified)}
+                              onChange={(event) =>
+                                onToggle(qualified, event.target.checked)
+                              }
+                              className="h-4 w-4 rounded border-gray-300 text-[#1d4ed8] accent-[#1d4ed8] focus:ring-[#1d4ed8]"
+                            />
+                            <span className="leading-snug">{option.value}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* True when a subtype-specific score applies: any "|"-separated keyword
+   appears as a whole word (case-insensitive) in a selected subtype. */
+const matchesSubtypeKeywords = (
+  keywords: string | null,
+  subtypeLabels: string[]
+): boolean => {
+  if (!keywords) return true;
+  return keywords
+    .split("|")
+    .map((keyword) => keyword.trim())
+    .filter(Boolean)
+    .some((keyword) => {
+      const pattern = new RegExp(
+        `(^|[^A-Za-z0-9])${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^A-Za-z0-9])`,
+        "i"
+      );
+      return subtypeLabels.some((label) => pattern.test(label));
+    });
+};
+
+/* "Cancer|label" entries -> "label, label" for the staging payload. */
+const joinRaw = (values: string[]): string =>
+  values.map((value) => splitQualified(value).raw).join(", ");
+
+/* YYYY-MM-DD / DD-MM-YYYY API date -> DD-MM-YYYY for the date fields. */
+const toPickedDateValue = (value?: string | null): string => {
+  const iso = toDateInputValue(value ?? "");
+  if (!iso) return "";
+  const [year, month, day] = iso.split("-");
+  return `${day}-${month}-${year}`;
+};
+
 type StagingReferenceItem = {
   stage_ref_id: string;
   cancer_type_id: string;
@@ -456,6 +803,18 @@ type CancerGradeItem = {
   description: string | null;
 };
 
+type CancerScoreItem = {
+  score_id: string;
+  score_system: string;
+  score_value: string;
+  input_type: string | null;
+  subtype_keywords: string | null;
+};
+
+/* Master rows tagged with the cancer type they were loaded for, so the
+   dropdowns can group them per selected cancer type like T/N/M. */
+type ForCancerType<T> = T & { cancerType: string };
+
 const Diagnosis: React.FC<{
   embedded?: boolean;
   patientId?: string;
@@ -478,19 +837,24 @@ const Diagnosis: React.FC<{
   const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
 
   const [formData, setFormData] = useState<FormData>({
+    diagnosisDate: "",
+    progressionDate: "",
+    relapseDate: "",
     preDiagnosis: "",
     molecularTesting: "",
     molecularTestingNote: "",
     molecularTestingDate: "",
     diseaseStatus: "",
-    laterality: "",
-    bodySite: "",
+    laterality: [],
+    bodySite: [],
     survivor: "",
     type: "",
+    cancerTypes: [],
     subType: [],
     histomorphology: "",
     cancerStage: [],
-    grade: "",
+    grade: [],
+    score: [],
     tStage: [],
     nStage: [],
     mStage: [],
@@ -508,8 +872,9 @@ const Diagnosis: React.FC<{
 
     try {
       const data = JSON.parse(saved) as Partial<FormData>;
-      /* Normalize legacy drafts: subType / cancerStage used to be single
-         strings, they are now multi-select arrays. */
+      /* Normalize legacy drafts: subType / cancerStage / laterality /
+         bodySite / grade used to be single strings, they are now
+         multi-select arrays. */
       const asArray = (value: unknown): string[] => {
         if (Array.isArray(value)) return value.map(String);
         if (typeof value === "string" && value.length > 0) return [value];
@@ -518,12 +883,19 @@ const Diagnosis: React.FC<{
       setFormData((previous) => ({
         ...previous,
         ...data,
+        cancerTypes: asArray(data.cancerTypes),
         subType: asArray(data.subType),
         cancerStage: asArray(data.cancerStage),
+        laterality: asArray(data.laterality),
+        bodySite: asArray(data.bodySite),
+        grade: asArray(data.grade),
+        score: asArray(data.score),
         tStage: asArray(data.tStage),
         nStage: asArray(data.nStage),
         mStage: asArray(data.mStage),
       }));
+      const savedTypes = asArray(data.cancerTypes);
+      if (savedTypes.length > 0) setSelectedCancerTypes(savedTypes);
     } catch (error) {
       console.error("Failed to restore diagnosis draft:", error);
     }
@@ -550,6 +922,9 @@ const Diagnosis: React.FC<{
           success: boolean;
           data: {
             visit_date?: string | null;
+            diagnosis_date?: string | null;
+            progression_date?: string | null;
+            relapse_date?: string | null;
             suggested_molecular_test?: string | null;
             suggested_molecular_test_note?: string | null;
             suggested_molecular_test_date?: string | null;
@@ -564,6 +939,13 @@ const Diagnosis: React.FC<{
         if (!detail || cancelled) return;
         setFormData((previous) => ({
           ...previous,
+          diagnosisDate:
+            previous.diagnosisDate || toPickedDateValue(detail.diagnosis_date),
+          progressionDate:
+            previous.progressionDate ||
+            toPickedDateValue(detail.progression_date),
+          relapseDate:
+            previous.relapseDate || toPickedDateValue(detail.relapse_date),
           molecularTesting:
             previous.molecularTesting ||
             detail.suggested_molecular_test ||
@@ -616,7 +998,15 @@ const Diagnosis: React.FC<{
      independent. The checkbox's checked state drives add vs. remove so a
      click can never silently invert a selection. */
   const handleMultiToggle = (
-    field: "subType" | "cancerStage" | "tStage" | "nStage" | "mStage"
+    field:
+      | "subType"
+      | "cancerStage"
+      | "tStage"
+      | "nStage"
+      | "mStage"
+      | "laterality"
+      | "bodySite"
+      | "grade"
   ) => (
     value: string,
     select?: boolean
@@ -676,56 +1066,90 @@ const Diagnosis: React.FC<{
     });
   }, [formData.type]);
 
-  /* Sync the diagnosis selection (cancer_type_id + subtype_id +
-     diagnosis_id) to localStorage so downstream steps (Treatment Plan)
-     can read the IDs to query regimen protocols from the backend. */
+  /* Sync the diagnosis selection to localStorage so downstream steps can
+     read it: Treatment Plan lists regimen protocols for every selected
+     cancer type (cancer_type_ids) and Histopathology (subtype_ids); the
+     single primary fields are kept for Summary / plan sync. */
+  const lastSelectionRef = useRef("");
   useEffect(() => {
-    if (!formData.type || formData.subType.length === 0) return;
+    const typeNames =
+      selectedCancerTypes.length > 0
+        ? selectedCancerTypes
+        : formData.type
+          ? [formData.type]
+          : [];
+    const matchedTypes = typeNames
+      .map((name) => cancerTypes.find((item) => item.cancer_type === name))
+      .filter((item): item is CancerTypeItem => Boolean(item?.cancer_type_id));
+    if (matchedTypes.length === 0) return;
 
-    /* Primary subtype = the first selected one. */
-    const primarySubtype = splitQualified(formData.subType[0]).raw;
-    const matchedType = cancerTypes.find(
-      (item) => item.cancer_type === formData.type
-    );
-    const matchedSubtype = subtypes.find(
-      (item) => item.subtype_name === primarySubtype
-    );
-
-    if (matchedType && matchedSubtype) {
-      /* Resolve diagnosis_id by matching the subtype's ICD-10 code
-         against the loaded diagnosis catalog. */
-      let diagnosisId = "";
-      const subtypeIcd = matchedSubtype.icd10_subtype?.trim();
-      if (subtypeIcd && diagnosisCatalogRef.current.length > 0) {
-        const match = diagnosisCatalogRef.current.find(
-          (entry) =>
-            entry.icd_code?.toUpperCase() === subtypeIcd.toUpperCase()
+    /* Resolve each ticked Histopathology to its subtype row, matching on
+       the cancer type it was ticked under. */
+    const matchedSubtypes = formData.subType
+      .map((value) => {
+        const { cancerType, raw } = splitQualified(value);
+        return subtypes.find(
+          (item) =>
+            item.subtype_name === raw &&
+            (!cancerType || item.cancerType === cancerType)
         );
-        if (match) diagnosisId = match.diagnosis_id;
-      }
+      })
+      .filter((item): item is CancerSubtypeOption => Boolean(item));
 
-      localStorage.setItem(
-        "hms_diagnosis_selection",
-        JSON.stringify({
-          cancer_type_id: matchedType.cancer_type_id,
-          subtype_id: matchedSubtype.subtype_id,
-          cancer_type: matchedType.cancer_type,
-          subtype_name: matchedSubtype.subtype_name,
-          diagnosis_id: diagnosisId,
-        })
-      );
+    const primaryType =
+      matchedTypes.find((item) => item.cancer_type === formData.type) ??
+      matchedTypes[0];
+    const primarySubtype =
+      matchedSubtypes.find(
+        (item) => item.cancerType === primaryType.cancer_type
+      ) ?? matchedSubtypes[0];
 
-      window.dispatchEvent(
-        new CustomEvent("cancer-type-changed", {
-          detail: {
-            patientId: resolvedPatientId,
-            cancerType: matchedType.cancer_type,
-            cancerSubtype: matchedSubtype.subtype_name,
-          },
-        })
+    /* Resolve diagnosis_id by matching the primary subtype's ICD-10 code
+       against the loaded diagnosis catalog. */
+    let diagnosisId = "";
+    const subtypeIcd = primarySubtype?.icd10_subtype?.trim();
+    if (subtypeIcd && diagnosisCatalogRef.current.length > 0) {
+      const match = diagnosisCatalogRef.current.find(
+        (entry) => entry.icd_code?.toUpperCase() === subtypeIcd.toUpperCase()
       );
+      if (match) diagnosisId = match.diagnosis_id;
     }
-  }, [formData.type, formData.subType, cancerTypes, subtypes, diagnosisCatalogReady, resolvedPatientId]);
+
+    const selection = JSON.stringify({
+      patient_id: resolvedPatientId,
+      cancer_type_id: primaryType.cancer_type_id,
+      subtype_id: primarySubtype?.subtype_id ?? "",
+      cancer_type: primaryType.cancer_type,
+      subtype_name: primarySubtype?.subtype_name ?? "",
+      diagnosis_id: diagnosisId,
+      cancer_type_ids: matchedTypes.map((item) => item.cancer_type_id),
+      subtype_ids: Array.from(
+        new Set(matchedSubtypes.map((item) => item.subtype_id))
+      ),
+    });
+    if (selection === lastSelectionRef.current) return;
+    lastSelectionRef.current = selection;
+
+    localStorage.setItem("hms_diagnosis_selection", selection);
+
+    window.dispatchEvent(
+      new CustomEvent("cancer-type-changed", {
+        detail: {
+          patientId: resolvedPatientId,
+          cancerType: primaryType.cancer_type,
+          cancerSubtype: primarySubtype?.subtype_name ?? "",
+        },
+      })
+    );
+  }, [
+    formData.type,
+    formData.subType,
+    selectedCancerTypes,
+    cancerTypes,
+    subtypes,
+    diagnosisCatalogReady,
+    resolvedPatientId,
+  ]);
 
   const [stageLabels, setStageLabels] = useState<StageOption[]>([]);
 
@@ -733,9 +1157,18 @@ const Diagnosis: React.FC<{
   const [tOptions, setTOptions] = useState<StageOption[]>([]);
   const [nOptions, setNOptions] = useState<StageOption[]>([]);
   const [mOptions, setMOptions] = useState<StageOption[]>([]);
-  const [grades, setGrades] = useState<string[]>([]);
-  const [bodySiteOptions, setBodySiteOptions] = useState<AnatomicalSiteItem[]>([]);
-  const [gradeMasterOptions, setGradeMasterOptions] = useState<CancerGradeItem[]>([]);
+  /* Grades parsed out of staging_reference text; fallback for cancer
+     types with no cancer_grade_master rows. */
+  const [grades, setGrades] = useState<StageOption[]>([]);
+  const [bodySiteOptions, setBodySiteOptions] = useState<
+    ForCancerType<AnatomicalSiteItem>[]
+  >([]);
+  const [gradeMasterOptions, setGradeMasterOptions] = useState<
+    ForCancerType<CancerGradeItem>[]
+  >([]);
+  const [scoreMasterOptions, setScoreMasterOptions] = useState<
+    ForCancerType<CancerScoreItem>[]
+  >([]);
   const [metastasisSites, setMetastasisSites] = useState<string[]>([]);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
   const [diagnosisError, setDiagnosisError] = useState("");
@@ -743,6 +1176,7 @@ const Diagnosis: React.FC<{
 
   const diagnosisRequestRef = useRef(0);
   const stagingRequestRef = useRef(0);
+  const masterRequestRef = useRef(0);
   const diagnosisCatalogRef = useRef<
     { diagnosis_id: string; icd_code: string }[]
   >([]);
@@ -835,36 +1269,49 @@ const Diagnosis: React.FC<{
       });
   };
 
-  const loadSitesForCancerType = (cancerTypeId: string) => {
-    if (!cancerTypeId) {
+  /* Body Site, Grade and Score masters for every selected cancer type,
+     each row tagged with its cancer type for per-type grouping. */
+  const loadMastersForCancerTypes = (
+    selections: { cancerTypeId: string; cancerTypeName: string }[]
+  ) => {
+    const ids = selections.filter((selection) => Boolean(selection.cancerTypeId));
+    const requestId = ++masterRequestRef.current;
+
+    if (ids.length === 0) {
       setBodySiteOptions([]);
-      return;
-    }
-
-    API.get<{ success: boolean; data: AnatomicalSiteItem[] }>(
-      `/oncology/reference/cancer-types/${cancerTypeId}/sites`
-    )
-      .then((response) => setBodySiteOptions(response.data.data ?? []))
-      .catch((error) => {
-        console.error("Failed to load anatomical sites:", error);
-        setBodySiteOptions([]);
-      });
-  };
-
-  const loadGradesForCancerType = (cancerTypeId: string) => {
-    if (!cancerTypeId) {
       setGradeMasterOptions([]);
+      setScoreMasterOptions([]);
       return;
     }
 
-    API.get<{ success: boolean; data: CancerGradeItem[] }>(
-      `/oncology/reference/cancer-types/${cancerTypeId}/grades`
-    )
-      .then((response) => setGradeMasterOptions(response.data.data ?? []))
-      .catch((error) => {
-        console.error("Failed to load cancer grades:", error);
-        setGradeMasterOptions([]);
-      });
+    const fetchTagged = <T,>(path: string, label: string) =>
+      Promise.all(
+        ids.map((selection) =>
+          API.get<{ success: boolean; data: T[] }>(
+            `/oncology/reference/cancer-types/${selection.cancerTypeId}/${path}`
+          )
+            .then((response) =>
+              (response.data.data ?? []).map((item) => ({
+                ...item,
+                cancerType: selection.cancerTypeName,
+              }))
+            )
+            .catch((error) => {
+              console.error(`Failed to load ${label}:`, error);
+              return [] as ForCancerType<T>[];
+            })
+        )
+      ).then((lists) => lists.flat());
+
+    fetchTagged<AnatomicalSiteItem>("sites", "anatomical sites").then((items) => {
+      if (requestId === masterRequestRef.current) setBodySiteOptions(items);
+    });
+    fetchTagged<CancerGradeItem>("grades", "cancer grades").then((items) => {
+      if (requestId === masterRequestRef.current) setGradeMasterOptions(items);
+    });
+    fetchTagged<CancerScoreItem>("scores", "cancer scores").then((items) => {
+      if (requestId === masterRequestRef.current) setScoreMasterOptions(items);
+    });
   };
 
   const loadStagesForCancerTypes = (
@@ -911,7 +1358,7 @@ const Diagnosis: React.FC<{
         const tOptionsAggregated: StageOption[] = [];
         const nOptionsAggregated: StageOption[] = [];
         const mOptionsAggregated: StageOption[] = [];
-        const gradeOptions: string[] = [];
+        const gradeOptions: StageOption[] = [];
 
         for (const result of results) {
           const { cancerTypeName, items } = result;
@@ -949,9 +1396,9 @@ const Diagnosis: React.FC<{
               const grade = match[0]
                 .replace(/\s+/g, " ")
                 .replace(/\b\w/g, (c) => c.toUpperCase());
-              if (!seenGrade.has(grade)) {
-                seenGrade.add(grade);
-                gradeOptions.push(grade);
+              if (!seenGrade.has(`${cancerTypeName}|${grade}`)) {
+                seenGrade.add(`${cancerTypeName}|${grade}`);
+                gradeOptions.push({ value: grade, cancerType: cancerTypeName });
               }
             }
           }
@@ -1018,7 +1465,9 @@ const Diagnosis: React.FC<{
         setTOptions(tOptionsAggregated);
         setNOptions(nOptionsAggregated);
         setMOptions(mOptionsAggregated);
-        setGrades(gradeOptions.sort());
+        setGrades(
+          gradeOptions.sort((a, b) => a.value.localeCompare(b.value))
+        );
         if (!resetStageSelection) return;
         setFormData((previous) => ({
           ...previous,
@@ -1051,37 +1500,38 @@ const Diagnosis: React.FC<{
         const fetched = response.data.data;
         setCancerTypes(fetched);
 
-        let savedType = "";
+        let savedTypes: string[] = [];
         try {
           const savedDraft = JSON.parse(
             localStorage.getItem(diagnosisDraftKey) ?? ""
           ) as Partial<FormData> | null;
-          savedType = savedDraft?.type ?? "";
+          savedTypes = Array.isArray(savedDraft?.cancerTypes)
+            ? savedDraft.cancerTypes.map(String)
+            : [];
+          if (savedDraft?.type && !savedTypes.includes(savedDraft.type)) {
+            savedTypes = [savedDraft.type, ...savedTypes];
+          }
         } catch (error) {
           console.error("Failed to read diagnosis draft:", error);
         }
 
-        const matchedSavedType = savedType
-          ? fetched.find((item) => item.cancer_type === savedType)
-          : undefined;
+        const matchedSavedTypes = savedTypes
+          .map((name) => fetched.find((item) => item.cancer_type === name))
+          .filter(
+            (item): item is CancerTypeItem =>
+              Boolean(item && item.cancer_type_id)
+          )
+          .map((item) => ({
+            cancerTypeId: item.cancer_type_id,
+            cancerTypeName: item.cancer_type,
+          }));
 
-        if (matchedSavedType) {
-          // Restoring a saved draft: reload options for the saved
-          // type without overwriting the user's selections.
-          loadSubtypesForCancerTypes([
-            {
-              cancerTypeId: matchedSavedType.cancer_type_id,
-              cancerTypeName: matchedSavedType.cancer_type,
-            },
-          ], false);
-          loadStagesForCancerTypes([
-            {
-              cancerTypeId: matchedSavedType.cancer_type_id,
-              cancerTypeName: matchedSavedType.cancer_type,
-            },
-          ], false);
-          loadSitesForCancerType(matchedSavedType.cancer_type_id);
-          loadGradesForCancerType(matchedSavedType.cancer_type_id);
+        if (matchedSavedTypes.length > 0) {
+          // Restoring a saved draft: reload options for every saved
+          // cancer type without overwriting the user's selections.
+          loadSubtypesForCancerTypes(matchedSavedTypes, false);
+          loadStagesForCancerTypes(matchedSavedTypes, false);
+          loadMastersForCancerTypes(matchedSavedTypes);
           return;
         }
 
@@ -1105,8 +1555,12 @@ const Diagnosis: React.FC<{
               cancerTypeName: initial.cancer_type,
             },
           ]);
-          loadSitesForCancerType(initial.cancer_type_id);
-          loadGradesForCancerType(initial.cancer_type_id);
+          loadMastersForCancerTypes([
+            {
+              cancerTypeId: initial.cancer_type_id,
+              cancerTypeName: initial.cancer_type,
+            },
+          ]);
         }
       })
       .catch((error) => {
@@ -1159,11 +1613,22 @@ const Diagnosis: React.FC<{
 
     /* Reload the dependent fields off the first selected type. */
     const primaryType = values[0] ?? "";
+    /* Drop grouped selections that belonged to a deselected cancer type. */
+    const keepSelectedTypes = (items: string[]) =>
+      items.filter((item) => {
+        const { cancerType } = splitQualified(item);
+        return !cancerType || values.includes(cancerType);
+      });
     setFormData((previous) => ({
       ...previous,
       type: primaryType,
+      cancerTypes: values,
       subType: [],
       icdCode: "",
+      laterality: keepSelectedTypes(previous.laterality),
+      bodySite: keepSelectedTypes(previous.bodySite),
+      grade: keepSelectedTypes(previous.grade),
+      score: keepSelectedTypes(previous.score),
     }));
 
 /* Histopathology shows the subtypes of every selected cancer type,
@@ -1180,15 +1645,117 @@ const Diagnosis: React.FC<{
       }));
     loadSubtypesForCancerTypes(selectedTypes);
     loadStagesForCancerTypes(selectedTypes);
+    loadMastersForCancerTypes(selectedTypes);
+  };
 
-    /* Body Site and Grade masters follow the primary (first) type. */
-    const primaryCancerType = cancerTypes.find(
-      (item) => item.cancer_type === primaryType
+  /* Per-cancer-type option groups for Laterality / Body Site / Grade, in
+     the order the cancer types were selected. */
+  const optionTypes =
+    selectedCancerTypes.length > 0
+      ? selectedCancerTypes
+      : formData.type
+        ? [formData.type]
+        : [];
+
+  const lateralityGroups = buildCheckboxGroups(
+    optionTypes.flatMap((cancerType) =>
+      LATERALITY_OPTIONS.map((value) => ({ value, cancerType }))
+    )
+  );
+
+  const bodySiteGroups = buildCheckboxGroups(
+    optionTypes.flatMap((cancerType) => {
+      const sites = bodySiteOptions.filter(
+        (site) => site.cancerType === cancerType
+      );
+      const names =
+        sites.length > 0
+          ? sites.map((site) => site.site_name)
+          : BODY_SITE_OPTIONS;
+      return names.map((value) => ({ value, cancerType }));
+    })
+  );
+
+  const gradeGroups = buildCheckboxGroups(
+    optionTypes.flatMap((cancerType) => {
+      const masters = gradeMasterOptions.filter(
+        (grade) => grade.cancerType === cancerType
+      );
+      return masters.length > 0
+        ? masters.map((grade) => ({ value: grade.grade_value, cancerType }))
+        : grades.filter((grade) => grade.cancerType === cancerType);
+    })
+  );
+
+  /* Score options: subtype-specific scores (e.g. IPI for DLBCL) only appear
+     once a matching Histopathology value is ticked for that cancer type. */
+  const scoreOptions: ScoreOption[] = optionTypes.flatMap((cancerType) => {
+    const subtypeLabels = formData.subType
+      .filter((value) => {
+        const parsed = splitQualified(value);
+        return !parsed.cancerType || parsed.cancerType === cancerType;
+      })
+      .map((value) => splitQualified(value).raw);
+    return scoreMasterOptions
+      .filter(
+        (score) =>
+          score.cancerType === cancerType &&
+          matchesSubtypeKeywords(score.subtype_keywords, subtypeLabels)
+      )
+      .map((score) => ({
+        cancerType,
+        system: score.score_system,
+        value: score.score_value,
+      }));
+  });
+
+  const scoreSystemOf = (qualified: string) => {
+    const { cancerType, raw } = splitQualified(qualified);
+    return scoreMasterOptions.find(
+      (score) => score.cancerType === cancerType && score.score_value === raw
+    )?.score_system;
+  };
+
+  /* Multiple scores may be picked, but only one value per score system per
+     cancer type (e.g. one IPI value), mirroring the T/N/M one-per-type rule. */
+  const handleScoreToggle = (value: string, select?: boolean) => {
+    setFormData((previous) => {
+      const present = previous.score.includes(value);
+      const adding = select ?? !present;
+      if (!adding) {
+        return {
+          ...previous,
+          score: previous.score.filter((item) => item !== value),
+        };
+      }
+      if (present) return previous;
+      const system = scoreSystemOf(value);
+      const { cancerType } = splitQualified(value);
+      return {
+        ...previous,
+        score: [
+          ...previous.score.filter(
+            (item) =>
+              !system ||
+              splitQualified(item).cancerType !== cancerType ||
+              scoreSystemOf(item) !== system
+          ),
+          value,
+        ],
+      };
+    });
+  };
+
+  /* Typed score that isn't in the master list; filed under the primary
+     cancer type. */
+  const handleScoreCustom = (text: string) => {
+    const cancerType = optionTypes[0] ?? "";
+    const value = cancerType ? `${cancerType}|${text}` : text;
+    setFormData((previous) =>
+      previous.score.includes(value)
+        ? previous
+        : { ...previous, score: [...previous.score, value] }
     );
-    if (primaryCancerType) {
-      loadSitesForCancerType(primaryCancerType.cancer_type_id);
-      loadGradesForCancerType(primaryCancerType.cancer_type_id);
-    }
   };
 
   const handleNext = async () => {
@@ -1203,6 +1770,7 @@ const Diagnosis: React.FC<{
       formData.type ||
       formData.subType.length > 0 ||
       formData.cancerStage.length > 0 ||
+      formData.score.length > 0 ||
       formData.tStage.length > 0 ||
       formData.nStage.length > 0 ||
       formData.mStage.length > 0 ||
@@ -1228,6 +1796,38 @@ const Diagnosis: React.FC<{
       return;
     }
 
+    /* Dates are typed or picked as DD-MM-YYYY; reject anything that isn't a
+       real date, and progression / relapse can't precede diagnosis. */
+    const dateFields = [
+      { label: "Date of Diagnosis", value: formData.diagnosisDate },
+      { label: "Date of Progression", value: formData.progressionDate },
+      { label: "Date of Relapse", value: formData.relapseDate },
+    ];
+    const invalidDate = dateFields.find(
+      (field) => field.value.trim() && !parsePickedDate(field.value.trim())
+    );
+    if (invalidDate) {
+      setDiagnosisError(`${invalidDate.label} must be in DD-MM-YYYY format.`);
+      return;
+    }
+    const diagnosisDateIso = toIsoDate(formData.diagnosisDate);
+    const progressionDateIso = toIsoDate(formData.progressionDate);
+    const relapseDateIso = toIsoDate(formData.relapseDate);
+    if (diagnosisDateIso) {
+      if (progressionDateIso && progressionDateIso < diagnosisDateIso) {
+        setDiagnosisError(
+          "Date of Progression cannot be earlier than the Date of Diagnosis."
+        );
+        return;
+      }
+      if (relapseDateIso && relapseDateIso < diagnosisDateIso) {
+        setDiagnosisError(
+          "Date of Relapse cannot be earlier than the Date of Diagnosis."
+        );
+        return;
+      }
+    }
+
     setDiagnosisError("");
     setSavingDiagnosis(true);
 
@@ -1248,9 +1848,21 @@ const Diagnosis: React.FC<{
         formData.icdCode
       );
 
-      const matchedGrade = gradeMasterOptions.find(
-        (item) => item.grade_value === formData.grade
+      /* Grading / scoring systems behind the picked values, de-duplicated
+         (custom typed scores have no system). */
+      const uniqueJoin = (items: (string | undefined)[]) =>
+        Array.from(new Set(items.filter(Boolean))).join(", ");
+      const gradeSystems = uniqueJoin(
+        formData.grade.map((value) => {
+          const { cancerType, raw } = splitQualified(value);
+          return gradeMasterOptions.find(
+            (item) =>
+              item.grade_value === raw &&
+              (!cancerType || item.cancerType === cancerType)
+          )?.grade_system;
+        })
       );
+      const scoreSystems = uniqueJoin(formData.score.map(scoreSystemOf));
 
       const visitDateIso = toIsoDate(visitDate);
 
@@ -1295,11 +1907,26 @@ const Diagnosis: React.FC<{
         ...(formData.diseaseStatus
           ? { disease_status: formData.diseaseStatus }
           : {}),
-        ...(formData.laterality ? { laterality: formData.laterality } : {}),
-        ...(formData.bodySite ? { site: formData.bodySite } : {}),
-        ...(formData.grade ? { grade: formData.grade } : {}),
-        ...(matchedGrade ? { grade_system: matchedGrade.grade_system } : {}),
+        ...(formData.laterality.length > 0
+          ? { laterality: joinRaw(formData.laterality) }
+          : {}),
+        ...(formData.bodySite.length > 0
+          ? { site: joinRaw(formData.bodySite) }
+          : {}),
+        ...(formData.grade.length > 0
+          ? { grade: joinRaw(formData.grade) }
+          : {}),
+        ...(gradeSystems ? { grade_system: gradeSystems } : {}),
+        ...(formData.score.length > 0
+          ? { score: joinRaw(formData.score) }
+          : {}),
+        ...(scoreSystems ? { score_system: scoreSystems } : {}),
         ...(visitDateIso ? { visit_date: visitDateIso } : {}),
+        ...(diagnosisDateIso ? { diagnosis_date: diagnosisDateIso } : {}),
+        ...(progressionDateIso
+          ? { progression_date: progressionDateIso }
+          : {}),
+        ...(relapseDateIso ? { relapse_date: relapseDateIso } : {}),
         ...(formData.molecularTesting
           ? { suggested_molecular_test: formData.molecularTesting }
           : {}),
@@ -1430,6 +2057,39 @@ const Diagnosis: React.FC<{
       >
         {/* Four Column Fields */}
         <div className="grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-3 lg:grid-cols-3">
+          {/* Date of Diagnosis */}
+          <DiagnosisDateField
+            id="diagnosisDate"
+            title="Date of Diagnosis"
+            value={formData.diagnosisDate}
+            onChange={(value) =>
+              setFormData((previous) => ({ ...previous, diagnosisDate: value }))
+            }
+          />
+
+          {/* Date of Progression */}
+          <DiagnosisDateField
+            id="progressionDate"
+            title="Date of Progression"
+            value={formData.progressionDate}
+            onChange={(value) =>
+              setFormData((previous) => ({
+                ...previous,
+                progressionDate: value,
+              }))
+            }
+          />
+
+          {/* Date of Relapse */}
+          <DiagnosisDateField
+            id="relapseDate"
+            title="Date of Relapse"
+            value={formData.relapseDate}
+            onChange={(value) =>
+              setFormData((previous) => ({ ...previous, relapseDate: value }))
+            }
+          />
+
           {/* Pre Diagnosis */}
           <div>
             <label
@@ -1492,41 +2152,20 @@ const Diagnosis: React.FC<{
           </div>
 
           {/* Laterality */}
-          <DiagnosisCheckboxSelect
+          <DiagnosisCheckboxList
             title="Laterality"
-            options={[
-              "Left",
-              "Right",
-              "Bilateral",
-              "Midline",
-              "Not Applicable",
-            ]}
-            value={formData.laterality}
-            onChange={(value) =>
-              setFormData((previous) => ({
-                ...previous,
-                laterality: value,
-              }))
-            }
-            placeholder="Select Laterality"
+            groups={lateralityGroups}
+            selected={formData.laterality}
+            onToggle={handleMultiToggle("laterality")}
           />
 
           {/* Body Site */}
-          <DiagnosisCheckboxSelect
+          <DiagnosisCheckboxList
             title="Body Site"
-            options={
-              bodySiteOptions.length > 0
-                ? bodySiteOptions.map((site) => site.site_name)
-                : BODY_SITE_OPTIONS
-            }
-            value={formData.bodySite}
-            onChange={(value) =>
-              setFormData((previous) => ({
-                ...previous,
-                bodySite: value,
-              }))
-            }
-            placeholder="Select Body Site"
+            groups={bodySiteGroups}
+            selected={formData.bodySite}
+            onToggle={handleMultiToggle("bodySite")}
+            loading={diagnosisLoading}
           />
 
           {/* Histopathology */}
@@ -1578,22 +2217,22 @@ const Diagnosis: React.FC<{
           />
 
           {/* Grade */}
-          <DiagnosisCheckboxSelect
+          <DiagnosisCheckboxList
             title="Grade"
-            options={
-              gradeMasterOptions.length > 0
-                ? gradeMasterOptions.map((gradeItem) => gradeItem.grade_value)
-                : grades
-            }
-            value={formData.grade}
-            onChange={(value) =>
-              setFormData((previous) => ({
-                ...previous,
-                grade: value,
-              }))
-            }
+            groups={gradeGroups}
+            selected={formData.grade}
+            onToggle={handleMultiToggle("grade")}
             loading={diagnosisLoading}
-            placeholder="Select Grade"
+          />
+
+          {/* Score */}
+          <DiagnosisScoreList
+            title="Score"
+            options={scoreOptions}
+            selected={formData.score}
+            onToggle={handleScoreToggle}
+            onAddCustom={handleScoreCustom}
+            loading={diagnosisLoading}
           />
 
           {/* TNM Staging */}

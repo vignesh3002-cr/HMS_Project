@@ -4,7 +4,6 @@ import {
   getApiErrorMessage,
   type AllergyOption,
   type ComorbidityOption,
-  type DiagnosisCategory,
   type EncounterClinicalDetails,
   type PerformanceStatusOption,
   type SymptomOption,
@@ -26,7 +25,8 @@ export interface ClinicalDetailsDraft {
     clinicalNotes?: string;
   }>;
   comorbidities: Array<{
-    diagnosisId: string;
+    /* comorbidity_master.id */
+    comorbidityId: string;
     clinicalNotes?: string;
   }>;
 }
@@ -45,23 +45,22 @@ interface UseClinicalDetailsResult {
   symptomOptions: SymptomOption[];
   allergyOptions: AllergyOption[];
   comorbidityOptions: ComorbidityOption[];
-  comorbidityCategories: DiagnosisCategory[];
+  /* Distinct comorbidity_master categories, for the "+ Add" panel. */
+  comorbidityCategories: string[];
 
   saved: EncounterClinicalDetails | null;
 
   saving: boolean;
   saveError: string | null;
   saveSuccess: boolean;
-  saveClinicalDetails: (
-    draft: ClinicalDetailsDraft,
-  ) => Promise<EncounterClinicalDetails | null>;
+  /* Resolves true when every write succeeded, false otherwise. */
+  saveClinicalDetails: (draft: ClinicalDetailsDraft) => Promise<boolean>;
 
   createSymptom: (name: string) => Promise<SymptomOption | null>;
   createAllergy: (substanceName: string) => Promise<AllergyOption | null>;
   createComorbidity: (payload: {
-    diagnosisName: string;
-    diagnosisCatogoryId?: string;
-    diagnosisCategory?: string;
+    comorbidityName: string;
+    category?: string;
     icdCode?: string;
   }) => Promise<ComorbidityOption | null>;
 }
@@ -87,7 +86,7 @@ export function useClinicalDetails({
     ComorbidityOption[]
   >([]);
   const [comorbidityCategories, setComorbidityCategories] = useState<
-    DiagnosisCategory[]
+    string[]
   >([]);
 
   const [saved, setSaved] = useState<EncounterClinicalDetails | null>(null);
@@ -132,37 +131,27 @@ export function useClinicalDetails({
           performanceRes,
           symptomRes,
           allergyRes,
-          categoryRes,
+          comorbidityRes,
           clinicalRes,
         ] = await Promise.all([
           clinicalDetailsApi.getPerformanceStatusOptions(),
           clinicalDetailsApi.getSymptomOptions(),
           clinicalDetailsApi.getAllergyOptions(),
-          clinicalDetailsApi.getDiagnosisCategories(),
+          clinicalDetailsApi.getComorbidityMaster(),
           clinicalDetailsApi.getEncounterClinicalDetails(encounterNo!),
         ]);
 
         if (cancelled) return;
 
-        const categories = categoryRes.data.data?.categories ?? [];
-        setComorbidityCategories(categories);
-
-        // Skip categories with no id - fetching them would hit the broken
-        // "/diagnosis/categories//diagnoses" endpoint (404).
-        const categoryResults = await Promise.all(
-          categories
-            .filter((category) => category.diagnosis_catogory_id)
-            .map((category) =>
-              clinicalDetailsApi.getDiagnosesByCategory(
-                category.diagnosis_catogory_id,
-              ),
+        const comorbidityOptions = comorbidityRes.data.data ?? [];
+        setComorbidityCategories(
+          Array.from(
+            new Set(
+              comorbidityOptions
+                .map((option) => option.category)
+                .filter((category): category is string => Boolean(category)),
             ),
-        );
-
-        if (cancelled) return;
-
-        const comorbidityOptions = categoryResults.flatMap(
-          (result) => result.data.data?.diagnoses ?? [],
+          ).sort(),
         );
 
         setPerformanceStatusOptions(
@@ -201,13 +190,13 @@ export function useClinicalDetails({
      are patient-level and saved through their own endpoints.
   ============================================================ */
   const saveClinicalDetails = useCallback(
-    async (draft: ClinicalDetailsDraft): Promise<EncounterClinicalDetails | null> => {
+    async (draft: ClinicalDetailsDraft): Promise<boolean> => {
       if (!patientId || !encounterNo) {
         setSaveError("Missing patient or encounter context.");
-        return null;
+        return false;
       }
 
-      if (saveInFlight.current) return null;
+      if (saveInFlight.current) return false;
       saveInFlight.current = true;
 
       setSaving(true);
@@ -366,12 +355,14 @@ export function useClinicalDetails({
 
         // ---- 4. Comorbidities (patient-level, longitudinal) ----
         const savedComorbidities = current?.comorbidities ?? [];
-        const draftComorbidityIds = draft.comorbidities.map(
-          (comorbidity) => comorbidity.diagnosisId,
+        const draftComorbidityIds = draft.comorbidities.map((comorbidity) =>
+          String(comorbidity.comorbidityId),
         );
 
         for (const savedComorbidity of savedComorbidities) {
-          if (!draftComorbidityIds.includes(savedComorbidity.diagnosisId)) {
+          if (
+            !draftComorbidityIds.includes(String(savedComorbidity.comorbidityId))
+          ) {
             try {
               await clinicalDetailsApi.removePatientComorbidity(
                 patientId,
@@ -381,7 +372,7 @@ export function useClinicalDetails({
               noteWriteError(
                 err,
                 "remove comorbidity",
-                savedComorbidity.diagnosisName,
+                savedComorbidity.comorbidityName,
               );
             }
           }
@@ -390,13 +381,14 @@ export function useClinicalDetails({
         for (const comorbidity of draft.comorbidities) {
           const existing = savedComorbidities.find(
             (savedComorbidity) =>
-              savedComorbidity.diagnosisId === comorbidity.diagnosisId,
+              String(savedComorbidity.comorbidityId) ===
+              String(comorbidity.comorbidityId),
           );
 
           if (!existing) {
             try {
               await clinicalDetailsApi.addPatientComorbidity(patientId, {
-                diagnosisId: comorbidity.diagnosisId,
+                comorbidityId: comorbidity.comorbidityId,
                 clinicalNotes: comorbidity.clinicalNotes || undefined,
                 identifiedAtEncounterNo: encounterNo,
               });
@@ -405,7 +397,7 @@ export function useClinicalDetails({
                 noteWriteError(
                   err,
                   "add comorbidity",
-                  String(comorbidity.diagnosisId),
+                  String(comorbidity.comorbidityId),
                 );
               }
             }
@@ -425,7 +417,7 @@ export function useClinicalDetails({
               noteWriteError(
                 err,
                 "update comorbidity",
-                String(comorbidity.diagnosisId),
+                String(comorbidity.comorbidityId),
               );
             }
           }
@@ -445,14 +437,14 @@ export function useClinicalDetails({
         } else {
           setSaveSuccess(true);
         }
-        return freshData;
+        return writeErrors.length === 0;
       } catch (err) {
         console.error(
           "[useClinicalDetails] Failed to save clinical details:",
           err,
         );
         setSaveError(getApiErrorMessage(err));
-        return null;
+        return false;
       } finally {
         saveInFlight.current = false;
         setSaving(false);
@@ -515,24 +507,30 @@ export function useClinicalDetails({
 
   const createComorbidity = useCallback(
     async (payload: {
-      diagnosisName: string;
-      diagnosisCatogoryId?: string;
-      diagnosisCategory?: string;
+      comorbidityName: string;
+      category?: string;
       icdCode?: string;
     }): Promise<ComorbidityOption | null> => {
       try {
         const response = await clinicalDetailsApi.createCustomComorbidity(
           payload,
         );
+        // A name that already exists comes back as the existing row.
         const created = response.data.data;
         if (created) {
           setComorbidityOptions((previous) =>
-            previous.some(
-              (option) => option.diagnosis_id === created.diagnosis_id,
-            )
+            previous.some((option) => option.id === created.id)
               ? previous
               : [...previous, created],
           );
+          const category = created.category;
+          if (category) {
+            setComorbidityCategories((previous) =>
+              previous.includes(category)
+                ? previous
+                : [...previous, category].sort(),
+            );
+          }
         }
         return created ?? null;
       } catch (err) {

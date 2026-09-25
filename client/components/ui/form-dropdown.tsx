@@ -11,6 +11,12 @@ export interface FormDropdownOption {
   // a badge naming their current branch.
   highlight?: boolean;
   badge?: string;
+  // "danger" reads as a warning (e.g. an occupied bed's badge) instead of
+  // the default informational blue.
+  badgeTone?: "info" | "danger";
+  // Shown in the list (so its status/context stays visible) but cannot be
+  // picked — e.g. a bed that's already occupied. Clicking it does nothing.
+  disabled?: boolean;
 }
 
 export interface FormDropdownProps
@@ -122,6 +128,7 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
     }, [normalized, search, selectedOption]);
 
     function handleSelect(option: FormDropdownOption) {
+      if (option.disabled) return;
       onValueChange?.(option.value);
       setSearch(option.label);
       setOpen(false);
@@ -131,7 +138,7 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
       if (event.key === "Escape") {
         setOpen(false);
         setSearch(selectedOption?.label ?? "");
-      } else if (event.key === "Enter" && filtered.length === 1) {
+      } else if (event.key === "Enter" && filtered.length === 1 && !filtered[0].disabled) {
         handleSelect(filtered[0]);
       }
     }
@@ -234,29 +241,42 @@ const FormDropdown = React.forwardRef<HTMLInputElement, FormDropdownProps>(
                           key={option.value}
                           role="option"
                           aria-selected={isSelected}
+                          aria-disabled={option.disabled || undefined}
                           onMouseDown={(event) => {
                             event.preventDefault();
                             handleSelect(option);
                           }}
                           className={cn(
-                            "flex cursor-pointer items-center justify-between px-4 py-2.5 text-sm transition-colors relative group",
-                            isSelected
-                              ? "bg-blue-50 font-medium text-blue-700"
-                              : option.highlight
-                              ? "bg-blue-500/10 text-gray-900 hover:bg-blue-500/15"
-                              : "text-gray-900 hover:bg-gray-50",
+                            "flex items-center justify-between px-4 py-2.5 text-sm transition-colors relative group",
+                            option.disabled
+                              ? "cursor-not-allowed text-gray-400"
+                              : cn(
+                                  "cursor-pointer",
+                                  isSelected
+                                    ? "bg-blue-50 font-medium text-blue-700"
+                                    : option.highlight
+                                    ? "bg-blue-500/10 text-gray-900 hover:bg-blue-500/15"
+                                    : "text-gray-900 hover:bg-gray-50",
+                                ),
                           )}
                         >
                           <span
                             className={cn(
                               "absolute left-0 top-0 bottom-0 w-1 bg-blue-600 transition-transform duration-200 origin-center",
-                              isSelected ? "scale-y-100" : "scale-y-0 group-hover:scale-y-100",
+                              isSelected && !option.disabled
+                                ? "scale-y-100"
+                                : "scale-y-0 group-hover:scale-y-100",
                             )}
                           />
                           <span className="pl-2 flex flex-col">
                             <span>{option.label}</span>
                             {option.badge && (
-                              <span className="text-[11px] font-medium text-blue-600">
+                              <span
+                                className={cn(
+                                  "text-[11px] font-medium",
+                                  option.badgeTone === "danger" ? "text-red-600" : "text-blue-600",
+                                )}
+                              >
                                 {option.badge}
                               </span>
                             )}

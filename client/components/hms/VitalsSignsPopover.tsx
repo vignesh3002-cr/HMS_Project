@@ -21,6 +21,12 @@ interface VitalsSignsPopoverProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   appointmentId?: string;
+  /**
+   * Looks the encounter up directly instead of via appointmentId -- for
+   * flows (e.g. IPD) where the encounter isn't tied to an appointment.
+   * When set, this takes priority over appointmentId.
+   */
+  encounterNo?: string;
   patientId?: string;
   /** Fired after vitals were successfully created/updated so parents can refresh their lists. */
   onSaved?: () => void;
@@ -119,7 +125,7 @@ function VitalLine({
   );
 }
 
-const VitalsSignsPopover = ({ open, onOpenChange, appointmentId, patientId, onSaved }: VitalsSignsPopoverProps) => {
+const VitalsSignsPopover = ({ open, onOpenChange, appointmentId, encounterNo, patientId, onSaved }: VitalsSignsPopoverProps) => {
   const { toast } = useToast();
   const [bpSystolic, setBpSystolic] = useState("");
   const [bpDiastolic, setBpDiastolic] = useState("");
@@ -161,12 +167,14 @@ const VitalsSignsPopover = ({ open, onOpenChange, appointmentId, patientId, onSa
   }, [open]);
 
   useEffect(() => {
-    if (!open || !appointmentId || !patientId) return;
+    if (!open || !patientId || (!appointmentId && !encounterNo)) return;
     let cancelled = false;
     const loadExistingVitals = async () => {
       setIsLoadingVitals(true);
       try {
-        const res = await encounterApi.getByAppointment(appointmentId);
+        const res = encounterNo
+          ? await encounterApi.getByEncounterNo(encounterNo)
+          : await encounterApi.getByAppointment(appointmentId!);
         const record = res.data?.data;
         if (!record || cancelled) return;
         setBpSystolic(valueToInput(record.systolic_bp));
@@ -193,7 +201,7 @@ const VitalsSignsPopover = ({ open, onOpenChange, appointmentId, patientId, onSa
     return () => {
       cancelled = true;
     };
-  }, [open, appointmentId, patientId]);
+  }, [open, appointmentId, encounterNo, patientId]);
 
   const tempValue = numOrNull(temperature);
   const tempC = tempValue === null ? null : tempUnit === "F" ? fToC(tempValue) : tempValue;

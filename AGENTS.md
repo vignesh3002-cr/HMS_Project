@@ -6,7 +6,7 @@ While the starter comes with a express server, only create endpoint when strictl
 
 ## Tech Stack
 
-- **PNPM**: Prefer pnpm
+- **NPM**: Use npm (`npm install`, commit `package-lock.json`); do not use pnpm or yarn
 - **Frontend**: React 18 + React Router 6 (spa) + TypeScript + Vite + TailwindCSS 3
 - **Backend**: Express server integrated with Vite dev server
 - **Testing**: Vitest
@@ -90,11 +90,11 @@ Path aliases:
 ## Development Commands
 
 ```bash
-pnpm dev        # Start dev server (client + server)
-pnpm build      # Production build
-pnpm start      # Start production server
-pnpm typecheck  # TypeScript validation
-pnpm test          # Run Vitest tests
+npm run dev        # Start dev server (client + server)
+npm run build      # Production build
+npm run preview    # Preview the production build
+npm run typecheck  # TypeScript validation
+npm test           # Run Vitest tests
 ```
 
 ## Adding Features
@@ -150,7 +150,7 @@ const data: MyRouteResponse = await response.json();
 
 ## Production Deployment
 
-- **Standard**: `pnpm build`
+- **Standard**: `npm run build`
 - **Binary**: Self-contained executables (Linux, macOS, Windows)
 - **Cloud Deployment**: Use either Netlify or Vercel via their MCP integrations for easy deployment. Both providers work well with this starter template.
 
@@ -238,7 +238,7 @@ const data: MyRouteResponse = await response.json();
  - Backend (HMS_Backend-main/src/modules/encounter/encounter.service.ts): terminal-status guard now excludes APPOINTMENT_STATUS.NOT_CHECKED_IN from blockingStatuses enabling late check-in; CANCELLED/NO_SHOW/COMPLETED still blocked; transaction flips status to IN_CONSULTATION.
  - AppointmentPage.tsx handleCheckIn: removed premature appointmentApi.updateStatus(IN_CONSULTATION) before encounterApi.create (same stranded-state bug fixed in Dashboard in #10); "Encounter already exists" treated as success. appointmentApi import kept (still used by reschedule/cancel flows).
  - Follow-up: first real check-in after the guard fix crashed with misleading Prisma "Argument `branch` is missing" - actual cause was encounter_type: null in the create payload (service sent appointment.Patient_type! but Patient_type is String? on appointment_history and the late-checked-in appointment had null; encounter.encounter_type is non-nullable @default("OPD") in schema.prisma). Latent until #11 because such appointments never reached encounter creation before. Fixed with encounter_type: appointment.Patient_type ?? ENCOUNTER_TYPE_DEFAULT (constant was already imported unused; value matches column default). No migration needed.
- - NOTE: backend runs via `pnpm dev` = ts-node src/server.ts with NO hot-reload - backend edits require manual restart or they never go live (this bit twice).
+ - NOTE: backend runs via `npm run dev` = ts-node src/server.ts with NO hot-reload - backend edits require manual restart or they never go live (this bit twice).
 
 ### 12. Scheduled.tsx restored from backup.tsx + HMS restyle
  - Restored logic dropped when the redesigned page came in: ScheduleSlotModal mount (Add/Edit/Delete slot flows were dead without it), Pending Transfer dialog (affected appointments + Transfer/Reschedule-queue/Cancel actions + replacement doctor select), Leave Confirm / Leave Success / Leave Conflicts AlertDialogs.

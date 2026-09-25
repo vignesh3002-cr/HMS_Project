@@ -203,6 +203,36 @@ export interface ChemoPlan {
   chemotherapy_cycle?: ChemoPlanCycle[] | null;
 }
 
+export interface ChemoPlanItem {
+  chemotherapy_plan_item_id: string;
+  medicine_id: string;
+  drug_sequence: number;
+  drug_role?: string | null;
+  drug_type?: string | null;
+  protocol_dose?: string | number | null;
+  protocol_dose_unit?: string | null;
+  calculated_dose?: string | number | null;
+  administration_route?: string | null;
+  formulation?: string | null;
+  infusion_type?: string | null;
+  frequency?: string | null;
+  remarks?: string | null;
+  medicine_master?: {
+    medicine_id?: string;
+    medicine_name?: string | null;
+    brand_name?: string | null;
+    generic_name?: string | null;
+  } | null;
+}
+
+// Full single-plan fetch (GET /chemotherapy/plans/:planId) -- unlike ChemoPlan
+// (the list-row shape), this includes the order's own medicine list, which is
+// what a pharmacy slip should read from since it always exists for a plan
+// regardless of whether the plan was derived from a saved regimen protocol.
+export interface ChemoPlanDetail extends ChemoPlan {
+  chemotherapy_plan_items?: ChemoPlanItem[] | null;
+}
+
 export interface LabReviewRecord {
   lab_review_id?: string;
   chemotherapy_cycle_id?: string;
@@ -237,6 +267,10 @@ export const chemotherapyApi = {
       data: ChemoPlan[];
       pagination: { total: number; page: number; limit: number };
     }>("/chemotherapy/plans", { params }),
+  getPlan: (planId: string) =>
+    API.get<{ success: boolean; message: string; data: ChemoPlanDetail }>(
+      `/chemotherapy/plans/${planId}`
+    ),
   listLabReviews: (cycleId: string) =>
     API.get<{ success: boolean; message: string; data: LabReviewRecord[] }>(
       `/chemotherapy/cycles/${cycleId}/lab-review`

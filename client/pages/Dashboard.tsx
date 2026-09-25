@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2, Activity, AlertCircle, AlertTriangle, FlaskConical, CheckCircle2, XCircle, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
+import { Stethoscope, UserRound, Users, Calendar as CalendarIcon, FileText, Receipt, Loader2, Activity, AlertCircle, FlaskConical, CheckCircle2, XCircle, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, ChevronDown, Bed, BedDouble } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import HmsTable from "@/components/hms/HmsTable";
 import { format, isToday, isTomorrow, isYesterday, addDays, subDays } from "date-fns";
@@ -17,6 +17,7 @@ import { employeeApi, type EmployeeRecord } from "@/api/employee.api";
 import { encounterApi, type EncounterRecord } from "@/api/encounter.api";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
+import { ipdApi } from "@/api/ipd.api";
 import { RefreshButton } from "@/components/hms/RefreshButton";
 import { StatusBadge } from "@/components/hms/StatusBadge";
 import { AppointmentActionMenu } from "@/components/hms/AppointmentActionMenu";
@@ -372,6 +373,8 @@ const ALL_KPI_IDS = [
   "chemo-delivered",
   "chemo-cancelled",
   "lab-visits",
+  "ipd-patients",
+  "beds-occupied",
 ];
 
 export default function Dashboard() {
@@ -432,6 +435,14 @@ export default function Dashboard() {
 
   const [prescriptionCount, setPrescriptionCount] = useState<number>(0);
   const [isPrescriptionsLoading, setIsPrescriptionsLoading] = useState(false);
+
+  // IPD snapshot -- currently admitted inpatients + bed occupancy (branch-scoped).
+  const [ipdOverview, setIpdOverview] = useState<{ totalPatients: number; bedsOccupied: number; totalBeds: number }>({
+    totalPatients: 0,
+    bedsOccupied: 0,
+    totalBeds: 0,
+  });
+  const [isIpdStatsLoading, setIsIpdStatsLoading] = useState(false);
 
   // Track previous counts to compute "newly added" deltas
   const prevDoctorsRef = useRef<number>(0);
@@ -747,6 +758,35 @@ export default function Dashboard() {
   useEffect(() => {
     setIsPrescriptionsLoading(prescriptionsQuery.isLoading || prescriptionsQuery.isFetching);
   }, [prescriptionsQuery.isLoading, prescriptionsQuery.isFetching]);
+
+  const canReadAdmissions = permissions.includes("admission.read");
+
+  // IPD KPI snapshot: currently-admitted inpatients and occupied beds in scope.
+  const ipdOverviewQuery = useQuery({
+    queryKey: ["dashboard-ipd-overview", isAllBranches ? "all" : selectedBranchId, dateStr],
+    queryFn: async () => {
+      const res = await ipdApi.getOverview(isAllBranches ? undefined : selectedBranchId);
+      return (
+        res.data?.data ?? { totalPatients: 0, bedsOccupied: 0, totalBeds: 0 }
+      );
+    },
+    enabled: canReadAdmissions,
+    refetchOnWindowFocus: false,
+    staleTime: 1000 * 60 * 2,
+  });
+
+  useEffect(() => {
+    if (ipdOverviewQuery.data === undefined) return;
+    setIpdOverview((prev) => ({
+      totalPatients: ipdOverviewQuery.data!.totalPatients,
+      bedsOccupied: ipdOverviewQuery.data!.bedsOccupied,
+      totalBeds: ipdOverviewQuery.data!.totalBeds ?? prev.totalBeds,
+    }));
+  }, [ipdOverviewQuery.data]);
+
+  useEffect(() => {
+    setIsIpdStatsLoading(ipdOverviewQuery.isLoading || ipdOverviewQuery.isFetching);
+  }, [ipdOverviewQuery.isLoading, ipdOverviewQuery.isFetching]);
 
   // Reflect React Query's pending state into the UI loading flags so the
   // table spinner and stat-card skeletons stay in sync with real requests.
@@ -1225,23 +1265,39 @@ export default function Dashboard() {
         },
       },
       {
-        id: "critical-patients",
-        label: "Critical Patients",
-        subLabel: "Current critical count",
-        permission: canReadPatients ? "patient.read" : "appointment.read",
-        loading: canReadPatients
-          ? criticalPatientsQuery.isLoading || criticalPatientsQuery.isFetching
-          : isAppointmentsLoading && realAppointments === null,
-        value: criticalPatientCount,
-        tag: `${criticalPatientCount} Critical`,
-        bg: "rgba(220, 38, 38, 0.14)",
+        id: "ipd-patients",
+        label: "Total IPD Patients",
+        subLabel: "Currently admitted",
+        permission: "admission.read",
+        loading: isIpdStatsLoading,
+        value: ipdOverview.totalPatients,
+        tag: "Inpatient",
+        bg: "#D6E3FF",
         border: "none",
-        valueColor: "#DC2626",
-        iconBg: "rgba(255, 255, 255, 0.45)",
-        icon: <AlertTriangle className="w-[17px] h-[17px]" color="#DC2626" />,
+        valueColor: "#00488D",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <BedDouble className="w-[17px] h-[17px]" color="#00488D" />,
         isActive: false,
         onClick: () => {
-          navigate("/patients");
+          navigate("/ipd");
+        },
+      },
+      {
+        id: "beds-occupied",
+        label: "Beds Occupied",
+        subLabel: "Beds currently in use",
+        permission: "admission.read",
+        loading: isIpdStatsLoading,
+        value: ipdOverview.bedsOccupied,
+        tag: `${ipdOverview.bedsOccupied} / ${ipdOverview.totalBeds} beds`,
+        bg: "#dcf5e8",
+        border: "none",
+        valueColor: "#007A4D",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <Bed className="w-[17px] h-[17px]" color="#007A4D" />,
+        isActive: false,
+        onClick: () => {
+          navigate("/ipd");
         },
       },
       {
@@ -1427,6 +1483,8 @@ export default function Dashboard() {
     criticalPatientsQuery.isLoading,
     isPrescriptionsLoading,
     patientLoading,
+    ipdOverview,
+    isIpdStatsLoading,
     activeTab,
     searchQuery,
     oncologyMetrics,
@@ -2021,6 +2079,7 @@ export default function Dashboard() {
                     patientsQuery.refetch();
                     void criticalPatientsQuery.refetch();
                     prescriptionsQuery.refetch();
+                    ipdOverviewQuery.refetch();
                   }}
                   isLoading={activeTab === "appointments" ? isAppointmentsLoading : isEmployeesLoading}
                 />

@@ -1,12 +1,15 @@
 import { useState, useEffect, useMemo, useRef, ChangeEvent, FormEvent } from "react";
 import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { addDays, format, parseISO } from "date-fns";
-import { ArrowLeft, CalendarPlus, Calendar as CalendarIcon, Plus, Loader2 } from "lucide-react";
+import { ArrowLeft, CalendarPlus, Calendar as CalendarIcon, Plus, Loader2, Hospital } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { usePermission } from "@/context/PermissionContext";
 import { FormDropdown } from "@/components/ui/form-dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import CalendarPicker from "@/components/hms/Calender";
 import { PatientConflictWarningDialog, type PatientConflictAppointment } from "@/components/hms/PatientConflictWarningDialog";
+import { AddWardDialog } from "@/components/hms/AddWardDialog";
+import { AddBedDialog } from "@/components/hms/AddBedDialog";
 import VoiceToText from "@/components/ui/voicetotext";
 import { branchApi, Branch } from "@/api/branch.api";
 
@@ -22,6 +25,7 @@ import { departmentApi, Department } from "@/api/department.api";
 import { employeeApi, type EmployeeRecord, type DoctorScheduleRecord } from "@/api/employee.api";
 import { doctorScheduleApi, type ScheduleChangeRecord } from "@/api/doctorSchedule.api";
 import { patientApi, type PatientRecord } from "@/api/patient.api";
+import { ipdApi, type WardRecord, type BedRecord, type AdmissionRecord } from "@/api/ipd.api";
 import {
   appointmentApi,
   type AvailableSlot,
@@ -31,6 +35,38 @@ import { validateRequiredFields, type RequiredField } from "@/lib/validation";
 import { activeBranches } from "@/lib/utils";
 
 const OTHER_DEPARTMENT_VALUE = "__OTHER__";
+
+// Payment-mode options recreated from the New Admission dialog on the IPD
+// page (admission.payment_mode is a free VARCHAR(100) in the schema) --
+// used by the inline Admission Details section of an IPD booking.
+const IPD_PAYMENT_MODES = ["CASH", "CARD", "UPI", "INSURANCE", "CREDIT"] as const;
+
+// Map the form's IPD visit types onto the admission.admission_type enum the
+// backend stores (REGULAR/Daycare/EMERGENCY/...). Anything unrecognized
+// ("Others", "Emergency Visit", ...) lands on REGULAR.
+function toAdmissionType(visitType: string): string {
+  const t = (visitType || "").trim();
+  if (t === "Daycare") return "Daycare";
+  if (t === "Emergency Visit") return "EMERGENCY";
+  return "REGULAR";
+}
+
+// Inverse mapping for load: admission_type -> a valid IPD visit type.
+function admissionTypeToVisitType(type: string): string {
+  const t = (type || "").toUpperCase();
+  if (t.includes("EMERGENCY")) return "Emergency Visit";
+  if (t === "DAYCARE") return "Daycare";
+  return "Admission";
+}
+
+// expected_stay_days is stored as a decimal (days + hours/24). Split back
+// into whole days + hours for the form's two inputs.
+function ipdStayToDaysHours(stay: number | string | null): { days: number; hours: number } {
+  const value = Number(stay) || 0;
+  const days = Math.floor(value);
+  const hours = Math.max(0, Math.min(23, Math.round((value - days) * 24)));
+  return { days, hours };
+}
 
 interface AppointmentFormData {
   patientId: string;
@@ -45,14 +81,22 @@ interface AppointmentFormData {
   timeSlot: string;
   patientComment: string;
   customVisitType: string;
+
+  // IPD admission-request fields (book-first flow -- only captured here,
+  // the real `admission` row is created later at admit time).
+  requestedWardId: string;
+  requestedBedId: string;
+  ipdPaymentMode: string;
+  ipdExpectedStayDays: number;
+  ipdExpectedStayHours: number;
+  ipdAdvanceAmount: number;
+  ipdProvisionalDiagnosis: string;
 }
 
 // Core static master data for Patient Types
 const STATIC_PATIENT_TYPES = [
   "Outpatient (OPD)",
   "Inpatient (IPD)",
-  "Emergency",
-  "Day Care",
 ] as const;
 
 export type PatientType = (typeof STATIC_PATIENT_TYPES)[number];
@@ -65,7 +109,6 @@ function getAvailablePatientTypes(context?: {
   departmentId?: string;
   departmentName?: string;
   role?: string;
-  excludeDayCare?: boolean;
 }): string[] {
   let types: string[] = [...STATIC_PATIENT_TYPES];
   const dept = (context?.departmentName || "").toLowerCase();
@@ -74,35 +117,21 @@ function getAvailablePatientTypes(context?: {
   if (dept.includes("lab") || dept.includes("diagnostic")) {
     // Diagnostic / Laboratory departments only take Outpatient visits
     types = types.filter((t) => t === "Outpatient (OPD)");
-  } else if (dept.includes("emergency")) {
-    // Emergency departments do not offer elective Day Care stays
-    types = types.filter((t) => t !== "Day Care");
-  } else if (context?.excludeDayCare) {
-    types = types.filter((t) => t !== "Day Care");
   }
 
   return types;
 }
 
-/**
- * Helper function: Converts Day Care → Inpatient (IPD) based on stay duration.
- */
-function convertDayCareToIpd(
-  patientType: string,
-  stayDurationHours?: number,
-  thresholdHours: number = 24,
-): string {
-  if (patientType === "Day Care" && stayDurationHours != null && stayDurationHours >= thresholdHours) {
-    return "Inpatient (IPD)";
-  }
-  return patientType;
-}
-
 const VISIT_TYPES_BY_PATIENT_TYPE: Record<string, string[]> = {
-  "Outpatient (OPD)": ["New consultation", "Follow-up", "Lab Visit", "Chemotherapy visit", "Emergency Visit", "Others"],
-  "Inpatient (IPD)": ["New consultation", "Follow-up", "Lab Visit", "Chemotherapy visit", "Emergency Visit", "Others"],
-  "Emergency": ["Emergency Visit", "Lab Visit", "Others"],
-  "Day Care": ["New consultation", "Follow-up", "Lab Visit", "Chemotherapy visit", "Others"],
+  "Outpatient (OPD)": ["New consultation", "Follow-up", "Lab Visit", "Chemotherapy Visit", "New Complaints", "Others"],
+  "Inpatient (IPD)": ["Emergency Visit", "Admission", "Daycare", "Others"],
+};
+
+// Legacy patient types from before Emergency/Day Care were folded into IPD.
+// Maps them onto their new patient type and a sensible default visit type.
+const LEGACY_PATIENT_TYPE_MAP: Record<string, { patientType: string; visitType: string }> = {
+  Emergency: { patientType: "Inpatient (IPD)", visitType: "Emergency Visit" },
+  "Day Care": { patientType: "Inpatient (IPD)", visitType: "Daycare" },
 };
 
 const emptyFormData: AppointmentFormData = {
@@ -118,6 +147,13 @@ const emptyFormData: AppointmentFormData = {
   timeSlot: "",
   patientComment: "",
   customVisitType: "",
+  requestedWardId: "",
+  requestedBedId: "",
+  ipdPaymentMode: "CASH",
+  ipdExpectedStayDays: 1,
+  ipdExpectedStayHours: 0,
+  ipdAdvanceAmount: 0,
+  ipdProvisionalDiagnosis: "",
 };
 
 // Looks forward day-by-day (up to and including maxDateStr) from startDateStr
@@ -238,6 +274,13 @@ export default function AddAppointment() {
   const { id: appointmentId } = useParams<{ id: string }>();
   const isEditMode = Boolean(appointmentId);
   const { toast } = useToast();
+  const { can } = usePermission();
+
+  // Arriving from the IPD list's "Edit Request" (a PLANNED admission, not an
+  // appointment) -- this instance of the form edits the admission record via
+  // ipdApi.update instead of appointmentApi.
+  const admissionEdit = (location.state as { admissionEdit?: AdmissionRecord } | null)?.admissionEdit ?? null;
+  const isAdmissionEditMode = Boolean(admissionEdit);
 
   // Arriving from Patients grid view's schedule icon carries the chosen
   // patient in nav state so the form opens with the patient locked in and
@@ -321,7 +364,7 @@ export default function AddAppointment() {
   });
 
   // Edit mode - load appointment data
-  const [loadingAppointment, setLoadingAppointment] = useState(isEditMode);
+  const [loadingAppointment, setLoadingAppointment] = useState(isEditMode || isAdmissionEditMode);
   const [appointmentStatus, setAppointmentStatus] = useState("");
 
   useEffect(() => {
@@ -367,6 +410,23 @@ export default function AddAppointment() {
         };
         originalSlotRef.current = originalSlot;
 
+        // Normalize legacy/unknown patient types and visit types so the edit
+        // form always holds values that exist in the current dropdown lists.
+        const rawPatientType = record.patient_type || "";
+        const legacy = LEGACY_PATIENT_TYPE_MAP[rawPatientType];
+        const normalizedPatientType = legacy
+          ? legacy.patientType
+          : (STATIC_PATIENT_TYPES as readonly string[]).includes(rawPatientType)
+            ? rawPatientType
+            : "Outpatient (OPD)";
+        const allowedVisitTypes = VISIT_TYPES_BY_PATIENT_TYPE[normalizedPatientType] || [];
+        const rawVisitType = record.patient_visit_type || "";
+        const normalizedVisitType = allowedVisitTypes.includes(rawVisitType)
+          ? rawVisitType
+          : legacy?.visitType && allowedVisitTypes.includes(legacy.visitType)
+            ? legacy.visitType
+            : (allowedVisitTypes[0] || "");
+
         setFormData((prev) => ({
           ...prev,
           patientId: record.patient_id,
@@ -382,8 +442,8 @@ export default function AddAppointment() {
           selectDate: date,
           timeSlot: time,
           patientComment: record.reason_for_visit || "",
-          patientType: record.patient_type || "Outpatient (OPD)",
-          patientVisitType: record.patient_visit_type || "New visit",
+          patientType: normalizedPatientType,
+          patientVisitType: normalizedVisitType,
         }));
       })
       .catch((err) => {
@@ -398,6 +458,44 @@ export default function AddAppointment() {
       .finally(() => setLoadingAppointment(false));
   }, [isEditMode, appointmentId, navigate, toast]);
 
+  // Admission-edit mode: populate the form from the PLANNED admission record.
+  // The form then submits via ipdApi.update (see handleConfirmCreate).
+  useEffect(() => {
+    if (!isAdmissionEditMode || !admissionEdit) {
+      setLoadingAppointment(false);
+      return;
+    }
+    const stay = ipdStayToDaysHours(admissionEdit.expected_stay_days);
+    const patient = admissionEdit.patient_bio_data;
+    setFormData((prev) => ({
+      ...prev,
+      patientId: admissionEdit.patient_id,
+      patientName: patient
+        ? [patient.patient_first_name, patient.patient_middle_name, patient.patient_last_name]
+            .filter(Boolean)
+            .join(" ")
+        : "",
+      patientNumber: patient?.patient_primary_mobile || patient?.patient_contact_number || "",
+      branchId: admissionEdit.branch_id,
+      departmentId: admissionEdit.department_id || "",
+      doctorId: admissionEdit.employee_id || "",
+      selectDate: admissionEdit.admission_date
+        ? format(new Date(admissionEdit.admission_date), "yyyy-MM-dd")
+        : format(new Date(), "yyyy-MM-dd"),
+      timeSlot: "",
+      patientType: "Inpatient (IPD)",
+      patientVisitType: admissionTypeToVisitType(admissionEdit.admission_type),
+      requestedWardId: admissionEdit.ward_id || "",
+      requestedBedId: admissionEdit.bed_id || "",
+      ipdPaymentMode: admissionEdit.payment_mode || "CASH",
+      ipdExpectedStayDays: stay.days,
+      ipdExpectedStayHours: stay.hours,
+      ipdAdvanceAmount: Number(admissionEdit.advance_amount) || 0,
+      ipdProvisionalDiagnosis: admissionEdit.provisional_diagnosis || "",
+    }));
+    setLoadingAppointment(false);
+  }, [isAdmissionEditMode, admissionEdit]);
+
   // The clicked grid cell only knows its hour ("10:00"), not the doctor's
   // real consultation-slot boundaries -- once availableSlots loads for this
   // doctor/branch/date, pick the closest real slot at/after that hour so
@@ -409,6 +507,14 @@ export default function AddAppointment() {
   const recognitionRef = useRef<any>(null);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [bookingResult, setBookingResult] = useState<AppointmentResponse | null>(null);
+
+  // Success payload for an IPD admission request (create or edit) -- shown in
+  // its own success dialog since there is no AppointmentResponse for it.
+  const [ipdResult, setIpdResult] = useState<AdmissionRecord | null>(null);
+
+  // "+ Add" ward/bed helpers inside the Admission Details card.
+  const [addWardOpen, setAddWardOpen] = useState(false);
+  const [addBedOpen, setAddBedOpen] = useState(false);
   const [showConflictWarning, setShowConflictWarning] = useState(false);
   const [conflictSeverity, setConflictSeverity] = useState<"warning" | "high" | "critical">("warning");
   const [conflictAppointments, setConflictAppointments] = useState<PatientConflictAppointment[]>([]);
@@ -462,6 +568,15 @@ export default function AddAppointment() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [customDepartment, setCustomDepartment] = useState("");
   const [doctors, setDoctors] = useState<EmployeeRecord[]>([]);
+
+  // Ward/bed data for the IPD Admission Details section -- wards of the
+  // selected branch, and the AVAILABLE beds of the requested ward. Book-first
+  // flow: these populate the dropdowns so the booking can *request* a ward and
+  // bed without binding them yet.
+  const [wards, setWards] = useState<WardRecord[]>([]);
+  const [beds, setBeds] = useState<BedRecord[]>([]);
+  const [loadingWards, setLoadingWards] = useState(false);
+  const [loadingBeds, setLoadingBeds] = useState(false);
 
   // Edit mode: load doctor's schedules, assigned branches, and changes
   // without overwriting the existing date/time.
@@ -618,8 +733,61 @@ export default function AddAppointment() {
     );
   }, [branchDoctors, doctors, formData.branchId, formData.doctorId]);
 
+  // Load the wards of the selected branch so an IPD "Admission"/"Daycare"
+  // booking can request a ward. Refetches whenever the branch changes.
+  useEffect(() => {
+    if (!formData.branchId) {
+      setWards([]);
+      setBeds([]);
+      setLoadingWards(false);
+      setLoadingBeds(false);
+      return;
+    }
+    setLoadingWards(true);
+    ipdApi
+      .getWards(formData.branchId)
+      .then((res) => {
+        setWards(res.data?.data || []);
+        setLoadingWards(false);
+      })
+      .catch(() => {
+        setWards([]);
+        setLoadingWards(false);
+      });
+  }, [formData.branchId]);
+
+  // Load the beds of the requested ward. A planned-admission request does not
+  // occupy a bed, so every non-maintenance bed is offered (not just AVAILABLE
+  // ones) -- the real availability check happens at admit time.
+  useEffect(() => {
+    if (!formData.requestedWardId) {
+      setBeds([]);
+      setLoadingBeds(false);
+      return;
+    }
+    setLoadingBeds(true);
+    ipdApi
+      .getBeds(formData.requestedWardId, formData.branchId || undefined)
+      .then((res) => {
+        const bedsForRequest = (res.data?.data || []).filter((b) => b.status !== "MAINTENANCE");
+        setBeds(bedsForRequest);
+        setLoadingBeds(false);
+      })
+      .catch(() => {
+        setBeds([]);
+        setLoadingBeds(false);
+      });
+  }, [formData.requestedWardId, formData.branchId]);
+
   // Fetch available slots when branch + doctor + date changes
   useEffect(() => {
+    // IPD admission requests are planned admissions, not OPD bookings -- they
+    // never fetch or auto-assign a time slot (a planned admission holds no
+    // appointment slot to claim).
+    if (formData.patientType === "Inpatient (IPD)") {
+      return;
+    }
+
     if (!formData.doctorId || !formData.branchId || !formData.selectDate) {
       setAvailableSlots([]);
       setDoctorUnavailable(false);
@@ -687,6 +855,44 @@ export default function AddAppointment() {
       }
 
       if (cancelled) return;
+
+      // IPD bookings skip the slot picker entirely: auto-assign the earliest
+      // open slot, or (create mode) auto-jump to the next date that has one.
+      if (formData.patientType === "Inpatient (IPD)") {
+        if (openSlots.length > 0) {
+          // Edit mode keeps the unchanged original slot untouched.
+          const keepOriginal =
+            isEditMode &&
+            isUnchangedSlot(
+              formData.doctorId,
+              formData.branchId,
+              formData.selectDate,
+              formData.timeSlot,
+            );
+          if (!keepOriginal) {
+            const earliest = [...openSlots]
+              .sort((a, b) => timeStringToMinutes(a.time) - timeStringToMinutes(b.time))[0];
+            if (earliest) {
+              setFormData((prev) => ({ ...prev, timeSlot: earliest.time }));
+            }
+          }
+        } else if (!isEditMode) {
+          setFindingNearestDate(true);
+          const nextDate = await findNearestAvailableDate(
+            formData.doctorId,
+            formData.branchId,
+            formData.selectDate,
+            maxSelectableDate,
+          );
+          setFindingNearestDate(false);
+          if (cancelled) return;
+          if (nextDate && nextDate !== formData.selectDate) {
+            setFormData((prev) => ({ ...prev, selectDate: nextDate, timeSlot: "" }));
+          }
+        }
+        setLoadingSlots(false);
+        return;
+      }
 
       // A Day View "New slot available" cell decides an hour is bookable from
       // the doctor_schedule row alone (day-of-week + time overlap) -- it
@@ -812,7 +1018,7 @@ export default function AddAppointment() {
     return () => {
       cancelled = true;
     };
-  }, [formData.doctorId, formData.branchId, formData.selectDate, formData.patientVisitType]);
+  }, [formData.doctorId, formData.branchId, formData.selectDate, formData.patientVisitType, formData.patientType]);
 
   // Load the full patient list once for the Patient dropdown.
   useEffect(() => {
@@ -917,6 +1123,7 @@ const stopVoiceRecognition = () => {
     const required: RequiredField<keyof AppointmentFormData>[] = [
       { key: "patientId", label: "Patient" },
       { key: "patientName", label: "Patient Name" },
+      { key: "patientNumber", label: "Mobile Number" },
       { key: "branchId", label: "Branch" },
       { key: "departmentId", label: "Department" },
       { key: "doctorId", label: "Doctor Name" },
@@ -924,7 +1131,10 @@ const stopVoiceRecognition = () => {
       { key: "patientVisitType", label: "Patient Visit Type" },
       ...(formData.patientVisitType === "Others" ? [{ key: "customVisitType" as const, label: "Specify Visit Purpose" }] : []),
       { key: "selectDate", label: "Appointment Date" },
-      { key: "timeSlot", label: "Available Time Slots" },
+      // IPD bookings don't require an explicit slot -- it is auto-assigned.
+      ...(formData.patientType === "Inpatient (IPD)"
+        ? []
+        : [{ key: "timeSlot" as const, label: "Available Time Slots" }]),
     ];
 
     if (!validateRequiredFields(required, formData, toast)) return;
@@ -938,7 +1148,10 @@ const stopVoiceRecognition = () => {
       return;
     }
 
-    if (isEditMode) {
+    // IPD admission requests (planned) hold no OPD slot, so they skip the
+    // slot requirement and the patient-conflict sweep entirely. OPD edits
+    // keep their original no-conflict-recheck behavior too.
+    if (formData.patientType === "Inpatient (IPD)" || isEditMode) {
       setShowConfirm(true);
       return;
     }
@@ -1050,6 +1263,54 @@ const stopVoiceRecognition = () => {
         setDepartments((p) => [...p, createdDept]);
       }
 
+      // Shared stay computation (days + hours/24, 2dp) for IPD flows.
+      const computedStay =
+        Math.round((formData.ipdExpectedStayDays + formData.ipdExpectedStayHours / 24) * 100) / 100;
+
+      // Admission-edit mode: update the PLANNED admission via /ipd directly.
+      if (isAdmissionEditMode && admissionEdit) {
+        const res = await ipdApi.update(admissionEdit.admission_id, {
+          department_id: effectiveDepartmentId || undefined,
+          employee_id: formData.doctorId,
+          admission_type: toAdmissionType(formData.patientVisitType),
+          is_daycare: formData.patientVisitType === "Daycare",
+          ward_id: formData.requestedWardId || undefined,
+          bed_id: formData.requestedBedId || undefined,
+          payment_mode: formData.ipdPaymentMode,
+          expected_stay_days: computedStay,
+          advance_amount: formData.ipdAdvanceAmount || undefined,
+          provisional_diagnosis: formData.ipdProvisionalDiagnosis.trim() || undefined,
+          admission_date: formData.selectDate,
+        });
+        setIpdResult(res.data.data);
+        setShowConfirm(false);
+        return;
+      }
+
+      // IPD create mode: book a PLANNED admission (no appointment row, no
+      // slot, no bed occupied until the patient is actually admitted).
+      if (isIpdBooking) {
+        const res = await ipdApi.create({
+          patient_id: formData.patientId,
+          branch_id: formData.branchId,
+          department_id: effectiveDepartmentId,
+          employee_id: formData.doctorId,
+          admission_type: toAdmissionType(formData.patientVisitType),
+          is_daycare: formData.patientVisitType === "Daycare",
+          ward_id: formData.requestedWardId || undefined,
+          bed_id: formData.requestedBedId || undefined,
+          payment_mode: formData.ipdPaymentMode,
+          expected_stay_days: computedStay,
+          advance_amount: formData.ipdAdvanceAmount || undefined,
+          provisional_diagnosis: formData.ipdProvisionalDiagnosis.trim() || undefined,
+          admission_date: formData.selectDate,
+          status: "PLANNED",
+        });
+        setIpdResult(res.data.data);
+        setShowConfirm(false);
+        return;
+      }
+
       if (isEditMode && appointmentId) {
         await appointmentApi.update(appointmentId, {
           employee_id: formData.doctorId,
@@ -1078,6 +1339,13 @@ const stopVoiceRecognition = () => {
           ? (formData.patientComment ? `${formData.customVisitType.trim()} - ${formData.patientComment}` : formData.customVisitType.trim())
           : (formData.patientComment || undefined);
 
+        // Book-first IPD flow: only the Admission/Daycare sections actually
+        // collect ward/bed/payment/stay/advance/diagnosis requests -- send
+        // them along with the appointment so admit time can reuse them.
+        const isIpdAdmissionFlow =
+          formData.patientType === "Inpatient (IPD)" &&
+          (formData.patientVisitType === "Admission" || formData.patientVisitType === "Daycare");
+
         const res = await appointmentApi.create({
           patient_id: formData.patientId,
           patient_name: formData.patientName,
@@ -1090,6 +1358,19 @@ const stopVoiceRecognition = () => {
           reason_for_visit: effectiveReason,
           patient_type: formData.patientType || undefined,
           patient_visit_type: effectiveVisitType || undefined,
+          ...(isIpdAdmissionFlow
+            ? {
+                requested_ward_id: formData.requestedWardId || undefined,
+                requested_bed_id: formData.requestedBedId || undefined,
+                ipd_payment_mode: formData.ipdPaymentMode || undefined,
+                expected_stay_days:
+                  formData.ipdExpectedStayDays + formData.ipdExpectedStayHours / 24
+                    ? Math.round((formData.ipdExpectedStayDays + formData.ipdExpectedStayHours / 24) * 100) / 100
+                    : undefined,
+                advance_amount: formData.ipdAdvanceAmount || undefined,
+                provisional_diagnosis: formData.ipdProvisionalDiagnosis.trim() || undefined,
+              }
+            : {}),
         });
 
         setBookingResult(res.data.data);
@@ -1113,6 +1394,11 @@ const stopVoiceRecognition = () => {
     navigate(isDoctorBooking ? "/doctor/appointments" : "/appointments");
   };
 
+  const handleIpdDone = () => {
+    setIpdResult(null);
+    navigate(isDoctorBooking ? "/doctor/appointments" : "/appointments");
+  };
+
   const handleCancel = () => {
     if (isDirty) {
       setShowLeaveConfirm(true);
@@ -1130,7 +1416,11 @@ const isDirty = Boolean(
       formData.timeSlot ||
       formData.patientType ||
       formData.patientVisitType ||
-      formData.patientComment
+      formData.patientComment ||
+      formData.requestedWardId ||
+      formData.requestedBedId ||
+      formData.ipdProvisionalDiagnosis ||
+      formData.ipdExpectedStayHours
   );
   
   // Once a branch is selected, only show departments that branch's (date-aware)
@@ -1362,6 +1652,265 @@ const isDirty = Boolean(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preselectedSlot]);
 
+  // IPD bookings collapse Branch/Department/Doctor/Date into the Admission
+  // Details card and hide the slot picker, so these core field blocks are
+  // extracted once and reused in both the OPD grid and the IPD card.
+  const isIpdBooking = formData.patientType === "Inpatient (IPD)";
+  const showWardBed =
+    formData.patientVisitType === "Admission" || formData.patientVisitType === "Daycare";
+
+  // The AddWard/AddBed dialogs take BranchFilterContext's branch shape
+  // ({id,name,area,hospital_name}); project the form's local branches onto it.
+  const branchFilterBranches = useMemo(
+    () =>
+      branches.map((b) => ({
+        id: b.branch_id,
+        name: b.branch_name || b.branch_id,
+        area: "",
+        hospital_name: "",
+      })),
+    [branches],
+  );
+
+  const handleWardCreated = (ward: WardRecord) => {
+    setFormData((prev) => ({ ...prev, requestedWardId: ward.ward_id, requestedBedId: "" }));
+    ipdApi
+      .getWards(formData.branchId)
+      .then((res) => setWards(res.data?.data || []))
+      .catch(() => {});
+    ipdApi
+      .getBeds(ward.ward_id, formData.branchId || undefined)
+      .then((res) => setBeds((res.data?.data || []).filter((b) => b.status !== "MAINTENANCE")))
+      .catch(() => setBeds([]));
+  };
+
+  const handleBedCreated = (bed: BedRecord) => {
+    if (formData.requestedWardId && bed.ward_id === formData.requestedWardId) {
+      setBeds((prev) => (prev.some((b) => b.bed_id === bed.bed_id) ? prev : [...prev, bed]));
+      setFormData((prev) => ({ ...prev, requestedBedId: bed.bed_id }));
+    }
+  };
+
+  const branchField = (
+    <div>
+      <label className={labelClass}>Branch {requiredStar}</label>
+      <FormDropdown
+        className={inputClass}
+        options={[
+          { label: "None", value: "" },
+          ...branchesForDropdown.map((b) => ({
+            label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
+            value: b.branch_id,
+            highlight: currentBranchId ? b.branch_id === currentBranchId : false,
+            badge: currentBranchId && b.branch_id === currentBranchId ? "Your branch" : undefined,
+          })),
+        ]}
+        value={formData.branchId}
+        onValueChange={(val) => {
+          if (!val) {
+            // Doctor portal booking keeps the logged-in doctor's
+            // identity locked -- never let a branch clear wipe it.
+            if (isDoctorBooking) return;
+            setFormData((prev) => ({
+              ...prev,
+              branchId: "",
+              departmentId: "",
+              doctorId: "",
+              timeSlot: "",
+            }));
+            return;
+          }
+          // With a doctor already chosen, switching to a branch the
+          // doctor isn't mapped to keeps the doctor, department and
+          // date exactly as they were, and only reloads the slots
+          // for the new branch. Only when no doctor is picked yet does
+          // a branch change reset department/doctor, since their
+          // options depend on the branch.
+          const doctorLocked = Boolean(formData.doctorId);
+          setFormData((prev) => ({
+            ...prev,
+            branchId: val,
+            departmentId: doctorLocked ? prev.departmentId : "",
+            doctorId: doctorLocked ? prev.doctorId : "",
+            timeSlot: "",
+          }));
+
+          if (!val || !doctorLocked) return;
+        }}
+        placeholder={
+          branchesForDropdown.length
+            ? "Select Branch"
+            : "Loading branches..."
+        }
+      />
+    </div>
+  );
+
+  const departmentField = (
+    <div>
+      <label className={labelClass}>Department {requiredStar}</label>
+      <FormDropdown
+        className={inputClass}
+        disabled={isDoctorBooking}
+        options={[
+          { label: "None", value: "" },
+          ...departmentsForDropdown.map((d) => ({
+            label: d.department_name,
+            value: d.department_id,
+          })),
+          { label: "Others", value: OTHER_DEPARTMENT_VALUE },
+        ]}
+        value={formData.departmentId}
+        onValueChange={(val) => {
+          const deptObj = departments.find((d) => d.department_id === val);
+          const newDeptName = deptObj?.department_name || "";
+          const allowedTypes = getAvailablePatientTypes({ departmentId: val, departmentName: newDeptName });
+          setFormData((prev) => {
+            const validPatientType = allowedTypes.includes(prev.patientType) ? prev.patientType : (allowedTypes[0] || "Outpatient (OPD)");
+            const allowedVisitTypes = VISIT_TYPES_BY_PATIENT_TYPE[validPatientType] || [];
+            const validVisitType = allowedVisitTypes.includes(prev.patientVisitType) ? prev.patientVisitType : (allowedVisitTypes[0] || "");
+            const isIpd = validPatientType === "Inpatient (IPD)";
+            return {
+              ...prev,
+              departmentId: val,
+              doctorId: isDoctorBooking ? prev.doctorId : "",
+              timeSlot: "",
+              patientType: validPatientType,
+              patientVisitType: validVisitType,
+              ...(isIpd
+                ? {}
+                : {
+                    requestedWardId: "",
+                    requestedBedId: "",
+                    ipdPaymentMode: "CASH",
+                    ipdExpectedStayDays: 1,
+                    ipdExpectedStayHours: 0,
+                    ipdAdvanceAmount: 0,
+                    ipdProvisionalDiagnosis: "",
+                  }),
+            };
+          });
+          if (val !== OTHER_DEPARTMENT_VALUE) setCustomDepartment("");
+        }}
+        placeholder={
+          branchDoctorsLoading
+            ? "Loading departments..."
+            : formData.branchId && departmentsForDropdown.length === 0
+              ? "No departments at this branch"
+              : departments.length
+                ? "Select Department"
+                : "Loading departments..."
+        }
+      />
+      {formData.departmentId === OTHER_DEPARTMENT_VALUE && (
+        <input
+          type="text"
+          placeholder="Type your department"
+          maxLength={100}
+          className={inputClass + " mt-2"}
+          value={customDepartment}
+          onChange={(e) => setCustomDepartment(e.target.value)}
+          disabled={submitting}
+        />
+      )}
+    </div>
+  );
+
+  const doctorField = (
+    <div>
+      <label className={labelClass}>
+        Doctor Name {requiredStar}
+        {isDoctorBooking && (
+          <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-blue-600">
+            (you)
+          </span>
+        )}
+      </label>
+      <FormDropdown
+        className={inputClass}
+        disabled={isDoctorBooking}
+        options={[
+          { label: "None", value: "" },
+          ...doctorsForDropdown.map((doc) => {
+            const fullName = `Dr. ${doc.first_name}${doc.middle_name ? ` ${doc.middle_name}` : ""} ${doc.last_name}`;
+            const specialty = doc.specialization || doc.department_master?.department_name;
+            const statusLabel =
+              doc.doctor_status === "LEAVE" ? " (On Leave)" : "";
+            return {
+              label: `${fullName}${statusLabel}${specialty ? ` (${specialty})` : ""}`,
+              value: doc.employee_id,
+            };
+          }),
+        ]}
+        value={formData.doctorId}
+        onValueChange={applyDoctorSelection}
+        placeholder={
+          formData.branchId && doctorsForDropdown.length === 0
+            ? "No doctors available for this date (including on leave)"
+            : "No doctors match this branch/department"
+        }
+      />
+    </div>
+  );
+
+  const dateField = (
+    <div>
+      <label className={labelClass}>
+        Appointment Date {requiredStar}
+        {findingNearestDate && (
+          <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-gray-400 normal-case">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Finding nearest available date...
+          </span>
+        )}
+      </label>
+
+      <div className="relative" ref={calendarWrapperRef}>
+        {/* Fake input that just displays the date */}
+        <button
+          type="button"
+          onClick={() => setIsCalendarOpen(false)}
+          className="w-full flex items-center justify-between rounded-xl border border-gray-200 px-4 py-2.5 text-left cursor-default bg-white text-sm text-gray-900"
+        >
+          <span>{format(parseISO(formData.selectDate), "dd-MM-yyyy")}</span>
+        </button>
+
+        {/* Calendar icon - the ONLY trigger */}
+        <button
+          type="button"
+          onClick={() => setIsCalendarOpen((prev) => !prev)}
+          className="absolute right-4 top-1/2 -translate-y-1/2"
+          aria-label="Open calendar"
+        >
+          <CalendarIcon className="w-4 h-4 text-gray-500" />
+        </button>
+
+        {isCalendarOpen && (
+          <div className="absolute z-50 mt-2">
+            <CalendarPicker
+              theme="light"
+              hideThemePicker
+              selected={parseISO(formData.selectDate)}
+              minDate={new Date()}
+              maxDate={addDays(new Date(), 14)}
+              isDateDisabled={isDateDisabled}
+              onSelect={(date) => {
+                if (date instanceof Date) {
+                  setFormData((prev) => ({
+                    ...prev,
+                    selectDate: format(date, "yyyy-MM-dd"),
+                    timeSlot: "",
+                  }));
+                  setIsCalendarOpen(false);
+                }
+              }}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-[#F7F9FB] p-6">
       <div className="max-w-6xl mx-auto">
@@ -1380,7 +1929,13 @@ const isDirty = Boolean(
               <CalendarPlus className="w-5 h-5 text-blue-600" />
             </div>
             <h4 className="hms-heading text-gray-900 tracking-tight">
-              {isEditMode ? "Edit Appointment" : "Create Appointment"}
+              {isAdmissionEditMode
+                ? "Edit IPD Admission Request"
+                : isIpdBooking
+                  ? "Create IPD Admission Request"
+                  : isEditMode
+                    ? "Edit Appointment"
+                    : "Create Appointment"}
             </h4>
           </div>
 
@@ -1439,159 +1994,13 @@ const isDirty = Boolean(
 
                 {/* Patient Number (read-only after selection) */}
                 <div>
-                  <label className={labelClass}>Mobile Number</label>
+                  <label className={labelClass}>Mobile Number {requiredStar}</label>
                   <input
                   type="text"
                   className={inputClass + " bg-gray-50 text-gray-500"}
                   value={formData.patientNumber}
                   readOnly
                   placeholder="Auto-filled from selection"
-                />
-              </div>
-
-              {/* Branch, Department, Doctor */}
-              <div>
-                <label className={labelClass}>Branch {requiredStar}</label>
-                <FormDropdown
-                  className={inputClass}
-                  options={[
-                    { label: "None", value: "" },
-                    ...branchesForDropdown.map((b) => ({
-                      label: `${b.branch_id}${b.branch_name ? ` - ${b.branch_name}` : ""}`,
-                      value: b.branch_id,
-                      highlight: currentBranchId ? b.branch_id === currentBranchId : false,
-                      badge: currentBranchId && b.branch_id === currentBranchId ? "Your branch" : undefined,
-                    })),
-                  ]}
-
-                  value={formData.branchId}
-                  onValueChange={(val) => {
-                    if (!val) {
-                      // Doctor portal booking keeps the logged-in doctor's
-                      // identity locked -- never let a branch clear wipe it.
-                      if (isDoctorBooking) return;
-                      setFormData((prev) => ({
-                        ...prev,
-                        branchId: "",
-                        departmentId: "",
-                        doctorId: "",
-                        timeSlot: "",
-                      }));
-                      return;
-                    }
-                    // With a doctor already chosen, switching to a branch the
-                    // doctor isn't mapped to keeps the doctor, department and
-                    // date exactly as they were, and only reloads the slots
-                    // for the new branch (the slots effect below refetches on
-                    // branch change). Only when no doctor is picked yet does
-                    // a branch change reset department/doctor, since their
-                    // options depend on the branch.
-                    const doctorLocked = Boolean(formData.doctorId);
-                    setFormData((prev) => ({
-                      ...prev,
-                      branchId: val,
-                      departmentId: doctorLocked ? prev.departmentId : "",
-                      doctorId: doctorLocked ? prev.doctorId : "",
-                      timeSlot: "",
-                    }));
-
-                    if (!val || !doctorLocked) return;
-                  }}
-                  placeholder={
-                    branchesForDropdown.length
-                      ? "Select Branch"
-                      : "Loading branches..."
-                  }
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Department {requiredStar}</label>
-                <FormDropdown
-                  className={inputClass}
-                  disabled={isDoctorBooking}
-                  options={[
-                    { label: "None", value: "" },
-                    ...departmentsForDropdown.map((d) => ({
-                      label: d.department_name,
-                      value: d.department_id,
-                    })),
-                    { label: "Others", value: OTHER_DEPARTMENT_VALUE },
-                  ]}
-                  value={formData.departmentId}
-                  onValueChange={(val) => {
-                    const deptObj = departments.find((d) => d.department_id === val);
-                    const newDeptName = deptObj?.department_name || "";
-                    const allowedTypes = getAvailablePatientTypes({ departmentId: val, departmentName: newDeptName });
-                    setFormData((prev) => {
-                      const validPatientType = allowedTypes.includes(prev.patientType) ? prev.patientType : (allowedTypes[0] || "Outpatient (OPD)");
-                      const allowedVisitTypes = VISIT_TYPES_BY_PATIENT_TYPE[validPatientType] || [];
-                      const validVisitType = allowedVisitTypes.includes(prev.patientVisitType) ? prev.patientVisitType : (allowedVisitTypes[0] || "");
-                      return {
-                        ...prev,
-                        departmentId: val,
-                        doctorId: isDoctorBooking ? prev.doctorId : "",
-                        timeSlot: "",
-                        patientType: validPatientType,
-                        patientVisitType: validVisitType,
-                      };
-                    });
-                    if (val !== OTHER_DEPARTMENT_VALUE) setCustomDepartment("");
-                  }}
-                  placeholder={
-                    branchDoctorsLoading
-                      ? "Loading departments..."
-                      : formData.branchId && departmentsForDropdown.length === 0
-                        ? "No departments at this branch"
-                        : departments.length
-                          ? "Select Department"
-                          : "Loading departments..."
-                  }
-                />
-                {formData.departmentId === OTHER_DEPARTMENT_VALUE && (
-                  <input
-                    type="text"
-                    placeholder="Type your department"
-                    maxLength={100}
-                    className={inputClass + " mt-2"}
-                    value={customDepartment}
-                    onChange={(e) => setCustomDepartment(e.target.value)}
-                    disabled={submitting}
-                  />
-                )}
-              </div>
-              {/* Doctor Name */}
-              <div>
-                <label className={labelClass}>
-                  Doctor Name {requiredStar}
-                  {isDoctorBooking && (
-                    <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-blue-600">
-                      (you)
-                    </span>
-                  )}
-                </label>
-                <FormDropdown
-                  className={inputClass}
-                  disabled={isDoctorBooking}
-                  options={[
-                    { label: "None", value: "" },
-                    ...doctorsForDropdown.map((doc) => {
-                      const fullName = `Dr. ${doc.first_name}${doc.middle_name ? ` ${doc.middle_name}` : ""} ${doc.last_name}`;
-                      const specialty = doc.specialization || doc.department_master?.department_name;
-                      const statusLabel =
-                        doc.doctor_status === "LEAVE" ? " (On Leave)" : "";
-                      return {
-                        label: `${fullName}${statusLabel}${specialty ? ` (${specialty})` : ""}`,
-                        value: doc.employee_id,
-                      };
-                    }),
-                  ]}
-                  value={formData.doctorId}
-                  onValueChange={applyDoctorSelection}
-                  placeholder={
-                    formData.branchId && doctorsForDropdown.length === 0
-                      ? "No doctors available for this date (including on leave)"
-                      : "No doctors match this branch/department"
-                  }
                 />
               </div>
 
@@ -1610,10 +2019,22 @@ const isDirty = Boolean(
                     const currentVisitType = formData.patientVisitType;
                     // Only clear visit type if current one is not valid for new patient type
                     const newVisitType = allowedVisitTypes.includes(currentVisitType) ? currentVisitType : (allowedVisitTypes[0] || "");
+                    const isIpd = val === "Inpatient (IPD)";
                     setFormData((prev) => ({
                       ...prev,
                       patientType: val,
                       patientVisitType: newVisitType,
+                      ...(isIpd
+                        ? {}
+                        : {
+                            requestedWardId: "",
+                            requestedBedId: "",
+                            ipdPaymentMode: "CASH",
+                            ipdExpectedStayDays: 1,
+                            ipdExpectedStayHours: 0,
+                            ipdAdvanceAmount: 0,
+                            ipdProvisionalDiagnosis: "",
+                          }),
                     }));
                   }}
                   placeholder="Select patient type"
@@ -1628,9 +2049,20 @@ const isDirty = Boolean(
                   options={VISIT_TYPES_BY_PATIENT_TYPE[formData.patientType] || []}
                   value={formData.patientVisitType}
                   onValueChange={(val) => {
+                    const isAdm = val === "Admission" || val === "Daycare";
                     setFormData((prev) => ({
                       ...prev,
                       patientVisitType: val,
+                      // Ward/bed requests only make sense for Admission/Daycare.
+                      ...(!isAdm ? { requestedWardId: "", requestedBedId: "" } : {}),
+                      // Daycare starts its expected stay at 0 days by default.
+                      ...(prev.patientType === "Inpatient (IPD)" && val === "Daycare" && prev.ipdExpectedStayDays === 1 && prev.ipdExpectedStayHours === 0
+                        ? { ipdExpectedStayDays: 0 }
+                        : {}),
+                      // Returning to Admission restores the 1-day minimum.
+                      ...(prev.patientType === "Inpatient (IPD)" && val === "Admission" && prev.ipdExpectedStayDays === 0
+                        ? { ipdExpectedStayDays: 1 }
+                        : {}),
                     }));
                   }}
                   placeholder="Select visit type"
@@ -1653,130 +2085,283 @@ const isDirty = Boolean(
                 </div>
               )}
 
-              {/* Select Date */}
-              <div>
-                <label className={labelClass}>
-                  Appointment Date {requiredStar}
-                  {findingNearestDate && (
-                    <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-gray-400 normal-case">
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                      Finding nearest available date...
-                    </span>
-                  )}
-                </label>
-
-                <div className="relative" ref={calendarWrapperRef}>
-                  {/* Fake input that just displays the date */}
-                  <button
-                    type="button"
-                    onClick={() => setIsCalendarOpen(false)}
-                    className="w-full flex items-center justify-between rounded-xl border border-gray-200 px-4 py-2.5 text-left cursor-default bg-white text-sm text-gray-900"
-                  >
-                    <span>{format(parseISO(formData.selectDate), "dd-MM-yyyy")}</span>
-                  </button>
-
-                  {/* Calendar icon - the ONLY trigger */}
-                  <button
-                    type="button"
-                    onClick={() => setIsCalendarOpen((prev) => !prev)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2"
-                    aria-label="Open calendar"
-                  >
-                    <CalendarIcon className="w-4 h-4 text-gray-500" />
-                  </button>
-
-                  {isCalendarOpen && (
-                    <div className="absolute z-50 mt-2">
-                      <CalendarPicker
-                        theme="light"
-                        hideThemePicker
-                        selected={parseISO(formData.selectDate)}
-                        minDate={new Date()}
-                        maxDate={addDays(new Date(), 14)}
-                        isDateDisabled={isDateDisabled}
-                        onSelect={(date) => {
-                          if (date instanceof Date) {
-                            setFormData((prev) => ({
-                              ...prev,
-                              selectDate: format(date, "yyyy-MM-dd"),
-                              timeSlot: "",
-                            }));
-                            setIsCalendarOpen(false);
-                          }
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Available Time Slots */}
-              <div className="lg:col-span-3 flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <label className={labelClass}>Available Time Slots {requiredStar}</label>
-                    <div className="flex items-center gap-1 text-gray-400">
-                      {loadingSlots && <Loader2 className="w-3 h-3 animate-spin" />}
-                      <span className="text-[10px] font-bold uppercase tracking-wide">
-                        {loadingSlots ? "Loading slots..." : "Select a time slot"}
+              {/* IPD Admission Details (book-first request). For IPD bookings this
+                  card replaces the main-grid Branch/Department/Doctor/Date/Slots
+                  sections and reorders them (Branch -> Ward -> Bed -> Department ->
+                  Doctor -> Date -> Stay -> Advance -> Payment -> Diagnosis). */}
+              {isIpdBooking ? (
+                <div className="lg:col-span-3">
+                  <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-3">
+                      <Hospital className="w-4 h-4 text-blue-600" />
+                      Admission Details
+                      <span className="text-xs font-normal text-gray-500">
+                        (request — ward/bed are assigned at admit time)
                       </span>
                     </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {branchField}
+                      {showWardBed && (
+                        <>
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <label className={labelClass}>
+                                Requested Ward
+                                <span className="font-normal text-xs text-gray-400 ml-1">(optional)</span>
+                              </label>
+                              {(can("ward.manage") || can("admission.create")) && (
+                                <button
+                                  type="button"
+                                  onClick={() => setAddWardOpen(true)}
+                                  className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium inline-flex items-center gap-0.5"
+                                >
+                                  <Plus className="w-3 h-3" /> Add Ward
+                                </button>
+                              )}
+                            </div>
+                            <FormDropdown
+                              className={inputClass}
+                              options={[
+                                { label: "None", value: "" },
+                                ...wards.map((w) => ({
+                                  label: `${w.ward_name}${w.ward_type ? ` (${w.ward_type})` : ""}`,
+                                  value: w.ward_id,
+                                })),
+                              ]}
+                              value={formData.requestedWardId}
+                              onValueChange={(val) => {
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  requestedWardId: val,
+                                  requestedBedId: "",
+                                }));
+                              }}
+                              placeholder={
+                                loadingWards
+                                  ? "Loading wards..."
+                                  : formData.branchId
+                                    ? "Select ward"
+                                    : "Select branch first"
+                              }
+                              disabled={!formData.branchId}
+                            />
+                          </div>
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <label className={labelClass}>
+                                Requested Bed
+                                <span className="font-normal text-xs text-gray-400 ml-1">(optional)</span>
+                              </label>
+                              {(can("bed.manage") || can("admission.create")) && (
+                                <button
+                                  type="button"
+                                  onClick={() => setAddBedOpen(true)}
+                                  className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium inline-flex items-center gap-0.5"
+                                >
+                                  <Plus className="w-3 h-3" /> Add Bed
+                                </button>
+                              )}
+                            </div>
+                            <FormDropdown
+                              className={inputClass}
+                              options={[
+                                { label: "No bed preference", value: "" },
+                                ...beds.map((b) => {
+                                  const isOccupied = b.status !== "AVAILABLE";
+                                  return {
+                                    label: `Bed ${b.bed_number}${b.bed_type ? ` (${b.bed_type})` : ""}`,
+                                    value: b.bed_id,
+                                    disabled: isOccupied,
+                                    badge: isOccupied ? "Occupied" : undefined,
+                                    badgeTone: "danger" as const,
+                                  };
+                                }),
+                              ]}
+                              value={formData.requestedBedId}
+                              onValueChange={(val) =>
+                                setFormData((prev) => ({ ...prev, requestedBedId: val }))
+                              }
+                              placeholder={
+                                !formData.requestedWardId
+                                  ? "Select ward first"
+                                  : loadingBeds
+                                    ? "Loading beds..."
+                                    : "Select bed"
+                              }
+                              disabled={!formData.requestedWardId}
+                            />
+                            {formData.requestedWardId && !loadingBeds && beds.length === 0 && (
+                              <p className="text-xs text-amber-600 mt-1">
+                                No beds in this ward — the ward will still be requested.
+                              </p>
+                            )}
+                          </div>
+                        </>
+                      )}
+                      {departmentField}
+                      {doctorField}
+                      {dateField}
+                      <div>
+                        <label className={labelClass}>Expected Stay</label>
+                        <div className="flex gap-2">
+                          <div className="flex-1">
+                            <input
+                              type="number"
+                              min={showWardBed && formData.patientVisitType === "Daycare" ? 0 : 1}
+                              className={inputClass}
+                              placeholder="Days"
+                              value={formData.ipdExpectedStayDays}
+                              onChange={(e) => {
+                                const min = showWardBed && formData.patientVisitType === "Daycare" ? 0 : 1;
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  ipdExpectedStayDays: Math.max(min, parseInt(e.target.value, 10) || min),
+                                }));
+                              }}
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <input
+                              type="number"
+                              min="0"
+                              max="23"
+                              className={inputClass}
+                              placeholder="Hrs"
+                              value={formData.ipdExpectedStayHours}
+                              onChange={(e) =>
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  ipdExpectedStayHours: Math.min(23, Math.max(0, parseInt(e.target.value, 10) || 0)),
+                                }))
+                              }
+                            />
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1">
+                          Days + hours{formData.patientVisitType === "Daycare" ? " (starts at 0 days)" : ""}
+                        </p>
+                      </div>
+                      <div>
+                        <label className={labelClass}>Advance Amount (₹)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          className={inputClass}
+                          value={formData.ipdAdvanceAmount || 0}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              ipdAdvanceAmount: Math.max(0, parseFloat(e.target.value) || 0),
+                            }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Payment Mode</label>
+                        <FormDropdown
+                          className={inputClass}
+                          options={IPD_PAYMENT_MODES.map((pm) => ({ label: pm, value: pm }))}
+                          value={formData.ipdPaymentMode}
+                          onValueChange={(val) =>
+                            setFormData((prev) => ({ ...prev, ipdPaymentMode: val }))
+                          }
+                          placeholder="Select payment mode"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className={labelClass}>Reason For Admit</label>
+                        <input
+                          type="text"
+                          className={inputClass}
+                          placeholder="Clinical reason for admission"
+                          value={formData.ipdProvisionalDiagnosis}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              ipdProvisionalDiagnosis: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
                   </div>
-                  {!formData.doctorId || !formData.branchId || !formData.selectDate ? (
-                    <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
-                      Select a branch, doctor and date to see available time slots
-                    </div>
-                  ) : loadingSlots || findingNearestDate ? (
-                    <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl flex items-center justify-center gap-2">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Loading available slots...
-                    </div>
-                  ) : doctorUnavailable && slotsCancelled ? (
-                    <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
-                      Doctor is unavailable on this date (marked as cancelled)
-                    </div>
-                  ) : doctorOnLeave ? (
-                    <div className="col-span-full py-8 text-center text-sm text-gray-500 bg-gray-50 rounded-xl">
-                      Doctor is on leave
-                      {leaveReason ? ` (${leaveReason})` : ""} — no slots can be
-                      booked on this date
-                    </div>
-                  ) : doctorUnavailable ? (
-                    <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
-                      Doctor is not assigned for this day
-                    </div>
-                  ) : availableSlots.length === 0 ? (
-                    <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
-                      <input
-                        type="time"
-                        className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            timeSlot: e.target.value,
-                          }))
-                        }
-                        placeholder="Select a time"
-                      />
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                      {uniqueSlots.map((slot) => (
-                        <button
-                          key={slot.time}
-                          type="button"
-                          onClick={() => setFormData((prev) => ({ ...prev, timeSlot: slot.time }))}
-                          className={`h-10 text-sm font-bold rounded-lg transition-all duration-200 ${
-                            formData.timeSlot === slot.time
-                              ? "bg-blue-600 text-white shadow-md"
-                              : "border border-blue-200 text-blue-600 hover:bg-blue-50"
-                          }`}
-                        >
-                          {formatSlotLabel(slot.time)}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
+              ) : (
+                <>
+                  {branchField}
+                  {departmentField}
+                  {doctorField}
+                  {dateField}
+
+                  {/* Available Time Slots */}
+                  <div className="lg:col-span-3 flex flex-col gap-3">
+                      <div className="flex items-center justify-between">
+                        <label className={labelClass}>Available Time Slots {requiredStar}</label>
+                        <div className="flex items-center gap-1 text-gray-400">
+                          {loadingSlots && <Loader2 className="w-3 h-3 animate-spin" />}
+                          <span className="text-[10px] font-bold uppercase tracking-wide">
+                            {loadingSlots ? "Loading slots..." : "Select a time slot"}
+                          </span>
+                        </div>
+                      </div>
+                      {!formData.doctorId || !formData.branchId || !formData.selectDate ? (
+                        <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
+                          Select a branch, doctor and date to see available time slots
+                        </div>
+                      ) : loadingSlots || findingNearestDate ? (
+                        <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl flex items-center justify-center gap-2">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Loading available slots...
+                        </div>
+                      ) : doctorUnavailable && slotsCancelled ? (
+                        <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
+                          Doctor is unavailable on this date (marked as cancelled)
+                        </div>
+                      ) : doctorOnLeave ? (
+                        <div className="col-span-full py-8 text-center text-sm text-gray-500 bg-gray-50 rounded-xl">
+                          Doctor is on leave
+                          {leaveReason ? ` (${leaveReason})` : ""} — no slots can be
+                          booked on this date
+                        </div>
+                      ) : doctorUnavailable ? (
+                        <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
+                          Doctor is not assigned for this day
+                        </div>
+                      ) : availableSlots.length === 0 ? (
+                        <div className="col-span-full py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
+                          <input
+                            type="time"
+                            className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                            onChange={(e) =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                timeSlot: e.target.value,
+                              }))
+                            }
+                            placeholder="Select a time"
+                          />
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                          {uniqueSlots.map((slot) => (
+                            <button
+                              key={slot.time}
+                              type="button"
+                              onClick={() => setFormData((prev) => ({ ...prev, timeSlot: slot.time }))}
+                              className={`h-10 text-sm font-bold rounded-lg transition-all duration-200 ${
+                                formData.timeSlot === slot.time
+                                  ? "bg-blue-600 text-white shadow-md"
+                                  : "border border-blue-200 text-blue-600 hover:bg-blue-50"
+                              }`}
+                            >
+                              {formatSlotLabel(slot.time)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                </>
+              )}
 
               {/* SMS Confirmation - Static */}
               <div className="lg:col-span-3">
@@ -1829,7 +2414,7 @@ const isDirty = Boolean(
                 ) : (
                   <Plus className="w-4 h-4 transition-transform duration-200 group-hover:rotate-90" />
                 )}
-                {submitting ? "Creating..." : "Confirm Appointment"}
+                {submitting ? "Creating..." : isIpdBooking || isAdmissionEditMode ? "Confirm Admission Request" : "Confirm Appointment"}
               </button>
             </div>
 
@@ -1846,8 +2431,12 @@ const isDirty = Boolean(
         onConfirm={handleConfirmCreate}
         onCancel={() => setShowConfirm(false)}
         type="question"
-        title="Confirm Appointment"
-        description="Are you sure you want to book this appointment?"
+        title={isIpdBooking || isAdmissionEditMode ? "Confirm Admission Request" : "Confirm Appointment"}
+        description={
+          isIpdBooking || isAdmissionEditMode
+            ? "A planned admission request will be created. The ward/bed are assigned when the patient is actually admitted."
+            : "Are you sure you want to book this appointment?"
+        }
         confirmText="Yes"
         cancelText="No"
         loading={submitting}
@@ -1933,6 +2522,62 @@ const isDirty = Boolean(
           ) : null
         }
         confirmText="Done"
+      />
+
+      <ConfirmationDialog
+        open={Boolean(ipdResult)}
+        onConfirm={handleIpdDone}
+        onCancel={handleIpdDone}
+        hideCancelButton
+        type="success"
+        title={isAdmissionEditMode ? "Admission Request Updated" : "Admission Request Created"}
+        description={
+          ipdResult ? (
+            <div className="w-full min-w-[300px] sm:min-w-[340px] rounded-xl bg-gray-50 border border-gray-100 p-4 text-left text-sm">
+              <div className="flex items-center justify-between gap-6 py-1">
+                <span className="shrink-0 text-gray-500">Patient</span>
+                <span className="text-right font-semibold text-gray-900">{formData.patientName || "-"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-6 py-1">
+                <span className="shrink-0 text-gray-500">Patient ID</span>
+                <span className="text-right font-semibold text-gray-900">{ipdResult.patient_id}</span>
+              </div>
+              <div className="flex items-center justify-between gap-6 py-1">
+                <span className="shrink-0 text-gray-500">IP Number</span>
+                <span className="text-right font-semibold text-blue-700">{ipdResult.ip_number}</span>
+              </div>
+              <div className="flex items-center justify-between gap-6 py-1">
+                <span className="shrink-0 text-gray-500">Status</span>
+                <span className="text-right font-semibold text-amber-700">{ipdResult.status}</span>
+              </div>
+              <div className="flex items-center justify-between gap-6 py-1">
+                <span className="shrink-0 text-gray-500">Requested Date</span>
+                <span className="text-right font-semibold text-gray-900">
+                  {format(parseISO(ipdResult.admission_date), "EEE, MMM d, yyyy")}
+                </span>
+              </div>
+            </div>
+          ) : null
+        }
+        confirmText="Done"
+      />
+
+      <AddWardDialog
+        open={addWardOpen}
+        onOpenChange={setAddWardOpen}
+        branches={branchFilterBranches}
+        defaultBranchId={formData.branchId || branchFilterBranches[0]?.id || ""}
+        onCreated={handleWardCreated}
+      />
+
+      <AddBedDialog
+        open={addBedOpen}
+        onOpenChange={setAddBedOpen}
+        wards={wards}
+        branches={branchFilterBranches}
+        defaultWardId={formData.requestedWardId || wards[0]?.ward_id || ""}
+        defaultBranchId={formData.branchId || branchFilterBranches[0]?.id || ""}
+        onCreated={handleBedCreated}
       />
     </div>
   );

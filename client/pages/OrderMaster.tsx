@@ -110,10 +110,12 @@ function OrderActionMenu({
   onView,
   onUpdateStatus,
   onExport,
+  onPharmacySlip,
 }: {
   onView: () => void;
   onUpdateStatus: () => void;
   onExport: () => void;
+  onPharmacySlip: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -160,6 +162,7 @@ function OrderActionMenu({
 
   const items: Array<{ label: string; onClick: () => void; danger?: boolean }> = [];
   if (canView) items.push({ label: "View Order", onClick: onView });
+  if (canView) items.push({ label: "Pharmacy Slip", onClick: onPharmacySlip });
   if (canUpdate) items.push({ label: "Update Status", onClick: onUpdateStatus });
   if (can("report.export")) items.push({ label: "Export Order", onClick: onExport });
 
@@ -534,6 +537,10 @@ export default function OrderMaster() {
     navigate("/doctor/patient-details", { state: { patientId: row.patient_id } });
   };
 
+  const handlePharmacySlip = (row: OrderRow) => {
+    navigate(`/orders/${row.plan_id}/pharmacy-slip`);
+  };
+
   const PLAN_TRANSITIONS: Record<string, string[]> = {
     PLANNED: ["ACTIVE", "CANCELLED"],
     ACTIVE: ["COMPLETED", "DISCONTINUED"],
@@ -775,6 +782,7 @@ export default function OrderMaster() {
                         return (
                           <OrderActionMenu
                             onView={() => handleView(row)}
+                            onPharmacySlip={() => handlePharmacySlip(row)}
                             onUpdateStatus={() => openStatusDialog(row)}
                             onExport={() => {
                               const single = [row];

@@ -166,13 +166,6 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
   const [proceeding, setProceeding] = useState(false);
 
   const clinicalDetailsRef = useRef<ClinicalDetailsSectionHandle>(null);
-  const [clinicalSaveState, setClinicalSaveState] = useState<{
-    saving: boolean;
-    disabled: boolean;
-    saveError: string | null;
-    saveSuccess: boolean;
-  }>({ saving: false, disabled: true, saveError: null, saveSuccess: false });
-  const [savingClinicalAll, setSavingClinicalAll] = useState(false);
 
   /* ============================================================
      SYNC HISTORY OF PRESENT ILLNESS FROM ACTIVE ENCOUNTER
@@ -439,41 +432,39 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
      INVESTIGATION
   ============================================================ */
 
-  const toggleInvestigation = (name: string) => {
-    setSelectedInvestigations((prev) =>
-      prev.includes(name)
-        ? prev.filter((item) => item !== name)
-        : [...prev, name]
-    );
-  };
+  /* Adds a user-typed custom investigation (Others... or the dropdown's
+     "+ Add") as a selectable option. If the typed name matches a real
+     lab test it just selects that test; otherwise it registers a custom
+     option. */
 
-  /* Adds a user-typed custom investigation (Others...) as a checkbox
-     option in the grid. If the typed name matches a real lab test it
-     just checks that test; otherwise it registers a custom option. */
-
-  const addOtherInvestigation = () => {
-    const value = otherInvestigationName.trim();
+  const addInvestigationByName = (name: string) => {
+    const value = name.trim();
     if (!value) return;
     if (investigations.includes(value)) {
-      toggleInvestigation(value);
+      setSelectedInvestigations((prev) =>
+        prev.includes(value) ? prev : [...prev, value]
+      );
     } else if (!customInvestigations.includes(value)) {
       setCustomInvestigations((prev) => [...prev, value]);
       setSelectedInvestigations((prev) =>
         prev.includes(value) ? prev : [...prev, value]
       );
     }
+  };
+
+  const addOtherInvestigation = () => {
+    addInvestigationByName(otherInvestigationName);
     setOtherInvestigationName("");
     setOtherInvestigationExpanded(false);
   };
 
-  /* Unchecking a custom investigation removes both its checkbox option
-     and its selection. */
+  /* The dropdown reports the full list of selected test names.
+     Unselecting a custom investigation removes both its option and its
+     selection (same behaviour as the old checkbox grid). */
 
-  const toggleCustomInvestigation = (name: string) => {
-    setSelectedInvestigations((prev) =>
-      prev.filter((item) => item !== name)
-    );
-    setCustomInvestigations((prev) => prev.filter((item) => item !== name));
+  const handleInvestigationsChange = (names: string[]) => {
+    setSelectedInvestigations(names);
+    setCustomInvestigations((prev) => prev.filter((item) => names.includes(item)));
   };
 
   /* ============================================================
@@ -495,6 +486,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
       consultationNotes,
       pastHistory,
       adviceRows: adviceSectionRef.current?.getDraftRows() ?? [],
+      adviceDiscussion: adviceSectionRef.current?.getDraftDiscussion() ?? "",
       investigations: selectedInvestigations,
     };
 
@@ -525,7 +517,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
   ============================================================ */
 
   /* ============================================================
-     CONSULTATION PERSIST (shared by Next + Save Clinical Details)
+     CONSULTATION PERSIST (run by Proceed to Next)
      Builds the encounter update payload from the Consultation step
      form and writes it + personal history + reason of visit.
   ============================================================ */
@@ -688,47 +680,15 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     }
   };
 
-  /* SAVE CLINICAL DETAILS
-     Persists the entire consultation step: the Clinical Details section,
-     the encounter fields (notes/HOPI/chief complaint/systemic + general
-     exam/clinical findings/past-history treatment/previous reports),
-     personal history, reason of visit, and the Reports (Previous) form. */
-  const handleSaveClinicalDetails = async () => {
-    if (savingClinicalAll || proceeding) return;
-
-    if (!encounter) {
-      showToast(
-        encounterError ||
-          "No active encounter found. Cannot save consultation details."
-      );
-      return;
-    }
-
-    setSavingClinicalAll(true);
-    try {
-      await clinicalDetailsRef.current?.handleSave();
-      await persistConsultation(encounter);
-      await persistReportsPrevious(encounter.encounter_no);
-      const adviceResult = await saveAdvice(encounter);
-      showToast(
-        adviceResult === "failed"
-          ? "Clinical details saved, but the Advice prescription could not be saved."
-          : "Clinical details saved"
-      );
-    } catch (error: any) {
-      console.error("Failed to save clinical details:", error);
-      showToast(
-        error?.response?.data?.message ||
-          error?.message ||
-          "Failed to save clinical details."
-      );
-    } finally {
-      setSavingClinicalAll(false);
-    }
-  };
-
   /* ============================================================
      NEXT
+     Saves the whole Consultation step, then moves on: the Clinical
+     Details section (ECOG, symptoms, allergies, comorbidities), the
+     encounter fields + personal history + reason of visit, the
+     Reports (Previous) form, and the Advice section (medicines +
+     Discussion). Every part is attempted; the step stays open when
+     the clinical details or the Advice could not be saved so
+     nothing is lost.
   ============================================================ */
 
   const proceedNext = async () => {
@@ -745,15 +705,21 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     try {
       setProceeding(true);
 
+      const clinicalSaved =
+        (await clinicalDetailsRef.current?.handleSave()) ?? true;
       await persistConsultation(encounter);
       await persistReportsPrevious(encounter.encounter_no);
-
-      /* Stay on this step when the Advice medicines could not be saved
-         so the prescription is not lost. */
       const adviceResult = await saveAdvice(encounter);
-      if (adviceResult === "failed") {
+
+      const failedParts = [
+        ...(clinicalSaved ? [] : ["clinical details"]),
+        ...(adviceResult === "failed" ? ["Advice"] : []),
+      ];
+      if (failedParts.length > 0) {
         showToast(
-          "Consultation saved, but the Advice prescription could not be saved."
+          `Consultation saved, but the ${failedParts.join(
+            " and "
+          )} could not be saved.`
         );
         return;
       }
@@ -1037,7 +1003,6 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
             ref={clinicalDetailsRef}
             patientId={consultationState?.patientId}
             encounterNo={encounter.encounter_no}
-            onSaveStateChange={setClinicalSaveState}
           />
         ) : (
           !encounterError && (
@@ -1454,7 +1419,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       </div>
 
-      {/* RIGHT COLUMN: PAST HISTORY + SAVE */}
+      {/* RIGHT COLUMN: PAST HISTORY */}
 
       <div className="flex w-full flex-col gap-4">
 
@@ -1564,58 +1529,6 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       </div>
 
-      {/* SAVE CLINICAL DETAILS (next to Reports) */}
-
-      <div className="flex flex-col justify-end gap-2">
-
-        <button
-          type="button"
-          onClick={handleSaveClinicalDetails}
-          disabled={clinicalSaveState.disabled || savingClinicalAll}
-          className="flex h-9 w-fit items-center justify-center gap-2 rounded-lg border-0 bg-blue-700 px-[25px] py-[9px] text-sm font-bold leading-5 text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-        >
-          {(clinicalSaveState.saving || savingClinicalAll) && (
-            <svg
-              className="h-4 w-4 animate-spin text-white"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              />
-            </svg>
-          )}
-          {clinicalSaveState.saving || savingClinicalAll
-            ? "Saving..."
-            : "Save Clinical Details"}
-        </button>
-
-        {clinicalSaveState.saveError && (
-          <div className="text-xs font-medium leading-4 text-red-600">
-            {clinicalSaveState.saveError}
-          </div>
-        )}
-
-        {clinicalSaveState.saveSuccess &&
-          !clinicalSaveState.saveError && (
-            <div className="text-xs font-medium leading-4 text-green-600">
-              Clinical details saved successfully.
-            </div>
-          )}
-
-      </div>
-
       </div>
 
     </div>
@@ -1657,39 +1570,21 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     {!labTestsLoading && !labTestsError &&
       (investigations.length > 0 ||
         customInvestigations.length > 0) && (
-    <div className="grid w-full grid-cols-3 gap-y-3">
-
-      {[...investigations, ...customInvestigations].map(
-        (investigation) => (
-
-        <label
-          key={investigation}
-          className="flex h-5 cursor-pointer items-center gap-2 whitespace-nowrap text-sm leading-5 text-slate-700"
-        >
-
-          <input
-            type="checkbox"
-            checked={selectedInvestigations.includes(
-              investigation
-            )}
-            onChange={() =>
-              customInvestigations.includes(investigation)
-                ? toggleCustomInvestigation(investigation)
-                : toggleInvestigation(investigation)
-            }
-            className="h-4 w-4 shrink-0 cursor-pointer appearance-none rounded border border-slate-300 bg-white checked:border-blue-600 checked:bg-blue-600"
-          />
-
-          <span>
-            {investigation}
-          </span>
-
-        </label>
-
-      )
-      )}
-
-    </div>
+    <MultiSelectDropdown
+      options={[
+        ...investigations.map((name) => ({ value: name, label: name })),
+        ...customInvestigations.map((name) => ({
+          value: name,
+          label: name,
+          hint: "Custom",
+        })),
+      ]}
+      value={selectedInvestigations}
+      onValueChange={handleInvestigationsChange}
+      onCreateOption={addInvestigationByName}
+      placeholder="Search and select investigations / scans..."
+      className="h-[38px] rounded-md border-slate-200 text-sm shadow-none"
+    />
     )}
 
     {!labTestsLoading && !labTestsError && (
@@ -1801,11 +1696,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     ================================================= */}
 
     <AdviceSection
-    ref={adviceSectionRef}
-    encounter={encounter}
-    encounterError={encounterError}
-    patientId={consultationState?.patientId}
-    onToast={showToast}
+      ref={adviceSectionRef}
+      encounter={encounter}
+      patientId={consultationState?.patientId}
+      onToast={showToast}
     />
 
     {/* =================================================
