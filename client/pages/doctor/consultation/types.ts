@@ -81,12 +81,15 @@ export type Drug = {
   volume: string;
   planItemId?: string;
   medicineId?: string;
-  /* Unscaled protocol dose (item.dosage / protocol_dose). Rows derived
-     from the protocol carry this so the displayed dose can be re-scaled
-     live when the dose calculator selection changes (BMI vs BSA). Rows
-     the doctor typed or edited themselves have no raw dosage and are
-     never re-scaled. */
+  /* Legacy drafts only: before the per-row Dose Cal, `dose` held the
+     BSA-scaled dose and this held the protocol dose. */
   rawDose?: number | null;
+  /* Dose Cal (PRIMARY rows): selected formula (DoseCalcMethod), the
+     protocol template's own method hint ("BSA", "AUC 5", ...) and the
+     target AUC for Calvert rows. `dose` is the protocol dose. */
+  doseCalc?: string;
+  protocolDoseCalc?: string | null;
+  targetAuc?: string;
 };
 
 export type RegimenProtocolDay = {
@@ -113,6 +116,7 @@ export type RegimenProtocolItem = {
   administration_day: number | null;
   cycle_day: number | null;
   frequency: string | null;
+  dose_calculation_method?: string | null;
   timing_relative_to_primary: string | null;
   remarks: string | null;
   administration_detail: string | null;

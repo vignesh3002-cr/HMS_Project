@@ -80,6 +80,7 @@ type SummaryPlanItem = {
   protocol_dose: number | null;
   protocol_dose_unit: string | null;
   calculated_dose?: number | string | null;
+  calculated_dose_unit?: string | null;
   formulation: string | null;
   dilution_volume: string | null;
   administration_route: string | null;
@@ -660,9 +661,19 @@ const Summary: React.FC<{
         "",
       form:
         item.formulation || item.medicine_master?.dosage_form || "",
-      dose: item.protocol_dose != null ? String(item.protocol_dose) : "",
+      /* Patient dose (Dose Cal result) when calculated, else the
+         protocol dose. */
+      dose:
+        item.calculated_dose != null
+          ? String(Number(item.calculated_dose))
+          : item.protocol_dose != null
+            ? String(item.protocol_dose)
+            : "",
       unit:
-        item.protocol_dose_unit || item.medicine_master?.unit || "",
+        (item.calculated_dose != null && item.calculated_dose_unit) ||
+        item.protocol_dose_unit ||
+        item.medicine_master?.unit ||
+        "",
       volume:
         item.dilution_volume != null ? String(item.dilution_volume) : "",
     }));
@@ -693,10 +704,12 @@ const Summary: React.FC<{
     }
   })();
 
+  /* The plan's own cancer type first: with a multi-type diagnosis it is
+     the cancer the chosen protocol treats, not necessarily the primary. */
   const cancerType =
+    plan?.cancer_type ||
     diagnosisSelectionFromStorage?.cancer_type ||
     plan?.oncology_staging_detail?.cancer_types?.cancer_type ||
-    plan?.cancer_type ||
     "";
 
   const stage =
@@ -883,14 +896,20 @@ const Summary: React.FC<{
         item.cycle_day != null ? `Cycle day ${item.cycle_day}` : "",
       ].filter(Boolean);
 
+      const hasPatientDose = item.calculated_dose != null;
       const unit =
-        item.protocol_dose_unit || item.medicine_master?.unit || "";
+        (hasPatientDose && item.calculated_dose_unit) ||
+        item.protocol_dose_unit ||
+        item.medicine_master?.unit ||
+        "";
 
       medicines.push({
         medicine_id: medicineId,
-        ...(item.protocol_dose != null
-          ? { dosage: String(item.protocol_dose) }
-          : {}),
+        ...(hasPatientDose
+          ? { dosage: String(Number(item.calculated_dose)) }
+          : item.protocol_dose != null
+            ? { dosage: String(item.protocol_dose) }
+            : {}),
         ...(unit ? { unit } : {}),
         ...(item.administration_route
           ? { route: item.administration_route }

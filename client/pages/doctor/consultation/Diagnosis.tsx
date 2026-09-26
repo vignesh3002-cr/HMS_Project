@@ -1102,7 +1102,7 @@ const Diagnosis: React.FC<{
     const primarySubtype =
       matchedSubtypes.find(
         (item) => item.cancerType === primaryType.cancer_type
-      ) ?? matchedSubtypes[0];
+      );
 
     /* Resolve diagnosis_id by matching the primary subtype's ICD-10 code
        against the loaded diagnosis catalog. */
@@ -1828,6 +1828,30 @@ const Diagnosis: React.FC<{
       }
     }
 
+    /* The histopathology ticked under a cancer type (one per type). The
+       primary one must come from under the primary type - not simply the
+       first box ticked, which may belong to another selected type. */
+    const subtypeFor = (cancerType: string) =>
+      formData.subType
+        .map((value) => splitQualified(value))
+        .filter(
+          (parsed) => !parsed.cancerType || parsed.cancerType === cancerType
+        )
+        .map((parsed) =>
+          subtypes.find(
+            (item) =>
+              item.subtype_name === parsed.raw && item.cancerType === cancerType
+          )
+        )
+        .find((item): item is CancerSubtypeOption => Boolean(item));
+
+    if (formData.type && !subtypeFor(formData.type)) {
+      setDiagnosisError(
+        `Please select a Histopathology for ${formData.type}.`
+      );
+      return;
+    }
+
     setDiagnosisError("");
     setSavingDiagnosis(true);
 
@@ -1835,13 +1859,20 @@ const Diagnosis: React.FC<{
       const matchedType = cancerTypes.find(
         (item) => item.cancer_type === formData.type
       );
-      const primarySubtype =
-        formData.subType.length > 0
-          ? splitQualified(formData.subType[0]).raw
-          : "";
-      const matchedSubtype = subtypes.find(
-        (item) => item.subtype_name === primarySubtype
-      );
+      const matchedSubtype = subtypeFor(formData.type);
+
+      /* Every other selected cancer type, with the histopathology ticked
+         under it, so protocols for these cancers can be saved on the plan. */
+      const additionalCancers = selectedCancerTypes
+        .filter((name) => name !== formData.type)
+        .map((name) => cancerTypes.find((item) => item.cancer_type === name))
+        .filter((item): item is CancerTypeItem =>
+          Boolean(item?.cancer_type_id)
+        )
+        .map((item) => ({
+          cancer_type_id: item.cancer_type_id,
+          cancer_subtype_id: subtypeFor(item.cancer_type)?.subtype_id ?? null,
+        }));
 
       const diagnosisId = await resolveDiagnosisId(
         resolvedPatientId,
@@ -1869,6 +1900,8 @@ const Diagnosis: React.FC<{
       const stagingFields: Record<string, unknown> = {
         cancer_type_id: matchedType?.cancer_type_id ?? "",
         cancer_subtype_id: matchedSubtype?.subtype_id ?? "",
+        /* Always sent: the list is replaced, so a deselected type is removed. */
+        additional_cancers: additionalCancers,
         ...(diagnosisId ? { diagnosis_id: diagnosisId } : {}),
         ...(formData.cancerStage.length > 0
           ? {
@@ -1997,26 +2030,11 @@ const Diagnosis: React.FC<{
           const existingPlanId =
             existingPlan.data.data?.chemotherapy_plan_id;
           if (existingPlanId) {
-            const planChanges: Record<string, unknown> = {
+            /* The server refreshes the plan's cancer type / subtype /
+               stage from this staging detail. */
+            await API.put(`/chemotherapy/plans/${existingPlanId}`, {
               staging_detail_id: stagingDetailId,
-            };
-            if (matchedType?.cancer_type_id) {
-              planChanges.cancer_type_id = matchedType.cancer_type_id;
-              planChanges.cancer_type = matchedType.cancer_type;
-            }
-            if (matchedSubtype?.subtype_id) {
-              planChanges.subtype_id = matchedSubtype.subtype_id;
-              planChanges.cancer_subtype = matchedSubtype.subtype_name;
-            }
-            if (formData.cancerStage.length > 0) {
-              planChanges.cancer_stage = formData.cancerStage
-                .map((stage) => splitQualified(stage).raw)
-                .join(", ");
-            }
-            await API.put(
-              `/chemotherapy/plans/${existingPlanId}`,
-              planChanges
-            );
+            });
           }
         } catch (planSyncError: any) {
           console.error(

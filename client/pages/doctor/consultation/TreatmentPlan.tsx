@@ -14,7 +14,6 @@ import type { ConsultationState, MeasurementValues } from "./types";
 import {
   createChemotherapyPlanForPatient,
   formatPickedDate,
-  loadProtocolSyncData,
   parsePickedDate,
   toIsoDate,
 } from "./helpers";
@@ -61,27 +60,10 @@ const syncExistingPlanProtocol = async (
     const existingPlanId = existing.data.data?.chemotherapy_plan_id;
     if (!existingPlanId) return;
 
-    const protocolSync = await loadProtocolSyncData(protocolId);
-    if (!protocolSync) return;
-
-    const planChanges: Record<string, unknown> = {
-      source_protocol_id: protocolSync.source_protocol_id,
-    };
-    if (protocolSync.regimen_name) {
-      planChanges.regimen_name = protocolSync.regimen_name;
-      planChanges.protocol_name = protocolSync.regimen_name;
-    }
-    if (protocolSync.regimen_code) {
-      planChanges.regimen_code = protocolSync.regimen_code;
-    }
-    if (protocolSync.planned_cycles > 0) {
-      planChanges.planned_cycles = protocolSync.planned_cycles;
-    }
-    if (protocolSync.cycle_interval_days > 0) {
-      planChanges.cycle_interval_days = protocolSync.cycle_interval_days;
-    }
-
-    await API.put(`/chemotherapy/plans/${existingPlanId}`, planChanges);
+    /* The server copies the protocol's regimen name / code / cycles. */
+    await API.put(`/chemotherapy/plans/${existingPlanId}`, {
+      source_protocol_id: protocolId,
+    });
   } catch (error: any) {
     console.error(
       "Failed to instantly sync protocol onto existing plan:",

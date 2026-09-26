@@ -985,6 +985,7 @@ const Consultation: React.FC = () => {
                     patientId={patientDisplayId}
                     measurements={measurements}
                     gender={patient?.patient_gender ?? ""}
+                    age={patient?.patient_age ?? null}
                     onNext={() => { selectStep("DISCHARGE MEDICATION", markStepCompleted("CHEMOTHERAPY ORDER")); }}
                   />
                 ) : activeStep === "DISCHARGE MEDICATION" ? (

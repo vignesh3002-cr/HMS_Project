@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import API, { getActiveBranchId } from "../../../api/axios";
 import { getUser } from "../../../utils/token";
-import { computeBmi, computeBsa } from "../../../utils/vitals";
 import { Calendar } from "../../../components/ui/calendar";
 import {
   Popover,
@@ -29,6 +28,23 @@ import {
   toIsoDate,
 } from "./helpers";
 import { BackIcon, BellIcon, CheckIcon } from "./icons";
+import {
+  DOSE_CALC_OPTIONS,
+  buildDosingSnapshot,
+  buildPlanItemsFromOrder,
+  computePatientDose,
+  defaultDoseCalc,
+  normalizeDoseCalc,
+  normalizeLegacyDraftDrug,
+  parseSex,
+  primaryDoseFields,
+  resolveDoseCalc,
+  resolveTargetAuc,
+  summarizeDosingInputs,
+  toPositiveNumber,
+  type DosingInputs,
+  type PatientDoseResult,
+} from "./doseCalculation";
 
 /* ============================================================
    CHEMOTHERAPY ORDER COMPONENT
@@ -47,70 +63,15 @@ const parseMeasureString = (value: string): number | null => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
 
-/* Plain BSA (Mosteller) of the patient derived from height/weight:
-   BSA (m²) = √(height_cm × weight_kg / 3600). Applied directly to the
-   protocol dose so larger patients get a higher dose and smaller
-   patients a lower one. Returns 1 when BSA cannot be derived so doses
-   stay unchanged. */
-const bsaDoseScaleFactor = (
-  measurements?: MeasurementValues
-): number => {
-  const height = parseMeasureString(measurements?.height ?? "");
-  const weight = parseMeasureString(measurements?.weight ?? "");
-  const bsa = computeBsa(height, weight);
-  if (bsa === null) return 1;
-  return Math.round(bsa * 1000) / 1000;
-};
-
-/* Creatinine clearance by Cockcroft-Gault:
-   CrCl (mL/min) = ((140 − age) × weight_kg) / (72 × serum_creatinine),
-   multiplied by 0.85 for females. */
-const computeCockcroftGault = (
-  weightKg: number | null,
-  ageYears: number | null,
-  serumCreatinine: number | null,
-  isFemale: boolean
-): number | null => {
-  if (
-    weightKg === null ||
-    ageYears === null ||
-    serumCreatinine === null ||
-    weightKg <= 0 ||
-    ageYears <= 0 ||
-    serumCreatinine <= 0
-  ) {
-    return null;
-  }
-  const base = ((140 - ageYears) * weightKg) / (72 * serumCreatinine);
-  const value = isFemale ? base * 0.85 : base;
-  return Math.round(value * 10) / 10;
-};
-
-/* Carboplatin dose by the Calvert formula:
-   Dose (mg) = target AUC × (CrCl + 25). */
-const computeCalvertCarboplatin = (
-  auc: number | null,
-  crcl: number | null
-): number | null => {
-  if (auc === null || crcl === null || auc <= 0 || crcl <= 0) return null;
-  return Math.round(auc * (crcl + 25) * 10) / 10;
-};
-
-/* Dose calculator options shown next to the Chemotherapy Orders tab. */
-const DOSE_CALCULATOR_OPTIONS = [
-  "Body Surface Area (BSA)",
-  "Body Mass Index (BMI)",
-  "Dosing Body Weight (Ideal & Adjusted)",
-  "Creatinine Clearance (CrCl) — Cockcroft-Gault",
-  "Carboplatin Dose — Calvert Formula",
-];
-
 type ChemotherapyPlanItem = {
   chemotherapy_plan_item_id: string;
   medicine_id: string;
   drug_role: string | null;
   protocol_dose: number | null;
   protocol_dose_unit: string | null;
+  dose_calculation_method?: string | null;
+  calculated_dose?: number | string | null;
+  calculated_dose_unit?: string | null;
   formulation: string | null;
   dilution_volume: number | null;
   medicine_master: {
@@ -147,12 +108,14 @@ const ChemotherapyOrder: React.FC<{
   patientId?: string;
   measurements?: MeasurementValues;
   gender?: string;
+  age?: string | number | null;
   onNext?: () => void;
 }> = ({
   embedded = false,
   patientId,
   measurements,
   gender,
+  age,
   onNext,
 }) => {
   const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
@@ -164,150 +127,23 @@ const ChemotherapyOrder: React.FC<{
   );
   const resolvedPatientId = patientId || statePatientId;
 
-  /* Dose calculator dropdown (next to the Chemotherapy Orders tab):
-     selected option and the inputs used to compute the chosen value. */
-  const [doseCalculator, setDoseCalculator] = useState("");
-  const [calcAgeYears, setCalcAgeYears] = useState("");
-  const [calcSerumCreatinine, setCalcSerumCreatinine] = useState("");
-  const [calcTargetAuc, setCalcTargetAuc] = useState("");
-  /* Sub-selection inside the "Dosing Body Weight" calculator:
-     "Ideal Body Weight (IBW)" or "Adjusted Body Weight". When nothing is
-     picked the BSA factor is used instead. */
-  const [dosingWeightType, setDosingWeightType] = useState("");
+  /* Serum creatinine for Cockcroft-Gault CrCl, used by Carboplatin -
+     Calvert rows. It is a lab value, not a vital, so it is entered here. */
+  const [serumCreatinine, setSerumCreatinine] = useState("");
 
-  /* Derived values for the dose-calculator dropdown. BMI uses the
-     recorded height/weight; CrCl (Cockcroft-Gault) and the Carboplatin
-     (Calvert) dose compute live from the entered age, serum creatinine
-     and target AUC. */
-  const calcHeight = parseMeasureString(measurements?.height ?? "");
-  const calcWeight = parseMeasureString(measurements?.weight ?? "");
-  const calcIsFemale = (gender ?? "").trim().toLowerCase() === "female";
-
-  const calcBmiValue = computeBmi(calcHeight, calcWeight);
-  const calcBsaValue = computeBsa(calcHeight, calcWeight);
-  const calcCrClValue = computeCockcroftGault(
-    calcWeight,
-    calcAgeYears ? Number(calcAgeYears) : null,
-    calcSerumCreatinine ? Number(calcSerumCreatinine) : null,
-    calcIsFemale
+  /* Inputs every PRIMARY row's Dose Cal formula uses: height / weight
+     from the banner vitals, age / sex from the patient record. */
+  const dosingInputs: DosingInputs = useMemo(
+    () => ({
+      heightCm: parseMeasureString(measurements?.height ?? ""),
+      weightKg: parseMeasureString(measurements?.weight ?? ""),
+      ageYears: toPositiveNumber(age),
+      sex: parseSex(gender),
+      serumCreatinine: toPositiveNumber(serumCreatinine),
+    }),
+    [measurements?.height, measurements?.weight, age, gender, serumCreatinine]
   );
-  const calcCarboplatinValue = computeCalvertCarboplatin(
-    calcTargetAuc ? Number(calcTargetAuc) : null,
-    calcCrClValue
-  );
-
-  /* Ideal Body Weight (IBW) by the Devine formula. Height is converted
-     from cm to inches (cm / 2.54) for:
-     Men:   IBW (kg) = 50   + 2.3 × [Height(in) − 60]
-     Women: IBW (kg) = 45.5 + 2.3 × [Height(in) − 60]
-     Used to scale the drug dose when the "Dosing Body Weight (Ideal &
-     Adjusted)" calculator is selected. */
-  const calcHeightIn =
-    calcHeight !== null ? Math.round((calcHeight / 2.54) * 100) / 100 : null;
-  const calcIbwValue =
-    calcHeightIn !== null
-      ? Math.round(
-          ((calcIsFemale ? 45.5 : 50) + 2.3 * (calcHeightIn - 60)) * 10
-        ) / 10
-      : null;
-
-  /* Adjusted Body Weight (AdjBW) for the "Adjusted Body Weight"
-     sub-selection inside the "Dosing Body Weight" calculator:
-     AdjBW (kg) = IBW + 0.4 × (Actual Weight − IBW). */
-  const calcAdjBwValue =
-    calcWeight !== null && calcIbwValue !== null
-      ? Math.round((calcIbwValue + 0.4 * (calcWeight - calcIbwValue)) * 10) /
-        10
-      : null;
-
-  const calcBmiDisplay =
-    calcBmiValue !== null
-      ? `${String(Math.round(calcBmiValue * 10) / 10)} kg/m²`
-      : "Enter height & weight";
-  const calcBsaDisplay =
-    calcBsaValue !== null
-      ? `${String(Math.round(calcBsaValue * 1000) / 1000)} m²`
-      : "Enter height & weight";
-  const calcCrClDisplay =
-    calcCrClValue !== null
-      ? `${String(calcCrClValue)} mL/min`
-      : "Enter age & serum creatinine";
-  const calcCarboplatinDisplay =
-    calcCarboplatinValue !== null
-      ? `${String(calcCarboplatinValue)} mg`
-      : calcCrClValue !== null
-        ? "Enter target AUC"
-        : "Complete CrCl calculation first";
-
-  const calcIbwDisplay =
-    calcIbwValue !== null
-      ? `${String(calcIbwValue)} kg`
-      : "Enter height";
-  const calcAdjBwDisplay =
-    calcAdjBwValue !== null
-      ? `${String(calcAdjBwValue)} kg`
-      : "Enter height & weight";
-
-  /* Dose scale factor used to auto-adjust drug doses (increase/decrease)
-     across all three tabs. When the "Body Mass Index (BMI)" calculator
-     is selected in the dropdown, doses scale by the patient's BMI
-     (weight kg / height m²). When the "Creatinine Clearance (CrCl) —
-     Cockcroft-Gault" calculator is selected, doses scale by the value
-     from CrCl (mL/min) = ((140 − age) × weight kg) / (72 × serum
-     creatinine), × 0.85 for women. When the "Carboplatin Dose —
-     Calvert Formula" calculator is selected, doses scale by the total
-     dose (mg) = target AUC × (CrCl + 25). When the "Dosing Body Weight
-     (Ideal & Adjusted)" calculator is selected, doses scale by the
-     sub-selected dosing weight: "Ideal Body Weight (IBW)" (Devine:
-     50 + 2.3 × [height(in) − 60] for men, 45.5 + 2.3 × [height(in) − 60]
-     for women) or "Adjusted Body Weight" (IBW + 0.4 × (actual weight −
-     IBW)). Any other selection (or none) falls back to BSA (Mosteller)
-     derived from height/weight. Falls back to BSA (and 1 when BSA is
-     unavailable) until the selected calculator's inputs are complete. */
-  const doseScaleFactor = useMemo(() => {
-    const bsa = bsaDoseScaleFactor(measurements);
-    const height = parseMeasureString(measurements?.height ?? "");
-    const weight = parseMeasureString(measurements?.weight ?? "");
-    const bmi = computeBmi(height, weight);
-    if (doseCalculator === "Body Mass Index (BMI)") {
-      return bmi !== null ? Math.round(bmi * 1000) / 1000 : bsa;
-    }
-    if (
-      doseCalculator ===
-      "Creatinine Clearance (CrCl) — Cockcroft-Gault"
-    ) {
-      return calcCrClValue !== null
-        ? Math.round(calcCrClValue * 1000) / 1000
-        : bsa;
-    }
-    if (doseCalculator === "Carboplatin Dose — Calvert Formula") {
-      return calcCarboplatinValue !== null
-        ? Math.round(calcCarboplatinValue * 1000) / 1000
-        : bsa;
-    }
-    if (doseCalculator === "Dosing Body Weight (Ideal & Adjusted)") {
-      if (dosingWeightType === "Ideal Body Weight (IBW)") {
-        return calcIbwValue !== null
-          ? Math.round(calcIbwValue * 1000) / 1000
-          : bsa;
-      }
-      if (dosingWeightType === "Adjusted Body Weight") {
-        return calcAdjBwValue !== null
-          ? Math.round(calcAdjBwValue * 1000) / 1000
-          : bsa;
-      }
-      return bsa;
-    }
-    return bsa;
-  }, [
-    doseCalculator,
-    measurements,
-    calcCrClValue,
-    calcCarboplatinValue,
-    calcIbwValue,
-    calcAdjBwValue,
-    dosingWeightType,
-  ]);
+  const dosingSummary = summarizeDosingInputs(dosingInputs);
 
   const [cycleDay, setCycleDay] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -333,31 +169,6 @@ const ChemotherapyOrder: React.FC<{
     premedication: false,
     supportive: false,
   });
-
-  /* Re-scale protocol-derived doses live whenever the dose calculator
-     selection changes: "Body Mass Index (BMI)" multiplies doses by the
-     patient's BMI (weight kg / height m²), "Dosing Body Weight (Ideal &
-     Adjusted)" scales by the sub-selected IBW / AdjBW, any other
-     selection (or none) keeps the BSA (Mosteller) factor. Only rows
-     carrying an unscaled rawDose are touched; doses the doctor typed or
-     edited are preserved. */
-  useEffect(() => {
-    const rescale = (group: Drug[]) =>
-      group.map((drug) =>
-        drug.rawDose != null
-          ? {
-              ...drug,
-              dose: String(
-                Math.round(drug.rawDose * doseScaleFactor * 10) / 10
-              ),
-            }
-          : drug
-      );
-
-    setDrugs((current) => rescale(current));
-    setPremedicationDrugs((current) => rescale(current));
-    setSupportiveDrugs((current) => rescale(current));
-  }, [doseScaleFactor]);
 
   const protocolRef = useRef<RegimenProtocolDetail | null>(null);
   const protocolDaysRef = useRef<RegimenProtocolDay[]>([]);
@@ -649,14 +460,16 @@ const ChemotherapyOrder: React.FC<{
       item.medicine_master?.dosage_form ||
       item.administration_route ||
       "",
-    dose:
-      item.dosage != null
-        ? String(Math.round(item.dosage * doseScaleFactor * 10) / 10)
-        : "",
-    unit: item.dosage_unit || item.medicine_master?.unit || "",
+    /* Protocol dose as written (mg/m², mg/kg, ...); the Patient Dose
+       column applies the row's Dose Cal formula. The unit comes from the
+       protocol only - medicine_master.unit is "mg" for almost every drug
+       and would turn per-m² doses into flat ones. */
+    dose: item.dosage != null ? String(Number(item.dosage)) : "",
+    unit: item.dosage_unit || "",
     volume: "",
     medicineId: item.medicine_id,
-    rawDose: item.dosage ?? null,
+    protocolDoseCalc: item.dose_calculation_method ?? null,
+    doseCalc: defaultDoseCalc(item.dosage_unit, item.dose_calculation_method),
   });
 
   const applyCycleDayDrugs = (
@@ -751,6 +564,7 @@ const ChemotherapyOrder: React.FC<{
         discussion?: string;
         postChemoInstructions?: string;
         additionalNotes?: string;
+        serumCreatinine?: string;
       };
 
       if (data.cycleDay) {
@@ -770,13 +584,17 @@ const ChemotherapyOrder: React.FC<{
         setAdditionalNotes(data.additionalNotes);
       }
 
+      if (data.serumCreatinine) {
+        setSerumCreatinine(data.serumCreatinine);
+      }
+
       if (data.startDate) {
         setStartDate(data.startDate);
         userTouched.current.startDate = true;
       }
 
       if (Array.isArray(data.drugs) && data.drugs.length > 0) {
-        setDrugs(data.drugs);
+        setDrugs(data.drugs.map(normalizeLegacyDraftDrug));
         userTouched.current.drugs = true;
       }
 
@@ -784,7 +602,9 @@ const ChemotherapyOrder: React.FC<{
         Array.isArray(data.premedicationDrugs) &&
         data.premedicationDrugs.length > 0
       ) {
-        setPremedicationDrugs(data.premedicationDrugs);
+        setPremedicationDrugs(
+          data.premedicationDrugs.map(normalizeLegacyDraftDrug)
+        );
         userTouched.current.premedication = true;
       }
 
@@ -792,7 +612,7 @@ const ChemotherapyOrder: React.FC<{
         Array.isArray(data.supportiveDrugs) &&
         data.supportiveDrugs.length > 0
       ) {
-        setSupportiveDrugs(data.supportiveDrugs);
+        setSupportiveDrugs(data.supportiveDrugs.map(normalizeLegacyDraftDrug));
         userTouched.current.supportive = true;
       }
     } catch (error) {
@@ -817,6 +637,10 @@ const ChemotherapyOrder: React.FC<{
         discussion,
         postChemoInstructions,
         additionalNotes,
+        serumCreatinine,
+        /* Discharge Medication rebuilds the plan items from this draft
+           with the same Dose Cal inputs. */
+        dosingInputs,
       })
     );
   }, [
@@ -828,6 +652,8 @@ const ChemotherapyOrder: React.FC<{
     discussion,
     postChemoInstructions,
     additionalNotes,
+    serumCreatinine,
+    dosingInputs,
     orderDraftKey,
     resolvedPatientId,
   ]);
@@ -971,54 +797,12 @@ const ChemotherapyOrder: React.FC<{
     const navigateTimer = setTimeout(navigateNext, 500);
 
     const saveOrder = async () => {
-      const planItems: Array<{
-        medicine_id: string;
-        drug_role: string;
-        drug_sequence: number;
-        dosage?: number;
-        dosage_unit?: string;
-        administration_route?: string;
-        remarks?: string;
-      }> = [];
-
-      drugs.forEach((drug, index) => {
-        if (drug.medicineId) {
-          planItems.push({
-            medicine_id: drug.medicineId,
-            drug_role: "PRIMARY",
-            drug_sequence: index + 1,
-            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
-            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
-            administration_route: "IV",
-          });
-        }
-      });
-
-      premedicationDrugs.forEach((drug, index) => {
-        if (drug.medicineId) {
-          planItems.push({
-            medicine_id: drug.medicineId,
-            drug_role: "PREMEDICATION",
-            drug_sequence: 90 + index,
-            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
-            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
-            administration_route: "IV",
-          });
-        }
-      });
-
-      supportiveDrugs.forEach((drug, index) => {
-        if (drug.medicineId) {
-          planItems.push({
-            medicine_id: drug.medicineId,
-            drug_role: "SUPPORTIVE",
-            drug_sequence: 100 + index,
-            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
-            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
-            administration_route: "IV",
-          });
-        }
-      });
+      const planItems = buildPlanItemsFromOrder(
+        drugs,
+        premedicationDrugs,
+        supportiveDrugs,
+        dosingInputs
+      );
 
       const planStartDate =
         toIsoDate(startDate) ||
@@ -1032,7 +816,8 @@ const ChemotherapyOrder: React.FC<{
         planStartDate,
         planItems.length > 0 ? planItems : undefined,
         undefined,
-        discussion
+        discussion,
+        buildDosingSnapshot(dosingInputs)
       );
     };
 
@@ -1204,20 +989,15 @@ const ChemotherapyOrder: React.FC<{
               "",
             dose:
               item.protocol_dose != null
-                ? String(
-                    Math.round(item.protocol_dose * doseScaleFactor * 10) / 10
-                  )
+                ? String(Number(item.protocol_dose))
                 : "",
-            unit:
-              item.protocol_dose_unit ||
-              item.medicine_master?.unit ||
-              "",
+            unit: item.protocol_dose_unit || "",
             volume:
               item.dilution_volume != null
                 ? `${item.dilution_volume}`
                 : "",
             medicineId: item.medicine_id,
-            rawDose: item.protocol_dose ?? null,
+            doseCalc: normalizeDoseCalc(item.dose_calculation_method) ?? undefined,
           });
 
           setDrugs(
@@ -1321,6 +1101,14 @@ const ChemotherapyOrder: React.FC<{
 
     setDrugs((current) =>
       current.filter((drug) => drug.id !== id)
+    );
+  };
+
+  /* Dose Cal / target AUC change on a PRIMARY row that isn't in edit mode. */
+  const updatePrimaryDrug = (id: number, patch: Partial<Drug>) => {
+    userTouched.current.drugs = true;
+    setDrugs((current) =>
+      current.map((drug) => (drug.id === id ? { ...drug, ...patch } : drug))
     );
   };
 
@@ -1497,6 +1285,9 @@ const ChemotherapyOrder: React.FC<{
                 drug_sequence: planItemsRef.current.length + 1,
                 dosage: trimmedDose === "" ? null : Number(trimmedDose),
                 dosage_unit: editDraft.unit.trim() || null,
+                ...(editingRow.kind === "drug"
+                  ? primaryDoseFields(editDraft, dosingInputs)
+                  : {}),
               }
             );
             const planData = createRes.data?.data;
@@ -1537,6 +1328,9 @@ const ChemotherapyOrder: React.FC<{
           {
             dosage: trimmedDose === "" ? null : Number(trimmedDose),
             dosage_unit: editDraft.unit.trim() || null,
+            ...(editingRow.kind === "drug"
+              ? primaryDoseFields(editDraft, dosingInputs)
+              : {}),
           }
         );
 
@@ -1547,10 +1341,7 @@ const ChemotherapyOrder: React.FC<{
         );
       }
 
-      const updatedDrug: Drug = {
-        ...editDraft,
-        rawDose: null,
-      };
+      const updatedDrug: Drug = { ...editDraft };
 
       if (editingRow.kind === "drug") {
         setDrugs((current) =>
@@ -1711,6 +1502,64 @@ const ChemotherapyOrder: React.FC<{
       />
     </svg>
   );
+
+  /* Dose Cal cell: formula select (+ target AUC for Calvert). */
+  const renderDoseCalcCell = (
+    drug: Drug,
+    onChange: (patch: Partial<Drug>) => void
+  ) => {
+    const method = resolveDoseCalc(drug);
+    return (
+      <div className="flex min-w-[200px] flex-col gap-1.5">
+        <select
+          aria-label={`Dose calculation for ${drug.name}`}
+          value={method}
+          onChange={(event) => onChange({ doseCalc: event.target.value })}
+          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+        >
+          {DOSE_CALC_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        {method === "AUC" && (
+          <label className="flex items-center gap-1.5 text-xs font-medium text-gray-500">
+            Target AUC
+            <input
+              type="number"
+              min="0"
+              step="0.5"
+              value={drug.targetAuc ?? String(resolveTargetAuc(drug) ?? "")}
+              onChange={(event) => onChange({ targetAuc: event.target.value })}
+              className="w-20 rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            />
+          </label>
+        )}
+      </div>
+    );
+  };
+
+  const renderPatientDoseCell = (result: PatientDoseResult) =>
+    result.value !== null ? (
+      <div>
+        <span className="text-base font-semibold text-gray-900">
+          {result.value} {result.unit}
+        </span>
+        {result.note && (
+          <p className="mt-0.5 text-xs text-gray-500">{result.note}</p>
+        )}
+      </div>
+    ) : (
+      <span className="text-xs font-medium text-amber-600">
+        {result.message}
+      </span>
+    );
+
+  const usesCalvert = drugs.some((drug) => resolveDoseCalc(drug) === "AUC");
+
+  const formatInput = (value: number | null | undefined, unit: string) =>
+    value != null ? `${value} ${unit}` : "—";
 
   const content = (
     <div className="w-full space-y-8">
@@ -1907,27 +1756,6 @@ const ChemotherapyOrder: React.FC<{
                       {tab}
                     </button>
 
-                    {/* Dose calculator dropdown placed next to the
-                        Chemotherapy Orders tab, outside the order table. */}
-                    {tab === "Chemotherapy Orders" && (
-                      <div className="flex items-end pb-3 pl-1">
-                        <select
-                          id="dose-calculator"
-                          value={doseCalculator}
-                          onChange={(event) =>
-                            setDoseCalculator(event.target.value)
-                          }
-                          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                        >
-                          <option value="">Select a calculator…</option>
-                          {DOSE_CALCULATOR_OPTIONS.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
                   </React.Fragment>
                 );
               })}
@@ -1950,225 +1778,6 @@ const ChemotherapyOrder: React.FC<{
           </div>
         </div>
 
-        {/* ================= DOSE CALCULATOR RESULT ================= */}
-        {doseCalculator && (
-          <div className="mx-8 mt-6 rounded-lg border border-gray-200 bg-gray-50 p-5">
-            {doseCalculator === "Body Surface Area (BSA)" && (
-              <div className="flex flex-wrap items-center gap-6">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    BSA
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-gray-900">
-                    {calcBsaDisplay}
-                  </p>
-                </div>
-                <p className="max-w-md text-sm text-gray-500">
-                  Body Surface Area (Mosteller) = √(height cm × weight kg /
-                  3600) in m². Derived from the most recent recorded height
-                  and weight for this patient.
-                </p>
-              </div>
-            )}
-
-            {doseCalculator === "Body Mass Index (BMI)" && (
-              <div className="flex flex-wrap items-center gap-6">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    BMI
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-gray-900">
-                    {calcBmiDisplay}
-                  </p>
-                </div>
-                <p className="max-w-md text-sm text-gray-500">
-                  Body Mass Index = weight (kg) / height (m)
-                  <sup>2</sup>. Derived from the most recent recorded
-                  height and weight for this patient.
-                </p>
-              </div>
-            )}
-
-            {doseCalculator ===
-              "Dosing Body Weight (Ideal & Adjusted)" && (
-              <div className="space-y-4">
-                <div className="flex flex-wrap items-end gap-6">
-                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
-                    Dosing Weight
-                    <select
-                      id="dosing-weight-type"
-                      value={dosingWeightType}
-                      onChange={(event) =>
-                        setDosingWeightType(event.target.value)
-                      }
-                      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    >
-                      <option value="">Select dosing weight…</option>
-                      <option value="Ideal Body Weight (IBW)">
-                        Ideal Body Weight (IBW)
-                      </option>
-                      <option value="Adjusted Body Weight">
-                        Adjusted Body Weight
-                      </option>
-                    </select>
-                  </label>
-                  {dosingWeightType === "Ideal Body Weight (IBW)" && (
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Ideal Body Weight (IBW)
-                      </p>
-                      <p className="mt-1 text-2xl font-semibold text-gray-900">
-                        {calcIbwDisplay}
-                      </p>
-                    </div>
-                  )}
-                  {dosingWeightType === "Adjusted Body Weight" && (
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Adjusted Body Weight
-                      </p>
-                      <p className="mt-1 text-2xl font-semibold text-gray-900">
-                        {calcAdjBwDisplay}
-                      </p>
-                    </div>
-                  )}
-                </div>
-                <p className="max-w-md text-sm text-gray-500">
-                  Ideal and adjusted body weight formulas used for
-                  chemotherapy dosing. Pick a dosing weight and drug doses
-                  are scaled by it so larger patients receive a higher dose
-                  and smaller patients a lower one (derived from the most
-                  recent recorded height, weight and gender).
-                </p>
-                <div className="rounded-md border border-gray-200 bg-white p-4">
-                  <p className="text-sm font-semibold text-gray-900">
-                    Ideal Body Weight (IBW) — Devine formula:
-                  </p>
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
-                    <li>
-                      Men: IBW (kg) = 50 + 2.3 × [Height(in) − 60]
-                    </li>
-                    <li>
-                      Women: IBW (kg) = 45.5 + 2.3 × [Height(in) − 60]
-                    </li>
-                  </ul>
-                </div>
-                <div className="rounded-md border border-gray-200 bg-white p-4">
-                  <p className="text-sm font-semibold text-gray-900">
-                    Adjusted Body Weight (for obese patients, used in some
-                    renal-dose/CrCl calculations):
-                  </p>
-                  <p className="mt-2 pl-5 text-sm text-gray-600">
-                    AdjBW (kg) = IBW + 0.4 × (Actual Weight − IBW)
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {doseCalculator ===
-              "Creatinine Clearance (CrCl) — Cockcroft-Gault" && (
-              <div className="flex flex-wrap items-center gap-6">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    CrCl
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-gray-900">
-                    {calcCrClDisplay}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-end gap-3">
-                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
-                    Age (years)
-                    <input
-                      type="number"
-                      value={calcAgeYears}
-                      onChange={(event) =>
-                        setCalcAgeYears(event.target.value)
-                      }
-                      placeholder="e.g. 55"
-                      className="w-28 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
-                    Serum creatinine (mg/dL)
-                    <input
-                      type="number"
-                      value={calcSerumCreatinine}
-                      onChange={(event) =>
-                        setCalcSerumCreatinine(event.target.value)
-                      }
-                      placeholder="0.9"
-                      className="w-36 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </label>
-                </div>
-                <p className="max-w-md text-sm text-gray-500">
-                  Cockcroft-Gault: CrCl = ((140 − age) × weight kg) / (72
-                  × serum creatinine)
-                  {calcIsFemale ? " × 0.85" : ""} mL/min.
-                </p>
-              </div>
-            )}
-
-            {doseCalculator ===
-              "Carboplatin Dose — Calvert Formula" && (
-              <div className="flex flex-wrap items-center gap-6">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Total Carboplatin Dose
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-gray-900">
-                    {calcCarboplatinDisplay}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-end gap-3">
-                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
-                    Age (years)
-                    <input
-                      type="number"
-                      value={calcAgeYears}
-                      onChange={(event) =>
-                        setCalcAgeYears(event.target.value)
-                      }
-                      placeholder="e.g. 55"
-                      className="w-28 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
-                    Serum creatinine (mg/dL)
-                    <input
-                      type="number"
-                      value={calcSerumCreatinine}
-                      onChange={(event) =>
-                        setCalcSerumCreatinine(event.target.value)
-                      }
-                      placeholder="0.9"
-                      className="w-36 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
-                    Target AUC (mg/mL·min)
-                    <input
-                      type="number"
-                      value={calcTargetAuc}
-                      onChange={(event) =>
-                        setCalcTargetAuc(event.target.value)
-                      }
-                      placeholder="5"
-                      className="w-28 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </label>
-                </div>
-                <p className="max-w-md text-sm text-gray-500">
-                  Calvert: Dose (mg) = AUC × (GFR + 25). GFR is estimated
-                  by CrCl (Cockcroft-Gault) from the age, serum creatinine
-                  and weight entered above.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* ================= ORDER TABLE ================= */}
         {activeTab === "Chemotherapy Orders" ? (
           <div className="p-8">
@@ -2177,6 +1786,64 @@ const ChemotherapyOrder: React.FC<{
                 {editError}
               </div>
             )}
+
+            {/* Inputs the Dose Cal formulas use (spec Section 4). */}
+            <div className="mb-4 flex flex-wrap items-end gap-x-6 gap-y-3 rounded-lg border border-gray-200 bg-gray-50 px-5 py-3 text-sm">
+              {[
+                ["Height", formatInput(dosingInputs.heightCm, "cm")],
+                ["Weight", formatInput(dosingInputs.weightKg, "kg")],
+                [
+                  "BSA",
+                  dosingSummary.bsa
+                    ? `${dosingSummary.bsa.bsa} m²${
+                        dosingSummary.bsa.isCapped
+                          ? ` (capped from ${dosingSummary.bsa.uncappedBsa})`
+                          : ""
+                      }`
+                    : "—",
+                ],
+                ["IBW", formatInput(dosingSummary.ibw, "kg")],
+                ["AdjBW", formatInput(dosingSummary.adjBw, "kg")],
+                ["Age", formatInput(dosingInputs.ageYears, "y")],
+                ["Sex", dosingInputs.sex ?? "—"],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    {label}
+                  </p>
+                  <p className="mt-0.5 font-medium capitalize text-gray-900">
+                    {value}
+                  </p>
+                </div>
+              ))}
+
+              {usesCalvert && (
+                <>
+                  <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Serum creatinine (mg/dL)
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={serumCreatinine}
+                      onChange={(event) =>
+                        setSerumCreatinine(event.target.value)
+                      }
+                      placeholder="0.9"
+                      className="w-28 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-normal normal-case text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      CrCl (Cockcroft-Gault)
+                    </p>
+                    <p className="mt-0.5 font-medium text-gray-900">
+                      {formatInput(dosingSummary.crCl, "mL/min")}
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -2190,11 +1857,19 @@ const ChemotherapyOrder: React.FC<{
                     </th>
 
                     <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Dose Cal
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                       Dose
                     </th>
 
                     <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                       Unit
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Patient Dose
                     </th>
 
                     <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
@@ -2207,7 +1882,7 @@ const ChemotherapyOrder: React.FC<{
                   {planLoading && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={7}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
                         Loading chemotherapy orders
@@ -2218,7 +1893,7 @@ const ChemotherapyOrder: React.FC<{
                   {!planLoading && !planError && drugs.length === 0 && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={7}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
                         No chemotherapy orders found for this patient.
@@ -2229,7 +1904,7 @@ const ChemotherapyOrder: React.FC<{
                   {planError && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={7}
                         className="px-6 py-8 text-center text-sm text-red-500"
                       >
                         {planError}
@@ -2254,6 +1929,14 @@ const ChemotherapyOrder: React.FC<{
 
                           <td className="whitespace-nowrap px-3 py-3 text-base text-gray-500">
                             {editDraft.form}
+                          </td>
+
+                          <td className="px-3 py-3">
+                            {renderDoseCalcCell(editDraft, (patch) =>
+                              setEditDraft((previous) =>
+                                previous ? { ...previous, ...patch } : previous
+                              )
+                            )}
                           </td>
 
                           <td className="px-3 py-3">
@@ -2282,6 +1965,12 @@ const ChemotherapyOrder: React.FC<{
                               }
                               className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                             />
+                          </td>
+
+                          <td className="px-3 py-3">
+                            {renderPatientDoseCell(
+                              computePatientDose(editDraft, dosingInputs)
+                            )}
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
@@ -2322,12 +2011,24 @@ const ChemotherapyOrder: React.FC<{
                         {drug.form}
                       </td>
 
+                      <td className="px-3 py-5">
+                        {renderDoseCalcCell(drug, (patch) =>
+                          updatePrimaryDrug(drug.id, patch)
+                        )}
+                      </td>
+
                       <td className="whitespace-nowrap px-3 py-5 text-base text-gray-900">
                         {drug.dose}
                       </td>
 
                       <td className="whitespace-nowrap px-3 py-5 text-base text-blue-500">
                         {drug.unit}
+                      </td>
+
+                      <td className="px-3 py-5">
+                        {renderPatientDoseCell(
+                          computePatientDose(drug, dosingInputs)
+                        )}
                       </td>
 
                       <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">

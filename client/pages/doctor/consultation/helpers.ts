@@ -3,6 +3,7 @@ import { appointmentApi } from "../../../api/appointment.api";
 import { getUser } from "../../../utils/token";
 import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
 import type { FormData, RegimenProtocolDetail } from "./types";
+import type { DosingSnapshot, OrderPlanItem } from "./doseCalculation";
 
 export const formatPickedDate = (date: Date) => {
   const day = String(date.getDate()).padStart(2, "0");
@@ -448,98 +449,18 @@ export const resolveStagingDetailId = async (patientId: string): Promise<string>
   }
 };
 
-/* Fetch the regimen protocol the Treatment Plan selected so an existing
-   plan can be brought in line with it - copying the protocol's cadence
-   (standard_cycles / cycle_interval_days) and display names exactly like
-   the backend's createPlan one-time copy does on first creation. */
-export const loadProtocolSyncData = async (
-  protocolId: string
-): Promise<{
-  source_protocol_id: string;
-  regimen_name: string;
-  regimen_code: string;
-  protocol_name: string;
-  planned_cycles: number;
-  cycle_interval_days: number;
-} | null> => {
-  try {
-    const response = await API.get<{
-      success: boolean;
-      data: RegimenProtocolDetail;
-    }>(`/chemotherapy/regimen-protocols/${encodeURIComponent(protocolId)}`);
-    const protocol = response.data.data;
-    if (!protocol) return null;
-    return {
-      source_protocol_id: protocol.protocol_id,
-      regimen_name: protocol.regimen_name,
-      regimen_code: protocol.regimen_code ?? "",
-      protocol_name: protocol.regimen_name,
-      planned_cycles: protocol.standard_cycles ?? 0,
-      cycle_interval_days: protocol.cycle_interval_days ?? 0,
-    };
-  } catch (error) {
-    console.error("Failed to load regimen protocol for plan sync:", error);
-    return null;
-  }
-};
-
-/* Resolve the cancer context of the patient's latest staging detail so an
-   existing plan can be re-linked when the diagnosis changes. */
-export const loadStagingSyncData = async (
-  stagingDetailId: string
-): Promise<{
-  staging_detail_id: string;
-  cancer_type: string;
-  cancer_subtype: string;
-  cancer_stage: string;
-  cancer_type_id: string;
-  subtype_id: string;
-} | null> => {
-  try {
-    const response = await API.get<{
-      success: boolean;
-      data: {
-        cancer_type_id?: string | null;
-        cancer_subtype_id?: string | null;
-        clinical_stage?: string | null;
-        cancer_types?: { cancer_type?: string | null } | null;
-        cancer_subtypes?: { subtype_name?: string | null } | null;
-      };
-    }>(`/oncology/staging-details/${encodeURIComponent(stagingDetailId)}`);
-    const staging = response.data.data;
-    if (!staging) return null;
-    return {
-      staging_detail_id: stagingDetailId,
-      cancer_type: staging.cancer_types?.cancer_type ?? "",
-      cancer_subtype: staging.cancer_subtypes?.subtype_name ?? "",
-      cancer_stage: staging.clinical_stage ?? "",
-      cancer_type_id: staging.cancer_type_id ?? "",
-      subtype_id: staging.cancer_subtype_id ?? "",
-    };
-  } catch (error) {
-    console.error("Failed to load staging detail for plan sync:", error);
-    return null;
-  }
-};
-
 /* Ensure a chemotherapy plan exists for the patient, returning its id.
    Used by the ChemotherapyOrder Save button and as a safety net before
    the Summary step creates a prescription. Re-uses an existing plan when
-   one is already on record; otherwise POSTs a new one. */
+   one is already on record; otherwise POSTs a new one. `dosing` is the
+   snapshot of the inputs the plan items' calculated_dose came from. */
 export const createChemotherapyPlanForPatient = async (
   patientId: string,
   startDateValue?: string | null,
-  planItems?: Array<{
-    medicine_id: string;
-    drug_role: string;
-    drug_sequence: number;
-    dosage?: number;
-    dosage_unit?: string;
-    administration_route?: string;
-    remarks?: string;
-  }>,
+  planItems?: OrderPlanItem[],
   plannedCycles?: number,
-  discussion?: string | null
+  discussion?: string | null,
+  dosing?: DosingSnapshot
 ): Promise<{ planId: string | null; error?: string }> => {
   const { encounter, scopeError } = await findActiveEncounter(patientId);
   if (!encounter) {
@@ -590,41 +511,17 @@ export const createChemotherapyPlanForPatient = async (
     });
     const existingPlanId = existing.data.data?.chemotherapy_plan_id;
     if (existingPlanId) {
-      /* Resolve the selected protocol + latest staging detail so the
-         existing plan is re-linked to the current selection. Both are
-         null-safe: only what is actually selected gets synced. */
-      const [protocolSync, stagingSync] = await Promise.all([
-        protocolId ? loadProtocolSyncData(protocolId) : Promise.resolve(null),
-        stagingDetailId
-          ? loadStagingSyncData(stagingDetailId)
-          : Promise.resolve(null),
-      ]);
-
-      const planChanges: Record<string, unknown> = {};
-      if (protocolSync) {
-        planChanges.source_protocol_id = protocolSync.source_protocol_id;
-        if (protocolSync.regimen_name) {
-          planChanges.regimen_name = protocolSync.regimen_name;
-          planChanges.protocol_name = protocolSync.regimen_name;
-        }
-        if (protocolSync.regimen_code) {
-          planChanges.regimen_code = protocolSync.regimen_code;
-        }
-        if (protocolSync.planned_cycles > 0) {
-          planChanges.planned_cycles = protocolSync.planned_cycles;
-        }
-        if (protocolSync.cycle_interval_days > 0) {
-          planChanges.cycle_interval_days = protocolSync.cycle_interval_days;
-        }
-      }
-      if (stagingSync) {
-        planChanges.staging_detail_id = stagingSync.staging_detail_id;
-        if (stagingSync.cancer_type) planChanges.cancer_type = stagingSync.cancer_type;
-        if (stagingSync.cancer_subtype) planChanges.cancer_subtype = stagingSync.cancer_subtype;
-        if (stagingSync.cancer_stage) planChanges.cancer_stage = stagingSync.cancer_stage;
-        if (stagingSync.cancer_type_id) planChanges.cancer_type_id = stagingSync.cancer_type_id;
-        if (stagingSync.subtype_id) planChanges.subtype_id = stagingSync.subtype_id;
-      }
+      /* Re-link the existing plan to the current protocol + diagnosis.
+         The server copies the protocol's regimen name / code / cycles and
+         the staging detail's cancer context, so only the ids are sent. A
+         failed re-link (e.g. protocol doesn't match the diagnosis) stops
+         here, before the plan items are replaced with that protocol's
+         drugs. */
+      const planChanges: Record<string, unknown> = {
+        ...(protocolId ? { source_protocol_id: protocolId } : {}),
+        ...(stagingDetailId ? { staging_detail_id: stagingDetailId } : {}),
+        ...(dosing ?? {}),
+      };
 
       if (Object.keys(planChanges).length > 0) {
         try {
@@ -633,10 +530,16 @@ export const createChemotherapyPlanForPatient = async (
             planChanges
           );
         } catch (syncErr: any) {
+          const message =
+            syncErr?.response?.data?.message ?? syncErr?.message;
           console.error(
             "Failed to sync protocol/cancer context onto existing plan:",
-            syncErr?.response?.data?.message ?? syncErr?.message
+            message
           );
+          return {
+            planId: existingPlanId,
+            error: message || "Failed to update the chemotherapy plan.",
+          };
         }
       }
 
@@ -732,6 +635,7 @@ export const createChemotherapyPlanForPatient = async (
       ...(plannedCycles ? { planned_cycles: plannedCycles } : {}),
       ...(planItems && planItems.length > 0 ? { plan_items: planItems } : {}),
       ...(discussion !== undefined ? { discussion: discussion || null } : {}),
+      ...(dosing ?? {}),
     });
     return { planId: response.data.data?.chemotherapy_plan_id ?? null };
   } catch (error: any) {
