@@ -16,6 +16,16 @@ export interface DrugConsumptionRecord {
   is_active: boolean;
 }
 
+/* general_examination_master / treatment_type_master rows. */
+export interface ConsultationOptionRecord {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  display_order: number;
+  is_active: boolean;
+}
+
 export interface PersonalHistoryRecord {
   personal_history_id: string;
   encounter_no: string;
@@ -39,7 +49,9 @@ export interface PersonalHistoryPayload {
 export interface EncounterReportRecord {
   encounter_report_id: string;
   encounter_no: string;
-  lab_test_id: string;
+  /* Either a lab_test_master test, or a test typed by hand (test_name). */
+  lab_test_id: string | null;
+  test_name: string | null;
   report_completed_date: string | null;
   result: string | null;
   impression: string | null;
@@ -51,7 +63,8 @@ export interface EncounterReportRecord {
 }
 
 export interface EncounterReportPayload {
-  lab_test_id: string;
+  lab_test_id?: string | null;
+  test_name?: string | null;
   report_completed_date?: string | null;
   result?: string | null;
   impression?: string | null;
@@ -80,6 +93,30 @@ export const consultationApi = {
   createCustomDrugConsumption: (data: { name: string; description?: string }) =>
     API.post<{ success: boolean; message: string; data: DrugConsumptionRecord }>(
       "/consultation/masters/drug-consumptions/custom",
+      data,
+    ),
+
+  getGeneralExaminationFindings: () =>
+    API.get<{ success: boolean; data: ConsultationOptionRecord[] }>(
+      "/consultation/masters/general-examination-findings",
+      { params: { isActive: true } },
+    ),
+
+  createCustomGeneralExaminationFinding: (data: { name: string; description?: string }) =>
+    API.post<{ success: boolean; message: string; data: ConsultationOptionRecord }>(
+      "/consultation/masters/general-examination-findings/custom",
+      data,
+    ),
+
+  getTreatmentTypes: () =>
+    API.get<{ success: boolean; data: ConsultationOptionRecord[] }>(
+      "/consultation/masters/treatment-types",
+      { params: { isActive: true } },
+    ),
+
+  createCustomTreatmentType: (data: { name: string; description?: string }) =>
+    API.post<{ success: boolean; message: string; data: ConsultationOptionRecord }>(
+      "/consultation/masters/treatment-types/custom",
       data,
     ),
 

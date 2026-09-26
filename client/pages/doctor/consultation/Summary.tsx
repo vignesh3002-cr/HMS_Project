@@ -376,6 +376,9 @@ const Summary: React.FC<{
             enc?.general_examination_lymphadenopathy
               ? "Lymphadenopathy"
               : "",
+            ...(enc?.general_examination_others ?? []).map(
+              (finding) => finding.name
+            ),
           ].filter(Boolean)
         );
         setSummaryPastHistoryTreatment(
@@ -1069,7 +1072,7 @@ const Summary: React.FC<{
   const handleEditReport = (report: EncounterReportRecord) => {
     setReportForm({
       encounter_report_id: report.encounter_report_id,
-      lab_test_id: report.lab_test_id,
+      lab_test_id: report.lab_test_id ?? "",
       report_completed_date: report.report_completed_date
         ? report.report_completed_date.slice(0, 10)
         : "",
@@ -1589,7 +1592,9 @@ const Summary: React.FC<{
                     summaryReports.map((report) => (
                       <tr key={report.encounter_report_id}>
                         <td className="py-3">
-                          {report.lab_test_master?.test_name ?? "—"}
+                          {report.lab_test_master?.test_name ??
+                            report.test_name ??
+                            "—"}
                         </td>
                         <td className="py-3">
                           {report.report_completed_date
