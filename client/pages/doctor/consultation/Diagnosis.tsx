@@ -61,9 +61,6 @@ const hasDraftContent = (raw: string): boolean => {
       "progressionDate",
       "relapseDate",
       "preDiagnosis",
-      "molecularTesting",
-      "molecularTestingNote",
-      "molecularTestingDate",
       "diseaseStatus",
       "survivor",
       "type",
@@ -93,21 +90,6 @@ const hasDraftContent = (raw: string): boolean => {
     return true;
   }
 };
-
-/* Molecular tests selectable under the Diagnosis > Molecular Testing
-   section. Picking a test reveals the note / date fields. */
-const MOLECULAR_TESTS = [
-  "PCR / RT-PCR",
-  "NGS (Next-Generation Sequencing)",
-  "FISH",
-  "ISH / CISH",
-  "IHC",
-  "Liquid biopsy / ctDNA",
-  "Gene-expression profiling",
-  "MSI / MMR testing",
-  "TMB testing",
-  "BRCA1/BRCA2 and HRR testing",
-];
 
 /* Laterality has no per-cancer-type master; the same list is offered under
    every selected cancer type. */
@@ -841,9 +823,6 @@ const Diagnosis: React.FC<{
     progressionDate: "",
     relapseDate: "",
     preDiagnosis: "",
-    molecularTesting: "",
-    molecularTestingNote: "",
-    molecularTestingDate: "",
     diseaseStatus: "",
     laterality: [],
     bodySite: [],
@@ -902,8 +881,8 @@ const Diagnosis: React.FC<{
   }, [diagnosisDraftKey, resolvedPatientId]);
 
   /* One-time server hydration: when there's no local draft yet, pull the
-     latest staging detail and seed the visit date + suggested molecular
-     test fields so a fresh browser shows what was previously saved. A
+     latest staging detail and seed the visit date, diagnosis dates and
+     notes so a fresh browser shows what was previously saved. A
      local draft always wins over this server seed. Runs before the
      draft-save effect so the empty initial draft can't suppress it. */
   useEffect(() => {
@@ -925,9 +904,6 @@ const Diagnosis: React.FC<{
             diagnosis_date?: string | null;
             progression_date?: string | null;
             relapse_date?: string | null;
-            suggested_molecular_test?: string | null;
-            suggested_molecular_test_note?: string | null;
-            suggested_molecular_test_date?: string | null;
             notes?: string | null;
           } | null;
         }>(
@@ -946,18 +922,6 @@ const Diagnosis: React.FC<{
             toPickedDateValue(detail.progression_date),
           relapseDate:
             previous.relapseDate || toPickedDateValue(detail.relapse_date),
-          molecularTesting:
-            previous.molecularTesting ||
-            detail.suggested_molecular_test ||
-            "",
-          molecularTestingNote:
-            previous.molecularTestingNote ||
-            detail.suggested_molecular_test_note ||
-            "",
-          molecularTestingDate:
-            previous.molecularTestingDate ||
-            toDateInputValue(detail.suggested_molecular_test_date ?? "") ||
-            "",
           notes: previous.notes || detail.notes || "",
         }));
         const visitDateIso = toDateInputValue(detail.visit_date ?? "");
@@ -1960,15 +1924,6 @@ const Diagnosis: React.FC<{
           ? { progression_date: progressionDateIso }
           : {}),
         ...(relapseDateIso ? { relapse_date: relapseDateIso } : {}),
-        ...(formData.molecularTesting
-          ? { suggested_molecular_test: formData.molecularTesting }
-          : {}),
-        ...(formData.molecularTestingNote
-          ? { suggested_molecular_test_note: formData.molecularTestingNote }
-          : {}),
-        ...(formData.molecularTestingDate
-          ? { suggested_molecular_test_date: formData.molecularTestingDate }
-          : {}),
         ...(formData.notes.trim() ? { notes: formData.notes.trim() } : {}),
       };
 
@@ -2302,61 +2257,6 @@ const Diagnosis: React.FC<{
                 placeholder="Select metastasis site(s)"
               />
             </div>
-          )}
-
-          {/* Molecular Testing */}
-          <DiagnosisCheckboxSelect
-            title="Molecular Testing"
-            options={MOLECULAR_TESTS}
-            value={formData.molecularTesting}
-            onChange={(value) =>
-              setFormData((previous) => ({
-                ...previous,
-                molecularTesting: value,
-              }))
-            }
-            placeholder="Select Molecular Testing"
-          />
-
-          {formData.molecularTesting && (
-            <>
-              <div>
-                <label
-                  htmlFor="molecularTestingNote"
-                  className="mb-2 block text-sm font-semibold text-gray-600"
-                >
-                  Enter Note
-                </label>
-
-                <input
-                  id="molecularTestingNote"
-                  name="molecularTestingNote"
-                  type="text"
-                  value={formData.molecularTestingNote}
-                  onChange={handleChange}
-                  placeholder="Type a note..."
-                  className="block w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="molecularTestingDate"
-                  className="mb-2 block text-sm font-semibold text-gray-600"
-                >
-                  Select Date
-                </label>
-
-                <input
-                  id="molecularTestingDate"
-                  name="molecularTestingDate"
-                  type="date"
-                  value={formData.molecularTestingDate}
-                  onChange={handleChange}
-                  className="block w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
-                />
-              </div>
-            </>
           )}
 
           {/* ICD Code */}

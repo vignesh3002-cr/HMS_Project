@@ -26,9 +26,6 @@ export type FormData = {
   progressionDate: string;
   relapseDate: string;
   preDiagnosis: string;
-  molecularTesting: string;
-  molecularTestingNote: string;
-  molecularTestingDate: string;
   diseaseStatus: string;
   /* Laterality / Body Site / Grade / Score are grouped per selected cancer
      type like T/N/M; values are qualified as `${cancerType}|${label}`. */

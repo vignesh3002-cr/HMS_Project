@@ -116,6 +116,17 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
   const [reportsTestDate, setReportsTestDate] = useState("");
   const [reportsTestResult, setReportsTestResult] = useState("");
   const [reportsTestImpression, setReportsTestImpression] = useState("");
+
+  /* Molecular Testing (moved here from the Diagnosis tab): one row per test
+     per visit in encounter_molecular_test. A test that isn't listed is
+     typed by hand and saved for this patient only. */
+  const [molecularTestOptions, setMolecularTestOptions] = useState<string[]>(
+    []
+  );
+  const [molecularTest, setMolecularTest] = useState("");
+  const [molecularTestDate, setMolecularTestDate] = useState("");
+  const [molecularTestResult, setMolecularTestResult] = useState("");
+  const [molecularTestImpression, setMolecularTestImpression] = useState("");
   const [reportsText, setReportsText] = useState("");
 
   const [chiefComplaint, setChiefComplaint] = useState("");
@@ -297,6 +308,14 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
         console.error("Failed to load treatment types:", error)
       );
     consultationApi
+      .getMolecularTestOptions()
+      .then((response) => {
+        if (!cancelled) setMolecularTestOptions(response.data.data ?? []);
+      })
+      .catch((error) =>
+        console.error("Failed to load molecular test options:", error)
+      );
+    consultationApi
       .getDietTypes()
       .then((response) => {
         if (!cancelled) setDietTypeOptions(response.data.data ?? []);
@@ -339,6 +358,31 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
   /* Master values are saved as {code, name}; a value that isn't in the
      master (an older free-text entry) keeps the "Others" item shape. */
+  /* Show the visit's most recent saved molecular test, so a saved (or
+     migrated) value is visible when the consultation is reopened. */
+  useEffect(() => {
+    const encounterNo = encounter?.encounter_no;
+    if (!encounterNo) return;
+    let cancelled = false;
+    consultationApi
+      .getMolecularTests(encounterNo)
+      .then((response) => {
+        if (cancelled) return;
+        const rows = response.data.data ?? [];
+        const latest = rows[rows.length - 1];
+        setMolecularTest(latest?.test_name ?? "");
+        setMolecularTestDate(latest?.test_date?.slice(0, 10) ?? "");
+        setMolecularTestResult(latest?.result ?? "");
+        setMolecularTestImpression(latest?.impression ?? "");
+      })
+      .catch((error) =>
+        console.error("Failed to load molecular tests:", error)
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [encounter?.encounter_no]);
+
   const buildPersonalHistoryItems = (
     selectedNames: string[],
     options: ImmunizationRecord[] | DrugConsumptionRecord[]
@@ -733,6 +777,41 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     }
   };
 
+  /* Persists the Molecular Testing form into encounter_molecular_test,
+     upserting the row for the selected test (matched by name) so repeated
+     saves never duplicate it. */
+  const persistMolecularTest = async (targetEncounterNo: string) => {
+    const testName = molecularTest.trim();
+    if (!testName) return;
+    try {
+      const existingTests = await consultationApi.getMolecularTests(
+        targetEncounterNo
+      );
+      const existing = (existingTests.data?.data ?? []).find(
+        (row) => row.test_name.toLowerCase() === testName.toLowerCase()
+      );
+      const payload = {
+        test_name: testName,
+        test_date: molecularTestDate || null,
+        result: molecularTestResult || null,
+        impression: molecularTestImpression || null,
+      };
+      if (existing) {
+        await consultationApi.updateMolecularTest(
+          existing.encounter_molecular_test_id,
+          payload
+        );
+      } else {
+        await consultationApi.addMolecularTest(targetEncounterNo, payload);
+      }
+    } catch (error: any) {
+      console.error(
+        "Failed to save molecular test:",
+        error?.response?.data?.message ?? error?.message
+      );
+    }
+  };
+
   /* ============================================================
      NEXT
      Saves the whole Consultation step, then moves on: the Clinical
@@ -762,6 +841,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
         (await clinicalDetailsRef.current?.handleSave()) ?? true;
       await persistConsultation(encounter);
       await persistReportsPrevious(encounter.encounter_no);
+      await persistMolecularTest(encounter.encounter_no);
       const adviceResult = await saveAdvice(encounter);
 
       const failedParts = [
@@ -1581,6 +1661,86 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
           onChange={(text) => setPastHistory(text)}
           placeholder="Type the patient's past history..."
         />
+
+      </div>
+
+      {/* MOLECULAR TESTING */}
+
+      <div className="flex flex-col gap-2">
+
+        <label className="text-xs font-bold leading-4 text-slate-500">
+          Molecular Testing
+        </label>
+
+        <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+
+            {/* SELECT TEST */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                Select Test
+              </label>
+
+              {/* Not in the list: the typed name is used for this
+                  patient only. */}
+              <SingleSelectDropdown
+                options={molecularTestOptions}
+                value={molecularTest}
+                onValueChange={setMolecularTest}
+                onCreateOption={setMolecularTest}
+                createLabel="Use"
+                placeholder="Select or type a test"
+                className="h-[38px] rounded-md border-slate-200 text-slate-700 shadow-none"
+              />
+            </div>
+
+            {/* DATE / RESULT / IMPRESSION */}
+            {molecularTest && (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    value={molecularTestDate}
+                    onChange={(event) =>
+                      setMolecularTestDate(event.target.value)
+                    }
+                    className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    Enter Result
+                  </label>
+                  <textarea
+                    value={molecularTestResult}
+                    onChange={(event) =>
+                      setMolecularTestResult(event.target.value)
+                    }
+                    placeholder="Type the result..."
+                    className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    Enter Impression
+                  </label>
+                  <textarea
+                    value={molecularTestImpression}
+                    onChange={(event) =>
+                      setMolecularTestImpression(event.target.value)
+                    }
+                    placeholder="Type the impression..."
+                    className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+              </>
+            )}
+
+          </div>
 
       </div>
 

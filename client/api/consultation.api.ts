@@ -62,6 +62,24 @@ export interface EncounterReportRecord {
   } | null;
 }
 
+/* Consultation > Patient Details > Molecular Testing (one row per test
+   per visit). test_name is a listed test or one typed by hand. */
+export interface EncounterMolecularTestRecord {
+  encounter_molecular_test_id: string;
+  encounter_no: string;
+  test_name: string;
+  test_date: string | null;
+  result: string | null;
+  impression: string | null;
+}
+
+export interface EncounterMolecularTestPayload {
+  test_name: string;
+  test_date?: string | null;
+  result?: string | null;
+  impression?: string | null;
+}
+
 export interface EncounterReportPayload {
   lab_test_id?: string | null;
   test_name?: string | null;
@@ -120,6 +138,11 @@ export const consultationApi = {
       data,
     ),
 
+  getMolecularTestOptions: () =>
+    API.get<{ success: boolean; data: string[] }>(
+      "/consultation/masters/molecular-tests",
+    ),
+
   getDietTypes: () =>
     API.get<{ success: boolean; data: string[] }>("/consultation/masters/diet-types"),
 
@@ -156,5 +179,31 @@ export const consultationApi = {
   removeReport: (encounterReportId: string) =>
     API.delete<{ success: boolean; message: string }>(
       `/consultation/reports/${encounterReportId}`,
+    ),
+
+  // ---------------- Encounter molecular tests ----------------
+  getMolecularTests: (encounterNo: string) =>
+    API.get<{ success: boolean; data: EncounterMolecularTestRecord[] }>(
+      `/consultation/encounters/${encounterNo}/molecular-tests`,
+    ),
+
+  addMolecularTest: (encounterNo: string, data: EncounterMolecularTestPayload) =>
+    API.post<{ success: boolean; message: string; data: EncounterMolecularTestRecord }>(
+      `/consultation/encounters/${encounterNo}/molecular-tests`,
+      data,
+    ),
+
+  updateMolecularTest: (
+    encounterMolecularTestId: string,
+    data: Partial<EncounterMolecularTestPayload>,
+  ) =>
+    API.put<{ success: boolean; message: string; data: EncounterMolecularTestRecord }>(
+      `/consultation/molecular-tests/${encounterMolecularTestId}`,
+      data,
+    ),
+
+  removeMolecularTest: (encounterMolecularTestId: string) =>
+    API.delete<{ success: boolean; message: string }>(
+      `/consultation/molecular-tests/${encounterMolecularTestId}`,
     ),
 };
