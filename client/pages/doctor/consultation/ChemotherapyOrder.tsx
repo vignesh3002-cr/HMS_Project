@@ -1788,62 +1788,7 @@ const ChemotherapyOrder: React.FC<{
             )}
 
             {/* Inputs the Dose Cal formulas use (spec Section 4). */}
-            <div className="mb-4 flex flex-wrap items-end gap-x-6 gap-y-3 rounded-lg border border-gray-200 bg-gray-50 px-5 py-3 text-sm">
-              {[
-                ["Height", formatInput(dosingInputs.heightCm, "cm")],
-                ["Weight", formatInput(dosingInputs.weightKg, "kg")],
-                [
-                  "BSA",
-                  dosingSummary.bsa
-                    ? `${dosingSummary.bsa.bsa} m²${
-                        dosingSummary.bsa.isCapped
-                          ? ` (capped from ${dosingSummary.bsa.uncappedBsa})`
-                          : ""
-                      }`
-                    : "—",
-                ],
-                ["IBW", formatInput(dosingSummary.ibw, "kg")],
-                ["AdjBW", formatInput(dosingSummary.adjBw, "kg")],
-                ["Age", formatInput(dosingInputs.ageYears, "y")],
-                ["Sex", dosingInputs.sex ?? "—"],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    {label}
-                  </p>
-                  <p className="mt-0.5 font-medium capitalize text-gray-900">
-                    {value}
-                  </p>
-                </div>
-              ))}
 
-              {usesCalvert && (
-                <>
-                  <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Serum creatinine (mg/dL)
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      value={serumCreatinine}
-                      onChange={(event) =>
-                        setSerumCreatinine(event.target.value)
-                      }
-                      placeholder="0.9"
-                      className="w-28 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-normal normal-case text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </label>
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      CrCl (Cockcroft-Gault)
-                    </p>
-                    <p className="mt-0.5 font-medium text-gray-900">
-                      {formatInput(dosingSummary.crCl, "mL/min")}
-                    </p>
-                  </div>
-                </>
-              )}
-            </div>
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">

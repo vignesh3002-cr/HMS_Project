@@ -91,15 +91,10 @@ const hasDraftContent = (raw: string): boolean => {
   }
 };
 
-/* Laterality has no per-cancer-type master; the same list is offered under
-   every selected cancer type. */
-const LATERALITY_OPTIONS = [
-  "Left",
-  "Right",
-  "Bilateral",
-  "Midline",
-  "Not Applicable",
-];
+/* Laterality values the staging tables accept. Offered only under the
+   selected cancer types it applies to (cancer type laterality_applicable:
+   paired organs - Breast, Kidney, Lung, Ovarian, Prostate). */
+const LATERALITY_OPTIONS = ["Left", "Right", "Bilateral"];
 
 /* Fallback Body Site list for cancer types with no anatomical_site_master
    rows. */
@@ -130,6 +125,7 @@ type CancerTypeItem = {
   cancer_type: string;
   icd10: string | null;
   staging_system: string | null;
+  laterality_applicable?: boolean;
 };
 
 type CancerSubtypeItem = {
@@ -156,6 +152,21 @@ const splitQualified = (value: string) => {
   return pipe === -1
     ? { cancerType: "", raw: value }
     : { cancerType: value.slice(0, pipe), raw: value.slice(pipe + 1) };
+};
+
+/* AJCC order for T / N / M values: Tx, T0, Tis, T1, T1a ... T4d. */
+const TNM_SUFFIX_ORDER = ["", "mi", "a", "b", "c", "d"];
+const tnmSortKey = (value: string): [number, number] => {
+  const match = value.match(/^[TNM](x|is|\d)(.*)$/i);
+  if (!match) return [99, 0];
+  const head = match[1].toLowerCase();
+  const number = head === "x" ? -1 : head === "is" ? 0.5 : Number(head);
+  return [number, TNM_SUFFIX_ORDER.indexOf(match[2].toLowerCase())];
+};
+const compareTnm = (a: string, b: string) => {
+  const [an, as] = tnmSortKey(a);
+  const [bn, bs] = tnmSortKey(b);
+  return an - bn || as - bs;
 };
 
 const buildCheckboxGroups = (
@@ -770,6 +781,10 @@ type StagingReferenceItem = {
   risk_criteria: string | null;
   os_5yr_approx: string | null;
   guideline_source: string | null;
+  /* Storable T / N / M values named by tnm_criteria (parsed server-side). */
+  t_values?: string[];
+  n_values?: string[];
+  m_values?: string[];
 };
 
 type AnatomicalSiteItem = {
@@ -1117,7 +1132,6 @@ const Diagnosis: React.FC<{
 
   const [stageLabels, setStageLabels] = useState<StageOption[]>([]);
 
-  const [tnmStages, setTnmStages] = useState<string[]>([]);
   const [tOptions, setTOptions] = useState<StageOption[]>([]);
   const [nOptions, setNOptions] = useState<StageOption[]>([]);
   const [mOptions, setMOptions] = useState<StageOption[]>([]);
@@ -1289,7 +1303,6 @@ const Diagnosis: React.FC<{
     const requestId = ++stagingRequestRef.current;
     setDiagnosisLoading(true);
     setDiagnosisError("");
-    setTnmStages([]);
     setTOptions([]);
     setNOptions([]);
     setMOptions([]);
@@ -1311,14 +1324,9 @@ const Diagnosis: React.FC<{
         if (requestId !== stagingRequestRef.current) return;
 
         const seenStage = new Set<string>();
-        const seenTnm = new Set<string>();
-        const seenT = new Set<string>();
-        const seenN = new Set<string>();
-        const seenM = new Set<string>();
         const seenGrade = new Set<string>();
 
         const stageOptions: StageOption[] = [];
-        const tnmOptionsAggregated: string[] = [];
         const tOptionsAggregated: StageOption[] = [];
         const nOptionsAggregated: StageOption[] = [];
         const mOptionsAggregated: StageOption[] = [];
@@ -1327,7 +1335,6 @@ const Diagnosis: React.FC<{
         for (const result of results) {
           const { cancerTypeName, items } = result;
 
-          const tnmOptions: string[] = [];
           for (const item of items) {
             const stageLabel = item.stage_label;
             if (
@@ -1336,14 +1343,6 @@ const Diagnosis: React.FC<{
             ) {
               seenStage.add(`${cancerTypeName}|${stageLabel}`);
               stageOptions.push({ value: stageLabel, cancerType: cancerTypeName });
-            }
-            const criteria = (item.tnm_criteria ?? "")
-              .replace(/\([^)]*\)/g, " ")
-              .replace(/\s+/g, " ")
-              .replace(/\s*[-“]\s*$/g, "")
-              .trim();
-            if (criteria && /(\b[TNM]\d|\bAny\s+[TNM])/i.test(criteria)) {
-              if (!tnmOptions.includes(criteria)) tnmOptions.push(criteria);
             }
             const gradeSource = [
               item.stage_label,
@@ -1367,65 +1366,25 @@ const Diagnosis: React.FC<{
             }
           }
 
-          for (const criteria of tnmOptions) {
-            if (!seenTnm.has(criteria)) {
-              seenTnm.add(criteria);
-              tnmOptionsAggregated.push(criteria);
-            }
+          /* T / N / M options: the storable values each criteria phrase
+             names, parsed server-side, merged per cancer type in AJCC
+             order - no "T1a/b/c"-style labels that can't be saved. */
+          const valuesOf = (key: "t_values" | "n_values" | "m_values") =>
+            [...new Set(items.flatMap((item) => item[key] ?? []))].sort(
+              compareTnm
+            );
+          for (const value of valuesOf("t_values")) {
+            tOptionsAggregated.push({ value, cancerType: cancerTypeName });
           }
-
-          const expandTnmRange = (token: string): string[] => {
-            const rangeMatch = token.match(/^([TNM])(\d+)([a-z])?-([a-z\d]+)$/i);
-            if (!rangeMatch) return [token];
-            const prefix = rangeMatch[1].toUpperCase();
-            const startNum = parseInt(rangeMatch[2], 10);
-            const startLetter = rangeMatch[3] || "";
-            const endStr = rangeMatch[4];
-            const results: string[] = [];
-            const endNum = parseInt(endStr, 10);
-            if (!startLetter && !isNaN(endNum)) {
-              for (let i = startNum; i <= endNum; i++) results.push(`${prefix}${i}`);
-            } else if (startLetter && endStr.length === 1) {
-              const startCode = startLetter.charCodeAt(0);
-              const endCode = endStr.charCodeAt(0);
-              for (let c = startCode; c <= endCode; c++) results.push(`${prefix}${startNum}${String.fromCharCode(c)}`);
-            }
-            return results.length > 0 ? results : [token];
-          };
-
-          const tSet = new Set<string>();
-          const nSet = new Set<string>();
-          const mSet = new Set<string>();
-          for (const option of tnmOptions) {
-            const parts = option.split(/\s+/);
-            for (const part of parts) {
-              if (/^T\d/i.test(part)) expandTnmRange(part).forEach((v) => tSet.add(v));
-              else if (/^N\d/i.test(part) || /^N[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => nSet.add(v));
-              else if (/^M\d/i.test(part) || /^M[a-z]/i.test(part)) expandTnmRange(part).forEach((v) => mSet.add(v));
-            }
+          for (const value of valuesOf("n_values")) {
+            nOptionsAggregated.push({ value, cancerType: cancerTypeName });
           }
-          for (const value of [...tSet].sort()) {
-            if (!seenT.has(`${cancerTypeName}|${value}`)) {
-              seenT.add(`${cancerTypeName}|${value}`);
-              tOptionsAggregated.push({ value, cancerType: cancerTypeName });
-            }
-          }
-          for (const value of [...nSet].sort()) {
-            if (!seenN.has(`${cancerTypeName}|${value}`)) {
-              seenN.add(`${cancerTypeName}|${value}`);
-              nOptionsAggregated.push({ value, cancerType: cancerTypeName });
-            }
-          }
-          for (const value of [...mSet].sort()) {
-            if (!seenM.has(`${cancerTypeName}|${value}`)) {
-              seenM.add(`${cancerTypeName}|${value}`);
-              mOptionsAggregated.push({ value, cancerType: cancerTypeName });
-            }
+          for (const value of valuesOf("m_values")) {
+            mOptionsAggregated.push({ value, cancerType: cancerTypeName });
           }
         }
 
         setStageLabels(stageOptions);
-        setTnmStages(tnmOptionsAggregated.sort());
         setTOptions(tOptionsAggregated);
         setNOptions(nOptionsAggregated);
         setMOptions(mOptionsAggregated);
@@ -1621,11 +1580,25 @@ const Diagnosis: React.FC<{
         ? [formData.type]
         : [];
 
+  /* Laterality only under the selected cancer types it applies to; older
+     picks for other types (or retired values like "Midline") are ignored. */
+  const lateralityTypes = optionTypes.filter(
+    (cancerType) =>
+      cancerTypes.find((item) => item.cancer_type === cancerType)
+        ?.laterality_applicable
+  );
   const lateralityGroups = buildCheckboxGroups(
-    optionTypes.flatMap((cancerType) =>
+    lateralityTypes.flatMap((cancerType) =>
       LATERALITY_OPTIONS.map((value) => ({ value, cancerType }))
     )
   );
+  const lateralitySelected = formData.laterality.filter((value) => {
+    const { cancerType, raw } = splitQualified(value);
+    return (
+      lateralityTypes.includes(cancerType || formData.type) &&
+      LATERALITY_OPTIONS.includes(raw)
+    );
+  });
 
   const bodySiteGroups = buildCheckboxGroups(
     optionTypes.flatMap((cancerType) => {
@@ -1792,6 +1765,50 @@ const Diagnosis: React.FC<{
       }
     }
 
+    /* T / N / M picked from an older option list (e.g. "T1a/b/c") can't be
+       stored - ask for a re-pick instead of failing on save. */
+    const staleChecks: [string, string[], StageOption[]][] = [
+      ["T Stage", formData.tStage, tOptions],
+      ["N Stage", formData.nStage, nOptions],
+      ["M Stage", formData.mStage, mOptions],
+    ];
+    for (const [label, values, options] of staleChecks) {
+      for (const value of values) {
+        const { cancerType, raw } = splitQualified(value);
+        const type = cancerType || formData.type;
+        const typeOptions = options.filter(
+          (option) => option.cancerType === type
+        );
+        if (
+          typeOptions.length > 0 &&
+          !typeOptions.some((option) => option.value === raw)
+        ) {
+          setDiagnosisError(
+            `Please re-select the ${label} for ${type}: "${raw}" is not a valid value.`
+          );
+          return;
+        }
+      }
+    }
+
+    /* The one value picked under a cancer type (one per type); a legacy
+       unqualified value belongs to the primary type. Each cancer type's
+       laterality / T / N / M is stored on its own row (primary: the
+       staging detail; others: additional_cancers). */
+    const valueFor = (values: string[], cancerType: string) => {
+      const match = values.find((value) => {
+        const parsed = splitQualified(value);
+        return parsed.cancerType
+          ? parsed.cancerType === cancerType
+          : cancerType === formData.type;
+      });
+      return match ? splitQualified(match).raw : undefined;
+    };
+    const lateralityFor = (cancerType: string) =>
+      lateralityTypes.includes(cancerType)
+        ? valueFor(lateralitySelected, cancerType)
+        : undefined;
+
     /* The histopathology ticked under a cancer type (one per type). The
        primary one must come from under the primary type - not simply the
        first box ticked, which may belong to another selected type. */
@@ -1836,7 +1853,16 @@ const Diagnosis: React.FC<{
         .map((item) => ({
           cancer_type_id: item.cancer_type_id,
           cancer_subtype_id: subtypeFor(item.cancer_type)?.subtype_id ?? null,
+          laterality: lateralityFor(item.cancer_type) ?? null,
+          t_stage: valueFor(formData.tStage, item.cancer_type) ?? null,
+          n_stage: valueFor(formData.nStage, item.cancer_type) ?? null,
+          m_stage: valueFor(formData.mStage, item.cancer_type) ?? null,
         }));
+
+      const primaryTStage = valueFor(formData.tStage, formData.type);
+      const primaryNStage = valueFor(formData.nStage, formData.type);
+      const primaryMStage = valueFor(formData.mStage, formData.type);
+      const primaryLaterality = lateralityFor(formData.type);
 
       const diagnosisId = await resolveDiagnosisId(
         resolvedPatientId,
@@ -1874,27 +1900,9 @@ const Diagnosis: React.FC<{
                 .join(", "),
             }
           : {}),
-        ...(formData.tStage.length > 0
-          ? {
-              t_stage: formData.tStage
-                .map((stage) => splitQualified(stage).raw)
-                .join(", "),
-            }
-          : {}),
-        ...(formData.nStage.length > 0
-          ? {
-              n_stage: formData.nStage
-                .map((stage) => splitQualified(stage).raw)
-                .join(", "),
-            }
-          : {}),
-        ...(formData.mStage.length > 0
-          ? {
-              m_stage: formData.mStage
-                .map((stage) => splitQualified(stage).raw)
-                .join(", "),
-            }
-          : {}),
+        ...(primaryTStage ? { t_stage: primaryTStage } : {}),
+        ...(primaryNStage ? { n_stage: primaryNStage } : {}),
+        ...(primaryMStage ? { m_stage: primaryMStage } : {}),
         ...(metastasisSites.length > 0
           ? { metastasis_sites: metastasisSites }
           : {}),
@@ -1904,9 +1912,7 @@ const Diagnosis: React.FC<{
         ...(formData.diseaseStatus
           ? { disease_status: formData.diseaseStatus }
           : {}),
-        ...(formData.laterality.length > 0
-          ? { laterality: joinRaw(formData.laterality) }
-          : {}),
+        ...(primaryLaterality ? { laterality: primaryLaterality } : {}),
         ...(formData.bodySite.length > 0
           ? { site: joinRaw(formData.bodySite) }
           : {}),
@@ -2124,13 +2130,15 @@ const Diagnosis: React.FC<{
             />
           </div>
 
-          {/* Laterality */}
-          <DiagnosisCheckboxList
-            title="Laterality"
-            groups={lateralityGroups}
-            selected={formData.laterality}
-            onToggle={handleMultiToggle("laterality")}
-          />
+          {/* Laterality - only when a selected cancer type has one */}
+          {lateralityTypes.length > 0 && (
+            <DiagnosisCheckboxList
+              title="Laterality"
+              groups={lateralityGroups}
+              selected={lateralitySelected}
+              onToggle={handleMultiToggle("laterality")}
+            />
+          )}
 
           {/* Body Site */}
           <DiagnosisCheckboxList
