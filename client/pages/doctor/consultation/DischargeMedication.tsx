@@ -268,6 +268,9 @@ const DischargeMedication: React.FC<{
                 premedicationDrugs?: Drug[];
                 supportiveDrugs?: Drug[];
                 dosingInputs?: DosingInputs;
+                planId?: string | null;
+                orderCycle?: number | null;
+                orderDay?: number | null;
               })
             : null;
         } catch (error) {
@@ -291,6 +294,12 @@ const DischargeMedication: React.FC<{
         (draft?.supportiveDrugs ?? []).map(normalizeLegacyDraftDrug),
         dosingInputs
       );
+      /* The draft's rows are the order of the cycle day it was saved
+         for; hydration is left as the Chemotherapy Order step saved it. */
+      const orderTarget =
+        draft?.planId && draft?.orderCycle && draft?.orderDay
+          ? { planId: draft.planId, cycle: draft.orderCycle, day: draft.orderDay }
+          : undefined;
 
       const planStartDate =
         toIsoDate(draft?.startDate) ||
@@ -305,7 +314,8 @@ const DischargeMedication: React.FC<{
         planItems.length > 0 ? planItems : undefined,
         undefined,
         undefined,
-        draft?.dosingInputs ? buildDosingSnapshot(draft.dosingInputs) : undefined
+        draft?.dosingInputs ? buildDosingSnapshot(draft.dosingInputs) : undefined,
+        { order: orderTarget }
       );
       if (error) {
         setMedsError(error);

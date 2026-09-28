@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import API from "../../../api/axios";
+import { isChemoPlanClosed } from "../../../api/chemotherapy.api";
 import { getUser } from "../../../utils/token";
 import { Calendar } from "../../../components/ui/calendar";
 import {
@@ -53,12 +54,14 @@ const syncExistingPlanProtocol = async (
        admins don't get a silent 403 that leaves it unchanged. */
     const existing = await API.get<{
       success: boolean;
-      data: { chemotherapy_plan_id: string } | null;
+      data: { chemotherapy_plan_id: string; treatment_status?: string | null } | null;
     }>("/chemotherapy/plans/latest-for-patient", {
       params: { patient_id: patientId },
     });
     const existingPlanId = existing.data.data?.chemotherapy_plan_id;
-    if (!existingPlanId) return;
+    /* A completed / discontinued course keeps its protocol; Save starts
+       the next course with the new one. */
+    if (!existingPlanId || isChemoPlanClosed(existing.data.data)) return;
 
     /* The server copies the protocol's regimen name / code / cycles. */
     await API.put(`/chemotherapy/plans/${existingPlanId}`, {
@@ -368,11 +371,16 @@ const TreatmentPlan: React.FC<{
         toIsoDate(plannedStartDate) ||
         toIsoDate(new Date().toISOString());
 
+      /* The only step that may start a new course once the previous
+         plan is completed / discontinued / cancelled. */
       const { error } = await createChemotherapyPlanForPatient(
         resolvedPatientId,
         planStartDate,
         undefined,
-        undefined
+        undefined,
+        undefined,
+        undefined,
+        { allowNewCourse: true }
       );
 
       if (error) {

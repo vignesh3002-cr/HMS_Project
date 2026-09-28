@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import API from "../../../api/axios";
+import { isChemoPlanClosed } from "../../../api/chemotherapy.api";
 import { getUser } from "../../../utils/token";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import { MultiSelectDropdown } from "../../../components/ui/multi-select-dropdown";
@@ -1982,7 +1983,7 @@ const Diagnosis: React.FC<{
         try {
           const existingPlan = await API.get<{
             success: boolean;
-            data: { chemotherapy_plan_id: string } | null;
+            data: { chemotherapy_plan_id: string; treatment_status?: string | null } | null;
           }>("/chemotherapy/plans/latest-for-patient", {
             params: {
               patient_id: resolvedPatientId,
@@ -1990,7 +1991,8 @@ const Diagnosis: React.FC<{
           });
           const existingPlanId =
             existingPlan.data.data?.chemotherapy_plan_id;
-          if (existingPlanId) {
+          /* A closed course keeps the diagnosis it was treated for. */
+          if (existingPlanId && !isChemoPlanClosed(existingPlan.data.data)) {
             /* The server refreshes the plan's cancer type / subtype /
                stage from this staging detail. */
             await API.put(`/chemotherapy/plans/${existingPlanId}`, {

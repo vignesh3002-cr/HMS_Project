@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Printer, Download, Trash2 } from "lucide-react";
-import { chemotherapyApi } from "@/api/chemotherapy.api";
+import { chemotherapyApi, chemoPlanCurrentItems, chemoPlanItemName } from "@/api/chemotherapy.api";
 import { useToast } from "@/hooks/use-toast";
 import { downloadExportPdf } from "@/lib/exportPdf";
 
@@ -64,11 +64,12 @@ export function PharmacySlip({ planId }: PharmacySlipProps) {
         setPatientId(plan.patient_id ?? "—");
         setProtocolName(plan.regimen_name ?? plan.protocol_name ?? "—");
 
-        // The order's own medicine list -- always present, regardless of
-        // whether the order was derived from a saved regimen protocol.
-        const planItemRows: SlipRow[] = (plan.chemotherapy_plan_items ?? []).map((item) => ({
+        // The current cycle day order's medicine list (else the plan's
+        // baseline) -- always present, regardless of whether the order was
+        // derived from a saved regimen protocol.
+        const planItemRows: SlipRow[] = chemoPlanCurrentItems(plan).map((item) => ({
           id: `plan-item-${item.chemotherapy_plan_item_id}`,
-          medicineName: item.medicine_master?.medicine_name ?? "—",
+          medicineName: chemoPlanItemName(item) || "—",
           brandName: item.medicine_master?.brand_name ?? "—",
           dose: formatDose(item.calculated_dose, item.protocol_dose_unit, item.protocol_dose),
           type: DRUG_ROLE_LABELS[item.drug_role ?? ""] ?? item.drug_type ?? item.drug_role ?? "—",

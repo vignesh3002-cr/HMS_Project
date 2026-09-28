@@ -9,6 +9,11 @@ import { clinicalDetailsApi } from "../../../api/clinicalDetails.api";
 import { patientApi } from "../../../api/patient.api";
 import { encounterApi } from "../../../api/encounter.api";
 import {
+  chemotherapyApi,
+  isChemoPlanClosed,
+  type ChemoPlanOrderHeader,
+} from "../../../api/chemotherapy.api";
+import {
   consultationApi,
   type PersonalHistoryItem,
   type EncounterReportRecord,
@@ -25,6 +30,7 @@ import type {
   RegimenProtocolDetail,
 } from "./types";
 import {
+  COURSE_CLOSED_MESSAGE,
   computeProtocolNextVisitDate,
   findActiveEncounter,
   PAST_HISTORY_MARKER,
@@ -73,9 +79,13 @@ const computeNextVisitDateForPatient = async (
   }
 };
 
+/* A plan drug: a medicine, or (medicine_id null) a drug name the doctor
+   typed for this patient. */
 type SummaryPlanItem = {
   chemotherapy_plan_item_id: string;
   medicine_id?: string | null;
+  drug_name?: string | null;
+  drug_type?: string | null;
   drug_role: string | null;
   protocol_dose: number | null;
   protocol_dose_unit: string | null;
@@ -97,8 +107,12 @@ type SummaryPlanItem = {
   } | null;
 };
 
+/* medicine_id for a medicine_master drug, else the typed drug_name. */
 type PrescriptionMedicinePayload = {
-  medicine_id: string;
+  medicine_id?: string;
+  drug_name?: string;
+  drug_role?: string;
+  drug_type?: string;
   dosage?: string;
   unit?: string;
   route?: string;
@@ -149,7 +163,21 @@ type SummaryPlan = {
   }[] | null;
   chemotherapy_plan_items: SummaryPlanItem[] | null;
   oncology_staging_detail: StagingDetailRecord | null;
+  /* Saved cycle day orders (by cycle / day) and the current one. */
+  plan_orders?: ChemoPlanOrderHeader[] | null;
+  current_order?: SummaryPlanOrder | null;
 };
+
+type SummaryPlanOrder = ChemoPlanOrderHeader & {
+  chemotherapy_plan_items: SummaryPlanItem[];
+};
+
+/* A plan item's display name: its medicine, else the typed name. */
+const planItemName = (item: SummaryPlanItem) =>
+  item.medicine_master?.medicine_name ||
+  item.medicine_master?.generic_name ||
+  item.drug_name ||
+  "";
 
 type ChemoOrderRow = {
   drug: string;
@@ -213,6 +241,8 @@ const Summary: React.FC<{
   );
 
   const [plan, setPlan] = useState<SummaryPlan | null>(null);
+  /* The cycle day order(s) saved in this visit's encounter. */
+  const [encounterOrders, setEncounterOrders] = useState<SummaryPlanOrder[]>([]);
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState("");
   const [dischargeMedications, setDischargeMedications] = useState<
@@ -479,23 +509,14 @@ const Summary: React.FC<{
     let cancelled = false;
     setPlanLoading(true);
     setPlanError("");
-    const branchId =
-      getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
-    API.get<{ success: boolean; data: SummaryPlan[] }>(
-      "/chemotherapy/plans",
-      {
-        params: { patient_id: resolvedPatientId, branchId, page: 1, limit: 1 },
-      }
+    /* The patient's open plan (one course at a time), else their latest,
+       with its cycle day orders. */
+    API.get<{ success: boolean; data: SummaryPlan | null }>(
+      "/chemotherapy/plans/latest-for-patient",
+      { params: { patient_id: resolvedPatientId } }
     )
       .then((response) => {
-        if (cancelled) return;
-        const planId = response.data.data?.[0]?.chemotherapy_plan_id;
-        if (!planId) return;
-        return API.get<{ success: boolean; data: SummaryPlan }>(
-          `/chemotherapy/plans/${planId}`
-        ).then((detail) => {
-          if (!cancelled) setPlan(detail.data.data);
-        });
+        if (!cancelled) setPlan(response.data.data ?? null);
       })
       .catch((error) => {
         console.error("Failed to load chemotherapy plan:", error);
@@ -513,6 +534,43 @@ const Summary: React.FC<{
       cancelled = true;
     };
   }, [resolvedPatientId]);
+
+  /* This visit's cycle day order(s): those saved in its encounter. The
+     current order is usually one of them; any other is fetched. */
+  const visitEncounterNo = encounterNo || resolvedSummaryEncounterNo;
+  useEffect(() => {
+    if (!plan || !visitEncounterNo) {
+      setEncounterOrders([]);
+      return;
+    }
+    let cancelled = false;
+    const headers = (plan.plan_orders ?? []).filter(
+      (order) => order.encounter_no === visitEncounterNo
+    );
+    Promise.all(
+      headers.map((header) =>
+        plan.current_order?.plan_order_id === header.plan_order_id
+          ? Promise.resolve(plan.current_order)
+          : chemotherapyApi
+              .getPlanOrder(plan.chemotherapy_plan_id, header.cycle_number, header.cycle_day)
+              .then((response) => response.data.data as unknown as SummaryPlanOrder | null)
+      )
+    )
+      .then((orders) => {
+        if (!cancelled) {
+          setEncounterOrders(
+            orders.filter((order): order is SummaryPlanOrder => Boolean(order))
+          );
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load this visit's chemotherapy order:", error);
+        if (!cancelled) setEncounterOrders([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [plan, visitEncounterNo]);
 
   /* Keep the Next Visit Date in sync with the selected protocol's
      cycle interval and the treatment start date so the Summary reflects
@@ -653,15 +711,33 @@ const Summary: React.FC<{
     };
   }, [resolvedPatientId]);
 
-  const planItems = plan?.chemotherapy_plan_items ?? [];
+  /* This visit's drugs: the cycle day order(s) saved in this encounter,
+     else the plan's current order, else its baseline (a plan saved before
+     cycle day orders). A closed course orders nothing more. */
+  const planClosed = isChemoPlanClosed(plan);
+  const visitOrders: SummaryPlanOrder[] =
+    encounterOrders.length > 0
+      ? encounterOrders
+      : !planClosed && plan?.current_order
+        ? [plan.current_order]
+        : [];
+  const planItems: SummaryPlanItem[] =
+    visitOrders.length > 0
+      ? visitOrders.flatMap((order) => order.chemotherapy_plan_items ?? [])
+      : planClosed
+        ? []
+        : plan?.chemotherapy_plan_items ?? [];
+  const cycleDayLabel = (order: ChemoPlanOrderHeader) =>
+    `Cycle ${order.cycle_number} / Day ${order.cycle_day}`;
+  const orderOfItem = (item: SummaryPlanItem) =>
+    visitOrders.find((order) =>
+      (order.chemotherapy_plan_items ?? []).includes(item)
+    );
 
   const chemotherapyOrders: ChemoOrderRow[] = planItems
     .filter((item) => item.drug_role === "PRIMARY")
     .map((item) => ({
-      drug:
-        item.medicine_master?.medicine_name ||
-        item.medicine_master?.generic_name ||
-        "",
+      drug: planItemName(item),
       form:
         item.formulation || item.medicine_master?.dosage_form || "",
       /* Patient dose (Dose Cal result) when calculated, else the
@@ -684,10 +760,7 @@ const Summary: React.FC<{
   const premedications: PremedRow[] = planItems
     .filter((item) => item.drug_role === "PREMEDICATION")
     .map((item) => ({
-      drug:
-        item.medicine_master?.medicine_name ||
-        item.medicine_master?.generic_name ||
-        "",
+      drug: planItemName(item),
       dose: item.protocol_dose != null ? String(item.protocol_dose) : "",
       route: item.administration_route || "",
       time: item.frequency || "",
@@ -876,27 +949,36 @@ const Summary: React.FC<{
      Created on Submit against the current appointment's OPEN
      encounter, with every medicine on the chemotherapy plan:
      PRIMARY (chemo orders) + PREMEDICATION + SUPPORTIVE /
-     POSTMEDICATION (discharge). Duplicate medicine ids are skipped
-     - the backend rejects duplicates within one prescription.
+     POSTMEDICATION (discharge) of this visit's cycle day order. A drug
+     name typed on the order goes as free text (drug_name). Duplicate
+     medicine ids / names are skipped - the backend rejects duplicate
+     medicines within one prescription.
   ------------------------------------------------------------ */
 
   const buildPrescriptionMedicines = (): PrescriptionMedicinePayload[] => {
-    const seenMedicineIds = new Set<string>();
+    const seenDrugs = new Set<string>();
     const medicines: PrescriptionMedicinePayload[] = [];
 
     for (const item of planItems) {
       const medicineId =
         item.medicine_id ?? item.medicine_master?.medicine_id ?? "";
-      if (!medicineId || seenMedicineIds.has(medicineId)) continue;
-      seenMedicineIds.add(medicineId);
+      const drugName = medicineId ? "" : (item.drug_name ?? "").trim();
+      const drugKey = medicineId || `name:${drugName.toLowerCase()}`;
+      if ((!medicineId && !drugName) || seenDrugs.has(drugKey)) continue;
+      seenDrugs.add(drugKey);
 
+      const order = orderOfItem(item);
       const instructionParts = [
         item.remarks ?? "",
         item.formulation ? `Formulation: ${item.formulation}` : "",
         item.dilution_volume
           ? `Dilution volume: ${item.dilution_volume}`
           : "",
-        item.cycle_day != null ? `Cycle day ${item.cycle_day}` : "",
+        order
+          ? cycleDayLabel(order)
+          : item.cycle_day != null
+            ? `Cycle day ${item.cycle_day}`
+            : "",
       ].filter(Boolean);
 
       const hasPatientDose = item.calculated_dose != null;
@@ -907,7 +989,9 @@ const Summary: React.FC<{
         "";
 
       medicines.push({
-        medicine_id: medicineId,
+        ...(medicineId ? { medicine_id: medicineId } : { drug_name: drugName }),
+        ...(item.drug_role ? { drug_role: item.drug_role } : {}),
+        ...(item.drug_type ? { drug_type: item.drug_type } : {}),
         ...(hasPatientDose
           ? { dosage: String(Number(item.calculated_dose)) }
           : item.protocol_dose != null
@@ -1095,6 +1179,26 @@ const Summary: React.FC<{
     }
   };
 
+  const closingCycleDay = () => {
+    const pending = visitOrders.filter(
+      (order) => order.order_status !== "COMPLETED"
+    );
+    const days = (plan?.chemotherapy_plan_items ?? []).map((item) => {
+      const day = Number(item.administration_day ?? item.cycle_day ?? 1);
+      return Number.isFinite(day) && day > 0 ? day : 1;
+    });
+    if (!plan || pending.length === 0 || days.length === 0) return null;
+    const lastDay = Math.max(...days);
+    const closing = pending.find((order) => order.cycle_day >= lastDay);
+    if (!closing) return null;
+    return {
+      cycle: closing.cycle_number,
+      label: cycleDayLabel(closing),
+      closesCourse:
+        (plan.completed_cycles ?? 0) + 1 >= (plan.planned_cycles ?? 0),
+    };
+  };
+
   const handleSubmitSummary = async () => {
     if (submittingSummary) return;
 
@@ -1130,8 +1234,24 @@ const Summary: React.FC<{
 
       if (medicines.length === 0) {
         setSummarySubmitMessage(
-          "No medicines found in the chemotherapy plan. Complete the Treatment Plan step first."
+          planClosed
+            ? COURSE_CLOSED_MESSAGE
+            : "No medicines found in the chemotherapy plan. Complete the Treatment Plan step first."
         );
+        return;
+      }
+
+      /* Submitting completes this visit's cycle day order. Say so first
+         when that closes a cycle - or the whole course. */
+      const closing = closingCycleDay();
+      if (
+        closing &&
+        !window.confirm(
+          closing.closesCourse
+            ? `This completes ${closing.label}, the last day of the last cycle. The chemotherapy course will be closed and no more orders can be added to it. Continue?`
+            : `This completes ${closing.label}, the last day of Cycle ${closing.cycle}. Continue?`
+        )
+      ) {
         return;
       }
 
@@ -1143,10 +1263,38 @@ const Summary: React.FC<{
 
       await saveAdminInstructions();
 
+      /* The visit's cycle day order is now completed (read-only); its
+         last day completes the cycle, the last cycle the course. */
+      let completionNote = "";
+      if (plan && !planClosed) {
+        try {
+          const completion = await chemotherapyApi.completePlanOrders(
+            plan.chemotherapy_plan_id,
+            targetEncounterNo
+          );
+          const result = completion.data.data;
+          const done = (result?.completed_orders ?? []).map(
+            (order) => `Cycle ${order.cycle_number} / Day ${order.cycle_day}`
+          );
+          completionNote = result?.plan_completed
+            ? " The chemotherapy course is completed."
+            : done.length > 0
+              ? ` ${done.join(", ")} completed.`
+              : "";
+        } catch (completionError: any) {
+          console.error("Failed to complete the cycle day order:", completionError);
+          completionNote = ` The cycle day could not be marked completed: ${
+            completionError?.response?.data?.message ??
+            completionError?.message ??
+            "please try again"
+          }.`;
+        }
+      }
+
       localStorage.removeItem(`hms_diagnosis_form_${resolvedPatientId}`);
       setSummarySubmitted(true);
       setSummarySubmitMessage(
-        "Prescription created successfully for this visit."
+        `Prescription created successfully for this visit.${completionNote}`
       );
     } catch (error: any) {
       console.error("Failed to create prescription:", error);

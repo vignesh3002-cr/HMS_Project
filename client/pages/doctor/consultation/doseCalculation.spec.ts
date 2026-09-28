@@ -185,6 +185,31 @@ describe("buildPlanItemsFromOrder", () => {
     expect(items[2]).not.toHaveProperty("calculated_dose");
   });
 
+  it("keeps typed drug names as drug_name and skips blank rows", () => {
+    const items = buildPlanItemsFromOrder(
+      [
+        row({ name: "  Patient Mix  ", dose: "100", unit: "mg/m2" }),
+        row({ id: 2, name: "", medicineId: undefined }),
+      ],
+      [],
+      [row({ id: 3, name: "Home Antiemetic", dose: "8", unit: "mg", drugType: "Tablet" })],
+      adultMale
+    );
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      drug_name: "Patient Mix",
+      drug_role: "PRIMARY",
+      dosage: 100,
+      calculated_dose: 182,
+    });
+    expect(items[0]).not.toHaveProperty("medicine_id");
+    expect(items[1]).toMatchObject({
+      drug_name: "Home Antiemetic",
+      drug_role: "SUPPORTIVE",
+      drug_type: "Tablet",
+    });
+  });
+
   it("omits calculated_dose when it cannot be calculated", () => {
     const [item] = buildPlanItemsFromOrder(
       [row({ medicineId: "M1", dose: "175", unit: "mg/m2" })],

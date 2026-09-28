@@ -21,6 +21,7 @@ import {
   useBranchFilter,
 } from "../../context/BranchFilterContext";
 import { computeBsa } from "../../utils/vitals";
+import { chemoPlanCurrentItems, chemoPlanItemName } from "../../api/chemotherapy.api";
 import { generatePrescriptionPdf, type PrescriptionData } from "../../utils/prescriptionPdf";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import {
@@ -55,6 +56,7 @@ type SummaryPlanItem = {
   remarks: string | null;
   cycle_day?: number | null;
   administration_day?: number | null;
+  drug_name?: string | null;
   medicine_master: {
     medicine_name: string;
     generic_name: string | null;
@@ -110,6 +112,7 @@ type SummaryPlan = {
     }[] | null;
   }[] | null;
   chemotherapy_plan_items: SummaryPlanItem[] | null;
+  current_order?: { chemotherapy_plan_items?: SummaryPlanItem[] | null } | null;
   oncology_staging_detail: StagingDetailRecord | null;
   doctor_name?: string | null;
 };
@@ -206,7 +209,7 @@ const MedicationPortal: React.FC<{
   const cycleId = plan?.chemotherapy_cycle?.find(c => c.cycle_number === selectedCycle)?.chemotherapy_cycle_id;
   const medPlanItems = cycleId && cycleMedicationsMap?.[cycleId]?.length
     ? cycleMedicationsMap[cycleId]
-    : plan?.chemotherapy_plan_items ?? [];
+    : chemoPlanCurrentItems<SummaryPlanItem>(plan);
   const medPremedications = medPlanItems.filter(
     (item) => (item.drug_role ?? "").toUpperCase() === "PREMEDICATION",
   );
@@ -483,7 +486,7 @@ const MedicationPortal: React.FC<{
                                 <tr key={item.chemotherapy_plan_item_id} className="transition-colors hover:bg-slate-50">
                                   <td className="px-6 py-4 text-center text-slate-400">{index + 1}</td>
                                   <td className="px-6 py-4">
-                                    <p className="font-bold text-slate-800">{item.medicine_master?.medicine_name ?? "—"}</p>
+                                    <p className="font-bold text-slate-800">{chemoPlanItemName(item) || "—"}</p>
                                     {item.medicine_master?.generic_name && <p className="text-xs text-slate-500">{item.medicine_master.generic_name}</p>}
                                   </td>
                                   <td className="px-6 py-4 text-slate-700">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
@@ -523,7 +526,7 @@ const MedicationPortal: React.FC<{
                               medChemoDrugs.map((item, index) => (
                                 <tr key={item.chemotherapy_plan_item_id} className="transition-colors hover:bg-slate-50">
                                   <td className="px-6 py-4 text-center text-slate-400">{index + 1}</td>
-                                  <td className="px-6 py-4"><span className="font-bold text-[#0052cc]">{item.medicine_master?.medicine_name ?? "—"}</span></td>
+                                  <td className="px-6 py-4"><span className="font-bold text-[#0052cc]">{chemoPlanItemName(item) || "—"}</span></td>
                                   <td className="px-6 py-4 text-xs text-slate-500">{item.protocol_dose != null ? `${item.protocol_dose}${item.protocol_dose_unit ? ` ${item.protocol_dose_unit}` : ""}` : "—"}</td>
                                   <td className="px-6 py-4 font-bold text-slate-800">{item.calculated_dose ?? item.protocol_dose ?? "—"}</td>
                                   <td className="px-6 py-4 text-slate-700">{item.administration_route ?? "—"}</td>
@@ -1976,8 +1979,8 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
     dilution_volume: '',
   });
   const protocolItems = protocolItemsRaw.map(mapProtocolItem);
-  const planItems = currentPlan?.chemotherapy_plan_items ?? [];
-  const savedItems = savedPlan?.chemotherapy_plan_items ?? [];
+  const planItems = chemoPlanCurrentItems<any>(currentPlan);
+  const savedItems = chemoPlanCurrentItems<SummaryPlanItem>(savedPlan);
   const sourceItems = cycleMedications.length > 0 ? cycleMedications : (protocolItems.length > 0 ? protocolItems : (planItems.length > 0 ? planItems : savedItems));
 
   const matchesCycleAndDay = (item: any) => {
@@ -2667,7 +2670,7 @@ function HMSPatientPortal({ onBack }: { onBack?: () => void }) {
 premedicationItems.map((item, index) => (
 <tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
 <td className="py-2 whitespace-nowrap">{index + 1}</td>
-<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{chemoPlanItemName(item) || "—"}</td>
 <td className="py-2 whitespace-nowrap">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
 <td className="py-2 whitespace-nowrap">{item.administration_route ?? "—"}</td>
 <td className="py-2 whitespace-nowrap">{item.frequency ?? item.remarks ?? "—"}</td>
@@ -2705,7 +2708,7 @@ premedicationItems.map((item, index) => (
 primaryChemoItems.map((item, index) => (
 <tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
 <td className="py-2 whitespace-nowrap">{index + 1}</td>
-<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{chemoPlanItemName(item) || "—"}</td>
 <td className="py-2 whitespace-nowrap">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
 <td className="py-2 whitespace-nowrap">{item.administration_route ?? "—"}</td>
 <td className="py-2 whitespace-nowrap">{item.dilution_volume ?? "—"}</td>
@@ -2743,7 +2746,7 @@ primaryChemoItems.map((item, index) => (
 supportiveItems.map((item, index) => (
 <tr key={item.chemotherapy_plan_item_id} className="border-b border-slate-50 last:border-0">
 <td className="py-2 whitespace-nowrap">{index + 1}</td>
-<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{item.medicine_master?.medicine_name ?? "—"}</td>
+<td className="py-2 font-medium text-[#1e293b] whitespace-nowrap">{chemoPlanItemName(item) || "—"}</td>
 <td className="py-2 whitespace-nowrap">{item.protocol_dose != null ? `${item.protocol_dose} ${item.protocol_dose_unit ?? ""}`.trim() : "—"}</td>
 <td className="py-2 whitespace-nowrap">{item.administration_route ?? "—"}</td>
 <td className="py-2 whitespace-nowrap">{item.frequency ?? item.remarks ?? "—"}</td>
@@ -3040,7 +3043,7 @@ const HistoryDashboard: React.FC<{
       patient_allergies: null,
       patient_symptoms: null,
       prescription_items: (p.prescription_items || []).map((it: any) => ({
-        medicine_name: it.medicine_master?.medicine_name || '',
+        medicine_name: it.medicine_master?.medicine_name || it.drug_name || '',
         medicine_master: it.medicine_master,
         dosage: it.dosage,
         unit: it.unit,
@@ -3320,13 +3323,14 @@ const HistoryDashboard: React.FC<{
 
   /* Cycle-history table rows: agent/dose come from the plan's
      PRIMARY items (or all items if not tagged); outcome is the real cycle_status. */
-  const primaryPlanItems = (plan?.chemotherapy_plan_items ?? []).filter(
+  const planDrugItems = chemoPlanCurrentItems<SummaryPlanItem>(plan);
+  const primaryPlanItems = planDrugItems.filter(
     (item) => (item.drug_role ?? "").toUpperCase() === "PRIMARY"
   );
   const relevantPlanItems =
     primaryPlanItems.length > 0
       ? primaryPlanItems
-      : (plan?.chemotherapy_plan_items ?? []);
+      : planDrugItems;
 
   const cyclesToDisplay =
     planCyclesSorted.length > 0
@@ -3374,7 +3378,7 @@ const HistoryDashboard: React.FC<{
         .map((item) => {
           const dose = item.protocol_dose ?? item.calculated_dose;
           if (!dose) return null;
-          const name = item.medicine_master?.medicine_name;
+          const name = chemoPlanItemName(item);
           const unit = item.protocol_dose_unit || item.calculated_dose_unit || "";
           return relevantPlanItems.length > 1 && name
             ? `${name}: ${dose} ${unit}`.trim()
@@ -3410,7 +3414,7 @@ const HistoryDashboard: React.FC<{
         .join(" - "),
       agent:
         relevantPlanItems
-          .map((item) => item.medicine_master?.medicine_name)
+          .map((item) => chemoPlanItemName(item))
           .filter(Boolean)
           .join(", ") ||
         plan?.regimen_name ||
@@ -3422,8 +3426,8 @@ const HistoryDashboard: React.FC<{
   });
 
   /* Medication history rows from the plan's saved items. */
-  const medicationRows = (plan?.chemotherapy_plan_items ?? []).map((item) => ({
-    medication: item.medicine_master?.medicine_name ?? "—",
+  const medicationRows = planDrugItems.map((item) => ({
+    medication: chemoPlanItemName(item) || "—",
     start: fmtHistoryDate(plan?.treatment_start_date),
     end:
       (plan?.treatment_status ?? "").toUpperCase() === "COMPLETED"
@@ -3611,7 +3615,7 @@ const HistoryDashboard: React.FC<{
         const num = Number(item.administration_day ?? item.cycle_day);
         if (Number.isFinite(num) && num > 0) set.add(num);
       });
-      (plan?.chemotherapy_plan_items ?? []).forEach((item) => {
+      planDrugItems.forEach((item) => {
         const num = Number(item.administration_day ?? item.cycle_day);
         if (Number.isFinite(num) && num > 0) set.add(num);
       });
@@ -3763,13 +3767,13 @@ const HistoryDashboard: React.FC<{
         }
 
         // Dynamic description from drugs scheduled for this day, remarks, or adverse events
-        const dayMedicines = (plan?.chemotherapy_plan_items ?? [])
+        const dayMedicines = planDrugItems
           .filter((item) => {
             if (!hasManyDays) return true;
             const itemDay = Number(item.administration_day ?? item.cycle_day ?? 1);
             return itemDay === dNum;
           })
-          .map((item) => item.medicine_master?.medicine_name)
+          .map((item) => chemoPlanItemName(item))
           .filter(Boolean);
 
         let description = "";
@@ -5935,6 +5939,7 @@ function mapEncounterToClinicalNote(
     : "Clinical evaluation - diagnosis pending.");
 
   const planItems: string[] = [];
+  const planDrugs = chemoPlanCurrentItems<SummaryPlanItem>(plan);
   const matchingRx = prescriptionsList.find((rx: any) =>
     (rx.encounter_no && rx.encounter_no === enc.encounter_no) ||
     (rx.prescription_date && enc.encounter_ts && rx.prescription_date.slice(0, 10) === enc.encounter_ts.slice(0, 10))
@@ -5949,9 +5954,9 @@ function mapEncounterToClinicalNote(
         planItems.push(`${[medName, dose, route].filter(Boolean).join(" ")} prescribed.`);
       }
     }
-  } else if (plan?.chemotherapy_plan_items?.length) {
-    for (const item of plan.chemotherapy_plan_items) {
-      const medName = item.medicine_master?.medicine_name || item.drug_role;
+  } else if (planDrugs.length) {
+    for (const item of planDrugs) {
+      const medName = chemoPlanItemName(item) || item.drug_role;
       if (medName) {
         const dose = [item.calculated_dose ?? item.protocol_dose, item.calculated_dose_unit ?? item.protocol_dose_unit].filter(Boolean).join(" ");
         const route = item.administration_route ? item.administration_route : "";
@@ -5981,10 +5986,10 @@ function mapEncounterToClinicalNote(
       })
       .filter(Boolean)
       .join(", ");
-  } else if (plan?.chemotherapy_plan_items?.length) {
-    medications = plan.chemotherapy_plan_items
+  } else if (planDrugs.length) {
+    medications = planDrugs
       .map((item) => {
-        const medName = item.medicine_master?.medicine_name || item.drug_role;
+        const medName = chemoPlanItemName(item) || item.drug_role;
         const dose = [item.calculated_dose ?? item.protocol_dose, item.calculated_dose_unit ?? item.protocol_dose_unit].filter(Boolean).join(" ");
         const route = item.administration_route || "";
         return [medName, dose, route].filter(Boolean).join(" ").trim();
@@ -6242,7 +6247,7 @@ const PatientNotesDocuments: React.FC<{
   }, [patientId]);
 
   /* Live counts derived from fetched records (no hardcoded values). */
-  const prescriptionsCount = (notesPlan?.chemotherapy_plan_items ?? []).length;
+  const prescriptionsCount = chemoPlanCurrentItems(notesPlan).length;
   const activities = notesActivities;
 
   const handleFileUpload = async (files: FileList | File[] | null) => {

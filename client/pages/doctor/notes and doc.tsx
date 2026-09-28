@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import API from "../../api/axios";
 import { encounterApi, type EncounterRecord } from "../../api/encounter.api";
+import { chemoPlanCurrentItems, chemoPlanItemName } from "../../api/chemotherapy.api";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import {
   type PatientDocumentItem,
@@ -45,6 +46,7 @@ type SummaryPlan = {
   notes?: string | null;
   status?: string | null;
   chemotherapy_plan_items?: any[];
+  current_order?: { chemotherapy_plan_items?: any[] | null } | null;
 };
 
 const INITIAL_CLINICAL_NOTES: ClinicalNoteRecord[] = [];
@@ -145,6 +147,7 @@ function mapEncounterToClinicalNote(
     : "Clinical evaluation - diagnosis pending.");
 
   const planItems: string[] = [];
+  const planDrugs = chemoPlanCurrentItems<any>(plan);
   const matchingRx = prescriptionsList.find((rx: any) =>
     (rx.encounter_no && rx.encounter_no === enc.encounter_no) ||
     (rx.prescription_date && enc.encounter_ts && rx.prescription_date.slice(0, 10) === enc.encounter_ts.slice(0, 10))
@@ -159,9 +162,9 @@ function mapEncounterToClinicalNote(
         planItems.push(`${[medName, dose, route].filter(Boolean).join(" ")} prescribed.`);
       }
     }
-  } else if (plan?.chemotherapy_plan_items?.length) {
-    for (const item of plan.chemotherapy_plan_items) {
-      const medName = item.medicine_master?.medicine_name || item.drug_role;
+  } else if (planDrugs.length) {
+    for (const item of planDrugs) {
+      const medName = chemoPlanItemName(item) || item.drug_role;
       if (medName) {
         const dose = [item.calculated_dose ?? item.protocol_dose, item.calculated_dose_unit ?? item.protocol_dose_unit].filter(Boolean).join(" ");
         const route = item.administration_route ? item.administration_route : "";
@@ -191,10 +194,10 @@ function mapEncounterToClinicalNote(
       })
       .filter(Boolean)
       .join(", ");
-  } else if (plan?.chemotherapy_plan_items?.length) {
-    medications = plan.chemotherapy_plan_items
+  } else if (planDrugs.length) {
+    medications = planDrugs
       .map((item) => {
-        const medName = item.medicine_master?.medicine_name || item.drug_role;
+        const medName = chemoPlanItemName(item) || item.drug_role;
         const dose = [item.calculated_dose ?? item.protocol_dose, item.calculated_dose_unit ?? item.protocol_dose_unit].filter(Boolean).join(" ");
         const route = item.administration_route || "";
         return [medName, dose, route].filter(Boolean).join(" ").trim();

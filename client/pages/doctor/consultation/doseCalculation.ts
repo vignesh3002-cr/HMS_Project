@@ -293,8 +293,10 @@ export const buildDosingSnapshot = (inputs: DosingInputs): DosingSnapshot => {
   };
 };
 
+/* medicine_id for a medicine_master drug, else the typed drug_name. */
 export type OrderPlanItem = {
-  medicine_id: string;
+  medicine_id?: string;
+  drug_name?: string;
   drug_role: string;
   drug_sequence: number;
   dosage?: number;
@@ -303,8 +305,55 @@ export type OrderPlanItem = {
   calculated_dose?: number;
   calculated_dose_unit?: string;
   administration_route?: string;
-  remarks?: string;
+  formulation?: string | null;
+  infusion_type?: string | null;
+  infusion_duration_minutes?: number | null;
+  frequency?: string | null;
+  timing_relative_to_primary?: string | null;
+  administration_detail?: string | null;
+  remarks?: string | null;
+  administration_day?: number;
+  drug_type?: string | null;
+  infusion_rate?: string | null;
+  dilution_solution?: string | null;
+  dilution_volume?: string | null;
+  maximum_dose?: number | null;
+  minimum_dose?: number | null;
 };
+
+const textOrNull = (value?: string | null) => value?.trim() || null;
+
+/* Form + administration columns of any order row (all three tabs). The
+   route falls back to IV, as before these were editable. */
+export const planItemRowColumns = (drug: Drug) => {
+  const minutes = Number.parseInt(drug.infusionDuration ?? "", 10);
+  return {
+    formulation: textOrNull(drug.form),
+    administration_route: drug.route?.trim() || "IV",
+    infusion_type: textOrNull(drug.infusionType),
+    infusion_duration_minutes:
+      Number.isFinite(minutes) && minutes >= 0 ? minutes : null,
+    frequency: textOrNull(drug.frequency),
+    timing_relative_to_primary: textOrNull(drug.timing),
+    administration_detail: textOrNull(drug.administrationDetail),
+    remarks: textOrNull(drug.remarks),
+    drug_type: textOrNull(drug.drugType),
+    infusion_rate: textOrNull(drug.infusionRate),
+    dilution_solution: textOrNull(drug.dilutionSolution),
+    dilution_volume: textOrNull(drug.volume),
+    maximum_dose: drug.maximumDose ?? null,
+    minimum_dose: drug.minimumDose ?? null,
+  };
+};
+
+/* The row's drug: its medicine_master id, else the name typed for it.
+   Null for a row with neither (a blank row that was never filled). */
+const drugIdentity = (drug: Drug) =>
+  drug.medicineId
+    ? { medicine_id: drug.medicineId }
+    : drug.name.trim()
+      ? { drug_name: drug.name.trim() }
+      : null;
 
 /* Dose columns of a PRIMARY plan item: protocol dose (dosage /
    dosage_unit; the target AUC for Calvert rows), the Dose Cal method and
@@ -325,20 +374,25 @@ export const primaryDoseFields = (drug: Drug, inputs: DosingInputs) => {
 
 /* Plan items for the Chemotherapy Order tables. PRIMARY rows carry
    primaryDoseFields; premedication / supportive rows keep their entered
-   dose. */
+   dose. Every row carries its form + administration columns, and the
+   displayed protocol day so the saved order can be shown again for it.
+   A row is a medicine_master drug or a typed drug name (drug_name). */
 export const buildPlanItemsFromOrder = (
   primary: Drug[],
   premedication: Drug[],
   supportive: Drug[],
-  inputs: DosingInputs
+  inputs: DosingInputs,
+  administrationDay?: number | null
 ): OrderPlanItem[] => {
+  const day = administrationDay ? { administration_day: administrationDay } : {};
   const items: OrderPlanItem[] = [];
 
   primary.forEach((drug, index) => {
-    if (!drug.medicineId) return;
+    const identity = drugIdentity(drug);
+    if (!identity) return;
     const fields = primaryDoseFields(drug, inputs);
     items.push({
-      medicine_id: drug.medicineId,
+      ...identity,
       drug_role: "PRIMARY",
       drug_sequence: index + 1,
       ...(fields.dosage !== null ? { dosage: fields.dosage } : {}),
@@ -350,21 +404,24 @@ export const buildPlanItemsFromOrder = (
             calculated_dose_unit: fields.calculated_dose_unit ?? undefined,
           }
         : {}),
-      administration_route: "IV",
+      ...planItemRowColumns(drug),
+      ...day,
     });
   });
 
   const pushPlain = (group: Drug[], role: string, offset: number) =>
     group.forEach((drug, index) => {
-      if (!drug.medicineId) return;
+      const identity = drugIdentity(drug);
+      if (!identity) return;
       const dosage = toPositiveNumber(drug.dose);
       items.push({
-        medicine_id: drug.medicineId,
+        ...identity,
         drug_role: role,
         drug_sequence: offset + index,
         ...(dosage !== null ? { dosage } : {}),
         ...(drug.unit ? { dosage_unit: drug.unit } : {}),
-        administration_route: "IV",
+        ...planItemRowColumns(drug),
+        ...day,
       });
     });
 

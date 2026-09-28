@@ -77,6 +77,8 @@ export type Drug = {
   unit: string;
   volume: string;
   planItemId?: string;
+  /* The medicine_master drug. Without one, `name` is a drug name the
+     doctor typed for this patient (saved as the plan item's drug_name). */
   medicineId?: string;
   /* Legacy drafts only: before the per-row Dose Cal, `dose` held the
      BSA-scaled dose and this held the protocol dose. */
@@ -87,6 +89,22 @@ export type Drug = {
   doseCalc?: string;
   protocolDoseCalc?: string | null;
   targetAuc?: string;
+  /* Administration details (Admin Instructions tab), saved on the plan
+     item. */
+  route?: string;
+  infusionType?: string;
+  infusionDuration?: string; // minutes
+  frequency?: string;
+  timing?: string;
+  remarks?: string;
+  administrationDetail?: string;
+  /* Plan item columns the tables don't show, carried so a saved order
+     copied to another cycle day ("As Cycle X / Day Y") stays identical. */
+  drugType?: string | null;
+  infusionRate?: string | null;
+  dilutionSolution?: string | null;
+  maximumDose?: number | null;
+  minimumDose?: number | null;
 };
 
 export type RegimenProtocolDay = {

@@ -2,6 +2,12 @@ import API, { getActiveBranchId } from "../../../api/axios";
 import { appointmentApi } from "../../../api/appointment.api";
 import { getUser } from "../../../utils/token";
 import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
+import {
+  chemotherapyApi,
+  isChemoPlanClosed,
+  type ChemoPlanOrderHeader,
+  type ChemoPlanOrderPayload,
+} from "../../../api/chemotherapy.api";
 import type { FormData, RegimenProtocolDetail } from "./types";
 import type { DosingSnapshot, OrderPlanItem } from "./doseCalculation";
 
@@ -449,19 +455,53 @@ export const resolveStagingDetailId = async (patientId: string): Promise<string>
   }
 };
 
+/* The dosing inputs a cycle day order's patient doses came from. */
+export const orderDosingFromSnapshot = (
+  dosing?: DosingSnapshot
+): ChemoPlanOrderPayload["dosing"] =>
+  dosing
+    ? {
+        height_cm: dosing.dosing_height_cm ?? null,
+        weight_kg: dosing.dosing_weight_kg ?? null,
+        bsa: dosing.dosing_bsa ?? null,
+        serum_creatinine: dosing.dosing_serum_creatinine ?? null,
+        crcl: dosing.dosing_crcl ?? null,
+      }
+    : undefined;
+
+/* The cycle day whose order `planItems` are, and (optionally) its
+   Hydration rows - left out, that day's saved hydration is kept. With
+   planId, the order is only saved onto that plan (a draft of an earlier
+   course is never saved onto the next one). */
+export type PlanOrderTarget = {
+  planId?: string | null;
+  cycle: number;
+  day: number;
+  hydration?: ChemoPlanOrderPayload["hydration"];
+};
+
+export const COURSE_CLOSED_MESSAGE =
+  "This chemotherapy course is completed. Start a new plan from the Treatment Plan step.";
+
 /* Ensure a chemotherapy plan exists for the patient, returning its id.
    Used by the ChemotherapyOrder Save button and as a safety net before
-   the Summary step creates a prescription. Re-uses an existing plan when
-   one is already on record; otherwise POSTs a new one. `dosing` is the
-   snapshot of the inputs the plan items' calculated_dose came from. */
+   the Summary step creates a prescription. Re-uses the patient's open
+   plan; otherwise POSTs a new one. `dosing` is the snapshot of the inputs
+   the plan items' calculated_dose came from.
+   A plan is one course: once it is completed (or discontinued /
+   cancelled) a new one is only started from the Treatment Plan step
+   (`allowNewCourse`); elsewhere the closed plan is returned untouched
+   with `courseClosed`. `planItems` are saved as the order of
+   `order.cycle` / `order.day`, unless that day is already completed. */
 export const createChemotherapyPlanForPatient = async (
   patientId: string,
   startDateValue?: string | null,
   planItems?: OrderPlanItem[],
   plannedCycles?: number,
   discussion?: string | null,
-  dosing?: DosingSnapshot
-): Promise<{ planId: string | null; error?: string }> => {
+  dosing?: DosingSnapshot,
+  options?: { order?: PlanOrderTarget; allowNewCourse?: boolean }
+): Promise<{ planId: string | null; error?: string; courseClosed?: boolean }> => {
   const { encounter, scopeError } = await findActiveEncounter(patientId);
   if (!encounter) {
     return {
@@ -490,27 +530,63 @@ export const createChemotherapyPlanForPatient = async (
       localStorage.getItem(`hms_planned_start_date_${patientId}`)
   );
 
-  /* Prefer an existing plan for this patient; creation only happens once
-     per diagnosis so repeated Saves don't stack duplicates.
-     When an existing plan is found, the latest oncology selections are
+  /* Saves planItems as the target cycle day's order - skipped when that
+     day was already completed (its consultation was submitted). */
+  const saveOrder = async (
+    planId: string,
+    orders: ChemoPlanOrderHeader[] | null | undefined
+  ): Promise<string | undefined> => {
+    const target = options?.order;
+    if (!target || !planItems || planItems.length === 0) return undefined;
+    if (target.planId && target.planId !== planId) return undefined;
+    const saved = (orders ?? []).find(
+      (order) =>
+        order.cycle_number === target.cycle && order.cycle_day === target.day
+    );
+    if (saved?.order_status === "COMPLETED") return undefined;
+    try {
+      await chemotherapyApi.savePlanOrder(planId, target.cycle, target.day, {
+        items: planItems,
+        ...(target.hydration ? { hydration: target.hydration } : {}),
+        dosing: orderDosingFromSnapshot(dosing),
+        encounter_no: encounter.encounter_no ?? null,
+      });
+      return undefined;
+    } catch (orderError: any) {
+      console.error(
+        "Failed to save the cycle day order:",
+        orderError?.response?.data?.message ?? orderError?.message
+      );
+      return (
+        orderError?.response?.data?.message ||
+        "Failed to save the chemotherapy order."
+      );
+    }
+  };
+
+  /* Prefer the patient's open plan; creation only happens once per
+     course so repeated Saves don't stack duplicates.
+     When an open plan is found, the latest oncology selections are
      pushed onto it: the protocol (name + cadence -> planned_cycles and
      cycle_interval_days) and the cancer context from the latest staging
      detail, so downstream viewers (patient-details) show the new days
-     and cycles immediately. When planItems are provided, they are also
-     synced (delete old items then add new ones). */
+     and cycles immediately. When planItems are provided, they are saved
+     as the target cycle day's order. */
   try {
     /* Look the plan up via the mapping-scoped /plans/latest-for-patient
        endpoint (same one patient-details reads) so the existing plan we
        sync is the plan being displayed and branch-scoped list 403s don't
        silently skip the update. */
-    const existing = await API.get<{
-      success: boolean;
-      data: { chemotherapy_plan_id: string } | null;
-    }>("/chemotherapy/plans/latest-for-patient", {
-      params: { patient_id: patientId },
-    });
-    const existingPlanId = existing.data.data?.chemotherapy_plan_id;
-    if (existingPlanId) {
+    const existing = await chemotherapyApi.getLatestPlanForPatient(patientId);
+    const existingPlan = existing.data.data;
+    const existingPlanId = existingPlan?.chemotherapy_plan_id;
+    const courseClosed = isChemoPlanClosed(existingPlan);
+    /* The course is over: nothing more is saved onto it, and only the
+       Treatment Plan step starts the next one (created below). */
+    if (existingPlanId && courseClosed && !options?.allowNewCourse) {
+      return { planId: existingPlanId, courseClosed: true };
+    }
+    if (existingPlanId && !courseClosed) {
       /* Re-link the existing plan to the current protocol + diagnosis.
          The server copies the protocol's regimen name / code / cycles and
          the staging detail's cancer context, so only the ids are sent. A
@@ -543,34 +619,9 @@ export const createChemotherapyPlanForPatient = async (
         }
       }
 
-      if (planItems && planItems.length > 0) {
-        try {
-          /* Fetch current items so we can remove stale ones. */
-          const planDetail = await API.get<{
-            success: boolean;
-            data: {
-              chemotherapy_plan_items: { chemotherapy_plan_item_id: string }[];
-            };
-          }>(`/chemotherapy/plans/${existingPlanId}`);
-          const currentItems =
-            planDetail.data.data?.chemotherapy_plan_items ?? [];
-          for (const ci of currentItems) {
-            await API.delete(
-              `/chemotherapy/plans/${existingPlanId}/items/${ci.chemotherapy_plan_item_id}`
-            );
-          }
-          for (const pi of planItems) {
-            await API.post(
-              `/chemotherapy/plans/${existingPlanId}/items`,
-              pi
-            );
-          }
-        } catch (syncErr: any) {
-          console.error(
-            "Failed to sync plan items to existing plan:",
-            syncErr?.response?.data?.message ?? syncErr?.message
-          );
-        }
+      const orderError = await saveOrder(existingPlanId, existingPlan?.plan_orders);
+      if (orderError) {
+        return { planId: existingPlanId, error: orderError };
       }
       if (discussion !== undefined) {
         try {
@@ -633,11 +684,17 @@ export const createChemotherapyPlanForPatient = async (
         : {}),
       confirm_suggested_therapy: true,
       ...(plannedCycles ? { planned_cycles: plannedCycles } : {}),
-      ...(planItems && planItems.length > 0 ? { plan_items: planItems } : {}),
+      /* The plan's baseline is the protocol's copy; only without a
+         protocol do the order's rows seed it. */
+      ...(!protocolId && planItems && planItems.length > 0
+        ? { plan_items: planItems }
+        : {}),
       ...(discussion !== undefined ? { discussion: discussion || null } : {}),
       ...(dosing ?? {}),
     });
-    return { planId: response.data.data?.chemotherapy_plan_id ?? null };
+    const planId = response.data.data?.chemotherapy_plan_id ?? null;
+    const orderError = planId ? await saveOrder(planId, []) : undefined;
+    return orderError ? { planId, error: orderError } : { planId };
   } catch (error: any) {
     console.error("Failed to create chemotherapy plan:", error);
     return {
