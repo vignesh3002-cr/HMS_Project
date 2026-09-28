@@ -6,6 +6,10 @@ import LabNav from "./labnav";
 import { labOrderApi, labOrderItemApi, LabOrderRecord, LabOrderItemRecord } from "@/api/labOrder.api";
 import { patientApi, PatientRecord } from "@/api/patient.api";
 import { labReportApi, LabReportRecord } from "@/api/labReport.api";
+import {
+  INITIAL_TESTING_SAMPLES,
+  TestingSampleItem,
+} from "./testingsamples";
 
 export interface QualityCheckParameter {
   id: string;
@@ -125,6 +129,81 @@ export const DEFAULT_QC_PARAMETERS: QualityCheckParameter[] = [
   },
 ];
 
+export function getDefaultQCParametersForPanel(testName: string): QualityCheckParameter[] {
+  const lower = (testName || "").toLowerCase();
+  if (lower.includes("kft") || lower.includes("kidney") || lower.includes("renal")) {
+    return [
+      { id: "qc-kft-1", parameter: "Serum Creatinine", result: "0.85", unit: "mg/dL", referenceRange: "0.6 - 1.2", status: "Normal", approved: true },
+      { id: "qc-kft-2", parameter: "Blood Urea Nitrogen (BUN)", result: "16.0", unit: "mg/dL", referenceRange: "7 - 20", status: "Normal", approved: true },
+      { id: "qc-kft-3", parameter: "Uric Acid", result: "4.8", unit: "mg/dL", referenceRange: "3.5 - 7.2", status: "Normal", approved: true },
+      { id: "qc-kft-4", parameter: "eGFR", result: "98", unit: "mL/min/1.73m²", referenceRange: "> 90", status: "Normal", approved: true },
+    ];
+  }
+  if (lower.includes("lft") || lower.includes("liver") || lower.includes("bilirubin")) {
+    return [
+      { id: "qc-lft-1", parameter: "Bilirubin (Total)", result: "0.8", unit: "mg/dL", referenceRange: "0.2 - 1.2", status: "Normal", approved: true },
+      { id: "qc-lft-2", parameter: "Bilirubin (Direct)", result: "0.2", unit: "mg/dL", referenceRange: "0.0 - 0.3", status: "Normal", approved: true },
+      { id: "qc-lft-3", parameter: "SGOT / AST", result: "28", unit: "U/L", referenceRange: "10 - 40", status: "Normal", approved: true },
+      { id: "qc-lft-4", parameter: "SGPT / ALT", result: "32", unit: "U/L", referenceRange: "7 - 56", status: "Normal", approved: true },
+      { id: "qc-lft-5", parameter: "Alkaline Phosphatase (ALP)", result: "78", unit: "U/L", referenceRange: "44 - 147", status: "Normal", approved: true },
+      { id: "qc-lft-6", parameter: "Total Protein", result: "7.1", unit: "g/dL", referenceRange: "6.0 - 8.3", status: "Normal", approved: true },
+      { id: "qc-lft-7", parameter: "Albumin", result: "4.2", unit: "g/dL", referenceRange: "3.5 - 5.0", status: "Normal", approved: true },
+    ];
+  }
+  if (lower.includes("lipid") || lower.includes("cholesterol") || lower.includes("triglyceride")) {
+    return [
+      { id: "qc-lip-1", parameter: "Total Cholesterol", result: "185", unit: "mg/dL", referenceRange: "< 200", status: "Normal", approved: true },
+      { id: "qc-lip-2", parameter: "Triglycerides", result: "140", unit: "mg/dL", referenceRange: "< 150", status: "Normal", approved: true },
+      { id: "qc-lip-3", parameter: "HDL Cholesterol", result: "48", unit: "mg/dL", referenceRange: "> 40", status: "Normal", approved: true },
+      { id: "qc-lip-4", parameter: "LDL Cholesterol", result: "109", unit: "mg/dL", referenceRange: "< 100", status: "Normal", approved: true },
+      { id: "qc-lip-5", parameter: "VLDL", result: "28", unit: "mg/dL", referenceRange: "< 30", status: "Normal", approved: true },
+    ];
+  }
+  if (lower.includes("thyroid") || lower.includes("t3") || lower.includes("t4") || lower.includes("tsh")) {
+    return [
+      { id: "qc-th-1", parameter: "Total T3", result: "1.2", unit: "ng/mL", referenceRange: "0.8 - 2.0", status: "Normal", approved: true },
+      { id: "qc-th-2", parameter: "Total T4", result: "8.5", unit: "µg/dL", referenceRange: "5.1 - 14.1", status: "Normal", approved: true },
+      { id: "qc-th-3", parameter: "TSH (Thyroid Stimulating)", result: "2.85", unit: "µIU/mL", referenceRange: "0.4 - 4.2", status: "Normal", approved: true },
+    ];
+  }
+  if (lower.includes("electrolyte") || lower.includes("na+") || lower.includes("k+")) {
+    return [
+      { id: "qc-el-1", parameter: "Sodium (Na+)", result: "139", unit: "mmol/L", referenceRange: "135 - 145", status: "Normal", approved: true },
+      { id: "qc-el-2", parameter: "Potassium (K+)", result: "4.2", unit: "mmol/L", referenceRange: "3.5 - 5.1", status: "Normal", approved: true },
+      { id: "qc-el-3", parameter: "Chloride (Cl-)", result: "101", unit: "mmol/L", referenceRange: "98 - 107", status: "Normal", approved: true },
+    ];
+  }
+  if (lower.includes("hba1c") || lower.includes("glycated")) {
+    return [
+      { id: "qc-hba1c-1", parameter: "HbA1c Glycated Hemoglobin", result: "5.7", unit: "%", referenceRange: "< 5.7", status: "Normal", approved: true },
+      { id: "qc-hba1c-2", parameter: "Estimated Average Glucose (eAG)", result: "117", unit: "mg/dL", referenceRange: "70 - 126", status: "Normal", approved: true },
+    ];
+  }
+  return DEFAULT_QC_PARAMETERS;
+}
+
+export function convertTestParamsToQCParams(params: any[]): QualityCheckParameter[] {
+  if (!Array.isArray(params) || params.length === 0) return DEFAULT_QC_PARAMETERS;
+  return params.map((p, idx) => {
+    let status: "Normal" | "Abnormal" | "Critical" = "Normal";
+    const rawStatus = (p.status || "").toLowerCase();
+    if (rawStatus.includes("crit") || rawStatus.includes("high") || rawStatus.includes("flag")) {
+      status = "Critical";
+    } else if (rawStatus.includes("abnorm")) {
+      status = "Abnormal";
+    }
+    return {
+      id: p.id || `qc-${idx + 1}`,
+      parameter: p.parameter || `Parameter ${idx + 1}`,
+      result: p.result !== undefined && p.result !== null ? String(p.result) : "0.0",
+      unit: p.unit || "",
+      referenceRange: p.referenceRange || "Normal",
+      status,
+      approved: p.status === "Completed" || p.approved !== false,
+    };
+  });
+}
+
 const INITIAL_REPORTS: ReportItem[] = [
   {
     id: "rep-1",
@@ -161,10 +240,10 @@ const INITIAL_REPORTS: ReportItem[] = [
     deliveredOn: "20 May 2024, 12:13 PM",
   },
   {
-    id: "rep-2",
-    reportId: "RPT-2024-0530-002",
-    requestId: "TRF1257",
-    sampleId: "SMP-2024-0530-002",
+    id: "rep-s3",
+    reportId: "RPT-SMP-003",
+    requestId: "BC2405200003",
+    sampleId: "SMP-003",
     patientId: "P000124",
     patientPid: "PAT-2024-00046",
     patientName: "Priya",
@@ -175,12 +254,12 @@ const INITIAL_REPORTS: ReportItem[] = [
     doctorName: "Dr. Patel",
     doctorEmail: "patel.nephro@hospital.com",
     testPanel: "Kidney Function Test (KFT)",
-    generatedDate: "30 Mar 2026 12:15 PM",
-    completedDate: "30 Mar 2026, 11:45 AM",
+    generatedDate: "20 May 2024 11:35 AM",
+    completedDate: "20 May 2024, 12:00 PM",
     completedBy: "Lab Technician - John Doe",
     sampleType: "Serum",
-    status: "GENERATED",
-    findingsSummary: "Normal Serum Creatinine and Blood Urea levels.",
+    status: "UNDER_REVIEW",
+    findingsSummary: "Creatinine: 0.8 mg/dL, Urea: 22 mg/dL. Analyzer testing completed successfully.",
     parameters: [
       {
         id: "kft-1",
@@ -219,16 +298,14 @@ const INITIAL_REPORTS: ReportItem[] = [
         approved: true,
       },
     ],
-    overallDecision: "Approved",
+    overallDecision: "Pending",
     clinicalCorrelation:
-      "Renal function parameters within healthy physiological range. No signs of renal impairment.",
-    approvalRemarks: "Report certified for clinical interpretation.",
+      "Renal function parameters within healthy physiological range. Correlate with clinical findings.",
+    approvalRemarks: "Testing completed on analyzer bench. Awaiting final pathologist sign-off.",
     approverName: "Dr. Sarah Johnson",
     approverRole: "Senior Pathologist",
-    approvalDate: "30 Mar 2026, 12:45 PM",
+    approvalDate: "20 May 2024, 12:15 PM",
     signatureUrl: "certified-default",
-    sentOn: "30 Mar 2026, 12:48 PM",
-    deliveredOn: "30 Mar 2026, 12:49 PM",
   },
   {
     id: "rep-3",
@@ -466,7 +543,7 @@ export default function ReportGeneration() {
   const [isLoading, setIsLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Real backend data fetch
+  // Real backend and completed testing samples data fetch
   const fetchRealData = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -494,11 +571,17 @@ export default function ReportGeneration() {
         if (o.lab_order_id) orderMap.set(o.lab_order_id, o);
       });
 
+      const existingReportIds = new Set<string>();
+      const existingSampleIds = new Set<string>();
+      const existingBarcodes = new Set<string>();
       const existingReportOrderIds = new Set(dbReports.map((r) => r.lab_order_id));
       const mappedList: ReportItem[] = [];
 
       // 1. Map existing lab_report records from database
       dbReports.forEach((rep) => {
+        existingReportIds.add(rep.lab_report_id);
+        if (rep.report_number) existingReportIds.add(rep.report_number);
+
         const order = orderMap.get(rep.lab_order_id) || rep.lab_order;
         const patientId = order?.patient_history?.patient_id || order?.patient_history_id || "PAT-001";
         const patient = patientMap.get(patientId);
@@ -540,6 +623,9 @@ export default function ReportGeneration() {
           orderItem?.barcode ||
           `SMP-${rep.lab_report_id.slice(-8)}`;
 
+        existingSampleIds.add(sampleBarcode);
+        if (orderItem?.lab_order_item_id) existingReportIds.add(orderItem.lab_order_item_id);
+
         mappedList.push({
           id: rep.lab_report_id,
           reportId: rep.report_number || `RPT-${rep.lab_report_id.slice(-6)}`,
@@ -559,7 +645,7 @@ export default function ReportGeneration() {
           sampleType,
           status,
           findingsSummary: parsedMeta?.text || rep.report_comment || "Diagnostic results verified within reference ranges.",
-          parameters: parsedMeta?.parameters && parsedMeta.parameters.length > 0 ? parsedMeta.parameters : DEFAULT_QC_PARAMETERS,
+          parameters: parsedMeta?.parameters && parsedMeta.parameters.length > 0 ? parsedMeta.parameters : getDefaultQCParametersForPanel(testPanel),
           overallDecision: parsedMeta?.overallDecision || "Approved",
           reviewComments: parsedMeta?.text || rep.report_comment || "",
           clinicalCorrelation: parsedMeta?.clinicalCorrelation || "Correlate clinically with physical examination and history.",
@@ -573,9 +659,17 @@ export default function ReportGeneration() {
         });
       });
 
-      // 2. Map verified or ordered lab items without reports
+      // 2. Map verified or completed lab items from backend
       items.forEach((item, idx) => {
-        if (existingReportOrderIds.has(item.lab_order_id)) return;
+        const rawItemStatus = (item.item_status || "").toUpperCase();
+        const storedItemStatus = typeof window !== "undefined"
+          ? localStorage.getItem(`testing_sample_status_${item.lab_order_item_id}`)
+          : null;
+        const isTestingCompleted = rawItemStatus === "COMPLETED" || storedItemStatus === "COMPLETED";
+
+        // If this order already has a report and this item is NOT newly completed, skip
+        if (existingReportOrderIds.has(item.lab_order_id) && !isTestingCompleted) return;
+        if (existingReportIds.has(item.lab_order_item_id)) return;
 
         const parentOrder = orderMap.get(item.lab_order_id) || item.lab_order;
         const patientId = parentOrder?.patient_history?.patient_id || parentOrder?.patient_history_id || `PAT00${idx + 1}`;
@@ -595,8 +689,7 @@ export default function ReportGeneration() {
         const testName = item.lab_test_master?.test_name || "Diagnostic Test";
         const sampleType = item.lab_test_master?.sample_type || item.specimen_type || "Whole Blood (EDTA)";
 
-        const rawItemStatus = (item.item_status || "").toUpperCase();
-        const isVerified = rawItemStatus === "VERIFIED" || rawItemStatus === "COMPLETED";
+        const isVerified = rawItemStatus === "VERIFIED" || isTestingCompleted;
 
         const sampleBarcode =
           item.sample_collection?.[0]?.barcode ||
@@ -604,12 +697,44 @@ export default function ReportGeneration() {
           (item.remarks?.match(/Barcode:\s*([A-Za-z0-9_-]+)/i)?.[1]) ||
           `SMP-${item.lab_order_item_id.slice(-6)}`;
 
+        const isApproved = typeof window !== "undefined" && (
+          localStorage.getItem(`report_approved_item-${item.lab_order_item_id}`) === "GENERATED" ||
+          localStorage.getItem(`report_approved_${item.lab_order_item_id}`) === "GENERATED"
+        );
+
         const status: "GENERATED" | "UNDER_REVIEW" | "DRAFT" =
-          rawItemStatus === "REPORT GENERATED"
+          isApproved || rawItemStatus === "REPORT GENERATED"
             ? "GENERATED"
             : isVerified
               ? "UNDER_REVIEW"
               : "DRAFT";
+
+        // Read custom test parameters if recorded in Testing Samples
+        const storedParamsStr = typeof window !== "undefined"
+          ? localStorage.getItem(`testing_sample_params_${item.lab_order_item_id}`)
+          : null;
+        let itemParameters = getDefaultQCParametersForPanel(testName);
+        if (storedParamsStr) {
+          try {
+            const parsed = JSON.parse(storedParamsStr);
+            itemParameters = convertTestParamsToQCParams(parsed);
+          } catch {}
+        }
+
+        const storedResult = typeof window !== "undefined"
+          ? localStorage.getItem(`testing_sample_result_${item.lab_order_item_id}`)
+          : null;
+
+        const findingsSummary = storedResult || item.remarks || (
+          isTestingCompleted
+            ? "Testing completed on analyzer bench. All test parameters entered and awaiting review."
+            : isVerified
+              ? "Sample verified. Analyzer test parameters entered and awaiting review."
+              : "Sample intake in progress. Awaiting verification and testing."
+        );
+
+        existingReportIds.add(item.lab_order_item_id);
+        existingSampleIds.add(sampleBarcode);
 
         mappedList.push({
           id: `item-${item.lab_order_item_id}`,
@@ -625,27 +750,198 @@ export default function ReportGeneration() {
           doctorEmail,
           testPanel: testName,
           generatedDate: formatReportDate(item.created_at || parentOrder?.order_datetime),
-          completedDate: "-",
-          completedBy: "Pending",
+          completedDate: isTestingCompleted ? formatReportDate(item.updated_at || new Date()) : "-",
+          completedBy: item.sample_collection?.[0]?.collected_by || (isTestingCompleted ? "Lab Technician" : "Pending"),
           sampleType,
           status,
-          findingsSummary: isVerified
-            ? "Sample verified. Analyzer test parameters entered and awaiting review."
-            : "Sample intake in progress. Awaiting verification and testing.",
-          parameters: DEFAULT_QC_PARAMETERS,
-          overallDecision: isVerified ? "Approved" : "Pending",
+          findingsSummary,
+          parameters: itemParameters,
+          overallDecision: isApproved ? "Approved" : isVerified ? "Approved" : "Pending",
           reviewComments: "",
           clinicalCorrelation: `Diagnostic test for ${testName}. Correlate with clinical diagnosis.`,
-          approvalRemarks: "",
+          approvalRemarks: isApproved ? "Report approved and certified." : "",
           approverName: "Dr. Sarah Johnson",
           approverRole: "Senior Pathologist",
           signatureUrl: "certified-default",
         });
       });
 
+      // 3. Map all completed testing samples from Testing Samples lifecycle
+      const completedRegistry: any[] = typeof window !== "undefined"
+        ? JSON.parse(localStorage.getItem("completed_testing_samples") || "[]")
+        : [];
+
+      // Check INITIAL_TESTING_SAMPLES for completed samples (like s3 - Priya KFT, or newly completed ones)
+      const initialTestingCompleted = INITIAL_TESTING_SAMPLES.filter((s) => {
+        const storedStatus = typeof window !== "undefined"
+          ? localStorage.getItem(`testing_sample_status_${s.id}`)
+          : null;
+        return storedStatus === "COMPLETED" || s.status === "COMPLETED";
+      });
+
+      // Check verified_samples_cache
+      const verifiedCache: any[] = typeof window !== "undefined"
+        ? JSON.parse(localStorage.getItem("verified_samples_cache") || "[]")
+        : [];
+      const cacheCompleted = verifiedCache.filter((c) => {
+        const storedStatus = typeof window !== "undefined"
+          ? localStorage.getItem(`testing_sample_status_${c.id}`)
+          : null;
+        return storedStatus === "COMPLETED" || c.status === "COMPLETED";
+      });
+
+      // Merge all completed testing samples
+      const allCompletedSamples: any[] = [
+        ...completedRegistry,
+        ...initialTestingCompleted,
+        ...cacheCompleted,
+      ];
+
+      // Also scan localStorage for any testing_sample_status_* === "COMPLETED"
+      if (typeof window !== "undefined") {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith("testing_sample_status_")) {
+            if (localStorage.getItem(key) === "COMPLETED") {
+              const id = key.replace("testing_sample_status_", "");
+              if (!allCompletedSamples.some((s) => s.id === id)) {
+                const storedResult = localStorage.getItem(`testing_sample_result_${id}`);
+                const storedComments = localStorage.getItem(`testing_sample_comments_${id}`);
+                const storedParams = localStorage.getItem(`testing_sample_params_${id}`);
+                allCompletedSamples.push({
+                  id,
+                  sampleId: id.startsWith("SMP-") ? id : `SMP-${id}`,
+                  barcode: `BC-${id}`,
+                  patientId: "PID123456",
+                  patientName: "Patient " + id,
+                  testName: "Diagnostic Panel",
+                  sampleType: "Whole Blood",
+                  status: "COMPLETED",
+                  testResult: storedResult,
+                  comments: storedComments,
+                  parameters: storedParams ? JSON.parse(storedParams) : undefined,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // Add each completed testing sample to mappedList if not already present
+      allCompletedSamples.forEach((s) => {
+        const sampleId = s.sampleId || s.id;
+        const barcode = s.barcode || "";
+
+        // Check if this sample is already in mappedList
+        const alreadyExists = mappedList.some(
+          (m) =>
+            m.id === s.id ||
+            m.id === `rep-${s.id}` ||
+            m.id === `item-${s.id}` ||
+            (sampleId && (m.sampleId === sampleId || m.reportId.includes(sampleId))) ||
+            (barcode && m.requestId === barcode)
+        );
+
+        if (alreadyExists) return;
+
+        const isApproved = typeof window !== "undefined" && (
+          localStorage.getItem(`report_approved_rep-${s.id}`) === "GENERATED" ||
+          localStorage.getItem(`report_approved_${s.id}`) === "GENERATED" ||
+          localStorage.getItem(`report_approved_rep_RPT-${sampleId}`) === "GENERATED" ||
+          localStorage.getItem(`report_approved_smp_${sampleId}`) === "GENERATED"
+        );
+
+        const status: "GENERATED" | "UNDER_REVIEW" | "CRITICAL" =
+          isApproved
+            ? "GENERATED"
+            : s.criticalAlert || s.status === "FLAGGED"
+              ? "CRITICAL"
+              : "UNDER_REVIEW";
+
+        let sampleParams: QualityCheckParameter[] = [];
+        if (s.parameters && Array.isArray(s.parameters) && s.parameters.length > 0) {
+          sampleParams = convertTestParamsToQCParams(s.parameters);
+        } else {
+          const storedParamsStr = typeof window !== "undefined"
+            ? localStorage.getItem(`testing_sample_params_${s.id}`)
+            : null;
+          if (storedParamsStr) {
+            try {
+              sampleParams = convertTestParamsToQCParams(JSON.parse(storedParamsStr));
+            } catch {
+              sampleParams = getDefaultQCParametersForPanel(s.testName);
+            }
+          } else {
+            sampleParams = getDefaultQCParametersForPanel(s.testName);
+          }
+        }
+
+        const storedResult = typeof window !== "undefined"
+          ? localStorage.getItem(`testing_sample_result_${s.id}`)
+          : null;
+        const findingsSummary =
+          storedResult ||
+          s.testResult ||
+          s.comments ||
+          "Analyzer testing completed successfully. All parameters recorded and queued for Pathologist review.";
+
+        const reportId = `RPT-${sampleId}`;
+        const patientName = s.patientName || "Patient";
+
+        mappedList.push({
+          id: `rep-${s.id}`,
+          reportId,
+          requestId: barcode || `TRF-${sampleId}`,
+          sampleId,
+          patientId: s.patientId || "P000124",
+          patientPid: s.patientPid || s.patientId || "P000124",
+          patientName,
+          patientAgeGender: s.patientAgeGender || "32 Years / Male",
+          patientAvatar: s.patientAvatar || "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=256&h=256",
+          patientEmail: s.patientEmail || `${patientName.toLowerCase().replace(/\s+/g, ".")}@email.com`,
+          doctorName: s.doctorName || "Dr. Sarah Johnson",
+          doctorEmail: s.doctorEmail || "doctor@hospital.com",
+          testPanel: s.testName || "Diagnostic Test",
+          generatedDate: formatReportDate(s.receivedDate || new Date()),
+          completedDate: s.estimatedCompletion || "Today, 11:30 AM",
+          completedBy: s.receivedBy || "Lab Technician - John Doe",
+          sampleType: s.sampleType || "Serum",
+          status,
+          findingsSummary,
+          parameters: sampleParams,
+          overallDecision: isApproved ? "Approved" : "Pending",
+          reviewComments: s.comments || "",
+          clinicalCorrelation: `Analyzer testing completed for ${s.testName}. Correlate clinically.`,
+          approvalRemarks: isApproved ? "Report approved and certified." : "Awaiting pathologist sign-off.",
+          approverName: "Dr. Sarah Johnson",
+          approverRole: "Senior Pathologist",
+          signatureUrl: "certified-default",
+        });
+
+        existingSampleIds.add(sampleId);
+        if (barcode) existingBarcodes.add(barcode);
+      });
+
+      // 4. Merge any initial demo reports (like rep-1, rep-3, rep-4, rep-5) if not already represented
+      INITIAL_REPORTS.forEach((demo) => {
+        const exists = mappedList.some(
+          (m) =>
+            m.id === demo.id ||
+            m.reportId === demo.reportId ||
+            (demo.sampleId && m.sampleId === demo.sampleId)
+        );
+        if (!exists) {
+          mappedList.push(demo);
+        }
+      });
+
       if (mappedList.length > 0) {
         setReports(mappedList);
-        setSelectedReport(mappedList[0]);
+        setSelectedReport((prev) => {
+          if (!prev) return mappedList[0];
+          const found = mappedList.find((r) => r.id === prev.id);
+          return found || mappedList[0];
+        });
       }
     } catch (err: any) {
       console.error("Error fetching lab reports:", err);
@@ -874,6 +1170,49 @@ export default function ReportGeneration() {
 
     setSelectedReport(updated);
 
+    try {
+      localStorage.setItem(`report_approved_${selectedReport.id}`, "GENERATED");
+      localStorage.setItem(`report_approved_rep_${selectedReport.reportId}`, "GENERATED");
+      if (selectedReport.sampleId) {
+        localStorage.setItem(`report_approved_smp_${selectedReport.sampleId}`, "GENERATED");
+      }
+
+      // If it corresponds to a real backend lab order, call the backend API
+      if (
+        selectedReport.requestId &&
+        !selectedReport.requestId.startsWith("TRF") &&
+        !selectedReport.requestId.startsWith("REQ") &&
+        !selectedReport.requestId.startsWith("BC")
+      ) {
+        labReportApi
+          .create({
+            lab_order_id: selectedReport.requestId,
+            report_number: selectedReport.reportId,
+            report_status: "Generated",
+            digital_signature: digitalSignature || undefined,
+            report_comment: JSON.stringify({
+              text: approvalRemarks,
+              clinicalCorrelation,
+              overallDecision: "Approved",
+              parameters: selectedReport.parameters,
+            }),
+          })
+          .catch((e) => console.warn("Could not save report to backend:", e));
+      }
+
+      const realItemId = selectedReport.id.replace("item-", "").replace("rep-", "");
+      if (realItemId && !realItemId.startsWith("s") && !realItemId.startsWith("ts-")) {
+        labOrderItemApi
+          .update(realItemId, {
+            item_status: "Report Generated",
+            remarks: approvalRemarks || "Report Approved & Digitally Signed",
+          })
+          .catch((e) => console.warn("Could not update lab order item status:", e));
+      }
+    } catch (err) {
+      console.warn("Could not persist approval state:", err);
+    }
+
     toast({
       title: "Report Approved & Digitally Signed",
       description: `Report ${selectedReport.reportId} is certified and ready for dispatch.`,
@@ -903,6 +1242,9 @@ export default function ReportGeneration() {
     setReports((prev) =>
       prev.map((r) => (r.id === id ? { ...r, status: "GENERATED" } : r)),
     );
+    try {
+      localStorage.setItem(`report_approved_${id}`, "GENERATED");
+    } catch {}
     toast({
       title: "Report Generated",
       description: "Diagnostic report compiled and certified for dispatch.",

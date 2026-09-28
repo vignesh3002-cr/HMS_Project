@@ -11,7 +11,7 @@ import {
 } from "@/api/labOrder.api";
 import { patientApi, PatientRecord } from "@/api/patient.api";
 
-interface TestingSampleItem {
+export interface TestingSampleItem {
   id: string;
   sampleId: string;
   barcode: string;
@@ -473,7 +473,7 @@ export const INITIAL_CBC_PARAMETERS: TestParameter[] = [
   },
 ];
 
-const INITIAL_TESTING_SAMPLES: TestingSampleItem[] = [
+export const INITIAL_TESTING_SAMPLES: TestingSampleItem[] = [
   {
     id: "s2",
     sampleId: "SMP-002",
@@ -946,9 +946,43 @@ export default function TestingSamples() {
 
     try {
       localStorage.setItem(`testing_sample_status_${selectedSample.id}`, "COMPLETED");
+      localStorage.setItem(`testing_sample_result_${selectedSample.id}`, updatedResult);
       if (completionComments.trim()) {
         localStorage.setItem(`testing_sample_comments_${selectedSample.id}`, completionComments.trim());
       }
+      const paramsToSave =
+        selectedSample.parameters && selectedSample.parameters.length > 0
+          ? selectedSample.parameters
+          : getDefaultParametersForTest(selectedSample.testName);
+      localStorage.setItem(`testing_sample_params_${selectedSample.id}`, JSON.stringify(paramsToSave));
+
+      try {
+        const existingCompleted = JSON.parse(localStorage.getItem("completed_testing_samples") || "[]");
+        const updatedCompleted = [
+          ...existingCompleted.filter((item: any) => item.id !== selectedSample.id),
+          {
+            id: selectedSample.id,
+            sampleId: selectedSample.sampleId,
+            barcode: selectedSample.barcode,
+            patientId: selectedSample.patientId,
+            patientName: selectedSample.patientName,
+            testName: selectedSample.testName,
+            analyzerBench: selectedSample.analyzerBench,
+            sampleType: selectedSample.sampleType,
+            receivedDate: selectedSample.receivedDate,
+            receivedBy: selectedSample.receivedBy,
+            status: "COMPLETED",
+            testResult: updatedResult,
+            comments: completionComments.trim() || selectedSample.comments,
+            parameters: paramsToSave,
+            completedAt: new Date().toISOString(),
+          },
+        ];
+        localStorage.setItem("completed_testing_samples", JSON.stringify(updatedCompleted));
+      } catch (e) {
+        console.warn("Could not save to completed_testing_samples registry:", e);
+      }
+
       if (!selectedSample.id.startsWith("ts-") && !selectedSample.id.startsWith("s")) {
         await labOrderItemApi.update(selectedSample.id, {
           item_status: "Completed",
@@ -1031,6 +1065,34 @@ export default function TestingSamples() {
       if (resultComments.trim()) {
         localStorage.setItem(`testing_sample_comments_${selectedSample.id}`, resultComments.trim());
       }
+
+      try {
+        const existingCompleted = JSON.parse(localStorage.getItem("completed_testing_samples") || "[]");
+        const updatedCompleted = [
+          ...existingCompleted.filter((item: any) => item.id !== selectedSample.id),
+          {
+            id: selectedSample.id,
+            sampleId: selectedSample.sampleId,
+            barcode: selectedSample.barcode,
+            patientId: selectedSample.patientId,
+            patientName: selectedSample.patientName,
+            testName: selectedSample.testName,
+            analyzerBench: selectedSample.analyzerBench,
+            sampleType: selectedSample.sampleType,
+            receivedDate: selectedSample.receivedDate,
+            receivedBy: selectedSample.receivedBy,
+            status: "COMPLETED",
+            testResult: summary,
+            comments: resultComments.trim() || selectedSample.comments,
+            parameters: testParameters,
+            completedAt: new Date().toISOString(),
+          },
+        ];
+        localStorage.setItem("completed_testing_samples", JSON.stringify(updatedCompleted));
+      } catch (e) {
+        console.warn("Could not save to completed_testing_samples registry:", e);
+      }
+
       if (!selectedSample.id.startsWith("ts-")) {
         await labOrderItemApi.update(selectedSample.id, {
           item_status: "Completed",
@@ -2556,9 +2618,9 @@ export default function TestingSamples() {
                                     e.stopPropagation();
                                     handleOpenEnterResults(s);
                                   }}
-                                  className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-[#15803d] border border-emerald-200 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                                  className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-[#15803d] border border-emerald-200 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
                                 >
-                                  View / Edit Result
+                                  Edit Result
                                 </button>
                                 <button
                                   type="button"
@@ -2566,9 +2628,20 @@ export default function TestingSamples() {
                                     e.stopPropagation();
                                     handleOpenMarkCompleted(s);
                                   }}
-                                  className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                                  className="px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
                                 >
                                   Review
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate("/doctor/lab/report-generation");
+                                  }}
+                                  className="px-2.5 py-1.5 bg-[#0b57d0] hover:bg-[#094bb5] text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                                  title="Go to Report Generation"
+                                >
+                                  Go to Report →
                                 </button>
                               </div>
                             )}
