@@ -792,7 +792,7 @@ export default function ReportGeneration() {
       overallDecision,
       reviewComments,
       parameters: currentParameters,
-    }));
+    } : null));
 
     if (proceedToApproval) {
       handleOpenApproveResults({
