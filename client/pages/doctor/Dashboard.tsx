@@ -15,7 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 
 import { useCriticalPatients } from "@/hooks/useCriticalPatients";
-import { CriticalWrapper, CriticalCorner, CriticalDot } from "@/components/hms/CriticalPatientIndicator";
+import { CriticalDot, CriticalCorner, CriticalWrapper } from "@/components/hms/CriticalPatientIndicator";
 
 type AppointmentStatus = "Check Out" | "Check In" | "Cancelled";
 
@@ -837,10 +837,10 @@ export default function DoctorDashboard() {
                         })):undefined}
                       className={`relative cursor-pointer transition hover:bg-slate-50`}
                     >
-                      <td className="h-[50px] overflow-hidden border-b border-slate-100 px-5 py-2 text-xs text-slate-600">
-                        <CriticalWrapper className="flex items-center gap-3" reasons={crit.reasons}>
-                          <CriticalCorner reasons={crit.reasons} />
-                          <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-slate-100">
+                      <td className="h-[50px] border-b border-slate-100 px-5 py-2 text-xs text-slate-600 relative">
+                        <CriticalCorner reasons={crit.reasons} />
+                        <CriticalWrapper className="flex items-center gap-2" reasons={crit.reasons}>
+                          <div className="w-7 h-7 shrink-0 overflow-hidden rounded-full bg-slate-100">
                             {appointment.image ? (
                               <img
                                 src={appointment.image}
@@ -864,7 +864,7 @@ export default function DoctorDashboard() {
 
                           <span className="overflow-hidden text-ellipsis whitespace-nowrap font-['Manrope',sans-serif] text-xs font-bold text-slate-800 inline-flex items-center">
                             {appointment.patient}
-                            <CriticalDot reasons={getCriticalInfo(appointment.patientId).reasons} />
+                            <CriticalDot reasons={crit.reasons} />
                           </span>
                         </CriticalWrapper>
                       </td>

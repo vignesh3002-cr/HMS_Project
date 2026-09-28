@@ -412,8 +412,15 @@ export const chemotherapyApi = {
         dilution_dose_units: string[];
         dilution_volume_units: string[];
         diluents: string[];
+        treatment_intents?: string[];
       };
     }>("/chemotherapy/protocol-field-options"),
+  listTreatmentIntents: () =>
+    API.get<{
+      success: boolean;
+      message: string;
+      data: string[];
+    }>("/chemotherapy/treatment-intents"),
   listMedicinesByCancerSubtype: (
     cancerTypeIds: string | string[],
     subtypeIds: string | string[] | undefined,

@@ -46,6 +46,9 @@ export interface LabOrderItemRecord {
   net_amount?: number | string | null;
   item_status?: string | null;
   remarks?: string | null;
+  barcode?: string | null;
+  sample_id?: string | null;
+  specimen_type?: string | null;
   created_at?: string;
   updated_at?: string;
   branch_id?: string | null;
@@ -65,6 +68,7 @@ export interface LabOrderItemRecord {
     unit?: string | null;
     sample_type?: string | null;
     reference_range?: string | null;
+    tat_hours?: number | string | null;
   } | null;
   sample_collection?: {
     id?: number;
@@ -74,6 +78,7 @@ export interface LabOrderItemRecord {
     container_type?: string | null;
     collection_status?: string | null;
     remarks?: string | null;
+    collected_by?: string | null;
   }[];
 }
 

@@ -2632,7 +2632,7 @@ export default function SampleVerification() {
               className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
               data-purpose="kpi-metric-cards"
             >
-              {/* Card 1: Test Completed */}
+              {/* Card 1: Sample Verified */}
               <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
                 <div className="w-14 h-14 rounded-full bg-[#def7ec] flex items-center justify-center shrink-0">
                   <svg
@@ -2650,18 +2650,18 @@ export default function SampleVerification() {
                 </div>
                 <div>
                   <span className="text-[13px] font-semibold text-[#059669]">
-                    Test Completed
+                    Sample Verified
                   </span>
                   <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
                     {verifiedCount}
                   </h3>
                   <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                    Tests verified successfully
+                    Samples verified successfully
                   </p>
                 </div>
               </div>
 
-              {/* Card 2: Test Result Pending */}
+              {/* Card 2: Sample Verification Pending */}
               <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
                 <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
                   <svg
@@ -2679,13 +2679,13 @@ export default function SampleVerification() {
                 </div>
                 <div>
                   <span className="text-[13px] font-semibold text-[#2563eb]">
-                    Test Result Pending
+                    Sample Verification Pending
                   </span>
                   <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
                     {pendingCount}
                   </h3>
                   <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                    Results pending verification
+                    Samples pending verification
                   </p>
                 </div>
               </div>

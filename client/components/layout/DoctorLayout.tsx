@@ -6,6 +6,7 @@ import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { remove, getUser } from "../../utils/token";
 import { employeeApi } from "../../api/employee.api";
 import { BranchFilterProvider } from "@/context/BranchFilterContext";
+import { AIChatBox } from "@/components/hms/AIChatBox";
 
 interface DoctorLayoutProps {
   children?: React.ReactNode;
@@ -148,6 +149,7 @@ const DoctorLayout: React.FC<DoctorLayoutProps> = ({
           onConfirm={handleLogout}
           onCancel={() => setLogoutOpen(false)}
         />
+        <AIChatBox />
       </div>
     </BranchFilterProvider>
   );

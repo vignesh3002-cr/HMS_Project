@@ -1,8 +1,11 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
 import { toast } from "@/hooks/use-toast";
 import LabNav from "./labnav";
+import { labReportApi, LabReportRecord } from "@/api/labReport.api";
+import { labOrderApi, labOrderItemApi, LabOrderRecord, LabOrderItemRecord } from "@/api/labOrder.api";
+import { patientApi, PatientRecord } from "@/api/patient.api";
 
 export interface DiagnosticParameter {
   parameter: string;
@@ -369,6 +372,22 @@ const INITIAL_TRANSFERS: TransferItem[] = [
   },
 ];
 
+function calculateAge(dob: string): number {
+  const birth = new Date(dob);
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  const m = now.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) age--;
+  return Math.max(0, age);
+}
+
+function formatReportDate(dateVal?: string | Date | null): string {
+  if (!dateVal) return new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return String(dateVal);
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
 export default function ReportTransfer() {
   const navigate = useNavigate();
   const currentUser = getUser();
@@ -390,6 +409,196 @@ export default function ReportTransfer() {
     "ALL" | "DELIVERED" | "SENT" | "QUEUED" | "FAILED"
   >("ALL");
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Real database fetch
+  const fetchRealData = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setFetchError(null);
+
+      const [ordersRes, itemsRes, patientsRes, reportsRes] = await Promise.all([
+        labOrderApi.getAll().catch(() => ({ data: { data: [] } })),
+        labOrderItemApi.getAll().catch(() => ({ data: { data: [] } })),
+        patientApi.getAll({ limit: 100 }).catch(() => ({ data: { data: { patients: [] } } })),
+        labReportApi.getAll().catch(() => ({ data: { data: [] } })),
+      ]);
+
+      const orders: LabOrderRecord[] = ordersRes?.data?.data || [];
+      const items: LabOrderItemRecord[] = itemsRes?.data?.data || [];
+      const patients: PatientRecord[] = patientsRes?.data?.data?.patients || [];
+      const dbReports: LabReportRecord[] = reportsRes?.data?.data || [];
+
+      const patientMap = new Map<string, PatientRecord>();
+      patients.forEach((p) => {
+        if (p.patient_id) patientMap.set(p.patient_id, p);
+      });
+
+      const orderMap = new Map<string, LabOrderRecord>();
+      orders.forEach((o) => {
+        if (o.lab_order_id) orderMap.set(o.lab_order_id, o);
+      });
+
+      const itemsByOrderMap = new Map<string, LabOrderItemRecord[]>();
+      items.forEach((item) => {
+        const arr = itemsByOrderMap.get(item.lab_order_id) || [];
+        arr.push(item);
+        itemsByOrderMap.set(item.lab_order_id, arr);
+      });
+
+      const mappedTransfers: TransferItem[] = [];
+
+      // 1. Map all lab_report records in the database
+      dbReports.forEach((rep, idx) => {
+        const order = orderMap.get(rep.lab_order_id) || rep.lab_order;
+        const patientId = order?.patient_history?.patient_id || order?.patient_history_id || "PAT-001";
+        const patient = patientMap.get(patientId);
+
+        const patientName = patient
+          ? [patient.patient_first_name, patient.patient_middle_name, patient.patient_last_name].filter(Boolean).join(" ")
+          : `Patient ${patientId}`;
+        const age = patient?.patient_age || (patient?.patient_dob ? calculateAge(patient.patient_dob) : 34);
+        const gender = patient?.patient_gender || "Male";
+        const patientAgeGender = `${age} Years / ${gender}`;
+
+        const doctor = order?.employees;
+        const doctorName = doctor ? `Dr. ${doctor.first_name} ${doctor.last_name || ""}`.trim() : "Dr. Sarah Johnson";
+        const doctorEmail = (doctor as any)?.email || "johnson@hospital.com";
+
+        const orderItem = rep.lab_order?.lab_order_item?.[0] || itemsByOrderMap.get(rep.lab_order_id)?.[0];
+        const testProfile = orderItem?.lab_test_master?.test_name || "Diagnostic Panel";
+
+        const sampleBarcode =
+          orderItem?.sample_collection?.[0]?.barcode ||
+          orderItem?.barcode ||
+          `SMP-${rep.lab_report_id.slice(-8)}`;
+
+        const isDelivered = !!rep.delivered_datetime || rep.report_status?.toUpperCase() === "DELIVERED" || !!rep.delivered_to;
+        const status: "DELIVERED" | "SENT" | "QUEUED" | "FAILED" = isDelivered ? "DELIVERED" : "QUEUED";
+
+        const dispatchId = `DSP-${9000 + idx + 1}`;
+        const recipient = rep.delivered_to || `${doctorName} (Internal Medicine)`;
+        const channel: "EMR / Doctor" | "Patient SMS / WhatsApp" | "Email PDF" | "ICU / Ward" =
+          rep.delivered_to?.includes("Patient") ? "Patient SMS / WhatsApp" : "EMR / Doctor";
+
+        let parsedMeta: any = null;
+        if (rep.report_comment) {
+          try {
+            parsedMeta = JSON.parse(rep.report_comment);
+          } catch {
+            // plain text
+          }
+        }
+
+        const deliveredTimeStr = rep.delivered_datetime
+          ? new Date(rep.delivered_datetime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+          : "11:35 AM";
+
+        mappedTransfers.push({
+          id: rep.lab_report_id,
+          dispatchId,
+          reportId: rep.report_number || `RPT-${rep.lab_report_id.slice(-6)}`,
+          sampleId: sampleBarcode,
+          patientId,
+          patientPid: patient?.patient_id || patientId,
+          patientName,
+          patientAgeGender,
+          patientAvatar:
+            (patient as any)?.avatar ||
+            "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256&h=256",
+          patientEmail: patient?.patient_email || `${patientName.toLowerCase().replace(/\s+/g, ".")}@email.com`,
+          doctorName,
+          doctorEmail,
+          testProfile,
+          recipient,
+          channel,
+          dispatchedAt: deliveredTimeStr,
+          status,
+          ackDetails: isDelivered ? "Delivered and acknowledged in portal" : "Pending dispatch queue",
+          collectedOn: formatReportDate((orderItem as any)?.created_at || order?.order_datetime),
+          reportedOn: formatReportDate(rep.generated_datetime || rep.created_at),
+          clinicalRemarks: parsedMeta?.text || rep.report_comment || "All parameters evaluated. Laboratory diagnostics complete.",
+          clinicalCorrelation: parsedMeta?.clinicalCorrelation || "Correlate clinically with physical findings and history.",
+          parameters: parsedMeta?.parameters && parsedMeta.parameters.length > 0 ? parsedMeta.parameters : DEFAULT_CBC_PARAMETERS,
+        });
+      });
+
+      // 2. Map verified / completed items that don't have a report yet so they appear in transfer queue
+      const reportedOrderIds = new Set(dbReports.map((r) => r.lab_order_id));
+      items.forEach((item, idx) => {
+        if (reportedOrderIds.has(item.lab_order_id)) return;
+        const rawStatus = (item.item_status || "").toUpperCase();
+        if (rawStatus !== "VERIFIED" && rawStatus !== "REPORT GENERATED" && rawStatus !== "COMPLETED") return;
+
+        const parentOrder = orderMap.get(item.lab_order_id) || item.lab_order;
+        const patientId = parentOrder?.patient_history?.patient_id || parentOrder?.patient_history_id || `PAT00${idx + 1}`;
+        const patient = patientMap.get(patientId);
+
+        const patientName = patient
+          ? [patient.patient_first_name, patient.patient_middle_name, patient.patient_last_name].filter(Boolean).join(" ")
+          : `Patient ${patientId}`;
+        const age = patient?.patient_age || (patient?.patient_dob ? calculateAge(patient.patient_dob) : 30);
+        const gender = patient?.patient_gender || "Male";
+        const patientAgeGender = `${age} Years / ${gender}`;
+
+        const doctor = parentOrder?.employees;
+        const doctorName = doctor ? `Dr. ${doctor.first_name} ${doctor.last_name || ""}`.trim() : "Dr. Sarah Johnson";
+        const doctorEmail = (doctor as any)?.email || "doctor@hospital.com";
+
+        const testProfile = item.lab_test_master?.test_name || "Diagnostic Test";
+        const sampleBarcode =
+          item.sample_collection?.[0]?.barcode ||
+          item.barcode ||
+          `SMP-${item.lab_order_item_id.slice(-6)}`;
+
+        const isGenerated = rawStatus === "REPORT GENERATED" || rawStatus === "COMPLETED";
+
+        mappedTransfers.push({
+          id: `item-${item.lab_order_item_id}`,
+          dispatchId: `DSP-${9100 + idx + 1}`,
+          reportId: `RPT-${item.lab_order_item_id.slice(-6)}`,
+          sampleId: sampleBarcode,
+          patientId,
+          patientPid: patient?.patient_id || patientId,
+          patientName,
+          patientAgeGender,
+          patientAvatar:
+            (patient as any)?.avatar ||
+            "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=256&h=256",
+          patientEmail: patient?.patient_email || `${patientName.toLowerCase().replace(/\s+/g, ".")}@email.com`,
+          doctorName,
+          doctorEmail,
+          testProfile,
+          recipient: `${doctorName} (Internal Medicine)`,
+          channel: "EMR / Doctor",
+          dispatchedAt: "Queued",
+          status: isGenerated ? "SENT" : "QUEUED",
+          ackDetails: isGenerated ? "Report generated. Ready for portal transfer." : "Test verified. In dispatch queue.",
+          collectedOn: formatReportDate((item as any)?.created_at || parentOrder?.order_datetime),
+          reportedOn: formatReportDate((item as any)?.updated_at || new Date()),
+          clinicalRemarks: "Diagnostic results ready for clinical correlation and delivery.",
+          clinicalCorrelation: "Correlate with attending physician assessment.",
+          parameters: DEFAULT_CBC_PARAMETERS,
+        });
+      });
+
+      if (mappedTransfers.length > 0) {
+        setTransfers(mappedTransfers);
+        setSelectedTransfer(mappedTransfers[0]);
+      }
+    } catch (err: any) {
+      console.error("Error fetching transfer records:", err);
+      setFetchError(err.message || "Failed to load real transfer data");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRealData();
+  }, [fetchRealData]);
 
   // Workflow View Mode: "table" | "forward" | "preview"
   const [viewMode, setViewMode] = useState<"table" | "forward" | "preview">(
@@ -449,7 +658,7 @@ export default function ReportTransfer() {
     setAdditionalRecipients((prev) => prev.filter((e) => e !== email));
   };
 
-  const handleSendReport = () => {
+  const handleSendReport = async () => {
     if (!sendToPatient && !sendToDoctor && additionalRecipients.length === 0) {
       toast({
         title: "No Recipients Selected",
@@ -465,6 +674,28 @@ export default function ReportTransfer() {
       minute: "2-digit",
     });
 
+    const recipientList: string[] = [];
+    if (sendToPatient) recipientList.push("Patient Portal");
+    if (sendToDoctor) recipientList.push("Doctor Portal");
+    if (additionalRecipients.length > 0) {
+      recipientList.push(`${additionalRecipients.length} external email(s)`);
+    }
+
+    const deliveredToStr = recipientList.join(" | ") || selectedTransfer.recipient;
+
+    // Persist real transfer to database if lab_report exists
+    if (!selectedTransfer.id.startsWith("tx-") && !selectedTransfer.id.startsWith("item-")) {
+      try {
+        await labReportApi.transfer(selectedTransfer.id, {
+          delivered_to: deliveredToStr,
+          delivered_datetime: new Date().toISOString(),
+          report_status: "DELIVERED",
+        });
+      } catch (err: any) {
+        console.error("Failed to update report transfer in DB:", err);
+      }
+    }
+
     setTransfers((prev) =>
       prev.map((t) =>
         t.id === selectedTransfer.id
@@ -478,13 +709,6 @@ export default function ReportTransfer() {
       ),
     );
 
-    const recipientList: string[] = [];
-    if (sendToPatient) recipientList.push("Patient Portal");
-    if (sendToDoctor) recipientList.push("Doctor Portal");
-    if (additionalRecipients.length > 0) {
-      recipientList.push(`${additionalRecipients.length} external email(s)`);
-    }
-
     toast({
       title: "Report Forwarded Successfully",
       description: `Report ${selectedTransfer.reportId} sent to: ${recipientList.join(", ")}.`,
@@ -493,17 +717,31 @@ export default function ReportTransfer() {
     setViewMode("table");
   };
 
-  const handleResend = (id: string) => {
+  const handleResend = async (id: string) => {
+    const nowTime = new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    if (!id.startsWith("tx-") && !id.startsWith("item-")) {
+      try {
+        await labReportApi.transfer(id, {
+          delivered_to: "Resent to Portal",
+          delivered_datetime: new Date().toISOString(),
+          report_status: "DELIVERED",
+        });
+      } catch (err: any) {
+        console.error("Failed to re-transmit report in DB:", err);
+      }
+    }
+
     setTransfers((prev) =>
       prev.map((t) =>
         t.id === id
           ? {
               ...t,
               status: "DELIVERED",
-              dispatchedAt: new Date().toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              }),
+              dispatchedAt: nowTime,
               ackDetails: "Successfully re-transmitted and acknowledged.",
             }
           : t,
@@ -515,8 +753,24 @@ export default function ReportTransfer() {
     });
   };
 
-  const handleBatchSync = (e?: React.FormEvent) => {
+  const handleBatchSync = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    const queuedReports = transfers.filter(
+      (t) => (t.status === "QUEUED" || t.status === "FAILED") && !t.id.startsWith("tx-") && !t.id.startsWith("item-")
+    );
+
+    if (queuedReports.length > 0) {
+      await Promise.allSettled(
+        queuedReports.map((t) =>
+          labReportApi.transfer(t.id, {
+            delivered_to: t.recipient,
+            delivered_datetime: new Date().toISOString(),
+            report_status: "DELIVERED",
+          })
+        )
+      );
+    }
+
     setTransfers((prev) =>
       prev.map((t) =>
         t.status === "QUEUED" || t.status === "FAILED"
@@ -562,6 +816,14 @@ export default function ReportTransfer() {
   );
   const failedCount = useMemo(
     () => transfers.filter((t) => t.status === "FAILED").length,
+    [transfers],
+  );
+  const transferredCount = useMemo(
+    () => transfers.filter((t) => t.status === "DELIVERED" || t.status === "SENT").length,
+    [transfers],
+  );
+  const pendingTransferCount = useMemo(
+    () => transfers.filter((t) => t.status !== "DELIVERED" && t.status !== "SENT").length,
     [transfers],
   );
 
@@ -1222,7 +1484,7 @@ export default function ReportTransfer() {
                 className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
                 data-purpose="kpi-metric-cards"
               >
-                {/* Card 1: Test Completed */}
+                {/* Card 1: Report Transfer */}
                 <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
                   <div className="w-14 h-14 rounded-full bg-[#def7ec] flex items-center justify-center shrink-0">
                     <svg
@@ -1240,18 +1502,18 @@ export default function ReportTransfer() {
                   </div>
                   <div>
                     <span className="text-[13px] font-semibold text-[#059669]">
-                      Test Completed
+                      Report Transfer
                     </span>
                     <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                      128
+                      {transferredCount}
                     </h3>
                     <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                      Tests completed successfully
+                      Reports transferred successfully
                     </p>
                   </div>
                 </div>
 
-                {/* Card 2: Test Result Pending */}
+                {/* Card 2: Report Transfer Pending */}
                 <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
                   <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
                     <svg
@@ -1269,13 +1531,13 @@ export default function ReportTransfer() {
                   </div>
                   <div>
                     <span className="text-[13px] font-semibold text-[#2563eb]">
-                      Test Result Pending
+                      Report Transfer Pending
                     </span>
                     <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                      56
+                      {pendingTransferCount}
                     </h3>
                     <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                      Results pending verification
+                      Awaiting report transfer
                     </p>
                   </div>
                 </div>
@@ -1349,9 +1611,33 @@ export default function ReportTransfer() {
                   className="px-8 pt-7 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4"
                   data-purpose="table-header"
                 >
-                  <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
-                    Report Dispatch &amp; Transfer Log
-                  </h1>
+                  <div className="flex items-center gap-3">
+                    <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
+                      Report Dispatch &amp; Transfer Log
+                    </h1>
+                    <button
+                      type="button"
+                      onClick={() => fetchRealData()}
+                      disabled={isLoading}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50 cursor-pointer"
+                      title="Reload real reports from database"
+                    >
+                      <svg
+                        className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        />
+                      </svg>
+                      {isLoading ? "Refreshing..." : "Refresh"}
+                    </button>
+                  </div>
                   {/* BEGIN: SearchAndFilters */}
                   <div
                     className="flex flex-wrap items-center gap-3"

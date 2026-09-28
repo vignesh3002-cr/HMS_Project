@@ -1,8 +1,11 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
 import { toast } from "@/hooks/use-toast";
 import LabNav from "./labnav";
+import { labOrderApi, labOrderItemApi, LabOrderRecord, LabOrderItemRecord } from "@/api/labOrder.api";
+import { patientApi, PatientRecord } from "@/api/patient.api";
+import { labReportApi, LabReportRecord } from "@/api/labReport.api";
 
 export interface QualityCheckParameter {
   id: string;
@@ -422,6 +425,22 @@ const INITIAL_REPORTS: ReportItem[] = [
   },
 ];
 
+function calculateAge(dob: string): number {
+  const birth = new Date(dob);
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  const m = now.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) age--;
+  return Math.max(0, age);
+}
+
+function formatReportDate(dateVal?: string | Date | null): string {
+  if (!dateVal) return new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return String(dateVal);
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
 export default function ReportGeneration() {
   const navigate = useNavigate();
   const currentUser = getUser();
@@ -443,6 +462,202 @@ export default function ReportGeneration() {
     "ALL" | "GENERATED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL"
   >("ALL");
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Real backend data fetch
+  const fetchRealData = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setFetchError(null);
+
+      const [ordersRes, itemsRes, patientsRes, reportsRes] = await Promise.all([
+        labOrderApi.getAll().catch(() => ({ data: { data: [] } })),
+        labOrderItemApi.getAll().catch(() => ({ data: { data: [] } })),
+        patientApi.getAll({ limit: 100 }).catch(() => ({ data: { data: { patients: [] } } })),
+        labReportApi.getAll().catch(() => ({ data: { data: [] } })),
+      ]);
+
+      const orders: LabOrderRecord[] = ordersRes?.data?.data || [];
+      const items: LabOrderItemRecord[] = itemsRes?.data?.data || [];
+      const patients: PatientRecord[] = patientsRes?.data?.data?.patients || [];
+      const dbReports: LabReportRecord[] = reportsRes?.data?.data || [];
+
+      const patientMap = new Map<string, PatientRecord>();
+      patients.forEach((p) => {
+        if (p.patient_id) patientMap.set(p.patient_id, p);
+      });
+
+      const orderMap = new Map<string, LabOrderRecord>();
+      orders.forEach((o) => {
+        if (o.lab_order_id) orderMap.set(o.lab_order_id, o);
+      });
+
+      const existingReportOrderIds = new Set(dbReports.map((r) => r.lab_order_id));
+      const mappedList: ReportItem[] = [];
+
+      // 1. Map existing lab_report records from database
+      dbReports.forEach((rep) => {
+        const order = orderMap.get(rep.lab_order_id) || rep.lab_order;
+        const patientId = order?.patient_history?.patient_id || order?.patient_history_id || "PAT-001";
+        const patient = patientMap.get(patientId);
+
+        const patientName = patient
+          ? [patient.patient_first_name, patient.patient_middle_name, patient.patient_last_name].filter(Boolean).join(" ")
+          : `Patient ${patientId}`;
+        const age = patient?.patient_age || (patient?.patient_dob ? calculateAge(patient.patient_dob) : 34);
+        const gender = patient?.patient_gender || "Male";
+        const patientAgeGender = `${gender} | ${age} Years`;
+
+        const doctorName = order?.employees
+          ? `Dr. ${order.employees.first_name} ${order.employees.last_name || ""}`.trim()
+          : "Dr. Sarah Johnson";
+        const doctorEmail = (order?.employees as any)?.email || "doctor@hospital.com";
+
+        const orderItem = rep.lab_order?.lab_order_item?.[0];
+        const testPanel = orderItem?.lab_test_master?.test_name || "Diagnostic Panel";
+        const sampleType = orderItem?.lab_test_master?.sample_type || orderItem?.specimen_type || "Whole Blood (EDTA)";
+
+        let parsedMeta: any = null;
+        if (rep.report_comment) {
+          try {
+            parsedMeta = JSON.parse(rep.report_comment);
+          } catch {
+            // plain text
+          }
+        }
+
+        const rawStatus = (rep.report_status || "GENERATED").toUpperCase();
+        let status: "GENERATED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL" = "GENERATED";
+        if (rawStatus === "CRITICAL") status = "CRITICAL";
+        else if (rawStatus === "UNDER_REVIEW" || rawStatus === "UNDER REVIEW") status = "UNDER_REVIEW";
+        else if (rawStatus === "DRAFT") status = "DRAFT";
+        else status = "GENERATED";
+
+        const sampleBarcode =
+          orderItem?.sample_collection?.[0]?.barcode ||
+          orderItem?.barcode ||
+          `SMP-${rep.lab_report_id.slice(-8)}`;
+
+        mappedList.push({
+          id: rep.lab_report_id,
+          reportId: rep.report_number || `RPT-${rep.lab_report_id.slice(-6)}`,
+          requestId: rep.lab_order_id,
+          sampleId: sampleBarcode,
+          patientId,
+          patientPid: patient?.patient_id || patientId,
+          patientName,
+          patientAgeGender,
+          patientEmail: patient?.patient_email || `${patientName.toLowerCase().replace(/\s+/g, ".")}@email.com`,
+          doctorName,
+          doctorEmail,
+          testPanel,
+          generatedDate: formatReportDate(rep.generated_datetime || rep.created_at),
+          completedDate: formatReportDate(rep.approved_datetime || rep.generated_datetime),
+          completedBy: rep.employees ? `Dr. ${rep.employees.first_name} ${rep.employees.last_name || ""}`.trim() : "Pathology Lab",
+          sampleType,
+          status,
+          findingsSummary: parsedMeta?.text || rep.report_comment || "Diagnostic results verified within reference ranges.",
+          parameters: parsedMeta?.parameters && parsedMeta.parameters.length > 0 ? parsedMeta.parameters : DEFAULT_QC_PARAMETERS,
+          overallDecision: parsedMeta?.overallDecision || "Approved",
+          reviewComments: parsedMeta?.text || rep.report_comment || "",
+          clinicalCorrelation: parsedMeta?.clinicalCorrelation || "Correlate clinically with physical examination and history.",
+          approvalRemarks: rep.report_comment || "Parameters approved.",
+          approverName: rep.employees ? `Dr. ${rep.employees.first_name} ${rep.employees.last_name || ""}`.trim() : "Dr. Sarah Johnson",
+          approverRole: rep.employees?.designation || "Senior Pathologist",
+          approvalDate: formatReportDate(rep.approved_datetime),
+          signatureUrl: rep.digital_signature || "certified-default",
+          sentOn: rep.delivered_datetime ? formatReportDate(rep.delivered_datetime) : undefined,
+          deliveredOn: rep.delivered_datetime ? formatReportDate(rep.delivered_datetime) : undefined,
+        });
+      });
+
+      // 2. Map verified or ordered lab items without reports
+      items.forEach((item, idx) => {
+        if (existingReportOrderIds.has(item.lab_order_id)) return;
+
+        const parentOrder = orderMap.get(item.lab_order_id) || item.lab_order;
+        const patientId = parentOrder?.patient_history?.patient_id || parentOrder?.patient_history_id || `PAT00${idx + 1}`;
+        const patient = patientMap.get(patientId);
+
+        const patientName = patient
+          ? [patient.patient_first_name, patient.patient_middle_name, patient.patient_last_name].filter(Boolean).join(" ")
+          : `Patient ${patientId}`;
+        const age = patient?.patient_age || (patient?.patient_dob ? calculateAge(patient.patient_dob) : 32);
+        const gender = patient?.patient_gender || "Male";
+        const patientAgeGender = `${gender} | ${age} Years`;
+
+        const doctor = parentOrder?.employees;
+        const doctorName = doctor ? `Dr. ${doctor.first_name} ${doctor.last_name || ""}`.trim() : "Dr. Sarah Johnson";
+        const doctorEmail = (doctor as any)?.email || "doctor@hospital.com";
+
+        const testName = item.lab_test_master?.test_name || "Diagnostic Test";
+        const sampleType = item.lab_test_master?.sample_type || item.specimen_type || "Whole Blood (EDTA)";
+
+        const rawItemStatus = (item.item_status || "").toUpperCase();
+        const isVerified = rawItemStatus === "VERIFIED" || rawItemStatus === "COMPLETED";
+
+        const sampleBarcode =
+          item.sample_collection?.[0]?.barcode ||
+          item.barcode ||
+          (item.remarks?.match(/Barcode:\s*([A-Za-z0-9_-]+)/i)?.[1]) ||
+          `SMP-${item.lab_order_item_id.slice(-6)}`;
+
+        const status: "GENERATED" | "UNDER_REVIEW" | "DRAFT" =
+          rawItemStatus === "REPORT GENERATED"
+            ? "GENERATED"
+            : isVerified
+              ? "UNDER_REVIEW"
+              : "DRAFT";
+
+        mappedList.push({
+          id: `item-${item.lab_order_item_id}`,
+          reportId: `RPT-PENDING-${item.lab_order_item_id.slice(-6)}`,
+          requestId: item.lab_order_id,
+          sampleId: sampleBarcode,
+          patientId,
+          patientPid: patient?.patient_id || patientId,
+          patientName,
+          patientAgeGender,
+          patientEmail: patient?.patient_email || `${patientName.toLowerCase().replace(/\s+/g, ".")}@email.com`,
+          doctorName,
+          doctorEmail,
+          testPanel: testName,
+          generatedDate: formatReportDate(item.created_at || parentOrder?.order_datetime),
+          completedDate: "-",
+          completedBy: "Pending",
+          sampleType,
+          status,
+          findingsSummary: isVerified
+            ? "Sample verified. Analyzer test parameters entered and awaiting review."
+            : "Sample intake in progress. Awaiting verification and testing.",
+          parameters: DEFAULT_QC_PARAMETERS,
+          overallDecision: isVerified ? "Approved" : "Pending",
+          reviewComments: "",
+          clinicalCorrelation: `Diagnostic test for ${testName}. Correlate with clinical diagnosis.`,
+          approvalRemarks: "",
+          approverName: "Dr. Sarah Johnson",
+          approverRole: "Senior Pathologist",
+          signatureUrl: "certified-default",
+        });
+      });
+
+      if (mappedList.length > 0) {
+        setReports(mappedList);
+        setSelectedReport(mappedList[0]);
+      }
+    } catch (err: any) {
+      console.error("Error fetching lab reports:", err);
+      setFetchError(err.message || "Could not load database records");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRealData();
+  }, [fetchRealData]);
 
   // Workflow View Mode: "table" | "quality-check" | "approve-results" | "delivered-status"
   const [viewMode, setViewMode] = useState<
@@ -732,6 +947,10 @@ export default function ReportGeneration() {
   );
   const criticalCount = useMemo(
     () => reports.filter((r) => r.status === "CRITICAL").length,
+    [reports],
+  );
+  const pendingReportCount = useMemo(
+    () => reports.filter((r) => r.status !== "GENERATED").length,
     [reports],
   );
 
@@ -1805,7 +2024,7 @@ export default function ReportGeneration() {
                 className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
                 data-purpose="kpi-metric-cards"
               >
-                {/* Card 1: Test Completed */}
+                {/* Card 1: Report Generated */}
                 <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
                   <div className="w-14 h-14 rounded-full bg-[#def7ec] flex items-center justify-center shrink-0">
                     <svg
@@ -1823,18 +2042,18 @@ export default function ReportGeneration() {
                   </div>
                   <div>
                     <span className="text-[13px] font-semibold text-[#059669]">
-                      Test Completed
+                      Report Generated
                     </span>
                     <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                      128
+                      {generatedCount}
                     </h3>
                     <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                      Tests completed successfully
+                      Reports generated successfully
                     </p>
                   </div>
                 </div>
 
-                {/* Card 2: Test Result Pending */}
+                {/* Card 2: Report Pending */}
                 <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
                   <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
                     <svg
@@ -1852,13 +2071,13 @@ export default function ReportGeneration() {
                   </div>
                   <div>
                     <span className="text-[13px] font-semibold text-[#2563eb]">
-                      Test Result Pending
+                      Report Pending
                     </span>
                     <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
-                      56
+                      {pendingReportCount}
                     </h3>
                     <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                      Results pending verification
+                      Awaiting report generation
                     </p>
                   </div>
                 </div>

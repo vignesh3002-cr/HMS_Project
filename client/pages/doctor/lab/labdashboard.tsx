@@ -4,6 +4,8 @@ import { getUser, remove } from "@/utils/token";
 import LabNav from "./labnav";
 import { labOrderApi, labOrderItemApi, LabOrderRecord, LabOrderItemRecord } from "@/api/labOrder.api";
 import { patientApi, PatientRecord } from "@/api/patient.api";
+import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 
 export interface TestItemDetail {
   id: string;
@@ -247,15 +249,24 @@ const DEFAULT_TEST_ITEMS: TestItemDetail[] = [
 
 export default function LabDashboard() {
   const navigate = useNavigate();
-  const currentUser = getUser();
+  const currentUser = useMemo(() => getUser(), []);
   const displayName = currentUser?.username || "Lab Technician";
   const displayRole =
     currentUser?.role_type === "LAB_TECHNICIAN"
       ? "Lab Technician"
       : currentUser?.role_type || "Lab Technician";
+  const avatarUrl =
+    typeof window !== "undefined"
+      ? localStorage.getItem("user_photo") || undefined
+      : undefined;
+
+  const [logoutOpen, setLogoutOpen] = useState(false);
 
   const handleLogout = () => {
+    setLogoutOpen(false);
     remove();
+    localStorage.removeItem("user_info");
+    localStorage.removeItem("user_photo");
     navigate("/", { replace: true });
   };
 
@@ -755,22 +766,14 @@ export default function LabDashboard() {
 
                 {/* User Profile Info & Logout */}
                 <div className="flex items-center space-x-3" data-purpose="user-badge">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-[#0b57d0] text-white font-bold text-xs flex items-center justify-center shadow-xs">
-                      {displayName.charAt(0).toUpperCase()}
-                    </div>
-                    <span className="text-sm font-medium text-slate-700">{displayName}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-red-600 hover:bg-red-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                    </svg>
-                    Logout
-                  </button>
+                  <UserProfileDropdown
+                    userName={displayName}
+                    userSubtext={displayRole}
+                    userAvatar={avatarUrl}
+                    onLogout={() => setLogoutOpen(true)}
+                    profilePath="/lab/profile"
+                    notificationsPath="/doctor/notifications"
+                  />
                 </div>
               </div>
             </header>
@@ -947,16 +950,11 @@ export default function LabDashboard() {
                                 Patient ID
                               </label>
                               <input
-                                className="w-full bg-[#f8fafc] border border-slate-200 text-slate-800 text-sm rounded-lg px-3.5 py-2.5 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 focus:border-blue-600 transition-colors font-medium"
+                                className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3.5 py-2.5 font-medium cursor-not-allowed select-all focus:outline-none"
                                 id="patient-id"
                                 type="text"
+                                readOnly
                                 value={patientFormData.patientId}
-                                onChange={(e) =>
-                                  setPatientFormData({
-                                    ...patientFormData,
-                                    patientId: e.target.value,
-                                  })
-                                }
                               />
                             </div>
                             <div>
@@ -967,16 +965,11 @@ export default function LabDashboard() {
                                 Full Name
                               </label>
                               <input
-                                className="w-full bg-[#f8fafc] border border-slate-200 text-slate-800 text-sm rounded-lg px-3.5 py-2.5 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 focus:border-blue-600 transition-colors font-medium"
+                                className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3.5 py-2.5 font-medium cursor-not-allowed select-all focus:outline-none"
                                 id="full-name"
                                 type="text"
+                                readOnly
                                 value={patientFormData.fullName}
-                                onChange={(e) =>
-                                  setPatientFormData({
-                                    ...patientFormData,
-                                    fullName: e.target.value,
-                                  })
-                                }
                               />
                             </div>
                           </div>
@@ -992,16 +985,11 @@ export default function LabDashboard() {
                               </label>
                               <div className="relative">
                                 <input
-                                  className="w-full bg-[#f8fafc] border border-slate-200 text-slate-800 text-sm rounded-lg px-3.5 py-2.5 pr-10 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 focus:border-blue-600 transition-colors font-medium"
+                                  className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3.5 py-2.5 pr-10 font-medium cursor-not-allowed select-all focus:outline-none"
                                   id="dob"
                                   type="text"
+                                  readOnly
                                   value={patientFormData.dob}
-                                  onChange={(e) =>
-                                    setPatientFormData({
-                                      ...patientFormData,
-                                      dob: e.target.value,
-                                    })
-                                  }
                                 />
                                 {/* Calendar Icon */}
                                 <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
@@ -1028,16 +1016,11 @@ export default function LabDashboard() {
                                 Gender
                               </label>
                               <input
-                                className="w-full bg-[#f8fafc] border border-slate-200 text-slate-800 text-sm rounded-lg px-3.5 py-2.5 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 focus:border-blue-600 transition-colors font-medium"
+                                className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3.5 py-2.5 font-medium cursor-not-allowed select-all focus:outline-none"
                                 id="gender"
                                 type="text"
+                                readOnly
                                 value={patientFormData.gender}
-                                onChange={(e) =>
-                                  setPatientFormData({
-                                    ...patientFormData,
-                                    gender: e.target.value,
-                                  })
-                                }
                               />
                             </div>
                           </div>
@@ -1051,16 +1034,11 @@ export default function LabDashboard() {
                               Mobile Number
                             </label>
                             <input
-                              className="w-full bg-[#f8fafc] border border-slate-200 text-slate-800 text-sm rounded-lg px-3.5 py-2.5 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 focus:border-blue-600 transition-colors font-medium"
+                              className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3.5 py-2.5 font-medium cursor-not-allowed select-all focus:outline-none"
                               id="mobile-number"
                               type="text"
+                              readOnly
                               value={patientFormData.mobile}
-                              onChange={(e) =>
-                                setPatientFormData({
-                                  ...patientFormData,
-                                  mobile: e.target.value,
-                                })
-                              }
                             />
                           </div>
 
@@ -1073,16 +1051,11 @@ export default function LabDashboard() {
                               Email
                             </label>
                             <input
-                              className="w-full bg-[#f8fafc] border border-slate-200 text-slate-800 text-sm rounded-lg px-3.5 py-2.5 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 focus:border-blue-600 transition-colors font-medium"
+                              className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3.5 py-2.5 font-medium cursor-not-allowed select-all focus:outline-none"
                               id="email"
                               type="email"
+                              readOnly
                               value={patientFormData.email}
-                              onChange={(e) =>
-                                setPatientFormData({
-                                  ...patientFormData,
-                                  email: e.target.value,
-                                })
-                              }
                             />
                           </div>
 
@@ -1095,16 +1068,11 @@ export default function LabDashboard() {
                               Address
                             </label>
                             <input
-                              className="w-full bg-[#f8fafc] border border-slate-200 text-slate-800 text-sm rounded-lg px-3.5 py-2.5 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 focus:border-blue-600 transition-colors font-medium"
+                              className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3.5 py-2.5 font-medium cursor-not-allowed select-all focus:outline-none"
                               id="address"
                               type="text"
+                              readOnly
                               value={patientFormData.address}
-                              onChange={(e) =>
-                                setPatientFormData({
-                                  ...patientFormData,
-                                  address: e.target.value,
-                                })
-                              }
                             />
                           </div>
                         </form>
@@ -1634,29 +1602,14 @@ export default function LabDashboard() {
 
                 {/* Role Label & Profile Avatar & Logout */}
                 <div className="flex items-center gap-3 pl-1">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-[#0b57d0] text-white font-bold text-xs flex items-center justify-center shadow-xs">
-                      {displayName.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex flex-col text-left">
-                      <span className="text-xs font-semibold text-slate-800 leading-tight">
-                        {displayName}
-                      </span>
-                      <span className="text-[10px] text-slate-500 leading-tight">
-                        {displayRole}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-red-600 hover:bg-red-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                    </svg>
-                    Logout
-                  </button>
+                  <UserProfileDropdown
+                    userName={displayName}
+                    userSubtext={displayRole}
+                    userAvatar={avatarUrl}
+                    onLogout={() => setLogoutOpen(true)}
+                    profilePath="/lab/profile"
+                    notificationsPath="/doctor/notifications"
+                  />
                 </div>
               </div>
             </header>
@@ -1668,7 +1621,7 @@ export default function LabDashboard() {
                 className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
                 data-purpose="kpi-metric-cards"
               >
-                {/* Card 1: Test Completed */}
+                {/* Card 1: Sample Registered */}
                 <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
                   <div className="w-14 h-14 rounded-full bg-[#def7ec] flex items-center justify-center shrink-0">
                     <svg
@@ -1686,18 +1639,18 @@ export default function LabDashboard() {
                   </div>
                   <div>
                     <span className="text-[13px] font-semibold text-[#059669]">
-                      Test Completed
+                      Sample Registered
                     </span>
                     <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
                       {completedCount}
                     </h3>
                     <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                      Tests completed successfully
+                      Samples registered successfully
                     </p>
                   </div>
                 </div>
 
-                {/* Card 2: Test Result Pending */}
+                {/* Card 2: Sample Registration Pending */}
                 <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
                   <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
                     <svg
@@ -1715,13 +1668,13 @@ export default function LabDashboard() {
                   </div>
                   <div>
                     <span className="text-[13px] font-semibold text-[#2563eb]">
-                      Test Result Pending
+                      Sample Registration Pending
                     </span>
                     <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
                       {pendingCount}
                     </h3>
                     <p className="text-[12px] text-slate-400 font-normal mt-0.5">
-                      Results pending verification
+                      Awaiting sample registration
                     </p>
                   </div>
                 </div>
@@ -2088,6 +2041,17 @@ export default function LabDashboard() {
           </>
         )}
       </div>
+
+      <ConfirmationDialog
+        open={logoutOpen}
+        type="danger"
+        title="Log Out?"
+        description="Are you sure you want to log out? Any unsaved changes may be lost."
+        confirmText="Log Out"
+        cancelText="Stay"
+        onConfirm={handleLogout}
+        onCancel={() => setLogoutOpen(false)}
+      />
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { BranchFilterProvider } from "@/context/BranchFilterContext";
 import { employeeApi } from "@/api/employee.api";
 import { clearAccountActivity } from "@/utils/accountActivity";
 import { QuickAddFab } from "@/components/hms/QuickAddFab";
+import { AIChatBox } from "@/components/hms/AIChatBox";
 import { usePermission } from "@/context/PermissionContext";
 import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
 import { BellNotification } from "@/components/hms/BellNotification";
@@ -469,6 +470,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
         />
 
         <QuickAddFab />
+        <AIChatBox />
       </div>
     </BranchFilterProvider>
   );

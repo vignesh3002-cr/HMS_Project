@@ -123,6 +123,9 @@ export interface PatientRecord {
   patient_district: string | null;
   patient_area: string | null;
   patient_pincode: number | null;
+  Patient_address?: string | null;
+  patient_address?: string | null;
+  current_address?: string | null;
   // Referral details columns on patient_bio_data
   referral_type?: string | null;
   referred_by?: string | null;

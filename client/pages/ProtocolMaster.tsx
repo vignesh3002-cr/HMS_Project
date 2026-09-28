@@ -43,6 +43,8 @@ interface ProtocolRow {
   cancer_type: string;
   version: string;
   intent: string;
+  review_date?: string | null;
+  used_this_month?: number | null;
 }
 
 
@@ -56,16 +58,29 @@ function toRow(p: RegimenProtocol): ProtocolRow {
     ? Array.from(new Set(multiCancers)).join(", ")
     : (p.cancer_types?.cancer_type ?? "—");
 
+  let status: ProtocolStatus = p.active_status === 1 ? "Active" : "Archive";
+  if ((p as any).status === "Draft" || (p as any).is_draft) {
+    status = "Draft";
+  } else if ((p as any).status === "Under Review") {
+    status = "Under Review";
+  } else if ((p as any).status === "Archive" || (p as any).status === "Archived" || p.active_status === 0) {
+    status = "Archive";
+  } else if ((p as any).status === "Active" || p.active_status === 1) {
+    status = "Active";
+  }
+
   return {
     protocol_id: p.protocol_id,
     name: p.regimen_name,
     cycle_days: p.no_of_days,
-    status: p.active_status === 1 ? "Active" : "Archive",
+    status,
     updated_by: "—",
     updated_at: p.updated_at ?? p.created_at ?? new Date().toISOString(),
     cancer_type: cancerTypeDisplay,
     version: p.protocol_version ?? "v1",
     intent: p.treatment_intent ?? "—",
+    review_date: (p as any).review_date ?? (p as any).next_review_date ?? null,
+    used_this_month: typeof (p as any).used_this_month === "number" ? (p as any).used_this_month : null,
   };
 }
 
@@ -232,6 +247,36 @@ export default function ProtocolMaster() {
     const underReview = rows.filter((r) => r.status === "Under Review").length;
     const draft = rows.filter((r) => r.status === "Draft").length;
     return { total: rows.length, active, archived, underReview, draft };
+  }, [rows]);
+
+  const usedThisMonth = useMemo(() => {
+    let count = 0;
+    let hasUsageData = false;
+    for (const r of rows) {
+      if (typeof r.used_this_month === "number") {
+        hasUsageData = true;
+        count += r.used_this_month;
+      }
+    }
+    return { count, hasUsageData };
+  }, [rows]);
+
+  const dueForReview = useMemo(() => {
+    const now = new Date();
+    let count = 0;
+    let hasReviewData = false;
+    let overdueCount = 0;
+    for (const r of rows) {
+      if (r.review_date) {
+        hasReviewData = true;
+        const targetDate = new Date(r.review_date);
+        if (!isNaN(targetDate.getTime()) && targetDate <= now) {
+          count++;
+          overdueCount++;
+        }
+      }
+    }
+    return { count, hasReviewData, overdueCount };
   }, [rows]);
 
   const filtered = useMemo(() => {
@@ -438,12 +483,55 @@ export default function ProtocolMaster() {
     { name: "TCP Chemotherapy", days: "in 14 days", date: "03 Sep 2026" },
   ];
 
+  const activePercent = stats.total > 0 ? (stats.active / stats.total) * 100 : 0;
+  const activePercentFormatted =
+    activePercent % 1 === 0 ? `${activePercent}%` : `${parseFloat(activePercent.toFixed(2))}%`;
+
   const statCards = [
-    { label: "Total Protocols", value: stats.total, trend: "+12.5% vs last month", icon: FileText, color: "#004785" },
-    { label: "Active", value: stats.active, trend: `${stats.total ? Math.round((stats.active / stats.total) * 100) : 0}% of total`, icon: CheckCircle2, color: "#059669" },
-    { label: "Under Review", value: stats.underReview, trend: "Awaiting approval", icon: Eye, color: "#F59E0B" },
-    { label: "Draft", value: stats.draft, trend: "In progress", icon: PenLine, color: "#6366F1" },
-    { label: "Archived", value: stats.archived, trend: "Inactive protocols", icon: Archive, color: "#6B7280" },
+    {
+      label: "Total Protocols",
+      value: stats.total,
+      supportingText: "All protocols",
+      supportingClass: "text-[#6B7280]",
+      icon: FileText,
+      color: "#004785",
+    },
+    {
+      label: "Active",
+      value: stats.active,
+      supportingText: `${activePercentFormatted} of total`,
+      supportingClass: "text-[#059669]",
+      icon: CheckCircle2,
+      color: "#059669",
+    },
+    {
+      label: "Used This Month",
+      value: usedThisMonth.count,
+      supportingText: usedThisMonth.hasUsageData ? "This calendar month" : "No usage data tracked",
+      supportingClass: "text-[#6B7280]",
+      icon: TrendingUp,
+      color: "#004785",
+    },
+    {
+      label: "Due for Review",
+      value: dueForReview.count,
+      supportingText: dueForReview.hasReviewData
+        ? dueForReview.overdueCount > 0
+          ? `${dueForReview.overdueCount} overdue`
+          : "Up to date"
+        : "No review dates set",
+      supportingClass: dueForReview.overdueCount > 0 ? "text-[#DC2626]" : "text-[#6B7280]",
+      icon: Clock,
+      color: "#F59E0B",
+    },
+    {
+      label: "Draft",
+      value: stats.draft,
+      supportingText: "In progress",
+      supportingClass: "text-[#6B7280]",
+      icon: PenLine,
+      color: "#6366F1",
+    },
   ];
 
   return (
@@ -480,9 +568,8 @@ export default function ProtocolMaster() {
                   <card.icon className="w-4 h-4" style={{ color: card.color }} />
                 </div>
                 <div className="mt-2 text-3xl font-bold text-[#191C1E]">{card.value}</div>
-                <div className="mt-1 flex items-center gap-1 text-xs font-semibold text-[#059669]">
-                  {card.label === "Total Protocols" && <TrendingUp className="w-3 h-3" />}
-                  {card.trend}
+                <div className={`mt-1 text-xs font-semibold ${card.supportingClass}`}>
+                  {card.supportingText}
                 </div>
               </div>
             ))}

@@ -143,7 +143,16 @@ const Profile = () => {
   const isDoctor = String(getUser()?.role_type ?? "").toUpperCase() === "DOCTOR";
 
   const handleBack = () => {
-    navigate(-1);
+    if (window.history.state && window.history.state.idx > 0) {
+      navigate(-1);
+    } else {
+      const role = String(getUser()?.role_type ?? "").toUpperCase();
+      if (role === "LAB_TECHNICIAN") {
+        navigate("/lab/dashboard");
+      } else {
+        navigate("/dashboard");
+      }
+    }
   };
 
   useEffect(() => {

@@ -69,49 +69,58 @@ export function MultiSelectDropdown({
           type="button"
           disabled={disabled}
           className={cn(
-            "flex min-h-[46px] w-full flex-wrap items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-900 shadow-sm transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed",
+            "flex h-10 w-full items-center justify-between gap-1.5 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 shadow-sm transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed overflow-hidden",
             className,
           )}
         >
-          {value.length === 0 ? (
-            <span className="text-gray-400">{placeholder}</span>
-          ) : (
-            value.map((v) => {
-              const opt = normalized.find((o) => o.value === v);
-              return (
-                <span
-                  key={v}
-                  className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700"
-                >
-                  {opt?.label ?? v}
-                  {/* A real <button> here would nest inside the trigger's own
-                      <button>, which is invalid HTML (React warns and some
-                      browsers mis-handle the click). A span with button
-                      semantics avoids the nesting while staying clickable
-                      and keyboard-accessible. */}
+          <div
+            className="flex items-center gap-1.5 flex-1 min-w-0 overflow-x-auto overflow-y-hidden hide-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden py-0.5"
+            onWheel={(e) => {
+              if (e.currentTarget.scrollWidth > e.currentTarget.clientWidth && e.deltaY !== 0) {
+                e.currentTarget.scrollLeft += e.deltaY;
+              }
+            }}
+          >
+            {value.length === 0 ? (
+              <span className="text-gray-400 truncate">{placeholder}</span>
+            ) : (
+              value.map((v) => {
+                const opt = normalized.find((o) => o.value === v);
+                return (
                   <span
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`Remove ${opt?.label ?? v}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleOption(v);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
+                    key={v}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700 whitespace-nowrap"
+                  >
+                    {opt?.label ?? v}
+                    {/* A real <button> here would nest inside the trigger's own
+                        <button>, which is invalid HTML (React warns and some
+                        browsers mis-handle the click). A span with button
+                        semantics avoids the nesting while staying clickable
+                        and keyboard-accessible. */}
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Remove ${opt?.label ?? v}`}
+                      onClick={(e) => {
                         e.stopPropagation();
                         toggleOption(v);
-                      }
-                    }}
-                    className="inline-flex items-center justify-center leading-none hover:text-blue-900 cursor-pointer"
-                  >
-                    ×
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toggleOption(v);
+                        }
+                      }}
+                      className="inline-flex items-center justify-center leading-none hover:text-blue-900 cursor-pointer"
+                    >
+                      ×
+                    </span>
                   </span>
-                </span>
-              );
-            })
-          )}
+                );
+              })
+            )}
+          </div>
           <ChevronDown
             className={cn(
               "ml-auto h-4 w-4 flex-shrink-0 text-gray-400 transition-transform duration-200",

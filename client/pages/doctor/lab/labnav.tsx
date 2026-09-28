@@ -1,13 +1,16 @@
-import React from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
+import { Logo } from "@/components/hms/Logo";
+import { employeeApi } from "@/api/employee.api";
 
 export type LabTab =
   | "Dashboard"
   | "Samples Verification"
   | "Testing Samples"
   | "Report Generation"
-  | "Report Transfer";
+  | "Report Transfer"
+  | "Profile";
 
 export interface LabNavProps {
   activeTab: LabTab;
@@ -22,6 +25,37 @@ export default function LabNav({ activeTab, onTabChange }: LabNavProps) {
     currentUser?.role_type === "LAB_TECHNICIAN"
       ? "Lab Technician"
       : currentUser?.role_type || "Admin User";
+
+  const [avatarUrl, setAvatarUrl] = useState<string>(
+    () => localStorage.getItem("user_photo") || ""
+  );
+
+  useEffect(() => {
+    let mounted = true;
+    const updatePhoto = (e: any) => {
+      if (e?.detail) setAvatarUrl(e.detail);
+    };
+    window.addEventListener("profile-photo-updated", updatePhoto);
+
+    if (!avatarUrl) {
+      employeeApi
+        .getMe()
+        .then((res) => {
+          if (!mounted) return;
+          const url = res.data?.data?.employee?.employee_photo_URL || "";
+          if (url) {
+            setAvatarUrl(url);
+            localStorage.setItem("user_photo", url);
+          }
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      mounted = false;
+      window.removeEventListener("profile-photo-updated", updatePhoto);
+    };
+  }, []);
 
   const handleLogout = () => {
     remove();
@@ -46,8 +80,9 @@ export default function LabNav({ activeTab, onTabChange }: LabNavProps) {
       <div className="p-6">
         {/* Brand Logo / Title */}
         <div className="mb-8" data-purpose="brand-header">
-          <h1 className="text-xl font-bold text-[#0b4a8b] tracking-tight">HMS</h1>
-          <p className="text-xs text-slate-500 font-medium">Admin Portal</p>
+          <Link to="/lab/dashboard" className="block focus:outline-none">
+            <Logo className="w-full max-w-[175px] h-auto" iconPosition="left" />
+          </Link>
         </div>
 
         {/* Main Navigation Links */}
@@ -188,10 +223,10 @@ export default function LabNav({ activeTab, onTabChange }: LabNavProps) {
       {/* Bottom Sidebar Utilities & User Profile */}
       <div className="p-6 border-t border-slate-100 space-y-4" data-purpose="sidebar-footer">
         <nav aria-label="Support and Settings" className="space-y-1.5">
-          <a
-            className="flex items-center gap-3.5 px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-50 font-medium text-sm transition-colors"
-            href="#settings"
-            onClick={(e) => e.preventDefault()}
+          <button
+            type="button"
+            className="flex items-center gap-3.5 px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-50 font-medium text-sm transition-colors w-full text-left cursor-pointer"
+            onClick={() => navigate("/lab/profile")}
           >
             <svg
               className="w-5 h-5 text-slate-500 shrink-0"
@@ -212,7 +247,7 @@ export default function LabNav({ activeTab, onTabChange }: LabNavProps) {
               />
             </svg>
             <span>Settings</span>
-          </a>
+          </button>
           <a
             className="flex items-center gap-3.5 px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-50 font-medium text-sm transition-colors"
             href="#support"
@@ -237,25 +272,35 @@ export default function LabNav({ activeTab, onTabChange }: LabNavProps) {
 
         {/* User Profile Badge & Logout */}
         <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-          <div className="flex items-center gap-3">
+          <div
+            onClick={() => navigate("/lab/profile")}
+            className="flex items-center gap-3 cursor-pointer group flex-1 min-w-0"
+            title="View Profile"
+          >
             <div className="relative w-10 h-10 rounded-full overflow-hidden shrink-0 border border-slate-200">
-              <img
-                alt="Admin Avatar"
-                className="w-full h-full object-cover"
-                src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"
-                onError={(e) => {
-                  (e.target as HTMLElement).style.display = "none";
-                }}
-              />
-              <div className="w-full h-full bg-[#0b4a8b] text-white flex items-center justify-center font-bold text-sm">
+              {avatarUrl ? (
+                <img
+                  alt={displayName}
+                  className="w-full h-full object-cover"
+                  src={avatarUrl}
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = "none";
+                  }}
+                />
+              ) : null}
+              <div
+                className={`w-full h-full bg-[#0b4a8b] text-white flex items-center justify-center font-bold text-sm ${
+                  avatarUrl ? "hidden" : "flex"
+                }`}
+              >
                 {displayName.charAt(0).toUpperCase()}
               </div>
             </div>
             <div className="truncate">
-              <p className="text-sm font-semibold text-slate-900 leading-tight">
+              <p className="text-sm font-semibold text-slate-900 group-hover:text-[#0b4a8b] transition-colors leading-tight truncate">
                 {displayName}
               </p>
-              <p className="text-xs text-slate-400">{displayRole}</p>
+              <p className="text-xs text-slate-400 truncate">{displayRole}</p>
             </div>
           </div>
           <button

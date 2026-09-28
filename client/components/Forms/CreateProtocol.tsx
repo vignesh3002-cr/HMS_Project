@@ -15,12 +15,21 @@ import {
   Eye,
   Plus,
   Copy,
+  Calculator,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormProtocolDropdown } from "@/components/ui/form-protocol-dropdown";
 import { FormProtocolMultiSelect } from "@/components/ui/form-protocol-multiselect";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import { chemotherapyApi, MedicineOption, RegimenProtocolDilutionInput, DischargeInstructionInput } from "@/api/chemotherapy.api";
+import { DoseCalculationModal } from "@/components/chemo/DoseCalculationModal";
+import {
+  inferDosingBasisForMedicine,
+  convertUnit,
+  convertMassToVolume,
+  getRecommendedUnitsForDoseCalc,
+  calculatePatientDoseFromTemplate,
+} from "@/utils/chemoCalculations";
 
 // Styling tokens - merged from the mFOLFOX6 "Protocol Builder" mockup:
 // soft grey canvas, white cards with hairline borders, muted uppercase grid
@@ -186,7 +195,19 @@ const getDurationUnitOptions = (
   return options;
 };
 
-const DOSE_CALC_OPTIONS = ["BSA", "IBW", "BMI", "AUC 1.5", "AUC 2", "AUC 5", "KG", "Fixed Dose"];
+const DOSE_CALC_OPTIONS = [
+  "BSA (mg/m²)",
+  "Weight (mg/kg)",
+  "AUC (Calvert)",
+  "Fixed Dose",
+  "BSA",
+  "IBW",
+  "BMI",
+  "AUC 1.5",
+  "AUC 2",
+  "AUC 5",
+  "KG",
+];
 
 export default function CreateProtocol() {
   const navigate = useNavigate();
@@ -199,12 +220,24 @@ export default function CreateProtocol() {
   const isCreateMode = !protocolId && !isViewMode && !isEditMode;
   const disabled = isViewMode;
 
+  // Calculation Modal State
+  const [calcModalOpen, setCalcModalOpen] = useState(false);
+  const [calcTargetRow, setCalcTargetRow] = useState<{
+    index: number;
+    drug: string;
+    dose: string;
+    doseCalc: string;
+  } | null>(null);
+
   // --- Protocol header fields --- regimen_code = Regime_name, regimen_name = Protocol Title (original_protocol)
   const [regimenCode, setRegimenCode] = useState("");
   const [regimenName, setRegimenName] = useState("");
   const [cancerTypeIds, setCancerTypeIds] = useState<string[]>([]);
   const [subtypeIds, setSubtypeIds] = useState<string[]>([]);
   const [loadingSubtypes, setLoadingSubtypes] = useState(false);
+  const [treatmentIntent, setTreatmentIntent] = useState("");
+  const [treatmentIntentOptions, setTreatmentIntentOptions] = useState<string[]>([]);
+  const [loadingTreatmentIntents, setLoadingTreatmentIntents] = useState(false);
   
   const [standardCycles, setStandardCycles] = useState<number>(6);
   const [cycleIntervalDays, setCycleIntervalDays] = useState<number>(21);
@@ -239,6 +272,9 @@ export default function CreateProtocol() {
 
   const [cancerTypes, setCancerTypes] = useState<Array<{ cancer_type_id: string; cancer_type: string }>>([]);
   const [subtypes, setSubtypes] = useState<Array<{ subtype_id: string; subtype_name: string }>>([]);
+  const [filterByCancerAndSubtype, setFilterByCancerAndSubtype] = useState(true);
+  const [allHospitalMeds, setAllHospitalMeds] = useState<MedicineOption[]>([]);
+  const [loadingAllMeds, setLoadingAllMeds] = useState(false);
   const [premedMeds, setPremedMeds] = useState<MedicineOption[]>([]);
   const [chemoMeds, setChemoMeds] = useState<MedicineOption[]>([]);
   const [supportiveMeds, setSupportiveMeds] = useState<MedicineOption[]>([]);
@@ -249,6 +285,14 @@ export default function CreateProtocol() {
   const [loadingSupportiveMeds, setLoadingSupportiveMeds] = useState(false);
   const [loadingDischargeMeds, setLoadingDischargeMeds] = useState(false);
   const [loadingDilutionMeds, setLoadingDilutionMeds] = useState(false);
+
+  const getDropdownOptions = (meds: MedicineOption[], selectedVal?: string, brandVal?: string) => {
+    const opts = meds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }));
+    if (selectedVal && !opts.some((o) => o.value === selectedVal)) {
+      opts.unshift({ label: brandVal || selectedVal, value: selectedVal });
+    }
+    return opts;
+  };
   const [fieldOptions, setFieldOptions] = useState<{
     dosage_units: string[];
     dilution_forms: string[];
@@ -302,8 +346,9 @@ export default function CreateProtocol() {
   }, []);
 
   // Fetch distinct option values (FORM / DOSE UNIT / VOLUME UNIT / dosage
-  // unit) from the backend for the protocol-builder dropdowns.
+  // unit / treatment intents) from the backend for the protocol-builder dropdowns.
   useEffect(() => {
+    setLoadingTreatmentIntents(true);
     chemotherapyApi
       .getProtocolFieldOptions()
       .then((res) => {
@@ -315,8 +360,29 @@ export default function CreateProtocol() {
           dilution_volume_units: Array.isArray(data?.dilution_volume_units) ? data.dilution_volume_units : [],
           diluents: Array.isArray(data?.diluents) ? data.diluents : [],
         });
+        if (Array.isArray(data?.treatment_intents) && data.treatment_intents.length > 0) {
+          setTreatmentIntentOptions(data.treatment_intents);
+        } else {
+          chemotherapyApi
+            .listTreatmentIntents()
+            .then((r) => {
+              const intents = (r.data as any)?.data ?? r.data;
+              if (Array.isArray(intents)) setTreatmentIntentOptions(intents);
+            })
+            .catch(() => {});
+        }
       })
-      .catch(() => setFieldOptions({ dosage_units: [], dilution_forms: [], dilution_dose_units: [], dilution_volume_units: [], diluents: [] }));
+      .catch(() => {
+        setFieldOptions({ dosage_units: [], dilution_forms: [], dilution_dose_units: [], dilution_volume_units: [], diluents: [] });
+        chemotherapyApi
+          .listTreatmentIntents()
+          .then((r) => {
+            const intents = (r.data as any)?.data ?? r.data;
+            if (Array.isArray(intents)) setTreatmentIntentOptions(intents);
+          })
+          .catch(() => {});
+      })
+      .finally(() => setLoadingTreatmentIntents(false));
   }, []);
 
   // Fetch subtypes for all selected cancer types. Subtypes belonging to
@@ -353,9 +419,34 @@ export default function CreateProtocol() {
       .finally(() => setLoadingSubtypes(false));
   }, [cancerTypeIds]);
 
+  // Fetch all hospital medicines on demand when filter is disabled
+  useEffect(() => {
+    if (!filterByCancerAndSubtype && allHospitalMeds.length === 0) {
+      setLoadingAllMeds(true);
+      chemotherapyApi
+        .listMedicines()
+        .then((res) => {
+          const data = (res.data as any)?.data ?? res.data;
+          setAllHospitalMeds(Array.isArray(data) ? data : []);
+        })
+        .catch(() => setAllHospitalMeds([]))
+        .finally(() => setLoadingAllMeds(false));
+    }
+  }, [filterByCancerAndSubtype, allHospitalMeds.length]);
+
   // Fetch medicines dynamically based on selected cancer types & subtypes for
   // PREMEDICATION, PRIMARY (chemo), SUPPORTIVE, and DISCHARGE (post-treatment).
   useEffect(() => {
+    if (!filterByCancerAndSubtype) {
+      if (allHospitalMeds.length > 0) {
+        setPremedMeds(allHospitalMeds);
+        setChemoMeds(allHospitalMeds);
+        setSupportiveMeds(allHospitalMeds);
+        setDischargeMeds(allHospitalMeds);
+      }
+      return;
+    }
+
     if (!cancerTypeIds || cancerTypeIds.length === 0) {
       setPremedMeds([]);
       setChemoMeds([]);
@@ -404,7 +495,7 @@ export default function CreateProtocol() {
       .catch(() => setDischargeMeds([]))
       .finally(() => setLoadingDischargeMeds(false));
 
-  }, [cancerTypeIds, subtypeIds]);
+  }, [cancerTypeIds, subtypeIds, filterByCancerAndSubtype, allHospitalMeds]);
 
   // Load existing protocol for edit/view
   useEffect(() => {
@@ -417,6 +508,14 @@ export default function CreateProtocol() {
         if (!p) return;
         setRegimenCode(p.regimen_code ?? "");
         setRegimenName(p.regimen_name ?? (p as any).original_protocol ?? "");
+        if (p.treatment_intent) {
+          setTreatmentIntent(p.treatment_intent);
+          setTreatmentIntentOptions((prev) =>
+            prev.includes(p.treatment_intent) ? prev : [p.treatment_intent, ...prev]
+          );
+        } else {
+          setTreatmentIntent("");
+        }
         const loadedCancerTypeIds = Array.isArray(p.cancer_type_ids) && p.cancer_type_ids.length > 0
           ? p.cancer_type_ids
           : Array.isArray(p.chemotherapy_protocol_cancers) && p.chemotherapy_protocol_cancers.length > 0
@@ -931,6 +1030,7 @@ export default function CreateProtocol() {
         cancer_type_ids: cancerTypeIds,
         subtype_id: subtypeIds[0] || null,
         subtype_ids: subtypeIds,
+        treatment_intent: treatmentIntent.trim() || null,
         standard_cycles: standardCycles || null,
         cycle_interval_days: cycleIntervalDays || null,
         no_of_days: days.length,
@@ -991,6 +1091,25 @@ export default function CreateProtocol() {
   const removeDilution = (idx: number) => setDilution(dilution.filter((_, i) => i !== idx));
   const addPost = () => setPost([...post, emptyPost()]);
   const removePost = (idx: number) => setPost(post.filter((_, i) => i !== idx));
+
+  const handleApplyDoseFromModal = (calcDose: string, calcUnit: string, doseCalcMethod: string) => {
+    if (calcTargetRow !== null && calcTargetRow.index >= 0) {
+      const idx = calcTargetRow.index;
+      const n = [...chemoPlans];
+      if (n[idx]) {
+        n[idx].patientDose = calcDose;
+        n[idx].patientUnit = calcUnit;
+        if (doseCalcMethod) {
+          n[idx].doseCalc = doseCalcMethod;
+        }
+        setChemoPlans(n);
+        toast({
+          title: "Calculated Dose Applied",
+          description: `Applied ${calcDose} ${calcUnit} to row #${idx + 1}.`,
+        });
+      }
+    }
+  };
 
   const allAvailableDilutionMeds = (() => {
     const map = new Map<string, string>();
@@ -1064,25 +1183,39 @@ export default function CreateProtocol() {
               <p className="text-[#5b6b7c] text-[13.5px] mt-[5px] max-w-[46ch]">{pageSubtitle}</p>
             </div>
           </div>
-          <button
-            onClick={handleSave}
-            disabled={isSubmitting}
-            className="bg-[#12335c] text-white border-none rounded-xl px-[22px] py-3 text-[13.5px] font-semibold flex items-center gap-2 shadow-[0_1px_2px_rgba(18,51,92,0.15)] hover:bg-[#0e2848] transition-colors disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Saving...
-              </>
-            ) : isViewMode ? (
-              <>
-                <Eye className="h-4 w-4" /> {saveLabel}
-              </>
-            ) : (
-              <>
-                <Save className="h-4 w-4" /> {saveLabel}
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setCalcTargetRow(null);
+                setCalcModalOpen(true);
+              }}
+              className="bg-white border border-[#dde4ec] text-[#12335c] rounded-xl px-4 py-3 text-[13.5px] font-semibold flex items-center gap-2 shadow-xs hover:bg-[#f8fafc] hover:border-[#c7d2dd] transition-colors whitespace-nowrap"
+              title="Open Medicine Dosage Calculator & Clinical Reference Info"
+            >
+              <Calculator className="h-4 w-4 text-[#12335c]" />
+              <span>Calculation Info & Calculator</span>
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={isSubmitting}
+              className="bg-[#12335c] text-white border-none rounded-xl px-[22px] py-3 text-[13.5px] font-semibold flex items-center gap-2 shadow-[0_1px_2px_rgba(18,51,92,0.15)] hover:bg-[#0e2848] transition-colors disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Saving...
+                </>
+              ) : isViewMode ? (
+                <>
+                  <Eye className="h-4 w-4" /> {saveLabel}
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4" /> {saveLabel}
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Info Bar - dynamic */}
@@ -1269,6 +1402,19 @@ export default function CreateProtocol() {
                     />
                   </div>
                   <div>
+                    <label className={labelCls}>Treatment Plan</label>
+                    <FormProtocolDropdown
+                      options={treatmentIntentOptions.map((t) => ({ label: t, value: t }))}
+                      value={treatmentIntent}
+                      onValueChange={setTreatmentIntent}
+                      placeholder={loadingTreatmentIntents ? "Loading..." : "Select treatment plan"}
+                      emptyMessage="No treatment plans found"
+                      disabled={disabled}
+                      loading={loadingTreatmentIntents}
+                    />
+                    <p className="text-[11px] text-[#8a97a6] mt-1">DB: treatment_intent</p>
+                  </div>
+                  <div>
                     <label className={labelCls}>Standard Cycles</label>
                     <div className="flex items-center border border-[#dde4ec] rounded-[11px] overflow-hidden h-10 bg-[#f8fafc]">
                       <button
@@ -1323,6 +1469,42 @@ export default function CreateProtocol() {
                       disabled={disabled}
                     />
                   </div>
+
+                  <div className="lg:col-span-3 flex flex-wrap items-center justify-between gap-2 pt-3 mt-1 border-t border-[#edf1f5] text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-[#5b6b7c]">Medicine Dropdowns:</span>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold ${
+                        filterByCancerAndSubtype
+                          ? "bg-[#eaf0f7] text-[#12335c] border border-[#d2dfef]"
+                          : "bg-[#fef3c7] text-[#92400e] border border-[#fde68a]"
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${filterByCancerAndSubtype ? "bg-[#12335c]" : "bg-[#d97706]"}`} />
+                        {filterByCancerAndSubtype
+                          ? subtypeIds.length > 0
+                            ? `Strictly filtered by Subtype (${subtypes.filter(s => subtypeIds.includes(s.subtype_id)).map(s => s.subtype_name).join(", ")})`
+                            : cancerTypeIds.length > 0
+                            ? `Filtered by Cancer Type (${cancerTypes.filter(c => cancerTypeIds.includes(c.cancer_type_id)).map(c => c.cancer_type).join(", ") || "Selected"})`
+                            : "Select cancer type & subtype to filter medicines"
+                          : `Showing ALL hospital medicines (${allHospitalMeds.length || "inventory"})`}
+                      </span>
+                    </div>
+                    {cancerTypeIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => !disabled && setFilterByCancerAndSubtype(!filterByCancerAndSubtype)}
+                        disabled={disabled || loadingAllMeds}
+                        className="text-xs font-medium text-[#12335c] hover:underline"
+                      >
+                        {loadingAllMeds ? (
+                          <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Loading all medicines...</span>
+                        ) : filterByCancerAndSubtype ? (
+                          "Need an uncatalogued drug? Show all hospital medicines"
+                        ) : (
+                          "← Switch back to strictly filtered cancer/subtype medicines"
+                        )}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1351,6 +1533,10 @@ export default function CreateProtocol() {
                 <div className="py-4 border-b border-[#e3e8ee]">
                   <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">CANCER TYPE</div>
                   <div className="text-sm font-bold text-[#1b2530]">{selectedCancerTypeName}</div>
+                </div>
+                <div className="py-4 border-b border-[#e3e8ee]">
+                  <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">TREATMENT PLAN</div>
+                  <div className="text-sm font-bold text-[#1b2530] truncate">{treatmentIntent || "—"}</div>
                 </div>
                 <div className="py-4 border-b border-[#e3e8ee]">
                   <div className="text-[10.5px] font-bold tracking-wide text-[#8a97a6] mb-1.5">CYCLE SCHEDULE</div>
@@ -1396,17 +1582,29 @@ export default function CreateProtocol() {
                       idx + 1,
                       <FormProtocolDropdown
                         key="m"
-                        options={premedMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
+                        options={getDropdownOptions(premedMeds, row.medication, row.brandName)}
                         value={row.medication}
                         onValueChange={(v) => {
                           const n = [...premeds];
                           n[idx].medication = v;
                           setPremeds(n);
                         }}
-                        placeholder={loadingPremedMeds ? "Loading medicines..." : "Select medicine"}
-                        emptyMessage="No medicines found"
+                        placeholder={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : loadingPremedMeds
+                            ? "Loading medicines..."
+                            : "Select medicine"
+                        }
+                        emptyMessage={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : subtypeIds.length > 0 && filterByCancerAndSubtype
+                            ? "No premedications found for selected subtype"
+                            : "No premedications found"
+                        }
                         loading={loadingPremedMeds}
-                        disabled={disabled}
+                        disabled={disabled || cancerTypeIds.length === 0}
                         className="h-8"
                       />,
                       <input
@@ -1491,20 +1689,40 @@ export default function CreateProtocol() {
 
             {/* Chemotherapy plan */}
             <div className={cardCls + " mb-5"}>
-              <div
-                className="flex items-center justify-between px-6 py-[17px] cursor-pointer hover:bg-[#f8f9fb] transition-colors"
-                onClick={() => toggleSection("chemo")}
-              >
-                <div className="flex items-center gap-2.5 text-[13.5px] font-bold text-[#17212e]">
+              <div className="flex items-center justify-between px-6 py-[17px] hover:bg-[#f8f9fb] transition-colors">
+                <div
+                  className="flex items-center gap-2.5 text-[13.5px] font-bold text-[#17212e] cursor-pointer flex-1"
+                  onClick={() => toggleSection("chemo")}
+                >
                   <Syringe className="w-4 h-4 text-[#12335c]" /> Chemotherapy Plan
                 </div>
-                {sections.chemo ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCalcTargetRow(null);
+                      setCalcModalOpen(true);
+                    }}
+                    className="text-xs font-semibold text-[#12335c] bg-[#eaf0f7] hover:bg-[#dbe7f4] px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors"
+                    title="Open Medicine Dosage Calculator & Formulas Reference"
+                  >
+                    <Calculator className="w-3.5 h-3.5" />
+                    <span>Formulas & Dose Calculator</span>
+                  </button>
+                  <div
+                    className="cursor-pointer p-1"
+                    onClick={() => toggleSection("chemo")}
+                  >
+                    {sections.chemo ? <ChevronUp className="w-4 h-4 text-[#8a97a6]" /> : <ChevronDown className="w-4 h-4 text-[#8a97a6]" />}
+                  </div>
+                </div>
               </div>
               {sections.chemo && (
                 <>
                   <ProtocolGridTable
                     columns={["#", "MEDICATION *", "BRAND", "DOSE CALC", "DOSE", "UNIT", "PATIENT DOSE", "UNIT", "ADMIN NOTES", "TOXICITY", "REMARKS", "ACTIONS"]}
-                    template="44px 1.8fr 1.2fr 1.1fr 0.7fr 1.2fr 0.7fr 1.0fr 1.4fr 0.9fr 0.9fr 40px"
+                    template="44px 1.8fr 1.2fr 1.1fr 0.7fr 1.2fr 0.7fr 1.0fr 1.4fr 0.9fr 0.9fr 68px"
                     addLabel="+ Add Row"
                     onAdd={addChemoPlan}
                     disabled={disabled}
@@ -1512,17 +1730,36 @@ export default function CreateProtocol() {
                       idx + 1,
                       <FormProtocolDropdown
                         key="m"
-                        options={chemoMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
+                        options={getDropdownOptions(chemoMeds, row.medication, row.brandName)}
                         value={row.medication}
                         onValueChange={(v) => {
                           const n = [...chemoPlans];
                           n[idx].medication = v;
+                          const medObj = chemoMeds.find((m) => m.medicine_id === v);
+                          if (medObj && !n[idx].doseCalc) {
+                            const inferred = inferDosingBasisForMedicine(medObj.medicine_name);
+                            if (inferred === "AUC") n[idx].doseCalc = "AUC (Calvert)";
+                            else if (inferred === "Weight") n[idx].doseCalc = "Weight (mg/kg)";
+                            else n[idx].doseCalc = "BSA (mg/m²)";
+                          }
                           setChemoPlans(n);
                         }}
-                        placeholder={loadingChemoMeds ? "Loading medicines..." : "Select medicine"}
-                        emptyMessage="No medicines found"
+                        placeholder={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : loadingChemoMeds
+                            ? "Loading medicines..."
+                            : "Select medicine"
+                        }
+                        emptyMessage={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : subtypeIds.length > 0 && filterByCancerAndSubtype
+                            ? "No chemo medicines found for selected subtype"
+                            : "No chemo medicines found"
+                        }
                         loading={loadingChemoMeds}
-                        disabled={disabled}
+                        disabled={disabled || cancerTypeIds.length === 0}
                         className="h-8"
                       />,
                       <input
@@ -1545,6 +1782,20 @@ export default function CreateProtocol() {
                         onValueChange={(v) => {
                           const n = [...chemoPlans];
                           n[idx].doseCalc = v;
+                          const recommended = getRecommendedUnitsForDoseCalc(v);
+                          if (!n[idx].unit || v) {
+                            n[idx].unit = recommended.unit;
+                          }
+                          if (!n[idx].patientUnit || v) {
+                            n[idx].patientUnit = recommended.patientUnit;
+                          }
+                          const numDose = parseFloat(n[idx].dose);
+                          if (!isNaN(numDose) && numDose > 0) {
+                            const calcPatientDose = calculatePatientDoseFromTemplate(numDose, v);
+                            if (calcPatientDose != null) {
+                              n[idx].patientDose = String(calcPatientDose);
+                            }
+                          }
                           setChemoPlans(n);
                         }}
                         placeholder="Select dose calc"
@@ -1556,8 +1807,18 @@ export default function CreateProtocol() {
                         type="text"
                         value={row.dose}
                         onChange={(e) => {
+                          const val = e.target.value;
                           const n = [...chemoPlans];
-                          n[idx].dose = e.target.value;
+                          n[idx].dose = val;
+                          const numDose = parseFloat(val);
+                          if (!isNaN(numDose) && numDose > 0 && n[idx].doseCalc) {
+                            const calcPatientDose = calculatePatientDoseFromTemplate(numDose, n[idx].doseCalc);
+                            if (calcPatientDose != null) {
+                              n[idx].patientDose = String(calcPatientDose);
+                            }
+                          } else if (!val.trim()) {
+                            n[idx].patientDose = "";
+                          }
                           setChemoPlans(n);
                         }}
                         className={ptInput}
@@ -1566,11 +1827,19 @@ export default function CreateProtocol() {
                       />,
                       <FormProtocolDropdown
                         key="u"
-                        options={Array.from(new Set([...fieldOptions.dosage_units, row.unit].filter(Boolean)))}
+                        options={Array.from(new Set([...fieldOptions.dosage_units, row.unit, "mg/m²", "mg/kg", "AUC", "mg", "g", "mcg"].filter(Boolean)))}
                         value={row.unit}
                         onValueChange={(v) => {
                           const n = [...chemoPlans];
+                          const oldUnit = n[idx].unit;
                           n[idx].unit = v;
+                          const numDose = parseFloat(n[idx].dose);
+                          if (!isNaN(numDose) && numDose > 0 && oldUnit && oldUnit !== v) {
+                            const converted = convertUnit(numDose, oldUnit, v);
+                            if (converted != null) {
+                              n[idx].dose = String(converted);
+                            }
+                          }
                           setChemoPlans(n);
                         }}
                         placeholder="Select unit"
@@ -1596,8 +1865,17 @@ export default function CreateProtocol() {
                         type="text"
                         value={row.patientUnit}
                         onChange={(e) => {
+                          const val = e.target.value;
                           const n = [...chemoPlans];
-                          n[idx].patientUnit = e.target.value;
+                          const oldUnit = n[idx].patientUnit;
+                          n[idx].patientUnit = val;
+                          const numPatientDose = parseFloat(n[idx].patientDose);
+                          if (!isNaN(numPatientDose) && numPatientDose > 0 && oldUnit && oldUnit !== val) {
+                            const converted = convertUnit(numPatientDose, oldUnit, val);
+                            if (converted != null) {
+                              n[idx].patientDose = String(converted);
+                            }
+                          }
                           setChemoPlans(n);
                         }}
                         className={ptInput}
@@ -1643,14 +1921,34 @@ export default function CreateProtocol() {
                         placeholder="Remarks"
                         disabled={disabled}
                       />,
-                      <button
-                        key="del"
-                        onClick={() => removeChemoPlan(idx)}
-                        disabled={disabled}
-                        className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6b7280] hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>,
+                      <div key="act" className="flex items-center justify-center gap-1">
+                        <button
+                          key="calc"
+                          type="button"
+                          onClick={() => {
+                            const selectedMed = chemoMeds.find((m) => m.medicine_id === row.medication)?.medicine_name || row.medication;
+                            setCalcTargetRow({
+                              index: idx,
+                              drug: selectedMed || row.brandName || "",
+                              dose: row.dose || "",
+                              doseCalc: row.doseCalc || "",
+                            });
+                            setCalcModalOpen(true);
+                          }}
+                          title="Calculate Dose (BSA / Weight / Calvert AUC)"
+                          className="p-1.5 rounded-lg hover:bg-[#eaf0f7] text-[#12335c] hover:text-[#0e2848] transition-colors"
+                        >
+                          <Calculator className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          key="del"
+                          onClick={() => removeChemoPlan(idx)}
+                          disabled={disabled}
+                          className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6b7280] hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>,
                     ])}
                   />
                 </>
@@ -1680,17 +1978,29 @@ export default function CreateProtocol() {
                       idx + 1,
                       <FormProtocolDropdown
                         key="m"
-                        options={supportiveMeds.map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
+                        options={getDropdownOptions(supportiveMeds, row.medication, row.brandName)}
                         value={row.medication}
                         onValueChange={(v) => {
                           const n = [...supportive];
                           n[idx].medication = v;
                           setSupportive(n);
                         }}
-                        placeholder={loadingSupportiveMeds ? "Loading medicines..." : "Select medicine"}
-                        emptyMessage="No supportive medicines found"
+                        placeholder={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : loadingSupportiveMeds
+                            ? "Loading medicines..."
+                            : "Select medicine"
+                        }
+                        emptyMessage={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : subtypeIds.length > 0 && filterByCancerAndSubtype
+                            ? "No supportive medicines found for selected subtype"
+                            : "No supportive medicines found"
+                        }
                         loading={loadingSupportiveMeds}
-                        disabled={disabled}
+                        disabled={disabled || cancerTypeIds.length === 0}
                         className="h-8"
                       />,
                       <input
@@ -1814,8 +2124,17 @@ export default function CreateProtocol() {
                         type="text"
                         value={row.dose}
                         onChange={(e) => {
+                          const val = e.target.value;
                           const n = [...dilution];
-                          n[idx].dose = e.target.value;
+                          n[idx].dose = val;
+                          const numDose = parseFloat(val);
+                          if (!isNaN(numDose) && numDose > 0 && n[idx].unit) {
+                            const vol = convertMassToVolume(numDose, n[idx].unit, n[idx].volumeUnit || "CC");
+                            if (vol != null) {
+                              n[idx].volume = String(vol);
+                              if (!n[idx].volumeUnit) n[idx].volumeUnit = "CC";
+                            }
+                          }
                           setDilution(n);
                         }}
                         className={ptInput}
@@ -1824,11 +2143,27 @@ export default function CreateProtocol() {
                       />,
                       <FormProtocolDropdown
                         key="du"
-                        options={fieldOptions.dilution_dose_units}
+                        options={Array.from(new Set([...fieldOptions.dilution_dose_units, row.unit, "mg", "g", "mcg", "kg"].filter(Boolean)))}
                         value={row.unit}
                         onValueChange={(v) => {
                           const n = [...dilution];
+                          const oldUnit = n[idx].unit;
                           n[idx].unit = v;
+                          const numDose = parseFloat(n[idx].dose);
+                          if (!isNaN(numDose) && numDose > 0) {
+                            if (oldUnit && oldUnit !== v) {
+                              const convertedDose = convertUnit(numDose, oldUnit, v);
+                              if (convertedDose != null) {
+                                n[idx].dose = String(convertedDose);
+                              }
+                            }
+                            const currentDose = parseFloat(n[idx].dose) || numDose;
+                            const vol = convertMassToVolume(currentDose, v, n[idx].volumeUnit || "CC");
+                            if (vol != null) {
+                              n[idx].volume = String(vol);
+                              if (!n[idx].volumeUnit) n[idx].volumeUnit = "CC";
+                            }
+                          }
                           setDilution(n);
                         }}
                         placeholder="Select unit"
@@ -1851,11 +2186,19 @@ export default function CreateProtocol() {
                       />,
                       <FormProtocolDropdown
                         key="vu"
-                        options={fieldOptions.dilution_volume_units}
+                        options={Array.from(new Set([...fieldOptions.dilution_volume_units, row.volumeUnit, "CC", "mL", "L"].filter(Boolean)))}
                         value={row.volumeUnit}
                         onValueChange={(v) => {
                           const n = [...dilution];
+                          const oldVolUnit = n[idx].volumeUnit;
                           n[idx].volumeUnit = v;
+                          const numVol = parseFloat(n[idx].volume);
+                          if (!isNaN(numVol) && numVol > 0 && oldVolUnit && oldVolUnit !== v) {
+                            const convertedVol = convertUnit(numVol, oldVolUnit, v);
+                            if (convertedVol != null) {
+                              n[idx].volume = String(convertedVol);
+                            }
+                          }
                           setDilution(n);
                         }}
                         placeholder="Select unit"
@@ -1930,17 +2273,29 @@ export default function CreateProtocol() {
                       />,
                       <FormProtocolDropdown
                         key="m"
-                        options={(dischargeMeds.length > 0 ? dischargeMeds : premedMeds).map((m) => ({ label: m.medicine_name, value: m.medicine_id }))}
+                        options={getDropdownOptions(dischargeMeds.length > 0 ? dischargeMeds : premedMeds, row.medication, row.brandName)}
                         value={row.medication}
                         onValueChange={(v) => {
                           const n = [...post];
                           n[idx].medication = v;
                           setPost(n);
                         }}
-                        placeholder={loadingDischargeMeds ? "Loading medicines..." : "Select medicine"}
-                        emptyMessage="No medicines found"
+                        placeholder={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : loadingDischargeMeds
+                            ? "Loading medicines..."
+                            : "Select medicine"
+                        }
+                        emptyMessage={
+                          cancerTypeIds.length === 0
+                            ? "Select cancer type(s) first"
+                            : subtypeIds.length > 0 && filterByCancerAndSubtype
+                            ? "No discharge medicines found for selected subtype"
+                            : "No discharge medicines found"
+                        }
                         loading={loadingDischargeMeds}
-                        disabled={disabled}
+                        disabled={disabled || cancerTypeIds.length === 0}
                         className="h-8"
                       />,
                       <input
@@ -2076,6 +2431,15 @@ export default function CreateProtocol() {
           navigate(-1);
         }}
         onCancel={() => setShowLeaveConfirm(false)}
+      />
+
+      <DoseCalculationModal
+        open={calcModalOpen}
+        onOpenChange={setCalcModalOpen}
+        initialDrugName={calcTargetRow?.drug ?? ""}
+        initialDose={calcTargetRow?.dose ?? ""}
+        initialDoseCalc={calcTargetRow?.doseCalc ?? ""}
+        onApplyDose={handleApplyDoseFromModal}
       />
     </div>
   );

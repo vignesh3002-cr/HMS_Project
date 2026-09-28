@@ -542,7 +542,7 @@ const INITIAL_TESTING_SAMPLES: TestingSampleItem[] = [
 
 export default function TestingSamples() {
   const navigate = useNavigate();
-  const currentUser = getUser();
+  const currentUser = useMemo(() => getUser(), []);
   const displayName = currentUser?.username || "Labtech";
   const displayRole =
     currentUser?.role_type === "LAB_TECHNICIAN"
@@ -616,9 +616,18 @@ export default function TestingSamples() {
         patientApi.getAll({ limit: 100 }).catch(() => ({ data: { data: { patients: [] } } })),
       ]);
 
-      const orders: LabOrderRecord[] = ordersRes?.data?.data || [];
-      const items: LabOrderItemRecord[] = itemsRes?.data?.data || [];
-      const patients: PatientRecord[] = patientsRes?.data?.data?.patients || [];
+      const currentUsername = currentUser?.username || "Lab Technician";
+
+      const orders: LabOrderRecord[] = Array.isArray(ordersRes?.data?.data)
+        ? ordersRes.data.data
+        : [];
+      const items: LabOrderItemRecord[] = Array.isArray(itemsRes?.data?.data)
+        ? itemsRes.data.data
+        : [];
+      const patientsRaw = patientsRes?.data?.data;
+      const patients: PatientRecord[] = Array.isArray(patientsRaw)
+        ? patientsRaw
+        : (patientsRaw as any)?.patients || [];
 
       if (items.length > 0) {
         const patientMap = new Map<string, PatientRecord>();
@@ -728,7 +737,7 @@ export default function TestingSamples() {
             ? createdDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })
             : "10:30 AM";
 
-          const tatHours = item.lab_test_master?.tat_hours || 1;
+          const tatHours = Number(item.lab_test_master?.tat_hours) || 1;
           const estDate = new Date(createdDate.getTime() + tatHours * 3600 * 1000);
           const estimatedCompletion = !isNaN(estDate.getTime())
             ? estDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })
@@ -799,7 +808,7 @@ export default function TestingSamples() {
             status,
             sampleType,
             receivedDate,
-            receivedBy: item.sample_collection?.[0]?.collected_by || currentUser?.username || "Lab Technician",
+            receivedBy: item.sample_collection?.[0]?.collected_by || currentUsername,
             comments: storedComments || item.remarks || "",
             testResult,
             parameters: params,
@@ -832,7 +841,7 @@ export default function TestingSamples() {
               status: "RUNNING",
               sampleType,
               receivedDate: "22 Sep 2026",
-              receivedBy: cached.technician || currentUser?.username || "Lab Technician",
+              receivedBy: cached.technician || currentUsername,
               comments: "",
               parameters: getDefaultParametersForTest(testName),
             });
@@ -863,7 +872,11 @@ export default function TestingSamples() {
 
         setSamples(combinedSamples);
         if (combinedSamples.length > 0) {
-          setSelectedSample(combinedSamples[0]);
+          setSelectedSample((prev) => {
+            if (!prev) return combinedSamples[0];
+            const exists = combinedSamples.find((s) => s.id === prev.id);
+            return exists || combinedSamples[0];
+          });
         }
       }
     } catch (err: any) {
@@ -872,7 +885,7 @@ export default function TestingSamples() {
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser]);
+  }, []);
 
   useEffect(() => {
     fetchRealData();

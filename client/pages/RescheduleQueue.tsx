@@ -23,6 +23,8 @@ import { employeeApi, EmployeeRecord, DoctorScheduleRecord } from "@/api/employe
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getUser } from "@/utils/token";
+import { useCriticalPatients } from "@/hooks/useCriticalPatients";
+import { CriticalWrapper, CriticalCorner, CriticalDot } from "@/components/hms/CriticalPatientIndicator";
 
 const TRANSFER_ADMIN_ROLES = ["HEAD_ADMIN", "SUPER_ADMIN", "BRANCH_ADMIN"];
 
@@ -468,6 +470,14 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
     if (!leaveBranchFilter) return leaveEntries;
     return leaveEntries.filter((l) => l.branch_id === leaveBranchFilter);
   }, [leaveEntries, leaveBranchFilter]);
+
+  const queuePatientAgeData = useMemo(() => {
+    return filtered.map((e) => ({
+      patientId: e.patient_id,
+    }));
+  }, [filtered]);
+
+  const { getCriticalInfo } = useCriticalPatients(queuePatientAgeData);
 
   // Compute doctor appointment counts from queue entries (frontend-only load balancing)
   const doctorQueueCounts = useMemo(() => {
@@ -968,8 +978,10 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
                 const name = [patient?.patient_first_name, patient?.patient_last_name]
                   .filter(Boolean)
                   .join(" ");
+                const crit = getCriticalInfo(entry.patient_id);
                 return (
-                  <div key={entry.queue_id} className="flex items-center gap-3 px-4 py-3">
+                  <CriticalWrapper key={entry.queue_id} className="flex items-center gap-3 px-4 py-3" reasons={crit.reasons}>
+                    <CriticalCorner reasons={crit.reasons} />
                     <div className="w-8 h-8 rounded-full bg-[#E6E8EA] flex items-center justify-center shrink-0">
                       <UserRound className="w-4 h-4 text-[#475569]" />
                     </div>
@@ -978,7 +990,7 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
                         <span className="text-sm font-medium text-[#191C1E] truncate">
                           {name || entry.patient_id}
                         </span>
-                        <span className="text-[11px] text-[#94A3B8] font-mono">{entry.patient_id}</span>
+                        <span className="text-[11px] text-[#94A3B8] font-mono flex items-center">{entry.patient_id}<CriticalDot reasons={crit.reasons} /></span>
                       </div>
                       <div className="text-xs text-[#64748B] mt-0.5">
                         {formatDate(entry.old_appointment_date)} · {formatTime(entry.old_appointment_time)}
@@ -1035,7 +1047,7 @@ const assignDay = useMemo(() => dayOfWeekOf(assignDate), [assignDate]);
                         </span>
                       )}
                     </div>
-                  </div>
+                  </CriticalWrapper>
                 );
               })}
             </div>
