@@ -150,6 +150,22 @@ export default function Login() {
       }
 
       // ==================================================
+      // LAB_TECHNICIAN
+      // ==================================================
+      if (roleType === "LAB_TECHNICIAN") {
+        console.log(
+          "LAB_TECHNICIAN detected -> redirecting to /lab/dashboard"
+        );
+
+        navigate("/lab/dashboard", {
+          replace: true,
+          state: { fromLogin: true },
+        });
+
+        return;
+      }
+
+      // ==================================================
       // ADMIN
       // ==================================================
       if (

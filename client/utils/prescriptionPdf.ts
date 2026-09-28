@@ -150,7 +150,7 @@ export async function generatePrescriptionPdf(prescription: PrescriptionData) {
   const doctorSpec = prescription.employees?.specialization || prescription.department_name || "—";
   const diagnosis = prescription.diagnosis?.diagnosis_name || "—";
   const dob = prescription.patient_history?.patient_dob || prescription.patient_history?.date_of_birth;
-  const patientAgeFromData = prescription.patient_history?.age ?? prescription.patient_history?.patient_age;
+  const patientAgeFromData = prescription.patient_history?.age ?? (prescription.patient_history as any)?.patient_age;
   const patientAge = typeof patientAgeFromData === 'number' && patientAgeFromData > 0
     ? patientAgeFromData
     : dob ? (() => {
@@ -429,7 +429,7 @@ export async function generatePrescriptionPdf(prescription: PrescriptionData) {
     const role = (it.drug_role || '').toString().toUpperCase();
     return role === 'DISCHARGE' || role.includes('DISCHARGE');
   });
-  const dischargeItemsFromField = prescription.discharge_medications || prescription.dischargeMedications || [];
+  const dischargeItemsFromField = (prescription as any).discharge_medications || (prescription as any).dischargeMedications || [];
   const dischargeItems = [...dischargeItemsFromPrescription, ...dischargeItemsFromField];
   const parsePipeLine = (line: string) => {
     const parts = line.split('|').map(p => p.trim());

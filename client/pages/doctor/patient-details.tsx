@@ -87,6 +87,7 @@ type SummaryPlan = {
   staging_detail_id?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  doctor_name?: string | null;
   employees?: {
     first_name?: string | null;
     last_name?: string | null;
@@ -111,7 +112,6 @@ type SummaryPlan = {
   }[] | null;
   chemotherapy_plan_items: SummaryPlanItem[] | null;
   oncology_staging_detail: StagingDetailRecord | null;
-  doctor_name?: string | null;
 };
 
 /* ============================================================

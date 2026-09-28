@@ -259,6 +259,19 @@ function mapEncounterToClinicalNote(
   };
 }
 
+const tabs = [
+  "Summary",
+  "Pathology",
+  "Molecular",
+  "Staging",
+  "Treatment Plan",
+  "Treatment Timeline",
+  "Medications",
+  "Discharge",
+  "History",
+  "Notes & Documents",
+];
+
 const PatientNotesDocuments: React.FC<{
   embedded?: boolean;
   patientId?: string;

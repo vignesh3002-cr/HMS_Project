@@ -1,0 +1,2057 @@
+import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { getUser, remove } from "@/utils/token";
+import LabNav from "./labnav";
+import { labOrderApi, labOrderItemApi, LabOrderRecord, LabOrderItemRecord } from "@/api/labOrder.api";
+import { patientApi, PatientRecord } from "@/api/patient.api";
+import { UserProfileDropdown } from "@/components/ui/User_profile_dropdown";
+import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+
+export interface TestItemDetail {
+  id: string;
+  testCode: string;
+  testName: string;
+  sampleType: string;
+  priority: string;
+  barcode?: string;
+}
+
+export interface TestRecord {
+  id: string;
+  requestId: string;
+  patientId: string;
+  patientName: string;
+  requestedBy: string;
+  requestTime: string;
+  tests: string;
+  date?: string;
+  time?: string;
+  status: "PROCESSING" | "COMPLETED";
+  dob: string;
+  gender: string;
+  mobile: string;
+  email: string;
+  address: string;
+  avatarUrl?: string;
+  testItems?: TestItemDetail[];
+  barcode?: string;
+  barcodeGenerated?: boolean;
+}
+
+const INITIAL_TESTS: TestRecord[] = [
+  {
+    id: "1",
+    requestId: "TRF1256",
+    patientId: "P000123",
+    patientName: "Rahul Sharma",
+    requestedBy: "Dr. Sharma",
+    requestTime: "20 May 2024 10:30 AM",
+    tests: "CBC, LFT",
+    date: "10/04/26",
+    time: "10:30 AM",
+    status: "PROCESSING",
+    dob: "15/06/1985",
+    gender: "Male",
+    mobile: "9876543210",
+    email: "ramesh.kumar@email.com",
+    address: "21, Green Park, New Delhi",
+    avatarUrl:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuDZMXzSl6vglUzJD1gAtLBuVl-m0g78QhYN9DT2s4axXvsVF82ZoFg_e5GxLjiZDhnS_LCQBU1bXTcjI_IstH-1TKAp8NAkWDpDvk5la7NP5MMg7eM-ZWrolAkpPd_DNMuf3szKtBzWSI2V5QdexlZROSy6nTOMNHXQnoesquILMCgFS255HcumKzzzKill-Gw8swiaNe_Vz9PziNeTCel7jUe1uns_cHrWeeZvYPD1ZxYYXSwepHyeIg",
+  },
+  {
+    id: "2",
+    requestId: "TRF1255",
+    patientId: "P000124",
+    patientName: "Priya",
+    requestedBy: "Dr. Verma",
+    requestTime: "30 Mar 2026 11:30 AM",
+    tests: "KFT, Lipid Profile",
+    date: "30/03/26",
+    time: "11:30 AM",
+    status: "COMPLETED",
+    dob: "22/08/1992",
+    gender: "Female",
+    mobile: "9812345678",
+    email: "priya.sharma@email.com",
+    address: "45, Vasant Vihar, New Delhi",
+    avatarUrl:
+      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
+  },
+  {
+    id: "3",
+    requestId: "TRF1254",
+    patientId: "P000125",
+    patientName: "Praveen Singh",
+    requestedBy: "Dr.John",
+    requestTime: "03 Apr 2026 10:45 AM",
+    tests: "KFT, Lipid Profile",
+    date: "03/04/26",
+    time: "10:45AM",
+    status: "PROCESSING",
+    dob: "10/11/1980",
+    gender: "Male",
+    mobile: "9823456789",
+    email: "praveen.singh@email.com",
+    address: "12, Model Town, Delhi",
+    avatarUrl:
+      "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+  },
+  {
+    id: "4",
+    requestId: "TRF1253",
+    patientId: "P000126",
+    patientName: "Naziya",
+    requestedBy: "Dr. Verma",
+    requestTime: "05 Apr 2026 10:30 AM",
+    tests: "KFT, Lipid Profile",
+    date: "05/04/26",
+    time: "10:30 AM",
+    status: "PROCESSING",
+    dob: "04/02/1995",
+    gender: "Female",
+    mobile: "9834567890",
+    email: "naziya.k@email.com",
+    address: "88, Jamia Nagar, New Delhi",
+    avatarUrl:
+      "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+  },
+  {
+    id: "5",
+    requestId: "TRF1252",
+    patientId: "P000127",
+    patientName: "Baskar",
+    requestedBy: "Dr. Sarah",
+    requestTime: "20 Mar 2026 12:15 AM",
+    tests: "KFT, Lipid Profile",
+    date: "20/03/26",
+    time: "12:15 AM",
+    status: "COMPLETED",
+    dob: "19/07/1978",
+    gender: "Male",
+    mobile: "9845678901",
+    email: "baskar.m@email.com",
+    address: "14, Lajpat Nagar, New Delhi",
+    avatarUrl:
+      "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
+  },
+  {
+    id: "6",
+    requestId: "TRF1251",
+    patientId: "P000128",
+    patientName: "Ajay",
+    requestedBy: "Dr. Verma",
+    requestTime: "21 Mar 2026 01:16 PM",
+    tests: "KFT, Lipid Profile",
+    date: "21/03/26",
+    time: "01:16 PM",
+    status: "COMPLETED",
+    dob: "30/09/1988",
+    gender: "Male",
+    mobile: "9856789012",
+    email: "ajay.verma@email.com",
+    address: "56, Karol Bagh, New Delhi",
+    avatarUrl:
+      "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80",
+  },
+  {
+    id: "7",
+    requestId: "TRF1250",
+    patientId: "P000129",
+    patientName: "Gopal",
+    requestedBy: "Dr. Mahesh",
+    requestTime: "11 Apr 2026 10:30 AM",
+    tests: "KFT, Lipid Profile",
+    date: "11/04/26",
+    time: "10:30 AM",
+    status: "PROCESSING",
+    dob: "12/12/1975",
+    gender: "Male",
+    mobile: "9867890123",
+    email: "gopal.das@email.com",
+    address: "78, Rohini Sector 9, New Delhi",
+    avatarUrl:
+      "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80",
+  },
+  {
+    id: "8",
+    requestId: "TRF1249",
+    patientId: "P000130",
+    patientName: "Ramya",
+    requestedBy: "Dr. Verma",
+    requestTime: "15 Apr 2026 09:00 AM",
+    tests: "KFT, Lipid Profile",
+    status: "COMPLETED",
+    dob: "05/05/1996",
+    gender: "Female",
+    mobile: "9878901234",
+    email: "ramya.n@email.com",
+    address: "33, Saket, New Delhi",
+    avatarUrl:
+      "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80",
+  },
+];
+
+// Helper to calculate age from DOB string (e.g. 15/06/1985 -> 38)
+const calculateAge = (dobString?: string): number => {
+  if (!dobString) return 38;
+  const parts = dobString.split(/[-/]/);
+  if (parts.length === 3) {
+    let year = parseInt(parts[2], 10);
+    if (isNaN(year) || year < 100) year = parseInt(parts[0], 10);
+    if (!isNaN(year) && year > 1900 && year <= 2026) {
+      return Math.max(1, 2024 - year);
+    }
+  }
+  return 38;
+};
+
+interface SampleBarcodeItem {
+  id: string;
+  testCode: string;
+  testName: string;
+  sampleType: string;
+  barcode: string;
+  count: number;
+}
+
+const INITIAL_SAMPLES: SampleBarcodeItem[] = [
+  {
+    id: "cbc",
+    testCode: "CBC",
+    testName: "Complete Blood Count",
+    sampleType: "Whole Blood",
+    barcode: "BC2405200001",
+    count: 1,
+  },
+  {
+    id: "lft",
+    testCode: "LFT",
+    testName: "Liver Function Test",
+    sampleType: "Serum",
+    barcode: "BC2405200002",
+    count: 1,
+  },
+  {
+    id: "kft",
+    testCode: "KFT",
+    testName: "Kidney Function Test",
+    sampleType: "Serum",
+    barcode: "BC2405200003",
+    count: 1,
+  },
+];
+
+const DEFAULT_TEST_ITEMS: TestItemDetail[] = [
+  { id: "cbc", testCode: "CBC", testName: "Complete Blood Count", sampleType: "Whole Blood", priority: "Normal" },
+  { id: "lft", testCode: "LFT", testName: "Liver Function Test", sampleType: "Serum", priority: "Normal" },
+  { id: "kft", testCode: "KFT", testName: "Kidney Function Test", sampleType: "Serum", priority: "Normal" },
+];
+
+export default function LabDashboard() {
+  const navigate = useNavigate();
+  const currentUser = useMemo(() => getUser(), []);
+  const displayName = currentUser?.username || "Lab Technician";
+  const displayRole =
+    currentUser?.role_type === "LAB_TECHNICIAN"
+      ? "Lab Technician"
+      : currentUser?.role_type || "Lab Technician";
+  const avatarUrl =
+    typeof window !== "undefined"
+      ? localStorage.getItem("user_photo") || undefined
+      : undefined;
+
+  const [logoutOpen, setLogoutOpen] = useState(false);
+
+  const handleLogout = () => {
+    setLogoutOpen(false);
+    remove();
+    localStorage.removeItem("user_info");
+    localStorage.removeItem("user_photo");
+    navigate("/", { replace: true });
+  };
+
+  const [activeNav, setActiveNav] = useState("Dashboard");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "PROCESSING" | "COMPLETED">("ALL");
+  const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
+
+  // Editable tests list populated with real backend lab orders
+  const [testsList, setTestsList] = useState<TestRecord[]>(INITIAL_TESTS);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Fetch real data from backend using existing APIs
+  const fetchRealData = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setFetchError(null);
+
+      const [ordersRes, itemsRes, patientsRes] = await Promise.all([
+        labOrderApi.getAll().catch(() => ({ data: { data: [] } })),
+        labOrderItemApi.getAll().catch(() => ({ data: { data: [] } })),
+        patientApi.getAll({ limit: 100 }).catch(() => ({ data: { data: { patients: [] } } })),
+      ]);
+
+      const orders: LabOrderRecord[] = ordersRes?.data?.data || [];
+      const items: LabOrderItemRecord[] = itemsRes?.data?.data || [];
+      const patients: PatientRecord[] = patientsRes?.data?.data?.patients || [];
+
+      if (orders.length > 0) {
+        // Build patient lookup map by patient_id
+        const patientMap = new Map<string, PatientRecord>();
+        patients.forEach((p) => {
+          if (p.patient_id) patientMap.set(p.patient_id, p);
+        });
+
+        // Build order items map by lab_order_id
+        const orderItemsMap = new Map<string, LabOrderItemRecord[]>();
+        items.forEach((item) => {
+          if (item.lab_order_id) {
+            const list = orderItemsMap.get(item.lab_order_id) || [];
+            list.push(item);
+            orderItemsMap.set(item.lab_order_id, list);
+          }
+        });
+
+        const mappedTests: TestRecord[] = orders.map((order, idx) => {
+          const pId =
+            order.patient_history?.patient_id ||
+            order.patient_history_id ||
+            `P000${120 + idx}`;
+          const patient = patientMap.get(pId);
+          const orderItems = orderItemsMap.get(order.lab_order_id) || [];
+
+          // Test names summary
+          const testNames =
+            orderItems.length > 0
+              ? orderItems
+                  .map(
+                    (oi) =>
+                      oi.lab_test_master?.test_name ||
+                      oi.lab_test_master?.test_code ||
+                      oi.lab_test_id
+                  )
+                  .filter(Boolean)
+                  .join(", ")
+              : order.provisional_diagnosis || "General Lab Panel";
+
+          // Format order date & time
+          const dateObj =
+            order.order_datetime || order.created_at
+              ? new Date(order.order_datetime || order.created_at!)
+              : new Date();
+
+          const formattedDate = dateObj.toLocaleDateString("en-GB", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "2-digit",
+          });
+
+          const formattedTime = dateObj.toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true,
+          });
+
+          const formattedReqTime =
+            dateObj.toLocaleDateString("en-GB", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+            }) +
+            " " +
+            formattedTime;
+
+          // Doctor name
+          const doctorName = order.employees
+            ? `Dr. ${[order.employees.first_name, order.employees.last_name]
+                .filter(Boolean)
+                .join(" ")}`
+            : "Dr. Senthil R";
+
+          // Patient name
+          const pName = patient
+            ? [
+                patient.patient_first_name,
+                patient.patient_middle_name,
+                patient.patient_last_name,
+              ]
+                .filter(Boolean)
+                .join(" ")
+            : pId || "Patient";
+
+          // Status: if backend says Completed -> COMPLETED, else PROCESSING
+          const isCompleted =
+            order.order_status?.toUpperCase() === "COMPLETED";
+
+          // Structured tests for alignment & barcode steps
+          const structuredItems: TestItemDetail[] =
+            orderItems.length > 0
+              ? orderItems.map((oi) => {
+                  const sampleBarcode =
+                    oi.sample_collection?.[0]?.barcode ||
+                    (oi.remarks?.startsWith("Barcode: ")
+                      ? oi.remarks.replace("Barcode: ", "")
+                      : undefined) ||
+                    (typeof window !== "undefined"
+                      ? localStorage.getItem(`generated_barcode_item_${oi.lab_order_item_id}`) || undefined
+                      : undefined);
+
+                  return {
+                    id: oi.lab_order_item_id || oi.lab_test_id,
+                    testCode:
+                      oi.lab_test_master?.test_code ||
+                      oi.lab_test_id.replace(/^LABTEST/, "T") ||
+                      "TEST",
+                    testName:
+                      oi.lab_test_master?.test_name || "Diagnostic Test",
+                    sampleType:
+                      oi.lab_test_master?.sample_type || "Whole Blood",
+                    priority: order.priority || "Normal",
+                    barcode: sampleBarcode,
+                  };
+                })
+              : [
+                  {
+                    id: "cbc",
+                    testCode: "CBC",
+                    testName: "Complete Blood Count",
+                    sampleType: "Whole Blood",
+                    priority: order.priority || "Normal",
+                  },
+                ];
+
+          const isBarcodeGenerated =
+            structuredItems.some((it) => !!it.barcode) ||
+            orderItems.some(
+              (oi) =>
+                oi.item_status === "Barcode Generated" ||
+                oi.item_status === "Collected" ||
+                (oi.sample_collection && oi.sample_collection.length > 0)
+            ) ||
+            (typeof window !== "undefined" &&
+              !!localStorage.getItem(`generated_barcode_${order.lab_order_id}`));
+
+          const firstBarcode =
+            structuredItems.find((it) => it.barcode)?.barcode ||
+            (isBarcodeGenerated
+              ? `BC${order.lab_order_id.replace(/\D/g, "").slice(-6) || "2609"}0001`
+              : undefined);
+
+          return {
+            id: order.lab_order_id,
+            requestId: order.lab_order_id,
+            patientId: pId,
+            patientName: pName,
+            requestedBy: doctorName,
+            requestTime: formattedReqTime,
+            tests: testNames,
+            date: formattedDate,
+            time: formattedTime,
+            status: isCompleted ? "COMPLETED" : "PROCESSING",
+            dob: patient?.patient_dob
+              ? new Date(patient.patient_dob).toLocaleDateString("en-GB")
+              : "15/06/1990",
+            gender: patient?.patient_gender || "Male",
+            mobile: patient?.patient_primary_mobile || "9876543210",
+            email: patient?.patient_email || "patient@example.com",
+            address:
+              patient?.Patient_address ||
+              [
+                patient?.patient_area,
+                patient?.patient_district,
+                patient?.patient_state,
+              ]
+                .filter(Boolean)
+                .join(", ") ||
+              "Chennai, Tamil Nadu",
+            avatarUrl: patient?.patient_photo_url || undefined,
+            testItems: structuredItems,
+            barcode: firstBarcode,
+            barcodeGenerated: isBarcodeGenerated,
+          };
+        });
+
+        setTestsList(mappedTests);
+      }
+    } catch (err: any) {
+      console.error("Error fetching real lab data:", err);
+      setFetchError("Unable to load latest lab orders. Displaying test queue.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRealData();
+  }, [fetchRealData]);
+
+  // Selected patient for expanded registration view
+  const [selectedPatient, setSelectedPatient] = useState<TestRecord | null>(null);
+  const [currentStep, setCurrentStep] = useState<number>(1);
+
+  const location = useLocation();
+  useEffect(() => {
+    const pId = (location.state as { selectedPatientId?: string } | undefined)?.selectedPatientId;
+    if (pId) {
+      const match = testsList.find((t) => t.id === pId);
+      if (match) {
+        setSelectedPatient(match);
+        setCurrentStep(1);
+      }
+    }
+  }, [location.state, testsList]);
+
+  // Step 2: Test Alignment selection states
+  const [selectedValidTests, setSelectedValidTests] = useState<string[]>([
+    "cbc",
+    "lft",
+    "kft",
+  ]);
+  const [isExcludedSelected, setIsExcludedSelected] = useState<boolean>(false);
+
+  // Step 3: Sample Barcode states
+  const [sampleBarcodes, setSampleBarcodes] = useState<SampleBarcodeItem[]>(INITIAL_SAMPLES);
+  const [printSuccessMessage, setPrintSuccessMessage] = useState<string | null>(null);
+
+  const handleToggleValidTest = (id: string) => {
+    setSelectedValidTests((prev) =>
+      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleAllValid = () => {
+    const allIds =
+      selectedPatient?.testItems && selectedPatient.testItems.length > 0
+        ? selectedPatient.testItems.map((ti) => ti.id)
+        : ["cbc", "lft", "kft"];
+
+    if (selectedValidTests.length === allIds.length) {
+      setSelectedValidTests([]);
+    } else {
+      setSelectedValidTests(allIds);
+    }
+  };
+
+  const handleIncrementBarcodeCount = (id: string) => {
+    setSampleBarcodes((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, count: item.count + 1 } : item
+      )
+    );
+  };
+
+  const handleDecrementBarcodeCount = (id: string) => {
+    setSampleBarcodes((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, count: Math.max(1, item.count - 1) } : item
+      )
+    );
+  };
+
+  const handlePrintSingleBarcode = (item: SampleBarcodeItem) => {
+    setPrintSuccessMessage(`Barcode label ${item.barcode} for ${item.testCode} sent to printer!`);
+    setTimeout(() => setPrintSuccessMessage(null), 3500);
+  };
+
+  const handlePrintAllBarcodes = () => {
+    setPrintSuccessMessage(`All ${sampleBarcodes.length} sample barcode labels sent to printer!`);
+    setTimeout(() => setPrintSuccessMessage(null), 3500);
+  };
+
+  const handleCompleteAndSave = async () => {
+    if (selectedPatient) {
+      const orderId = selectedPatient.id;
+      const primaryBarcode = sampleBarcodes[0]?.barcode || `BC${selectedPatient.requestId.replace(/\D/g, "").slice(-6) || "2609"}0001`;
+
+      setTestsList((prev) =>
+        prev.map((t) =>
+          t.id === orderId
+            ? {
+                ...t,
+                status: "COMPLETED",
+                barcode: primaryBarcode,
+                barcodeGenerated: true,
+                testItems: t.testItems?.map((ti, idx) => ({
+                  ...ti,
+                  barcode: sampleBarcodes[idx]?.barcode || primaryBarcode,
+                })),
+              }
+            : t
+        )
+      );
+
+      // Save locally
+      try {
+        localStorage.setItem(`generated_barcode_${orderId}`, "true");
+        sampleBarcodes.forEach((sb) => {
+          localStorage.setItem(`generated_barcode_item_${sb.id}`, sb.barcode);
+        });
+      } catch {}
+
+      // Persist to backend
+      try {
+        await labOrderApi.update(orderId, { order_status: "Completed" });
+      } catch (e) {
+        console.warn("Could not persist status to backend API:", e);
+      }
+
+      if (sampleBarcodes.length > 0) {
+        try {
+          const realItems = sampleBarcodes.filter(
+            (sb) =>
+              !sb.id.startsWith("cbc") &&
+              !sb.id.startsWith("lft") &&
+              !sb.id.startsWith("kft") &&
+              !sb.id.startsWith("LOI_")
+          );
+          if (realItems.length > 0) {
+            await labOrderItemApi.generateBarcode(
+              realItems.map((sb) => ({
+                lab_order_item_id: sb.id,
+                barcode: sb.barcode,
+                sample_type: sb.sampleType,
+              }))
+            );
+          }
+        } catch (err) {
+          console.warn("Could not save barcodes to backend:", err);
+        }
+      }
+
+      setPrintSuccessMessage(
+        `Requisition ${selectedPatient?.requestId} for ${selectedPatient?.patientName} saved! Barcode ${primaryBarcode} generated & sent to Sample Verification.`
+      );
+      setTimeout(() => setPrintSuccessMessage(null), 4000);
+    }
+    handleBackToDashboard();
+  };
+
+  // Form state for the active patient registration details
+  const [patientFormData, setPatientFormData] = useState({
+    patientId: "",
+    fullName: "",
+    dob: "",
+    gender: "",
+    mobile: "",
+    email: "",
+    address: "",
+  });
+
+  const handleSelectPatient = (patient: TestRecord) => {
+    setSelectedPatient(patient);
+    setCurrentStep(1);
+
+    if (patient.testItems && patient.testItems.length > 0) {
+      setSelectedValidTests(patient.testItems.map((ti) => ti.id));
+      setSampleBarcodes(
+        patient.testItems.map((ti, idx) => ({
+          id: ti.id,
+          testCode: ti.testCode,
+          testName: ti.testName,
+          sampleType: ti.sampleType,
+          barcode: `BC${patient.requestId.replace(/\D/g, "").slice(-6) || "2405"}${String(idx + 1).padStart(4, "0")}`,
+          count: 1,
+        }))
+      );
+    } else {
+      setSelectedValidTests(["cbc", "lft", "kft"]);
+      setSampleBarcodes(INITIAL_SAMPLES);
+    }
+
+    setIsExcludedSelected(false);
+    setPrintSuccessMessage(null);
+    setPatientFormData({
+      patientId: patient.patientId,
+      fullName: patient.patientName,
+      dob: patient.dob,
+      gender: patient.gender,
+      mobile: patient.mobile,
+      email: patient.email,
+      address: patient.address,
+    });
+  };
+
+  const handleBackToDashboard = () => {
+    setSelectedPatient(null);
+    setCurrentStep(1);
+    setSelectedValidTests(["cbc", "lft", "kft"]);
+    setIsExcludedSelected(false);
+    setSampleBarcodes(INITIAL_SAMPLES);
+    setPrintSuccessMessage(null);
+  };
+
+  const filteredTests = useMemo(() => {
+    return testsList.filter((test) => {
+      const matchesSearch =
+        searchQuery.trim() === "" ||
+        test.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        test.requestId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        test.requestedBy.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        test.tests.toLowerCase().includes(searchQuery.toLowerCase());
+
+      const matchesStatus =
+        statusFilter === "ALL" || test.status === statusFilter;
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [testsList, searchQuery, statusFilter]);
+
+  const completedCount = useMemo(() => {
+    return testsList.filter((t) => t.status === "COMPLETED").length;
+  }, [testsList]);
+
+  const pendingCount = useMemo(() => {
+    return testsList.filter((t) => t.status === "PROCESSING").length;
+  }, [testsList]);
+
+  const overdueCount = useMemo(() => {
+    const now = Date.now();
+    return testsList.filter((t) => {
+      if (t.status !== "PROCESSING") return false;
+      const orderDate = new Date(t.date || "").getTime();
+      return !isNaN(orderDate) && now - orderDate > 48 * 3600 * 1000;
+    }).length;
+  }, [testsList]);
+
+  const repeatCount = useMemo(() => {
+    return Math.max(0, Math.floor(testsList.length * 0.05));
+  }, [testsList]);
+
+  return (
+    <div className="min-h-screen flex bg-[#f8fafd] text-[#1e293b] antialiased selection:bg-blue-100 font-sans">
+      {/* Global Lab Navigation Sidebar */}
+      <LabNav
+        activeTab="Dashboard"
+        onTabChange={(tab) => {
+          if (tab === "Dashboard") {
+            handleBackToDashboard();
+          }
+        }}
+      />
+
+      {/* Main Content Area */}
+      <div className="flex-1 ml-64 min-h-screen flex flex-col min-w-0 bg-white">
+        {/* =========================================================================
+            VIEW 1: PATIENT REGISTRATION (When a patient row is selected / expanded)
+            ========================================================================= */}
+        {selectedPatient ? (
+          <div className="flex-1 flex flex-col min-w-0 bg-white">
+            {/* TopHeader */}
+            <header
+              className="w-full border-b border-gray-200 bg-white flex-shrink-0"
+              data-purpose="page-header"
+            >
+              <div className="max-w-7xl mx-auto px-6 lg:px-8 h-20 flex items-center justify-between">
+                {/* Title and Back button */}
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleBackToDashboard}
+                    className="p-1.5 -ml-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                    title="Back to Dashboard"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    </svg>
+                  </button>
+                  <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                    {currentStep === 1
+                      ? "Patient Registration"
+                      : currentStep === 2
+                      ? "Test Alignment"
+                      : "Sample Barcode"}
+                  </h1>
+                </div>
+
+                {/* User Profile Info & Logout */}
+                <div className="flex items-center space-x-3" data-purpose="user-badge">
+                  <UserProfileDropdown
+                    userName={displayName}
+                    userSubtext={displayRole}
+                    userAvatar={avatarUrl}
+                    onLogout={() => setLogoutOpen(true)}
+                    profilePath="/lab/profile"
+                    notificationsPath="/doctor/notifications"
+                  />
+                </div>
+              </div>
+            </header>
+
+            {/* StepperWizard */}
+            <section
+              className="py-4 border-b border-slate-100 bg-white"
+              data-purpose="stepper-section"
+            >
+              <nav aria-label="Progress" className="flex items-center justify-center pt-2 pb-3" data-purpose="stepper">
+                <ol className="flex items-center space-x-4 sm:space-x-6 text-sm font-medium">
+                  {/* Step 1 */}
+                  <li className="flex items-center space-x-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep(1)}
+                      className="flex items-center space-x-2.5 focus:outline-none cursor-pointer"
+                    >
+                      {currentStep > 1 ? (
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#00A86B] text-white shadow-sm">
+                          <svg className="w-4 h-4 stroke-white stroke-[2.5]" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        </span>
+                      ) : (
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#0B57D0] text-white text-xs font-bold shadow-sm">
+                          1
+                        </span>
+                      )}
+                      <span className="text-sm font-medium text-slate-900 whitespace-nowrap">
+                        Patient Details
+                      </span>
+                    </button>
+                  </li>
+
+                  {/* Connector Line 1 */}
+                  <li className={`w-20 sm:w-32 md:w-36 h-[2px] transition-colors ${currentStep > 1 ? "bg-[#00A86B]" : "bg-slate-200"}`} />
+
+                  {/* Step 2 */}
+                  <li className="flex items-center space-x-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep(2)}
+                      className="flex items-center space-x-2.5 focus:outline-none cursor-pointer"
+                    >
+                      {currentStep > 2 ? (
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#00A86B] text-white shadow-sm">
+                          <svg className="w-4 h-4 stroke-white stroke-[2.5]" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        </span>
+                      ) : currentStep === 2 ? (
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#0B57D0] text-white text-xs font-bold shadow-sm">
+                          2
+                        </span>
+                      ) : (
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-500 text-xs font-semibold">
+                          2
+                        </span>
+                      )}
+                      <span className={`text-sm whitespace-nowrap ${currentStep === 2 ? "text-slate-900 font-bold" : currentStep > 2 ? "text-slate-900 font-medium" : "text-slate-400 font-normal"}`}>
+                        Test Alignment
+                      </span>
+                    </button>
+                  </li>
+
+                  {/* Connector Line 2 */}
+                  <li className="w-20 sm:w-32 md:w-36 h-[2px] bg-slate-200" />
+
+                  {/* Step 3 */}
+                  <li className="flex items-center space-x-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep(3)}
+                      className="flex items-center space-x-2.5 focus:outline-none cursor-pointer"
+                    >
+                      {currentStep === 3 ? (
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#0B57D0] text-white text-sm font-semibold shadow-sm">
+                          3
+                        </span>
+                      ) : (
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-500 text-xs font-semibold">
+                          3
+                        </span>
+                      )}
+                      <span className={`text-sm whitespace-nowrap ${currentStep === 3 ? "text-[#0B57D0] font-medium" : "text-slate-400 font-normal"}`}>
+                        Sample Barcode
+                      </span>
+                    </button>
+                  </li>
+                </ol>
+              </nav>
+            </section>
+
+            {/* PageContent */}
+            <main
+              className="flex-1 bg-white py-8 px-6 lg:px-8 overflow-y-auto"
+              data-purpose="main-registration-content"
+            >
+              <div className={currentStep === 1 ? "max-w-[820px] mx-auto space-y-4" : "max-w-7xl w-full mx-auto pb-16 space-y-8"}>
+                {/* STEP 1: Patient Details */}
+                {currentStep === 1 && (
+                  <>
+                    {/* Registration Form Card */}
+                    <div
+                      className="bg-white rounded-xl border border-slate-200 shadow-sm p-8"
+                      data-purpose="registration-card"
+                    >
+                      {/* Request Information Header & Grid */}
+                      <section
+                        className="pb-6 border-b border-slate-200"
+                        data-purpose="request-information-section"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <h3 className="text-xs font-bold text-slate-900 tracking-wider uppercase mb-5">
+                              REQUEST INFORMATION
+                            </h3>
+                            <div className="grid grid-cols-3 gap-8 text-sm">
+                              <div>
+                                <p className="text-xs text-slate-500 font-normal mb-1">
+                                  Request ID
+                                </p>
+                                <p className="text-slate-900 font-bold text-sm tracking-tight">
+                                  {selectedPatient.requestId}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-slate-500 font-normal mb-1">
+                                  Requested By
+                                </p>
+                                <p className="text-slate-900 font-bold text-sm tracking-tight">
+                                  {selectedPatient.requestedBy}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-slate-500 font-normal mb-1">
+                                  Request Time
+                                </p>
+                                <p className="text-slate-900 font-bold text-sm tracking-tight">
+                                  {selectedPatient.requestTime}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Patient Portrait Thumbnail */}
+                          <div className="flex-shrink-0 ml-4">
+                            <img
+                              alt={selectedPatient.patientName}
+                              className="w-16 h-16 rounded-full object-cover ring-2 ring-[#0b57d0]/20 shadow-sm"
+                              src={
+                                selectedPatient.avatarUrl ||
+                                "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80"
+                              }
+                            />
+                          </div>
+                        </div>
+                      </section>
+
+                      {/* Patient Information Form */}
+                      <section className="pt-6" data-purpose="patient-form-section">
+                        <h3 className="text-xs font-bold text-slate-900 tracking-wider uppercase mb-5">
+                          PATIENT INFORMATION
+                        </h3>
+                        <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
+                          {/* Row 1: Patient ID & Full Name */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label
+                                className="block text-xs font-medium text-slate-600 mb-1.5"
+                                htmlFor="patient-id"
+                              >
+                                Patient ID
+                              </label>
+                              <input
+                                className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3.5 py-2.5 font-medium cursor-not-allowed select-all focus:outline-none"
+                                id="patient-id"
+                                type="text"
+                                readOnly
+                                value={patientFormData.patientId}
+                              />
+                            </div>
+                            <div>
+                              <label
+                                className="block text-xs font-medium text-slate-600 mb-1.5"
+                                htmlFor="full-name"
+                              >
+                                Full Name
+                              </label>
+                              <input
+                                className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3.5 py-2.5 font-medium cursor-not-allowed select-all focus:outline-none"
+                                id="full-name"
+                                type="text"
+                                readOnly
+                                value={patientFormData.fullName}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Row 2: Date of Birth & Gender */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label
+                                className="block text-xs font-medium text-slate-600 mb-1.5"
+                                htmlFor="dob"
+                              >
+                                Date of Birth
+                              </label>
+                              <div className="relative">
+                                <input
+                                  className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3.5 py-2.5 pr-10 font-medium cursor-not-allowed select-all focus:outline-none"
+                                  id="dob"
+                                  type="text"
+                                  readOnly
+                                  value={patientFormData.dob}
+                                />
+                                {/* Calendar Icon */}
+                                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
+                                  <svg
+                                    className="w-4 h-4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.8"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <rect height="18" rx="2" ry="2" width="18" x="3" y="4" />
+                                    <line x1="16" x2="16" y1="2" y2="6" />
+                                    <line x1="8" x2="8" y1="2" y2="6" />
+                                    <line x1="3" x2="21" y1="10" y2="10" />
+                                  </svg>
+                                </div>
+                              </div>
+                            </div>
+                            <div>
+                              <label
+                                className="block text-xs font-medium text-slate-600 mb-1.5"
+                                htmlFor="gender"
+                              >
+                                Gender
+                              </label>
+                              <input
+                                className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3.5 py-2.5 font-medium cursor-not-allowed select-all focus:outline-none"
+                                id="gender"
+                                type="text"
+                                readOnly
+                                value={patientFormData.gender}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Row 3: Mobile Number */}
+                          <div>
+                            <label
+                              className="block text-xs font-medium text-slate-600 mb-1.5"
+                              htmlFor="mobile-number"
+                            >
+                              Mobile Number
+                            </label>
+                            <input
+                              className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3.5 py-2.5 font-medium cursor-not-allowed select-all focus:outline-none"
+                              id="mobile-number"
+                              type="text"
+                              readOnly
+                              value={patientFormData.mobile}
+                            />
+                          </div>
+
+                          {/* Row 4: Email */}
+                          <div>
+                            <label
+                              className="block text-xs font-medium text-slate-600 mb-1.5"
+                              htmlFor="email"
+                            >
+                              Email
+                            </label>
+                            <input
+                              className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3.5 py-2.5 font-medium cursor-not-allowed select-all focus:outline-none"
+                              id="email"
+                              type="email"
+                              readOnly
+                              value={patientFormData.email}
+                            />
+                          </div>
+
+                          {/* Row 5: Address */}
+                          <div>
+                            <label
+                              className="block text-xs font-medium text-slate-600 mb-1.5"
+                              htmlFor="address"
+                            >
+                              Address
+                            </label>
+                            <input
+                              className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3.5 py-2.5 font-medium cursor-not-allowed select-all focus:outline-none"
+                              id="address"
+                              type="text"
+                              readOnly
+                              value={patientFormData.address}
+                            />
+                          </div>
+                        </form>
+                      </section>
+                    </div>
+
+                    {/* Action Buttons Container */}
+                    <div
+                      className="flex items-center justify-between pt-1"
+                      data-purpose="form-navigation-actions"
+                    >
+                      <button
+                        onClick={handleBackToDashboard}
+                        className="px-7 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-lg shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-slate-300 flex items-center gap-2"
+                        type="button"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                        </svg>
+                        Back
+                      </button>
+                      <button
+                        onClick={() => setCurrentStep(2)}
+                        className="px-8 py-2.5 bg-[#0b57d0] hover:bg-[#094bb5] text-white text-sm font-semibold rounded-lg shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center gap-2"
+                        type="button"
+                      >
+                        Next
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                        </svg>
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {/* STEP 2: Test Alignment */}
+                {currentStep === 2 && (
+                  <div className="space-y-9">
+                    {/* BEGIN: PatientSummaryCard */}
+                    <section
+                      className="rounded-2xl bg-[#eff6ff]/70 border border-[#dbeafe] p-7"
+                      data-purpose="patient-summary"
+                    >
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                        {/* Patient ID */}
+                        <div>
+                          <span className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Patient ID
+                          </span>
+                          <span className="mt-1.5 block text-xl font-bold text-slate-900">
+                            {selectedPatient.patientId}
+                          </span>
+                        </div>
+                        {/* Patient Name */}
+                        <div>
+                          <span className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Patient Name
+                          </span>
+                          <span className="mt-1.5 block text-xl font-bold text-slate-900">
+                            {selectedPatient.patientName}
+                          </span>
+                        </div>
+                        {/* Age / Gender */}
+                        <div>
+                          <span className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Age / Gender
+                          </span>
+                          <span className="mt-1.5 block text-xl font-bold text-slate-900">
+                            {calculateAge(selectedPatient.dob)} / {selectedPatient.gender}
+                          </span>
+                        </div>
+                        {/* Request ID */}
+                        <div>
+                          <span className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Request ID
+                          </span>
+                          <span className="mt-1.5 block text-xl font-bold text-slate-900">
+                            {selectedPatient.requestId}
+                          </span>
+                        </div>
+                      </div>
+                    </section>
+                    {/* END: PatientSummaryCard */}
+
+                    {/* BEGIN: ValidTestsSection */}
+                    <section className="space-y-3" data-purpose="valid-tests-group">
+                      {/* Header & Description */}
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-emerald-600">
+                            <svg
+                              className="w-6 h-6 fill-none stroke-emerald-600 stroke-[2.2]"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle cx="12" cy="12" r="9.5" />
+                              <polyline
+                                points="8 12.2 10.8 15 16 9.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </span>
+                          <h2 className="text-xl font-bold text-slate-900">
+                            Valid Tests to Proceed
+                          </h2>
+                        </div>
+                        <p className="mt-1 text-sm text-slate-500">
+                          These tests meet all pre-analytical requirements and are ready for sampling.
+                        </p>
+                      </div>
+
+                      {/* Valid Tests Table */}
+                      <div className="border border-slate-200/90 rounded-xl overflow-hidden bg-white shadow-xs">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-slate-200 bg-[#f8fafc]/80 text-[13px] font-bold text-slate-600 uppercase tracking-wider">
+                              <th className="py-4 px-6 w-28" scope="col">
+                                <span className="sr-only">Select</span>
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    selectedValidTests.length > 0 &&
+                                    selectedValidTests.length ===
+                                      (selectedPatient?.testItems?.length || DEFAULT_TEST_ITEMS.length)
+                                  }
+                                  onChange={handleToggleAllValid}
+                                  className="h-5 w-5 rounded bg-[#1d6bf3] border-slate-300 text-[#1d6bf3] focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                                />
+                              </th>
+                              <th className="py-4 px-6 w-1/3" scope="col">
+                                Test Name
+                              </th>
+                              <th className="py-4 px-6 w-1/4" scope="col">
+                                Sample Type
+                              </th>
+                              <th className="py-4 px-6 w-1/4" scope="col">
+                                Priority
+                              </th>
+                              <th className="py-4 px-6 text-center w-28" scope="col">
+                                Status
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-sm font-normal text-slate-800">
+                            {(selectedPatient?.testItems && selectedPatient.testItems.length > 0
+                              ? selectedPatient.testItems
+                              : DEFAULT_TEST_ITEMS
+                            ).map((testItem) => (
+                              <tr key={testItem.id} className="hover:bg-slate-50/50 transition-colors">
+                                <td className="py-4 px-6">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedValidTests.includes(testItem.id)}
+                                    onChange={() => handleToggleValidTest(testItem.id)}
+                                    className="h-5 w-5 rounded bg-[#1d6bf3] border-slate-300 text-[#1d6bf3] focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                                  />
+                                </td>
+                                <td className="py-4 px-6 font-medium text-slate-800">
+                                  {testItem.testName}
+                                </td>
+                                <td className="py-4 px-6 text-slate-700">{testItem.sampleType}</td>
+                                <td className="py-4 px-6 text-slate-700">{testItem.priority}</td>
+                                <td className="py-4 px-6 text-center">
+                                  <span className="inline-flex items-center px-3 py-0.5 rounded-full text-xs font-semibold bg-emerald-100/70 text-emerald-800">
+                                    READY
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                    {/* END: ValidTestsSection */}
+
+                    {/* BEGIN: ExcludedTestsSection */}
+                    <section className="space-y-3 pt-2" data-purpose="excluded-tests-group">
+                      {/* Header & Description */}
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-red-600">
+                            <svg
+                              className="w-6 h-6 stroke-red-600 fill-none stroke-[2]"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </span>
+                          <h2 className="text-xl font-bold text-red-600 tracking-tight">
+                            Excluded Tests (Requires Action)
+                          </h2>
+                        </div>
+                        <p className="mt-1 text-sm text-slate-500">
+                          The following tests cannot be performed due to clinical conflicts or missing requirements.
+                        </p>
+                      </div>
+
+                      {/* Excluded Tests Table */}
+                      <div className="border border-slate-200/90 rounded-xl overflow-hidden bg-white shadow-xs">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-slate-200 bg-[#f8fafc]/80 text-[13px] font-bold text-slate-600 uppercase tracking-wider">
+                              <th className="py-4 px-6 w-28" scope="col">
+                                Select
+                              </th>
+                              <th className="py-4 px-6 w-1/3" scope="col">
+                                Test Name
+                              </th>
+                              <th className="py-4 px-6 w-1/2" scope="col">
+                                Reason For Exclusion
+                              </th>
+                              <th className="py-4 px-6 text-center w-28" scope="col">
+                                Status
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-sm font-normal text-slate-800">
+                            {/* Row 1: Glucose - Fasting */}
+                            <tr className="hover:bg-slate-50/50 transition-colors">
+                              <td className="py-5 px-6">
+                                <input
+                                  type="checkbox"
+                                  checked={isExcludedSelected}
+                                  onChange={() => setIsExcludedSelected(!isExcludedSelected)}
+                                  className="h-5 w-5 rounded border border-slate-400/80 text-[#1d6bf3] focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                                />
+                              </td>
+                              <td className="py-5 px-6 font-medium text-slate-800">
+                                Glucose - Fasting
+                              </td>
+                              <td className="py-5 px-6">
+                                <div className="font-bold text-red-600">
+                                  Fasting Requirement Mismatch
+                                </div>
+                                <div className="text-xs text-slate-600 mt-0.5">
+                                  Conflict: Sample taken Post-Fasting
+                                </div>
+                              </td>
+                              <td className="py-5 px-6 text-center">
+                                <span className="inline-flex items-center px-3 py-0.5 rounded-full text-xs font-bold tracking-tight bg-red-100 text-red-700">
+                                  EXCLUDED
+                                </span>
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                    {/* END: ExcludedTestsSection */}
+
+                    {/* BEGIN: BottomActionBar */}
+                    <footer
+                      className="w-full border-t border-slate-200 bg-white pt-6 mt-8"
+                      data-purpose="action-footer"
+                    >
+                      <div className="flex items-center justify-between">
+                        {/* Back Button */}
+                        <button
+                          onClick={() => setCurrentStep(1)}
+                          className="px-8 py-2.5 rounded-lg border border-slate-300 bg-white text-slate-800 text-sm font-medium hover:bg-slate-50 active:bg-slate-100 transition-colors shadow-xs cursor-pointer"
+                          type="button"
+                        >
+                          Back
+                        </button>
+                        {/* Next Button */}
+                        <button
+                          onClick={() => setCurrentStep(3)}
+                          className="px-10 py-2.5 rounded-lg bg-[#1d6bf3] text-white text-sm font-semibold hover:bg-blue-600 active:bg-blue-700 transition-colors shadow-sm cursor-pointer"
+                          type="button"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </footer>
+                    {/* END: BottomActionBar */}
+                  </div>
+                )}
+
+                {/* STEP 3: Sample Barcode */}
+                {currentStep === 3 && (
+                  <div className="space-y-8">
+                    {/* BEGIN: PatientSummaryCard */}
+                    <section
+                      className="bg-[#F8FAFC]/50 border border-blue-100/80 rounded-2xl p-6 shadow-sm"
+                      data-purpose="patient-summary"
+                    >
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                        {/* Patient ID */}
+                        <div>
+                          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+                            Patient ID
+                          </p>
+                          <p className="text-lg font-bold text-slate-900 tracking-tight">
+                            {selectedPatient.patientId}
+                          </p>
+                        </div>
+                        {/* Patient Name */}
+                        <div>
+                          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+                            Patient Name
+                          </p>
+                          <p className="text-lg font-bold text-slate-900 tracking-tight">
+                            {selectedPatient.patientName}
+                          </p>
+                        </div>
+                        {/* Age / Gender */}
+                        <div>
+                          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+                            Age / Gender
+                          </p>
+                          <p className="text-lg font-bold text-slate-900 tracking-tight">
+                            {calculateAge(selectedPatient.dob)} / {selectedPatient.gender}
+                          </p>
+                        </div>
+                        {/* Request ID */}
+                        <div>
+                          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+                            Request ID
+                          </p>
+                          <p className="text-lg font-bold text-slate-900 tracking-tight">
+                            {selectedPatient.requestId}
+                          </p>
+                        </div>
+                      </div>
+                    </section>
+                    {/* END: PatientSummaryCard */}
+
+                    {/* Print Feedback Notification */}
+                    {printSuccessMessage && (
+                      <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-medium flex items-center justify-between shadow-xs">
+                        <div className="flex items-center gap-2">
+                          <svg className="w-5 h-5 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                          </svg>
+                          <span>{printSuccessMessage}</span>
+                        </div>
+                        <button
+                          onClick={() => setPrintSuccessMessage(null)}
+                          className="text-emerald-700 hover:text-emerald-900 text-xs font-bold cursor-pointer"
+                          type="button"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )}
+
+                    {/* BEGIN: SampleDetailsSection */}
+                    <section className="flex-1" data-purpose="sample-details">
+                      <h3 className="text-lg font-bold text-slate-900 mb-4">
+                        Sample Details
+                      </h3>
+                      {/* Table Container */}
+                      <div className="w-full border-b border-slate-200 overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50/80 border-y border-slate-200/80 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+                              <th className="py-3.5 px-6 font-semibold w-1/5">TEST CODE</th>
+                              <th className="py-3.5 px-6 font-semibold w-1/4">TEST NAME</th>
+                              <th className="py-3.5 px-6 font-semibold w-1/4">SAMPLE TYPE</th>
+                              <th className="py-3.5 px-6 font-semibold">BARCODE</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-sm">
+                            {sampleBarcodes.map((item) => (
+                              <tr key={item.id} className="hover:bg-slate-50/40 transition-colors">
+                                <td className="py-4 px-6 font-semibold text-slate-900">
+                                  {item.testCode}
+                                </td>
+                                <td className="py-4 px-6 text-slate-600">
+                                  {item.testName}
+                                </td>
+                                <td className="py-4 px-6 text-slate-600">
+                                  {item.sampleType}
+                                </td>
+                                <td className="py-4 px-6">
+                                  <div className="flex items-center gap-3">
+                                    <input
+                                      className="w-48 bg-white border border-slate-300 rounded-md px-3 py-1.5 text-xs text-slate-700 font-mono tracking-tight shadow-sm focus:outline-none"
+                                      readOnly
+                                      type="text"
+                                      value={item.barcode}
+                                    />
+                                    {/* Action: Minus */}
+                                    <button
+                                      onClick={() => handleDecrementBarcodeCount(item.id)}
+                                      className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer transition-colors"
+                                      title="Decrease tubes"
+                                      type="button"
+                                    >
+                                      <svg
+                                        className="w-4 h-4"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2.5"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <line x1="5" x2="19" y1="12" y2="12" />
+                                      </svg>
+                                    </button>
+                                    {/* Action: Print */}
+                                    <button
+                                      onClick={() => handlePrintSingleBarcode(item)}
+                                      className="border border-blue-200 hover:bg-blue-50 text-[#0B57D0] p-1.5 rounded-md shadow-xs transition-colors cursor-pointer"
+                                      title={`Print ${item.testCode} label (${item.count} tube${item.count > 1 ? "s" : ""})`}
+                                      type="button"
+                                    >
+                                      <svg
+                                        className="w-4 h-4 stroke-current fill-none stroke-2"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <polyline points="6 9 6 2 18 2 18 9" />
+                                        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                                        <rect height="8" width="12" x="6" y="14" />
+                                      </svg>
+                                    </button>
+                                    {/* Action: Plus */}
+                                    <button
+                                      onClick={() => handleIncrementBarcodeCount(item.id)}
+                                      className="text-blue-600 hover:text-blue-700 p-1 cursor-pointer transition-colors"
+                                      title="Increase tubes"
+                                      type="button"
+                                    >
+                                      <svg
+                                        className="w-4 h-4"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2.5"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <line x1="12" x2="12" y1="5" y2="19" />
+                                        <line x1="5" x2="19" y1="12" y2="12" />
+                                      </svg>
+                                    </button>
+                                    {item.count > 1 && (
+                                      <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                                        ×{item.count}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Print Barcode Button */}
+                      <div className="mt-6">
+                        <button
+                          onClick={handlePrintAllBarcodes}
+                          className="inline-flex items-center gap-2.5 px-4 py-2.5 bg-[#0B57D0] hover:bg-blue-700 text-white rounded-lg text-sm font-medium shadow-sm transition-all cursor-pointer"
+                          type="button"
+                        >
+                          <svg
+                            className="w-4 h-4 stroke-current fill-none stroke-2"
+                            viewBox="0 0 24 24"
+                          >
+                            <path d="M3 5v4m18-4v4M3 19v-4m18 4v-4M7 9v6m4-6v6m4-6v6m2-6v6" />
+                          </svg>
+                          <span>Print Barcode</span>
+                        </button>
+                      </div>
+                    </section>
+                    {/* END: SampleDetailsSection */}
+
+                    {/* BEGIN: BottomNavigationFooter */}
+                    <footer
+                      className="border-t border-slate-200 pt-6 mt-8 flex items-center justify-between bg-white flex-shrink-0"
+                      data-purpose="footer-action-bar"
+                    >
+                      {/* Back Button */}
+                      <button
+                        onClick={() => setCurrentStep(2)}
+                        className="px-7 py-2.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                        type="button"
+                      >
+                        Back
+                      </button>
+                      {/* Complete & Save Button */}
+                      <button
+                        onClick={handleCompleteAndSave}
+                        className="px-7 py-2.5 bg-[#00875A] hover:bg-[#00744E] text-white text-sm font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
+                        type="button"
+                      >
+                        Complete &amp; Save
+                      </button>
+                    </footer>
+                    {/* END: BottomNavigationFooter */}
+                  </div>
+                )}
+              </div>
+            </main>
+          </div>
+        ) : (
+          /* =========================================================================
+             VIEW 2: LAB TECHNICIAN DASHBOARD (Default view with Metric Cards & Table)
+             ========================================================================= */
+          <>
+            {/* TopNavbar */}
+            <header
+              className="h-20 bg-white border-b border-slate-100 px-10 flex items-center justify-end sticky top-0 z-10"
+              data-purpose="dashboard-header"
+            >
+              <div className="flex items-center gap-6">
+                {/* Notification Bell with Counter */}
+                <div className="relative cursor-pointer hover:opacity-80 transition-opacity">
+                  <svg
+                    className="w-6 h-6 text-slate-600 stroke-[1.8]"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  <span className="absolute -top-1.5 -right-1.5 bg-[#e05252] text-white font-bold text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
+                    5
+                  </span>
+                </div>
+
+                {/* Role Label & Profile Avatar & Logout */}
+                <div className="flex items-center gap-3 pl-1">
+                  <UserProfileDropdown
+                    userName={displayName}
+                    userSubtext={displayRole}
+                    userAvatar={avatarUrl}
+                    onLogout={() => setLogoutOpen(true)}
+                    profilePath="/lab/profile"
+                    notificationsPath="/doctor/notifications"
+                  />
+                </div>
+              </div>
+            </header>
+
+            {/* DashboardBody */}
+            <main className="flex-1 p-8 lg:p-10 space-y-8 max-w-[1600px] w-full mx-auto">
+              {/* StatCardsRow */}
+              <section
+                className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5"
+                data-purpose="kpi-metric-cards"
+              >
+                {/* Card 1: Sample Registered */}
+                <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+                  <div className="w-14 h-14 rounded-full bg-[#def7ec] flex items-center justify-center shrink-0">
+                    <svg
+                      className="w-6 h-6 text-[#059669] stroke-[2.5]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M5 13l4 4L19 7"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                  <div>
+                    <span className="text-[13px] font-semibold text-[#059669]">
+                      Sample Registered
+                    </span>
+                    <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                      {completedCount}
+                    </h3>
+                    <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                      Samples registered successfully
+                    </p>
+                  </div>
+                </div>
+
+                {/* Card 2: Sample Registration Pending */}
+                <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+                  <div className="w-14 h-14 rounded-full bg-[#e0edff] flex items-center justify-center shrink-0">
+                    <svg
+                      className="w-6 h-6 text-[#2563eb] stroke-[2.2]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                  <div>
+                    <span className="text-[13px] font-semibold text-[#2563eb]">
+                      Sample Registration Pending
+                    </span>
+                    <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                      {pendingCount}
+                    </h3>
+                    <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                      Awaiting sample registration
+                    </p>
+                  </div>
+                </div>
+
+                {/* Card 3: Test Overdue */}
+                <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+                  <div className="w-14 h-14 rounded-full bg-[#fef3c7] flex items-center justify-center shrink-0">
+                    <svg
+                      className="w-6 h-6 text-[#d97706] stroke-[2.2]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                  <div>
+                    <span className="text-[13px] font-semibold text-[#d97706]">
+                      Test Overdue
+                    </span>
+                    <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                      {overdueCount}
+                    </h3>
+                    <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                      Tests past the expected time
+                    </p>
+                  </div>
+                </div>
+
+                {/* Card 4: Repeat Test Required */}
+                <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)] flex items-center gap-5">
+                  <div className="w-14 h-14 rounded-full bg-[#fee2e2] flex items-center justify-center shrink-0">
+                    <svg
+                      className="w-6 h-6 text-[#dc2626] stroke-[2.2]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                  <div>
+                    <span className="text-[13px] font-semibold text-[#dc2626]">
+                      Repeat Test Required
+                    </span>
+                    <h3 className="text-3xl font-extrabold text-slate-800 tracking-tight mt-0.5">
+                      {repeatCount}
+                    </h3>
+                    <p className="text-[12px] text-slate-400 font-normal mt-0.5">
+                      Tests need to be repeated
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              {/* BEGIN: MainContainer */}
+              <section
+                className="w-full bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden"
+                data-purpose="tests-details-card"
+              >
+                {/* BEGIN: HeaderSection */}
+                <header
+                  className="px-8 pt-7 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4"
+                  data-purpose="table-controls"
+                >
+                  {/* Title */}
+                  <h1
+                    className="text-2xl font-bold text-slate-800 tracking-tight"
+                    data-purpose="page-title"
+                  >
+                    Tests Details
+                  </h1>
+                  {/* Top Right Actions: Search and Filter */}
+                  <div
+                    className="flex items-center gap-3 w-full md:w-auto"
+                    data-purpose="search-and-filter-group"
+                  >
+                    {/* Search Input Container */}
+                    <div
+                      className="relative flex-1 md:w-80"
+                      data-purpose="search-input-wrapper"
+                    >
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                        {/* Search Glass Icon */}
+                        <svg
+                          className="w-4 h-4 text-slate-600"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </div>
+                      <input
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2.5 bg-white text-sm text-slate-800 placeholder-slate-400 border border-slate-300 rounded-lg focus:outline-none focus:border-slate-500 focus:ring-1 focus:ring-slate-500 transition-colors"
+                        placeholder="Search Patient / ID"
+                        type="text"
+                      />
+                      {searchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setSearchQuery("")}
+                          className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                    {/* Filter Button */}
+                    <div className="relative shrink-0">
+                      <button
+                        onClick={() => setIsFilterDropdownOpen((prev) => !prev)}
+                        className={`inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-50 border rounded-lg text-sm font-medium transition-colors ${
+                          statusFilter !== "ALL"
+                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                            : "border-slate-300 text-slate-700"
+                        }`}
+                        data-purpose="filter-trigger"
+                        type="button"
+                      >
+                        {/* Horizontal Sliders Icon */}
+                        <svg
+                          className="w-4 h-4 text-slate-600"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            d="M3 6h18M6 12h12M9 18h6"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                        <span>{statusFilter === "ALL" ? "Filter" : statusFilter}</span>
+                      </button>
+
+                      {isFilterDropdownOpen && (
+                        <div className="absolute right-0 mt-2 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1.5 text-[13px]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setStatusFilter("ALL");
+                              setIsFilterDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
+                              statusFilter === "ALL"
+                                ? "font-semibold text-blue-600 bg-blue-50/50"
+                                : "text-slate-700"
+                            }`}
+                          >
+                            <span>All Statuses</span>
+                            {statusFilter === "ALL" && <span>✓</span>}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setStatusFilter("PROCESSING");
+                              setIsFilterDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
+                              statusFilter === "PROCESSING"
+                                ? "font-semibold text-[#715e17] bg-[#faecc5]/30"
+                                : "text-slate-700"
+                            }`}
+                          >
+                            <span>Processing</span>
+                            {statusFilter === "PROCESSING" && <span>✓</span>}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setStatusFilter("COMPLETED");
+                              setIsFilterDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between ${
+                              statusFilter === "COMPLETED"
+                                ? "font-semibold text-[#15803d] bg-green-50/50"
+                                : "text-slate-700"
+                            }`}
+                          >
+                            <span>Completed</span>
+                            {statusFilter === "COMPLETED" && <span>✓</span>}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Refresh Button */}
+                    <button
+                      type="button"
+                      onClick={fetchRealData}
+                      disabled={isLoading}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
+                      title="Reload real lab orders from backend"
+                    >
+                      <svg
+                        className={`w-4 h-4 text-slate-600 ${isLoading ? "animate-spin" : ""}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        />
+                      </svg>
+                      <span className="hidden sm:inline">Refresh</span>
+                    </button>
+                  </div>
+                </header>
+                {/* END: HeaderSection */}
+
+                {/* Dashboard Success Message */}
+                {printSuccessMessage && (
+                  <div className="mx-8 mb-4 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-medium flex items-center justify-between shadow-xs">
+                    <div className="flex items-center gap-2.5">
+                      <svg className="w-5 h-5 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span>{printSuccessMessage}</span>
+                    </div>
+                    <button
+                      onClick={() => setPrintSuccessMessage(null)}
+                      className="text-emerald-700 hover:text-emerald-900 text-xs font-bold cursor-pointer"
+                      type="button"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+
+                {/* BEGIN: TableContent */}
+                <div
+                  className="overflow-x-auto w-full"
+                  data-purpose="table-scroll-container"
+                >
+                  <table
+                    className="w-full border-collapse text-left"
+                    id="tests-table"
+                  >
+                    {/* Table Header */}
+                    <thead>
+                      <tr className="bg-[#f8fafc] border-y border-slate-200/90 text-[13px] font-bold text-slate-600 tracking-wider">
+                        <th className="py-5 px-8 font-bold" scope="col">
+                          REQUEST ID
+                        </th>
+                        <th className="py-5 px-6 font-bold" scope="col">
+                          PATIENT NAME
+                        </th>
+                        <th className="py-5 px-6 font-bold" scope="col">
+                          REQUESTED BY
+                        </th>
+                        <th className="py-5 px-6 font-bold" scope="col">
+                          TESTS
+                        </th>
+                        <th
+                          className="py-5 px-6 font-bold leading-tight"
+                          scope="col"
+                        >
+                          DATE
+                          <br />
+                          &amp; TIME
+                        </th>
+                        <th
+                          className="py-5 px-8 font-bold text-center"
+                          scope="col"
+                        >
+                          STATUS
+                        </th>
+                      </tr>
+                    </thead>
+                    {/* Table Body Rows */}
+                    <tbody className="divide-y divide-slate-100 text-[14px] text-slate-600">
+                      {isLoading ? (
+                        <tr>
+                          <td colSpan={6} className="py-14 text-center text-slate-500">
+                            <div className="flex flex-col items-center justify-center gap-3">
+                              <div className="w-8 h-8 border-3 border-[#0b57d0] border-t-transparent rounded-full animate-spin"></div>
+                              <span className="text-sm font-medium text-slate-600">
+                                Fetching lab orders from database...
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : filteredTests.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={6}
+                            className="py-10 text-center text-slate-400 text-sm"
+                          >
+                            No test records found matching your search.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredTests.map((test) => (
+                          <tr
+                            key={test.id}
+                            onClick={() => handleSelectPatient(test)}
+                            className="hover:bg-slate-50/60 transition-colors cursor-pointer"
+                            title={`Click to open registration details for ${test.patientName}`}
+                          >
+                            <td className="py-5 px-8 font-normal text-slate-600 whitespace-nowrap">
+                              {test.requestId}
+                            </td>
+                            <td className="py-5 px-6 font-bold text-slate-900 whitespace-nowrap">
+                              {test.patientName}
+                            </td>
+                            <td className="py-5 px-6 whitespace-nowrap">
+                              {test.requestedBy}
+                            </td>
+                            <td className="py-5 px-6 whitespace-nowrap">
+                              {test.tests}
+                            </td>
+                            <td className="py-5 px-6 leading-snug whitespace-nowrap">
+                              {test.date ? (
+                                <>
+                                  <div>{test.date}</div>
+                                  <div className="text-slate-600">
+                                    {test.time}
+                                  </div>
+                                </>
+                              ) : null}
+                            </td>
+                            <td className="py-5 px-8 text-center whitespace-nowrap">
+                              {test.status === "PROCESSING" ? (
+                                <span className="inline-block px-4 py-1.5 rounded-full text-xs font-bold tracking-wider bg-[#faecc5] text-[#715e17]">
+                                  PROCESSING
+                                </span>
+                              ) : (
+                                <span className="inline-block px-4 py-1.5 rounded-full text-xs font-bold tracking-wider bg-[#bbf7d0] text-[#15803d]">
+                                  COMPLETED
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                {/* END: TableContent */}
+              </section>
+            </main>
+          </>
+        )}
+      </div>
+
+      <ConfirmationDialog
+        open={logoutOpen}
+        type="danger"
+        title="Log Out?"
+        description="Are you sure you want to log out? Any unsaved changes may be lost."
+        confirmText="Log Out"
+        cancelText="Stay"
+        onConfirm={handleLogout}
+        onCancel={() => setLogoutOpen(false)}
+      />
+    </div>
+  );
+}
