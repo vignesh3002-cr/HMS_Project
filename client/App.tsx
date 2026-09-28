@@ -97,6 +97,12 @@ import DoctorNotifications from "./pages/doctor/DoctorNotifications";
 import Consultation from "./pages/doctor/Patientconsut";
 import DoctorPatientProfile from "./pages/doctor/notes and doc";
 import PatientDetails from "./pages/doctor/patient-details";
+import LabDashboard from "./pages/doctor/lab/labdashboard";
+import SampleVerification from "./pages/doctor/lab/sampleverification";
+import TestingSamples from "./pages/doctor/lab/testingsamples";
+import ReportGeneration from "./pages/doctor/lab/reportgeneration";
+import ReportTransfer from "./pages/doctor/lab/reporttransfer";
+import LabProfile from "./pages/doctor/lab/labprofile";
 
 // ============================================================
 // HOOKS / AUTH
@@ -480,17 +486,20 @@ const RememberMeCheck = () => {
 
   // Synchronous session check (sessionStorage/localStorage) - no async wait,
   // so the decision happens during render instead of after first paint.
-  if (!getToken()) return null;
-  if (!getUser()) return null; // token without a usable session -> Login handles cleanup
+  const user = getUser();
+  if (!getToken() || !user) return null; // token without a usable session -> Login handles cleanup
+
+  const roleType = String(user.role_type ?? "").trim().toUpperCase();
+  const targetDashboard = roleType === "LAB_TECHNICIAN" ? "/lab/dashboard" : "/dashboard";
 
   // Logged-in user landed on the login route: NEVER paint the Login form.
   // It used to render fully for one frame before the redirect effect fired,
   // which glitched the login page on every visit while logged in. Show the
-  // branded loading screen for that single frame until /dashboard commits.
+  // branded loading screen for that single frame until target dashboard commits.
   return (
     <>
       <LoadingScreen message="Preparing your workspace..." />
-      <Navigate to="/dashboard" replace />
+      <Navigate to={targetDashboard} replace />
     </>
   );
 };
@@ -553,6 +562,64 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <Navigate to="/dashboard" replace />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ==================================================
+                LABORATORY INFORMATION SYSTEM (LIS)
+            ================================================== */}
+
+            <Route
+              path="/lab/dashboard"
+              element={
+                <ProtectedRoute>
+                  <LabDashboard />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/lab/sample-verification"
+              element={
+                <ProtectedRoute>
+                  <SampleVerification />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/lab/testing-samples"
+              element={
+                <ProtectedRoute>
+                  <TestingSamples />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/lab/report-generation"
+              element={
+                <ProtectedRoute>
+                  <ReportGeneration />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/lab/report-transfer"
+              element={
+                <ProtectedRoute>
+                  <ReportTransfer />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/lab/profile"
+              element={
+                <ProtectedRoute>
+                  <LabProfile />
                 </ProtectedRoute>
               }
             />

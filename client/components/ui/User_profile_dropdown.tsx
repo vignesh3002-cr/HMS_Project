@@ -15,6 +15,7 @@ interface UserProfileDropdownProps {
   avatarLoading?: boolean;
   onLogout: () => void;
   profilePath?: string;
+  onProfileClick?: () => void;
   notificationsPath?: string;
 }
 
@@ -25,6 +26,7 @@ export function UserProfileDropdown({
   avatarLoading = false,
   onLogout,
   profilePath = "/profile",
+  onProfileClick,
   notificationsPath = "/notifications",
 }: UserProfileDropdownProps) {
   const navigate = useNavigate();
@@ -79,7 +81,13 @@ export function UserProfileDropdown({
           <div className="px-2 mt-1 space-y-0.5">
             <button
               type="button"
-              onClick={() => navigate(profilePath)}
+              onClick={() => {
+                if (onProfileClick) {
+                  onProfileClick();
+                } else {
+                  navigate(profilePath);
+                }
+              }}
               className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[#464555] hover:bg-[#D3E4FE] hover:text-[#3525CD] transition-colors group"
             >
               <User size={18} className="group-hover:text-[#3525CD] transition-colors" />

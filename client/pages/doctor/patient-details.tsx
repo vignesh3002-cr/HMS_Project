@@ -10,6 +10,7 @@ import {
 } from "../../context/BranchFilterContext";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import {
+<<<<<<< HEAD
   type ConsultationState,
   type SummaryPlan,
   type PatientAllergyRecord,
@@ -23,6 +24,97 @@ import MedicationsTab from "./patient-details/MedicationsTab";
 import DischargeTab from "./patient-details/DischargeTab";
 import HistoryTab from "./patient-details/HistoryTab";
 import NotesDocumentsTab from "./patient-details/NotesDocumentsTab";
+=======
+  type PatientDocumentItem,
+  loadPatientDocuments,
+  savePatientDocument,
+  deletePatientDocument,
+  downloadDocument,
+  downloadAllDocuments,
+} from "../../utils/patientDocuments";
+
+interface ConsultationState {
+  patientId?: string;
+  appointmentId?: string;
+  branchId?: string;
+  appointmentDate?: string;
+  appointmentTime?: string;
+  consultedBy?: string;
+}
+
+type SummaryPlanItem = {
+  chemotherapy_plan_item_id: string;
+  drug_role: string | null;
+  protocol_dose: number | null;
+  protocol_dose_unit: string | null;
+  calculated_dose?: number | string | null;
+  calculated_dose_unit?: string | null;
+  formulation: string | null;
+  dilution_volume: string | null;
+  administration_route: string | null;
+  frequency: string | null;
+  remarks: string | null;
+  cycle_day?: number | null;
+  administration_day?: number | null;
+  medicine_master: {
+    medicine_name: string;
+    generic_name: string | null;
+    dosage_form: string | null;
+    unit: string | null;
+  } | null;
+};
+
+type SummaryPlan = {
+  chemotherapy_plan_id: string;
+  patient_id: string;
+  cancer_type: string | null;
+  cancer_subtype: string | null;
+  cancer_stage: string | null;
+  protocol_name: string | null;
+  regimen_name: string | null;
+  regimen_code: string | null;
+  source_protocol_id?: string | null;
+  treatment_intent: string | null;
+  treatment_goal: string | null;
+  treatment_status: string | null;
+  planned_cycles: number;
+  completed_cycles: number | null;
+  cycle_interval_days: number | null;
+  treatment_start_date: string | null;
+  expected_end_date: string | null;
+  ecog_status?: number | string | null;
+  karnofsky_score?: number | string | null;
+  diagnosis_id?: string | null;
+  staging_detail_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  doctor_name?: string | null;
+  employees?: {
+    first_name?: string | null;
+    last_name?: string | null;
+  } | null;
+  chemotherapy_cycle: {
+    chemotherapy_cycle_id?: string;
+    cycle_number: number;
+    cycle_day?: number | null;
+    planned_date?: string | null;
+    actual_date?: string | null;
+    next_cycle_date?: string | null;
+    cycle_status?: string | null;
+    completion_status?: string | null;
+    remarks?: string | null;
+    chemotherapy_administration?: {
+      administration_day?: number | null;
+      administration_date?: string | null;
+      administration_status?: string | null;
+      infusion_completed?: boolean | null;
+      administered_by?: string | null;
+    }[] | null;
+  }[] | null;
+  chemotherapy_plan_items: SummaryPlanItem[] | null;
+  oncology_staging_detail: StagingDetailRecord | null;
+};
+>>>>>>> 982b9da7942ed8bd083e9b9a3bcad347b782d740
 
 /* ============================================================
    PATIENT DETAILS PAGE
