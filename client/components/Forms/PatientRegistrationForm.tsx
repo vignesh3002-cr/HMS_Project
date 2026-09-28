@@ -77,6 +77,9 @@ interface FormData {
   referred_by: string;
   referral_contact: string;
   referral_notes: string;
+  referral_address: string;
+  referral_mail: string;
+  referral_branch_name: string;
   patient_primary_mobile: string;
   patient_alternate_mobile: string;
   patient_email: string;
@@ -113,14 +116,7 @@ interface FormData {
   // diagnosis_notes: string;
 }
 
-const PATIENT_TYPE_OPTIONS = [
-  "Outpatient (OPD)",
-  "Inpatient (IPD)",
-  "Emergency",
-  "Corporate",
-  "Insurance",
-  "Referral",
-];
+const PATIENT_TYPE_OPTIONS = ["Self", "Referral"];
 
 const DEFAULT_REFERRAL_TYPES = [
   "Hospital",
@@ -130,6 +126,13 @@ const DEFAULT_REFERRAL_TYPES = [
   "Self",
 ];
 const OTHER_REFERRAL_TYPE_VALUE = "Others";
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+// Referral branch name is only relevant for these referral types.
+const BRANCH_REFERRAL_TYPES = ["Hospital", "Clinic"];
+const needsReferralBranchName = (referralType: string): boolean =>
+  BRANCH_REFERRAL_TYPES.includes((referralType || "").trim());
 
 const LOCAL_STORAGE_CUSTOM_REFERRAL_TYPES_KEY = "hms_custom_referral_types";
 
@@ -174,6 +177,9 @@ const emptyFormData: FormData = {
   referred_by: "",
   referral_contact: "",
   referral_notes: "",
+  referral_address: "",
+  referral_mail: "",
+  referral_branch_name: "",
   patient_primary_mobile: "",
   patient_alternate_mobile: "",
   patient_email: "",
@@ -368,6 +374,12 @@ export default function PatientRegistrationForm({
             referred_by: patient.patient_type === "Referral" ? (patient.referred_by || "") : "",
             referral_contact: patient.patient_type === "Referral" ? (patient.referral_contact || "") : "",
             referral_notes: patient.patient_type === "Referral" ? (patient.referral_notes || "") : "",
+            referral_address:
+              patient.patient_type === "Referral" ? ((patient as any).referral_address || "") : "",
+            referral_mail:
+              patient.patient_type === "Referral" ? ((patient as any).referral_mail || "") : "",
+            referral_branch_name:
+              patient.patient_type === "Referral" ? ((patient as any).referral_branch_name || "") : "",
             patient_primary_mobile: patient.patient_primary_mobile || "",
             patient_alternate_mobile: patient.patient_alternate_mobile || "",
             patient_email: patient.patient_email || "",
@@ -715,10 +727,34 @@ export default function PatientRegistrationForm({
         });
         return;
       }
+      if (needsReferralBranchName(formData.referral_type) && !formData.referral_branch_name?.trim()) {
+        toast({
+          title: "Missing required field",
+          description: "Referral branch name is required for Hospital/Clinic referrals.",
+          variant: "destructive",
+        });
+        return;
+      }
       if (!formData.referred_by?.trim()) {
         toast({
           title: "Missing required field",
           description: "Please enter or select the referrer in 'Referred by'.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!formData.referral_address?.trim()) {
+        toast({
+          title: "Missing required field",
+          description: "Referral address is required.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (formData.referral_mail?.trim() && !EMAIL_REGEX.test(formData.referral_mail.trim())) {
+        toast({
+          title: "Invalid email address",
+          description: "Please enter a valid referral mail.",
           variant: "destructive",
         });
         return;
@@ -823,6 +859,13 @@ export default function PatientRegistrationForm({
           referred_by: referralValue(formData, "referred_by"),
           referral_contact: referralValue(formData, "referral_contact"),
           referral_notes: referralValue(formData, "referral_notes"),
+          ...({
+            referral_address: referralValue(formData, "referral_address"),
+            referral_mail: referralValue(formData, "referral_mail"),
+            referral_branch_name: needsReferralBranchName(formData.referral_type)
+              ? referralValue(formData, "referral_branch_name")
+              : null,
+          } as Record<string, string | null>),
         });
 
         if (!response.data.success) {
@@ -878,6 +921,13 @@ export default function PatientRegistrationForm({
         referred_by: referralValue(formData, "referred_by"),
         referral_contact: referralValue(formData, "referral_contact"),
         referral_notes: referralValue(formData, "referral_notes"),
+        ...({
+          referral_address: referralValue(formData, "referral_address"),
+          referral_mail: referralValue(formData, "referral_mail"),
+          referral_branch_name: needsReferralBranchName(formData.referral_type)
+            ? referralValue(formData, "referral_branch_name")
+            : null,
+        } as Record<string, string | null>),
         created_by: "SYSTEM",
       });
 
@@ -1115,6 +1165,9 @@ export default function PatientRegistrationForm({
                       referred_by: val === "Referral" ? p.referred_by : "",
                       referral_contact: val === "Referral" ? p.referral_contact : "",
                       referral_notes: val === "Referral" ? p.referral_notes : "",
+                      referral_address: val === "Referral" ? p.referral_address : "",
+                      referral_mail: val === "Referral" ? p.referral_mail : "",
+                      referral_branch_name: val === "Referral" ? p.referral_branch_name : "",
                       // Insurance details active only when patient_type is "Insurance"
                       insurance_patient: val === "Insurance" ? "yes" : "no",
                       insurance_provider: val === "Insurance" ? p.insurance_provider : "",
@@ -1159,6 +1212,9 @@ export default function PatientRegistrationForm({
                         value={formData.referral_type}
                         onValueChange={(val) => {
                           setField("referral_type", val);
+                          if (!needsReferralBranchName(val)) {
+                            setField("referral_branch_name", "");
+                          }
                           if (val !== OTHER_REFERRAL_TYPE_VALUE && val !== "Other") {
                             setReferralOtherInput("");
                           }
@@ -1182,6 +1238,24 @@ export default function PatientRegistrationForm({
                           onChange={(e) => {
                             setReferralOtherInput(e.target.value);
                           }}
+                          disabled={submitting}
+                        />
+                      </div>
+                    )}
+
+                    {needsReferralBranchName(formData.referral_type) && (
+                      <div className="col-span-2">
+                        <label className={labelCls}>
+                          Referral branch name <Req />
+                        </label>
+                        <input
+                          type="text"
+                          name="referral_branch_name"
+                          placeholder="Enter referral branch name"
+                          maxLength={150}
+                          className={inputCls}
+                          value={formData.referral_branch_name}
+                          onChange={(e) => setField("referral_branch_name", e.target.value)}
                           disabled={submitting}
                         />
                       </div>
@@ -1403,6 +1477,38 @@ export default function PatientRegistrationForm({
                             document.body,
                           )
                         : null}
+                    </div>
+
+                    <div className="col-span-2">
+                      <label className={labelCls}>
+                        Referral address <Req />
+                      </label>
+                      <input
+                        type="text"
+                        name="referral_address"
+                        placeholder="Enter referral address"
+                        maxLength={255}
+                        className={inputCls}
+                        value={formData.referral_address}
+                        onChange={(e) => setField("referral_address", e.target.value)}
+                        disabled={submitting}
+                      />
+                    </div>
+
+                    <div>
+                      <label className={labelCls}>
+                        Referral mail <Opt />
+                      </label>
+                      <input
+                        type="email"
+                        name="referral_mail"
+                        placeholder="e.g. referrer@example.com"
+                        maxLength={100}
+                        className={inputCls}
+                        value={formData.referral_mail}
+                        onChange={(e) => setField("referral_mail", e.target.value)}
+                        disabled={submitting}
+                      />
                     </div>
 
                     <div className="col-span-3">
