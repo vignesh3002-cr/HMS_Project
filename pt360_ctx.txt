@@ -1,0 +1,51 @@
+=== ANCHOR: Vitals Trend History heading region (find) ===
+found line: 2
+1: HEADING_LINE:1
+2: 1: const fs=require('fs');const lines=fs.readFileSync(process.argv[1],'utf8').split('\n');let li=0;while(li<lines.length&&lines[li].indexOf('Vitals Trend History')<0)li++;let out=[];out.push('HEADING_LINE:'+(li+1));let start=Math.max(0,li-26);...[x]
+3: 
+4: 
+5: 
+6: 
+7: 
+8: 
+9: 
+10: 
+11: 
+12: 
+13: 
+14: 
+15: 
+16: 
+17: 
+18: 
+19: 
+20: 
+21: 
+22: 
+23: 
+24: 
+25: 
+26: 
+27: 
+
+=== Diagnosis-form 'Diagnosis name' mapping in Patientconsut (field labels) ===
+-- 109: "preDiagnosis",
+-- 110: "natureOfDiagnosis",
+-- 4638: preDiagnosis: string;
+-- 4639: natureOfDiagnosis: string;
+-- 5061: preDiagnosis: "",
+-- 5062: natureOfDiagnosis: "",
+-- 5873: ...(formData.preDiagnosis
+-- 5874: ? { pre_diagnosis: formData.preDiagnosis }
+-- 6014: {/* Pre Diagnosis */}
+-- 6017: htmlFor="preDiagnosis"
+-- 6020: Pre Diagnosis
+-- 6025: id="preDiagnosis"
+-- 6026: name="preDiagnosis"
+-- 6028: value={formData.preDiagnosis}
+-- 6030: placeholder="Type the pre diagnosis..."
+-- 6036: {/* Nature of Diagnosis */}
+-- 6038: title="Nature of Diagnosis"
+-- 6040: value={formData.natureOfDiagnosis}
+-- 6044: natureOfDiagnosis: value,
+-- 6047: placeholder="Select Nature of Diagnosis"

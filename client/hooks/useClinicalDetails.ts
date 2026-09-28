@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   clinicalDetailsApi,
   getApiErrorMessage,
   type AllergyOption,
   type ComorbidityOption,
-  type DiagnosisCategory,
   type EncounterClinicalDetails,
   type PerformanceStatusOption,
   type SymptomOption,
@@ -26,7 +25,8 @@ export interface ClinicalDetailsDraft {
     clinicalNotes?: string;
   }>;
   comorbidities: Array<{
-    diagnosisId: string;
+    /* comorbidity_master.id */
+    comorbidityId: string;
     clinicalNotes?: string;
   }>;
 }
@@ -45,23 +45,22 @@ interface UseClinicalDetailsResult {
   symptomOptions: SymptomOption[];
   allergyOptions: AllergyOption[];
   comorbidityOptions: ComorbidityOption[];
-  comorbidityCategories: DiagnosisCategory[];
+  /* Distinct comorbidity_master categories, for the "+ Add" panel. */
+  comorbidityCategories: string[];
 
   saved: EncounterClinicalDetails | null;
 
   saving: boolean;
   saveError: string | null;
   saveSuccess: boolean;
-  saveClinicalDetails: (
-    draft: ClinicalDetailsDraft,
-  ) => Promise<EncounterClinicalDetails | null>;
+  /* Resolves true when every write succeeded, false otherwise. */
+  saveClinicalDetails: (draft: ClinicalDetailsDraft) => Promise<boolean>;
 
   createSymptom: (name: string) => Promise<SymptomOption | null>;
   createAllergy: (substanceName: string) => Promise<AllergyOption | null>;
   createComorbidity: (payload: {
-    diagnosisName: string;
-    diagnosisCatogoryId?: string;
-    diagnosisCategory?: string;
+    comorbidityName: string;
+    category?: string;
     icdCode?: string;
   }) => Promise<ComorbidityOption | null>;
 }
@@ -87,7 +86,7 @@ export function useClinicalDetails({
     ComorbidityOption[]
   >([]);
   const [comorbidityCategories, setComorbidityCategories] = useState<
-    DiagnosisCategory[]
+    string[]
   >([]);
 
   const [saved, setSaved] = useState<EncounterClinicalDetails | null>(null);
@@ -100,6 +99,8 @@ export function useClinicalDetails({
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const [loadVersion, setLoadVersion] = useState(0);
+
+  const saveInFlight = useRef(false);
 
   const hasContext = Boolean(patientId && encounterNo);
 
@@ -130,37 +131,27 @@ export function useClinicalDetails({
           performanceRes,
           symptomRes,
           allergyRes,
-          categoryRes,
+          comorbidityRes,
           clinicalRes,
         ] = await Promise.all([
           clinicalDetailsApi.getPerformanceStatusOptions(),
           clinicalDetailsApi.getSymptomOptions(),
           clinicalDetailsApi.getAllergyOptions(),
-          clinicalDetailsApi.getDiagnosisCategories(),
+          clinicalDetailsApi.getComorbidityMaster(),
           clinicalDetailsApi.getEncounterClinicalDetails(encounterNo!),
         ]);
 
         if (cancelled) return;
 
-        const categories = categoryRes.data.data?.categories ?? [];
-        setComorbidityCategories(categories);
-
-        // Skip categories with no id - fetching them would hit the broken
-        // "/diagnosis/categories//diagnoses" endpoint (404).
-        const categoryResults = await Promise.all(
-          categories
-            .filter((category) => category.diagnosis_catogory_id)
-            .map((category) =>
-              clinicalDetailsApi.getDiagnosesByCategory(
-                category.diagnosis_catogory_id,
-              ),
+        const comorbidityOptions = comorbidityRes.data.data ?? [];
+        setComorbidityCategories(
+          Array.from(
+            new Set(
+              comorbidityOptions
+                .map((option) => option.category)
+                .filter((category): category is string => Boolean(category)),
             ),
-        );
-
-        if (cancelled) return;
-
-        const comorbidityOptions = categoryResults.flatMap(
-          (result) => result.data.data?.diagnoses ?? [],
+          ).sort(),
         );
 
         setPerformanceStatusOptions(
@@ -199,15 +190,34 @@ export function useClinicalDetails({
      are patient-level and saved through their own endpoints.
   ============================================================ */
   const saveClinicalDetails = useCallback(
-    async (draft: ClinicalDetailsDraft): Promise<EncounterClinicalDetails | null> => {
+    async (draft: ClinicalDetailsDraft): Promise<boolean> => {
       if (!patientId || !encounterNo) {
         setSaveError("Missing patient or encounter context.");
-        return null;
+        return false;
       }
+
+      if (saveInFlight.current) return false;
+      saveInFlight.current = true;
 
       setSaving(true);
       setSaveError(null);
       setSaveSuccess(false);
+
+      const writeErrors: unknown[] = [];
+      const isAlreadyActiveError = (err: any) =>
+        typeof err?.response?.data?.message === "string" &&
+        /already has this .* active/i.test(err.response.data.message);
+      const noteWriteError = (
+        err: unknown,
+        action: string,
+        label: string
+      ) => {
+        console.error(
+          `[useClinicalDetails] ${action} failed for ${label}:`,
+          err
+        );
+        writeErrors.push(err);
+      };
 
       try {
         const current = saved;
@@ -227,10 +237,14 @@ export function useClinicalDetails({
 
         for (const savedSymptom of savedSymptoms) {
           if (!draftSymptomIds.includes(Number(savedSymptom.symptomId))) {
-            await clinicalDetailsApi.removeEncounterSymptom(
-              encounterNo,
-              Number(savedSymptom.symptomId),
-            );
+            try {
+              await clinicalDetailsApi.removeEncounterSymptom(
+                encounterNo,
+                Number(savedSymptom.symptomId),
+              );
+            } catch (err) {
+              noteWriteError(err, "remove symptom", savedSymptom.symptomName);
+            }
           }
         }
 
@@ -240,14 +254,24 @@ export function useClinicalDetails({
               Number(savedSymptom.symptomId) === symptom.symptomId,
           );
 
+          const payload = {
+            severity: symptom.severity || undefined,
+            durationDays: symptom.durationDays,
+            onsetDate: symptom.onsetDate,
+            clinicalNotes: symptom.clinicalNotes || undefined,
+          };
+
           if (!existing) {
-            await clinicalDetailsApi.addEncounterSymptom(encounterNo, {
-              symptomId: symptom.symptomId,
-              severity: symptom.severity || undefined,
-              durationDays: symptom.durationDays,
-              onsetDate: symptom.onsetDate,
-              clinicalNotes: symptom.clinicalNotes || undefined,
-            });
+            try {
+              await clinicalDetailsApi.addEncounterSymptom(encounterNo, {
+                symptomId: symptom.symptomId,
+                ...payload,
+              });
+            } catch (err) {
+              if (!isAlreadyActiveError(err)) {
+                noteWriteError(err, "add symptom", String(symptom.symptomId));
+              }
+            }
           } else if (
             (existing.severity ?? "") !== (symptom.severity ?? "") ||
             (existing.durationDays ?? null) !==
@@ -256,16 +280,15 @@ export function useClinicalDetails({
             (existing.clinicalNotes ?? "") !==
               (symptom.clinicalNotes ?? "")
           ) {
-            await clinicalDetailsApi.updateEncounterSymptom(
-              encounterNo,
-              Number(existing.symptomId),
-              {
-                severity: symptom.severity || undefined,
-                durationDays: symptom.durationDays,
-                onsetDate: symptom.onsetDate,
-                clinicalNotes: symptom.clinicalNotes || undefined,
-              },
-            );
+            try {
+              await clinicalDetailsApi.updateEncounterSymptom(
+                encounterNo,
+                Number(existing.symptomId),
+                payload,
+              );
+            } catch (err) {
+              noteWriteError(err, "update symptom", String(symptom.symptomId));
+            }
           }
         }
 
@@ -277,10 +300,14 @@ export function useClinicalDetails({
 
         for (const savedAllergy of savedAllergies) {
           if (!draftAllergyIds.includes(Number(savedAllergy.allergyId))) {
-            await clinicalDetailsApi.removePatientAllergy(
-              patientId,
-              Number(savedAllergy.id),
-            );
+            try {
+              await clinicalDetailsApi.removePatientAllergy(
+                patientId,
+                Number(savedAllergy.id),
+              );
+            } catch (err) {
+              noteWriteError(err, "remove allergy", savedAllergy.substanceName);
+            }
           }
         }
 
@@ -290,89 +317,136 @@ export function useClinicalDetails({
               Number(savedAllergy.allergyId) === allergy.allergyId,
           );
 
+          const payload = {
+            reaction: allergy.reaction || undefined,
+            severity: allergy.severity || undefined,
+            clinicalNotes: allergy.clinicalNotes || undefined,
+          };
+
           if (!existing) {
-            await clinicalDetailsApi.addPatientAllergy(patientId, {
-              allergyId: allergy.allergyId,
-              reaction: allergy.reaction || undefined,
-              severity: allergy.severity || undefined,
-              clinicalNotes: allergy.clinicalNotes || undefined,
-              identifiedAtEncounterNo: encounterNo,
-            });
+            try {
+              await clinicalDetailsApi.addPatientAllergy(patientId, {
+                allergyId: allergy.allergyId,
+                ...payload,
+                identifiedAtEncounterNo: encounterNo,
+              });
+            } catch (err) {
+              if (!isAlreadyActiveError(err)) {
+                noteWriteError(err, "add allergy", String(allergy.allergyId));
+              }
+            }
           } else if (
             (existing.reaction ?? "") !== (allergy.reaction ?? "") ||
             (existing.severity ?? "") !== (allergy.severity ?? "") ||
             (existing.clinicalNotes ?? "") !==
               (allergy.clinicalNotes ?? "")
           ) {
-            await clinicalDetailsApi.updatePatientAllergy(
-              patientId,
-              Number(existing.id),
-              {
-                reaction: allergy.reaction || undefined,
-                severity: allergy.severity || undefined,
-                clinicalNotes: allergy.clinicalNotes || undefined,
-              },
-            );
+            try {
+              await clinicalDetailsApi.updatePatientAllergy(
+                patientId,
+                Number(existing.id),
+                payload,
+              );
+            } catch (err) {
+              noteWriteError(err, "update allergy", String(allergy.allergyId));
+            }
           }
         }
 
         // ---- 4. Comorbidities (patient-level, longitudinal) ----
         const savedComorbidities = current?.comorbidities ?? [];
-        const draftComorbidityIds = draft.comorbidities.map(
-          (comorbidity) => comorbidity.diagnosisId,
+        const draftComorbidityIds = draft.comorbidities.map((comorbidity) =>
+          String(comorbidity.comorbidityId),
         );
 
         for (const savedComorbidity of savedComorbidities) {
-          if (!draftComorbidityIds.includes(savedComorbidity.diagnosisId)) {
-            await clinicalDetailsApi.removePatientComorbidity(
-              patientId,
-              Number(savedComorbidity.id),
-            );
+          if (
+            !draftComorbidityIds.includes(String(savedComorbidity.comorbidityId))
+          ) {
+            try {
+              await clinicalDetailsApi.removePatientComorbidity(
+                patientId,
+                Number(savedComorbidity.id),
+              );
+            } catch (err) {
+              noteWriteError(
+                err,
+                "remove comorbidity",
+                savedComorbidity.comorbidityName,
+              );
+            }
           }
         }
 
         for (const comorbidity of draft.comorbidities) {
           const existing = savedComorbidities.find(
             (savedComorbidity) =>
-              savedComorbidity.diagnosisId === comorbidity.diagnosisId,
+              String(savedComorbidity.comorbidityId) ===
+              String(comorbidity.comorbidityId),
           );
 
           if (!existing) {
-            await clinicalDetailsApi.addPatientComorbidity(patientId, {
-              diagnosisId: comorbidity.diagnosisId,
-              clinicalNotes: comorbidity.clinicalNotes || undefined,
-              identifiedAtEncounterNo: encounterNo,
-            });
+            try {
+              await clinicalDetailsApi.addPatientComorbidity(patientId, {
+                comorbidityId: comorbidity.comorbidityId,
+                clinicalNotes: comorbidity.clinicalNotes || undefined,
+                identifiedAtEncounterNo: encounterNo,
+              });
+            } catch (err) {
+              if (!isAlreadyActiveError(err)) {
+                noteWriteError(
+                  err,
+                  "add comorbidity",
+                  String(comorbidity.comorbidityId),
+                );
+              }
+            }
           } else if (
             (existing.clinicalNotes ?? "") !==
             (comorbidity.clinicalNotes ?? "")
           ) {
-            await clinicalDetailsApi.updatePatientComorbidity(
-              patientId,
-              Number(existing.id),
-              {
-                clinicalNotes: comorbidity.clinicalNotes || undefined,
-              },
-            );
+            try {
+              await clinicalDetailsApi.updatePatientComorbidity(
+                patientId,
+                Number(existing.id),
+                {
+                  clinicalNotes: comorbidity.clinicalNotes || undefined,
+                },
+              );
+            } catch (err) {
+              noteWriteError(
+                err,
+                "update comorbidity",
+                String(comorbidity.comorbidityId),
+              );
+            }
           }
         }
 
-        // ---- 5. Refresh from server so local state mirrors the DB ----
+        // ---- 5. Always refresh from server so local state mirrors
+        //        the DB even when individual writes failed. ----
         const fresh = await clinicalDetailsApi.getEncounterClinicalDetails(
           encounterNo,
         );
         const freshData = fresh.data.data ?? EMPTY_SAVED;
         setSaved(freshData);
-        setSaveSuccess(true);
-        return freshData;
+        if (writeErrors.length > 0) {
+          setSaveError(
+            "Some clinical details could not be saved. The rest were saved successfully.",
+          );
+        } else {
+          setSaveSuccess(true);
+        }
+        return writeErrors.length === 0;
       } catch (err) {
         console.error(
           "[useClinicalDetails] Failed to save clinical details:",
           err,
         );
         setSaveError(getApiErrorMessage(err));
-        return null;
+        return false;
       } finally {
+        saveInFlight.current = false;
         setSaving(false);
       }
     },
@@ -433,24 +507,30 @@ export function useClinicalDetails({
 
   const createComorbidity = useCallback(
     async (payload: {
-      diagnosisName: string;
-      diagnosisCatogoryId?: string;
-      diagnosisCategory?: string;
+      comorbidityName: string;
+      category?: string;
       icdCode?: string;
     }): Promise<ComorbidityOption | null> => {
       try {
         const response = await clinicalDetailsApi.createCustomComorbidity(
           payload,
         );
+        // A name that already exists comes back as the existing row.
         const created = response.data.data;
         if (created) {
           setComorbidityOptions((previous) =>
-            previous.some(
-              (option) => option.diagnosis_id === created.diagnosis_id,
-            )
+            previous.some((option) => option.id === created.id)
               ? previous
               : [...previous, created],
           );
+          const category = created.category;
+          if (category) {
+            setComorbidityCategories((previous) =>
+              previous.includes(category)
+                ? previous
+                : [...previous, category].sort(),
+            );
+          }
         }
         return created ?? null;
       } catch (err) {

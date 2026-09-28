@@ -5,6 +5,10 @@ export interface CreateEncounterPayload {
   appointment_id: string;
 }
 
+export interface CreateIpdEncounterPayload {
+  admission_id: string;
+}
+
 export interface EncounterRecord {
   encounter_id: string;
   encounter_no: string;
@@ -15,15 +19,34 @@ export interface EncounterRecord {
   employee_id: string;
   schedule_id: string | number;
   encounter_type: string;
+  encounter_ts?: string | null;
   status: string;
   chief_complaint: string | null;
   symptoms: string | null;
   diagnosis_id: string | null;
-  encounter_ts?: string | null;
   diagnosis_text?: string | null;
   clinical_notes: string | null;
   advice: string | null;
+  /* Consultation > Advice > Discussion: the doctor's remarks for the visit. */
+  notes?: string | null;
   follow_up_date: string | null;
+  history_of_present_illness: string | null;
+  cns_examination: string | null;
+  cvs_examination: string | null;
+  per_abdomen_examination: string | null;
+  clinical_findings: string | null;
+  respiratory_examination: string | null;
+  general_examination_icterus: boolean | null;
+  general_examination_pallor: boolean | null;
+  general_examination_clubbing: boolean | null;
+  general_examination_cyanosis: boolean | null;
+  general_examination_oedema: boolean | null;
+  general_examination_lymphadenopathy: boolean | null;
+  past_history_treatment_type: string | null;
+  past_history_treatment_date: string | null;
+  past_history_treatment_note: string | null;
+  past_history_treatment_response: string | null;
+  previous_reports: string | null;
    height: number | null;
    weight: number | null;
    pulse: number | null;
@@ -129,6 +152,12 @@ export const encounterApi = {
   create: (data: CreateEncounterPayload) =>
     API.post<{ success: boolean; message: string; data: EncounterRecord }>("/encounters", data),
 
+  createIpd: (data: CreateIpdEncounterPayload) =>
+    API.post<{ success: boolean; message: string; data: EncounterRecord }>(
+      "/encounters/ipd",
+      data,
+    ),
+
   getAll: (params?: GetEncountersParams, config?: AxiosRequestConfig) =>
     API.get<{
       success: boolean;
@@ -153,6 +182,14 @@ export const encounterApi = {
   getByAppointment: (appointmentId: string) =>
     API.get<{ success: boolean; data: EncounterRecord }>(
       `/encounters/by-appointment/${appointmentId}`,
+    ),
+
+  // Direct lookup by encounter number (GET /encounters/:encounterNo) -- used
+  // where there's no appointment to key off, e.g. an IPD encounter created
+  // from an admission rather than a check-in.
+  getByEncounterNo: (encounterNo: string) =>
+    API.get<{ success: boolean; data: EncounterRecord }>(
+      `/encounters/${encounterNo}`,
     ),
 
   /**
