@@ -307,199 +307,6 @@ const INITIAL_REPORTS: ReportItem[] = [
     approvalDate: "20 May 2024, 12:15 PM",
     signatureUrl: "certified-default",
   },
-  {
-    id: "rep-3",
-    reportId: "RPT-2024-0530-003",
-    requestId: "TRF1258",
-    sampleId: "SMP-2024-0530-004",
-    patientId: "P000125",
-    patientPid: "PAT-2024-00047",
-    patientName: "Praveen Singh",
-    patientAgeGender: "Male | 45 Years",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "praveen.singh@email.com",
-    doctorName: "Dr. Rao",
-    doctorEmail: "rao.cardio@hospital.com",
-    testPanel: "Lipid Profile & Glucose Fasting",
-    generatedDate: "03 Apr 2026 11:50 AM",
-    completedDate: "03 Apr 2026, 11:15 AM",
-    completedBy: "Lab Technician - John Doe",
-    sampleType: "Plasma",
-    status: "CRITICAL",
-    findingsSummary:
-      "Severe hypertriglyceridemia flagged. Urgent doctor notification advised.",
-    parameters: [
-      {
-        id: "lp-1",
-        parameter: "Total Cholesterol",
-        result: "245",
-        unit: "mg/dL",
-        referenceRange: "< 200",
-        status: "Abnormal",
-        approved: true,
-      },
-      {
-        id: "lp-2",
-        parameter: "Triglycerides",
-        result: "480",
-        unit: "mg/dL",
-        referenceRange: "< 150",
-        status: "Critical",
-        approved: false,
-      },
-      {
-        id: "lp-3",
-        parameter: "HDL Cholesterol",
-        result: "32",
-        unit: "mg/dL",
-        referenceRange: "> 40",
-        status: "Abnormal",
-        approved: true,
-      },
-      {
-        id: "lp-4",
-        parameter: "LDL Cholesterol",
-        result: "165",
-        unit: "mg/dL",
-        referenceRange: "< 100",
-        status: "Abnormal",
-        approved: true,
-      },
-    ],
-    overallDecision: "Pending",
-    reviewComments: "High triglycerides require supervisor counter-sign.",
-    clinicalCorrelation:
-      "Critical elevation in serum Triglycerides (480 mg/dL). High cardiovascular risk profile. Immediate physician review recommended.",
-    approvalRemarks: "Requires stat clinical notification and fasting verification.",
-    approverName: "Dr. Sarah Johnson",
-    approverRole: "Senior Pathologist",
-    approvalDate: "03 Apr 2026, 12:20 PM",
-    sentOn: "03 Apr 2026, 12:22 PM",
-    deliveredOn: "03 Apr 2026, 12:24 PM",
-  },
-  {
-    id: "rep-4",
-    reportId: "RPT-2024-0530-004",
-    requestId: "TRF1259",
-    sampleId: "SMP-2024-0530-005",
-    patientId: "P000126",
-    patientPid: "PAT-2024-00048",
-    patientName: "Naziya",
-    patientAgeGender: "Female | 31 Years",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "naziya.k@email.com",
-    doctorName: "Dr. Johnson",
-    doctorEmail: "johnson@hospital.com",
-    testPanel: "Thyroid Profile (T3, T4, TSH)",
-    generatedDate: "05 Apr 2026 10:55 AM",
-    completedDate: "05 Apr 2026, 10:20 AM",
-    completedBy: "Lab Technician - John Doe",
-    sampleType: "Serum",
-    status: "UNDER_REVIEW",
-    findingsSummary:
-      "Awaiting Pathologist signature and hormone value confirmation.",
-    parameters: [
-      {
-        id: "tp-1",
-        parameter: "Total T3",
-        result: "1.2",
-        unit: "ng/mL",
-        referenceRange: "0.8 - 2.0",
-        status: "Normal",
-        approved: true,
-      },
-      {
-        id: "tp-2",
-        parameter: "Total T4",
-        result: "8.5",
-        unit: "µg/dL",
-        referenceRange: "5.1 - 14.1",
-        status: "Normal",
-        approved: true,
-      },
-      {
-        id: "tp-3",
-        parameter: "TSH (Thyroid Stimulating)",
-        result: "2.85",
-        unit: "µIU/mL",
-        referenceRange: "0.4 - 4.2",
-        status: "Normal",
-        approved: true,
-      },
-    ],
-    overallDecision: "Pending",
-    clinicalCorrelation:
-      "Thyroid profile consistent with euthyroid metabolic state. Hormonal levels are concordant.",
-    approvalRemarks: "Awaiting final pathologist sign-off.",
-    approverName: "Dr. Sarah Johnson",
-    approverRole: "Senior Pathologist",
-    approvalDate: "05 Apr 2026, 11:15 AM",
-    sentOn: "05 Apr 2026, 11:18 AM",
-    deliveredOn: "05 Apr 2026, 11:20 AM",
-  },
-  {
-    id: "rep-5",
-    reportId: "RPT-2024-0530-005",
-    requestId: "TRF1260",
-    sampleId: "SMP-2024-0530-006",
-    patientId: "P000127",
-    patientPid: "PAT-2024-00049",
-    patientName: "Meena Kumari",
-    patientAgeGender: "Female | 52 Years",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "meena.kumari@email.com",
-    doctorName: "Dr. Johnson",
-    doctorEmail: "johnson@hospital.com",
-    testPanel: "Electrolytes & Arterial Blood Gas",
-    generatedDate: "10 Apr 2026 09:40 AM",
-    completedDate: "10 Apr 2026, 09:15 AM",
-    completedBy: "Lab Technician - John Doe",
-    sampleType: "Whole Blood (Heparin)",
-    status: "DRAFT",
-    findingsSummary:
-      "Preliminary analyzer readings imported; awaiting technician review.",
-    parameters: [
-      {
-        id: "elec-1",
-        parameter: "Sodium (Na+)",
-        result: "139",
-        unit: "mmol/L",
-        referenceRange: "135 - 145",
-        status: "Normal",
-        approved: false,
-      },
-      {
-        id: "elec-2",
-        parameter: "Potassium (K+)",
-        result: "4.2",
-        unit: "mmol/L",
-        referenceRange: "3.5 - 5.1",
-        status: "Normal",
-        approved: false,
-      },
-      {
-        id: "elec-3",
-        parameter: "Chloride (Cl-)",
-        result: "101",
-        unit: "mmol/L",
-        referenceRange: "98 - 107",
-        status: "Normal",
-        approved: false,
-      },
-    ],
-    overallDecision: "Pending",
-    clinicalCorrelation:
-      "Electrolyte panel indicates normonatremic, normokalemic status with normal anion balance.",
-    approvalRemarks: "Initial analyzer data pending pathologist approval.",
-    approverName: "Dr. Sarah Johnson",
-    approverRole: "Senior Pathologist",
-    approvalDate: "10 Apr 2026, 10:00 AM",
-    sentOn: "10 Apr 2026, 10:05 AM",
-    deliveredOn: "10 Apr 2026, 10:06 AM",
-  },
 ];
 
 function calculateAge(dob: string): number {
@@ -667,6 +474,11 @@ export default function ReportGeneration() {
           : null;
         const isTestingCompleted = rawItemStatus === "COMPLETED" || storedItemStatus === "COMPLETED";
 
+        // ONLY include items where testing has completed or report is already generated
+        if (!isTestingCompleted && rawItemStatus !== "REPORT GENERATED") {
+          return;
+        }
+
         // If this order already has a report and this item is NOT newly completed, skip
         if (existingReportOrderIds.has(item.lab_order_id) && !isTestingCompleted) return;
         if (existingReportIds.has(item.lab_order_item_id)) return;
@@ -689,7 +501,7 @@ export default function ReportGeneration() {
         const testName = item.lab_test_master?.test_name || "Diagnostic Test";
         const sampleType = item.lab_test_master?.sample_type || item.specimen_type || "Whole Blood (EDTA)";
 
-        const isVerified = rawItemStatus === "VERIFIED" || isTestingCompleted;
+        const isVerified = true;
 
         const sampleBarcode =
           item.sample_collection?.[0]?.barcode ||
@@ -702,12 +514,10 @@ export default function ReportGeneration() {
           localStorage.getItem(`report_approved_${item.lab_order_item_id}`) === "GENERATED"
         );
 
-        const status: "GENERATED" | "UNDER_REVIEW" | "DRAFT" =
+        const status: "GENERATED" | "UNDER_REVIEW" =
           isApproved || rawItemStatus === "REPORT GENERATED"
             ? "GENERATED"
-            : isVerified
-              ? "UNDER_REVIEW"
-              : "DRAFT";
+            : "UNDER_REVIEW";
 
         // Read custom test parameters if recorded in Testing Samples
         const storedParamsStr = typeof window !== "undefined"
@@ -922,8 +732,9 @@ export default function ReportGeneration() {
         if (barcode) existingBarcodes.add(barcode);
       });
 
-      // 4. Merge any initial demo reports (like rep-1, rep-3, rep-4, rep-5) if not already represented
+      // 4. Merge initial completed baseline reports if not already represented
       INITIAL_REPORTS.forEach((demo) => {
+        if (demo.status === "DRAFT") return;
         const exists = mappedList.some(
           (m) =>
             m.id === demo.id ||
@@ -935,13 +746,56 @@ export default function ReportGeneration() {
         }
       });
 
-      if (mappedList.length > 0) {
-        setReports(mappedList);
+      // Strict filter: ONLY samples that are tested and completed (or reports already generated) appear in Report Generation
+      const completedOnlyReports = mappedList.filter((r) => {
+        if (r.status === "GENERATED") return true;
+        if (r.status === "DRAFT") return false;
+
+        const rawId = r.id.replace("rep-", "").replace("item-", "");
+
+        // 1. Check if marked completed in localStorage
+        const storedStatus = typeof window !== "undefined"
+          ? localStorage.getItem(`testing_sample_status_${rawId}`) ||
+            localStorage.getItem(`testing_sample_status_${r.id}`)
+          : null;
+        if (storedStatus === "COMPLETED") return true;
+
+        // 2. Check completed_testing_samples registry
+        if (
+          completedRegistry.some(
+            (cs: any) =>
+              cs.id === rawId ||
+              cs.sampleId === r.sampleId ||
+              (r.requestId && cs.barcode === r.requestId)
+          )
+        ) {
+          return true;
+        }
+
+        // 3. Check INITIAL_TESTING_SAMPLES
+        const matchInitial = INITIAL_TESTING_SAMPLES.find(
+          (ts) =>
+            ts.id === rawId ||
+            ts.sampleId === r.sampleId ||
+            (r.requestId && ts.barcode === r.requestId)
+        );
+        if (matchInitial && matchInitial.status === "COMPLETED") return true;
+
+        // 4. Baseline completed demo reports (e.g. rep-s3 Priya KFT, rep-1 Rahul CBC)
+        if (r.id === "rep-s3" || r.id === "rep-1") return true;
+
+        return false;
+      });
+
+      if (completedOnlyReports.length > 0) {
+        setReports(completedOnlyReports);
         setSelectedReport((prev) => {
-          if (!prev) return mappedList[0];
-          const found = mappedList.find((r) => r.id === prev.id);
-          return found || mappedList[0];
+          if (!prev) return completedOnlyReports[0];
+          const found = completedOnlyReports.find((r) => r.id === prev.id);
+          return found || completedOnlyReports[0];
         });
+      } else {
+        setReports([]);
       }
     } catch (err: any) {
       console.error("Error fetching lab reports:", err);
