@@ -432,41 +432,39 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
      INVESTIGATION
   ============================================================ */
 
-  const toggleInvestigation = (name: string) => {
-    setSelectedInvestigations((prev) =>
-      prev.includes(name)
-        ? prev.filter((item) => item !== name)
-        : [...prev, name]
-    );
-  };
+  /* Adds a user-typed custom investigation (Others... or the dropdown's
+     "+ Add") as a selectable option. If the typed name matches a real
+     lab test it just selects that test; otherwise it registers a custom
+     option. */
 
-  /* Adds a user-typed custom investigation (Others...) as a checkbox
-     option in the grid. If the typed name matches a real lab test it
-     just checks that test; otherwise it registers a custom option. */
-
-  const addOtherInvestigation = () => {
-    const value = otherInvestigationName.trim();
+  const addInvestigationByName = (name: string) => {
+    const value = name.trim();
     if (!value) return;
     if (investigations.includes(value)) {
-      toggleInvestigation(value);
+      setSelectedInvestigations((prev) =>
+        prev.includes(value) ? prev : [...prev, value]
+      );
     } else if (!customInvestigations.includes(value)) {
       setCustomInvestigations((prev) => [...prev, value]);
       setSelectedInvestigations((prev) =>
         prev.includes(value) ? prev : [...prev, value]
       );
     }
+  };
+
+  const addOtherInvestigation = () => {
+    addInvestigationByName(otherInvestigationName);
     setOtherInvestigationName("");
     setOtherInvestigationExpanded(false);
   };
 
-  /* Unchecking a custom investigation removes both its checkbox option
-     and its selection. */
+  /* The dropdown reports the full list of selected test names.
+     Unselecting a custom investigation removes both its option and its
+     selection (same behaviour as the old checkbox grid). */
 
-  const toggleCustomInvestigation = (name: string) => {
-    setSelectedInvestigations((prev) =>
-      prev.filter((item) => item !== name)
-    );
-    setCustomInvestigations((prev) => prev.filter((item) => item !== name));
+  const handleInvestigationsChange = (names: string[]) => {
+    setSelectedInvestigations(names);
+    setCustomInvestigations((prev) => prev.filter((item) => names.includes(item)));
   };
 
   /* ============================================================
@@ -1572,39 +1570,21 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     {!labTestsLoading && !labTestsError &&
       (investigations.length > 0 ||
         customInvestigations.length > 0) && (
-    <div className="grid w-full grid-cols-3 gap-y-3">
-
-      {[...investigations, ...customInvestigations].map(
-        (investigation) => (
-
-        <label
-          key={investigation}
-          className="flex h-5 cursor-pointer items-center gap-2 whitespace-nowrap text-sm leading-5 text-slate-700"
-        >
-
-          <input
-            type="checkbox"
-            checked={selectedInvestigations.includes(
-              investigation
-            )}
-            onChange={() =>
-              customInvestigations.includes(investigation)
-                ? toggleCustomInvestigation(investigation)
-                : toggleInvestigation(investigation)
-            }
-            className="h-4 w-4 shrink-0 cursor-pointer appearance-none rounded border border-slate-300 bg-white checked:border-blue-600 checked:bg-blue-600"
-          />
-
-          <span>
-            {investigation}
-          </span>
-
-        </label>
-
-      )
-      )}
-
-    </div>
+    <MultiSelectDropdown
+      options={[
+        ...investigations.map((name) => ({ value: name, label: name })),
+        ...customInvestigations.map((name) => ({
+          value: name,
+          label: name,
+          hint: "Custom",
+        })),
+      ]}
+      value={selectedInvestigations}
+      onValueChange={handleInvestigationsChange}
+      onCreateOption={addInvestigationByName}
+      placeholder="Search and select investigations / scans..."
+      className="h-[38px] rounded-md border-slate-200 text-sm shadow-none"
+    />
     )}
 
     {!labTestsLoading && !labTestsError && (

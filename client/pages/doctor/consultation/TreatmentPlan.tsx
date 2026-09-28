@@ -242,8 +242,10 @@ const TreatmentPlan: React.FC<{
     let cancelled = false;
 
     const loadRegimenProtocols = async () => {
-      let cancerTypeId = "";
-      let subtypeId = "";
+      /* Every Cancer Type and Histopathology selected in the Diagnosis
+         step (older selections only carry the single primary ids). */
+      let cancerTypeIds: string[] = [];
+      let subtypeIds: string[] = [];
 
       const saved = localStorage.getItem(
         "hms_diagnosis_selection"
@@ -251,9 +253,31 @@ const TreatmentPlan: React.FC<{
 
       if (saved) {
         try {
-          const selection = JSON.parse(saved);
-          cancerTypeId = selection?.cancer_type_id ?? "";
-          subtypeId = selection?.subtype_id ?? "";
+          const selection = JSON.parse(saved) as {
+            patient_id?: string;
+            cancer_type_id?: string;
+            subtype_id?: string;
+            cancer_type_ids?: string[];
+            subtype_ids?: string[];
+          } | null;
+          /* The selection key is shared across patients; ignore one that
+             was saved for a different patient. */
+          const forThisPatient =
+            !selection?.patient_id ||
+            !resolvedPatientId ||
+            selection.patient_id === resolvedPatientId;
+          if (selection && forThisPatient) {
+            cancerTypeIds = Array.isArray(selection.cancer_type_ids)
+              ? selection.cancer_type_ids.filter(Boolean)
+              : selection.cancer_type_id
+                ? [selection.cancer_type_id]
+                : [];
+            subtypeIds = Array.isArray(selection.subtype_ids)
+              ? selection.subtype_ids.filter(Boolean)
+              : selection.subtype_id
+                ? [selection.subtype_id]
+                : [];
+          }
         } catch (error) {
           console.error(
             "Failed to parse diagnosis selection:",
@@ -262,7 +286,7 @@ const TreatmentPlan: React.FC<{
         }
       }
 
-      if (!cancerTypeId) {
+      if (cancerTypeIds.length === 0) {
         setProtocolsError(
           "Cancer type not found. Complete the Diagnosis step first."
         );
@@ -278,8 +302,10 @@ const TreatmentPlan: React.FC<{
           data: RegimenProtocol[];
         }>("/chemotherapy/regimen-protocols", {
           params: {
-            cancer_type_id: cancerTypeId,
-            subtype_id: subtypeId,
+            cancer_type_ids: cancerTypeIds.join(","),
+            ...(subtypeIds.length > 0
+              ? { subtype_ids: subtypeIds.join(",") }
+              : {}),
           },
         });
 
@@ -290,7 +316,7 @@ const TreatmentPlan: React.FC<{
 
         if (fetched.length === 0) {
           setProtocolsError(
-            "No protocols found for the selected cancer type and sub type."
+            "No protocols found for the selected cancer type and histopathology."
           );
         }
       } catch (error: any) {
@@ -316,7 +342,16 @@ const TreatmentPlan: React.FC<{
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [resolvedPatientId]);
+
+  /* A protocol restored from the draft that no longer matches the current
+     Diagnosis selection is kept (downstream steps may already use it) but
+     flagged so the doctor re-picks it. */
+  const staleProtocol =
+    Boolean(protocol) &&
+    !protocolsLoading &&
+    protocols.length > 0 &&
+    !protocols.some((item) => item.protocol_id === protocol);
 
   const handleNext = async () => {
     if (saving) return;
@@ -859,6 +894,13 @@ const TreatmentPlan: React.FC<{
           {protocolsError && (
             <div className="mt-2 text-sm font-medium text-red-600">
               {protocolsError}
+            </div>
+          )}
+
+          {staleProtocol && (
+            <div className="mt-2 text-sm font-medium text-amber-600">
+              The previously selected protocol doesn't match the current
+              cancer type / histopathology. Please select a protocol again.
             </div>
           )}
         </div>
