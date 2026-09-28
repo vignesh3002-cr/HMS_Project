@@ -290,6 +290,13 @@ const ChemotherapyOrder: React.FC<{
     []
   );
   const medicinesRequestedRef = useRef(false);
+  /* Route of each medicine_master drug, to prefill an empty Route. */
+  const medicineRoutesRef = useRef<Map<string, string>>(new Map());
+  /* A row added with "Add Medicine" that hasn't been saved yet: Cancel
+     drops it again. */
+  const newRowRef = useRef<{ kind: RowKind | "hydration"; id: number } | null>(
+    null
+  );
 
   /* Edit-in-place state (medication rows) */
   const [editingRow, setEditingRow] = useState<{
@@ -705,7 +712,9 @@ const ChemotherapyOrder: React.FC<{
     setDisplayedDay(dayNumber ?? null);
     const cycleNumber = getCycleNumber(dayValue) ?? 1;
 
-    /* A different cycle day: any open row edit belongs to the old one. */
+    /* A different cycle day: any open row edit (or unsaved added row)
+       belongs to the old one. */
+    newRowRef.current = null;
     setEditingRow(null);
     setEditDraft(null);
     setHydrationDraft(null);
@@ -1318,21 +1327,6 @@ const ChemotherapyOrder: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cycleDay, resolvedPatientId]);
 
-  const handleAddDrug = () => {
-    userTouched.current.drugs = true;
-
-    const newDrug: Drug = {
-      id: Date.now(),
-      name: "",
-      form: "",
-      dose: "",
-      unit: "",
-      volume: "",
-    };
-
-    setDrugs((current) => [...current, newDrug]);
-  };
-
   const rowsOf = (kind: RowKind) =>
     kind === "drug"
       ? drugs
@@ -1467,17 +1461,24 @@ const ChemotherapyOrder: React.FC<{
         medicine_id: string;
         medicine_name: string;
         dosage_form: string | null;
+        route?: string | null;
       }[];
     }>("/chemotherapy/medicines")
-      .then((response) =>
+      .then((response) => {
+        const medicines = response.data.data ?? [];
+        medicineRoutesRef.current = new Map(
+          medicines
+            .filter((medicine) => medicine.route)
+            .map((medicine) => [medicine.medicine_id, medicine.route as string])
+        );
         setMedicineOptions(
-          (response.data.data ?? []).map((medicine) => ({
+          medicines.map((medicine) => ({
             label: medicine.medicine_name,
             value: medicine.medicine_id,
             hint: medicine.dosage_form ?? undefined,
           }))
-        )
-      )
+        );
+      })
       .catch((error) => {
         medicinesRequestedRef.current = false;
         console.error("Failed to load medicines:", error);
@@ -1490,6 +1491,25 @@ const ChemotherapyOrder: React.FC<{
     setEditError("");
     setEditingRow({ kind, id: drug.id, view });
     setEditDraft({ ...drug });
+  };
+
+  /* "Add Medicine": a blank row at the end of that list, opened for
+     editing (drug from medicine_master or a typed name, and its columns).
+     Saving it saves this patient's cycle day order only - the regimen
+     protocol and its master tables are never changed. */
+  const addMedicineRow = (kind: RowKind) => {
+    if (editingRow || savingEdit || copying || orderLocked) return;
+    const drug: Drug = {
+      id: Date.now(),
+      name: "",
+      form: "",
+      dose: "",
+      unit: "",
+      volume: "",
+    };
+    setRowsOf(kind, [...rowsOf(kind), drug]);
+    newRowRef.current = { kind, id: drug.id };
+    startEdit(kind, drug);
   };
 
   const handleEdit = (id: number) => {
@@ -1509,6 +1529,16 @@ const ChemotherapyOrder: React.FC<{
 
   const cancelEdit = () => {
     if (savingEdit) return;
+    /* An added row that was never saved goes away again. */
+    const added = newRowRef.current;
+    if (added && editingRow && added.kind === editingRow.kind && added.id === editingRow.id) {
+      if (added.kind === "hydration") {
+        setHydrationRows((rows) => rows.filter((row) => row.id !== added.id));
+      } else {
+        setRowsOf(added.kind, rowsOf(added.kind).filter((drug) => drug.id !== added.id));
+      }
+    }
+    newRowRef.current = null;
     setEditingRow(null);
     setEditDraft(null);
     setHydrationDraft(null);
@@ -1554,6 +1584,7 @@ const ChemotherapyOrder: React.FC<{
       await saveOrderToPlan(withRows(kind, rows));
       touch(kind);
       setRowsOf(kind, rows);
+      newRowRef.current = null;
       setEditingRow(null);
       setEditDraft(null);
     } catch (error: any) {
@@ -1682,6 +1713,24 @@ const ChemotherapyOrder: React.FC<{
     setHydrationDraft({ ...row });
   };
 
+  /* "Add Medicine" on Hydration: a blank row for this cycle day only. */
+  const addHydrationRow = () => {
+    if (editingRow || savingEdit || copying || orderLocked) return;
+    const row: HydrationRow = {
+      id: Date.now(),
+      sourceDilutionId: null,
+      stage: "PRE",
+      agent: "",
+      diluent: "",
+      volume: "",
+      volumeUnit: "mL",
+      guidance: "",
+    };
+    setHydrationRows((rows) => [...rows, row]);
+    newRowRef.current = { kind: "hydration", id: row.id };
+    startHydrationEdit(row);
+  };
+
   const updateHydrationDraft = (field: keyof HydrationRow, value: string) => {
     setHydrationDraft((previous) =>
       previous ? { ...previous, [field]: value } : previous
@@ -1690,6 +1739,10 @@ const ChemotherapyOrder: React.FC<{
 
   const saveHydrationRow = async () => {
     if (!hydrationDraft || savingEdit) return;
+    if (!hydrationDraft.agent.trim() && !hydrationDraft.diluent.trim()) {
+      setEditError("Enter the agent or the diluent.");
+      return;
+    }
     const volume = hydrationDraft.volume.trim();
     if (volume && (Number.isNaN(Number(volume)) || Number(volume) < 0)) {
       setEditError("Volume must be a number.");
@@ -1702,6 +1755,7 @@ const ChemotherapyOrder: React.FC<{
       setSavingEdit(true);
       setEditError("");
       await commitHydration(rows);
+      newRowRef.current = null;
       setEditingRow(null);
       setHydrationDraft(null);
     } catch (error: any) {
@@ -1921,6 +1975,10 @@ const ChemotherapyOrder: React.FC<{
                     medicineId: medicineId || undefined,
                     name: option?.label ?? "",
                     form: option?.hint || previous.form,
+                    route:
+                      previous.route ||
+                      medicineRoutesRef.current.get(medicineId) ||
+                      "",
                   }
                 : previous
             );
@@ -2029,6 +2087,29 @@ const ChemotherapyOrder: React.FC<{
   ];
 
   const tablesLoading = planLoading || orderLoading;
+
+  /* "Add Medicine" under a list (hidden on a completed day / closed
+     course). */
+  const renderAddMedicineButton = (onAdd: () => void) =>
+    !orderLocked && (
+      <div className="mt-4 flex justify-start">
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={Boolean(editingRow) || savingEdit || copying || tablesLoading}
+          className="inline-flex items-center gap-2 rounded-md border border-dashed border-blue-400 bg-white px-4 py-2 text-sm font-semibold text-blue-600 transition-colors hover:border-blue-600 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path
+              fillRule="evenodd"
+              d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
+              clipRule="evenodd"
+            />
+          </svg>
+          Add Medicine
+        </button>
+      </div>
+    );
 
   const infusionLabel = (drug: Drug) =>
     [drug.infusionType, drug.infusionDuration ? `${drug.infusionDuration} min` : ""]
@@ -2579,6 +2660,7 @@ const ChemotherapyOrder: React.FC<{
 </table>
              </div>
 
+            {renderAddMedicineButton(() => addMedicineRow("drug"))}
           </div>
         ) : activeTab === "Premedication" ? (
           <div className="p-8">
@@ -2770,6 +2852,7 @@ const ChemotherapyOrder: React.FC<{
                 </tbody>
               </table>
             </div>
+            {renderAddMedicineButton(() => addMedicineRow("premedication"))}
           </div>
         ) : activeTab === "Supportive" ? (
           <div className="p-8">
@@ -2951,6 +3034,7 @@ const ChemotherapyOrder: React.FC<{
                 </tbody>
               </table>
             </div>
+            {renderAddMedicineButton(() => addMedicineRow("supportive"))}
           </div>
         ) : activeTab === "Admin Instructions" ? (
           <div className="p-8">
@@ -3349,6 +3433,7 @@ const ChemotherapyOrder: React.FC<{
                 </tbody>
               </table>
             </div>
+            {renderAddMedicineButton(addHydrationRow)}
           </div>
         ) : (
           /* Other Tabs */
