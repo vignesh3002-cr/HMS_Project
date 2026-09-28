@@ -25,6 +25,7 @@ export interface ReportItem {
   id: string;
   reportId: string;
   requestId: string;
+  barcode?: string;
   sampleId: string;
   patientId: string;
   patientPid?: string;
@@ -333,6 +334,7 @@ export default function ReportGeneration() {
           id: rep.lab_report_id,
           reportId: rep.report_number || `RPT-${rep.lab_report_id.slice(-6)}`,
           requestId: rep.lab_order_id,
+          barcode: sampleBarcode,
           sampleId: sampleBarcode,
           patientId,
           patientPid: patient?.patient_id || patientId,
@@ -446,6 +448,7 @@ export default function ReportGeneration() {
           id: `item-${item.lab_order_item_id}`,
           reportId: `RPT-PENDING-${item.lab_order_item_id.slice(-6)}`,
           requestId: item.lab_order_id,
+          barcode: sampleBarcode,
           sampleId: sampleBarcode,
           patientId,
           patientPid: patient?.patient_id || patientId,
@@ -598,6 +601,7 @@ export default function ReportGeneration() {
           id: `rep-${s.id}`,
           reportId,
           requestId: barcode || `TRF-${sampleId}`,
+          barcode: barcode || sampleId,
           sampleId,
           patientId: s.patientId || "P000124",
           patientPid: s.patientPid || s.patientId || "P000124",
@@ -2427,7 +2431,7 @@ export default function ReportGeneration() {
                     <thead>
                       <tr className="bg-[#f8fafc] border-y border-slate-200/90 text-[13px] font-bold text-slate-600 tracking-wider">
                         <th className="py-5 px-8 font-bold" scope="col">
-                          REPORT &amp; REQUISITION
+                          BARCODE
                         </th>
                         <th className="py-5 px-6 font-bold" scope="col">
                           PATIENT NAME
@@ -2476,11 +2480,8 @@ export default function ReportGeneration() {
                             className="hover:bg-slate-50/60 transition-colors cursor-pointer"
                           >
                             <td className="py-5 px-8 whitespace-nowrap">
-                              <span className="font-semibold text-slate-900 font-mono block">
-                                {r.reportId}
-                              </span>
-                              <span className="font-mono text-blue-600 text-xs font-semibold">
-                                {r.requestId}
+                              <span className="font-mono text-slate-900 text-sm font-semibold">
+                                {r.barcode || r.sampleId || r.requestId}
                               </span>
                             </td>
                             <td className="py-5 px-6 whitespace-nowrap">
