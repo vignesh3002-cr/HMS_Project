@@ -157,219 +157,6 @@ const INITIAL_TRANSFERS: TransferItem[] = [
       "Correlate clinically with patient's physical symptoms and history.",
     parameters: DEFAULT_CBC_PARAMETERS,
   },
-  {
-    id: "tx-3",
-    dispatchId: "DSP-9043",
-    reportId: "RPT-2024-0530-002",
-    sampleId: "SMP-2024-0520-002",
-    patientId: "P000124",
-    patientPid: "PAT-2024-00046",
-    patientName: "Priya",
-    patientAgeGender: "28 Years / Female",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "priya.clinical@gmail.com",
-    doctorName: "Dr. Sarah Johnson",
-    doctorEmail: "patel.nephro@hospital.com",
-    testProfile: "Kidney Function Test (KFT)",
-    recipient: "Dr. Patel (Nephrology)",
-    channel: "EMR / Doctor",
-    dispatchedAt: "12:20 PM",
-    collectedOn: "20 May 2024, 11:15 AM",
-    reportedOn: "20 May 2024, 12:20 PM",
-    status: "DELIVERED",
-    ackDetails: "Received and acknowledged in physician portal",
-    clinicalRemarks:
-      "Renal biomarkers within reference intervals. Serum creatinine indicates normal glomerular filtration.",
-    clinicalCorrelation:
-      "Patient hydration adequate. No physiological indicators of renal insufficiency.",
-    parameters: [
-      {
-        parameter: "Serum Creatinine",
-        result: "0.85",
-        unit: "mg/dL",
-        referenceRange: "0.6 - 1.2",
-        status: "NORMAL",
-      },
-      {
-        parameter: "Blood Urea Nitrogen (BUN)",
-        result: "16.0",
-        unit: "mg/dL",
-        referenceRange: "7 - 20",
-        status: "NORMAL",
-      },
-      {
-        parameter: "Uric Acid",
-        result: "4.8",
-        unit: "mg/dL",
-        referenceRange: "3.5 - 7.2",
-        status: "NORMAL",
-      },
-      {
-        parameter: "eGFR",
-        result: "98",
-        unit: "mL/min/1.73m²",
-        referenceRange: "> 90",
-        status: "NORMAL",
-      },
-    ],
-  },
-  {
-    id: "tx-4",
-    dispatchId: "DSP-9044",
-    reportId: "RPT-2024-0530-003",
-    sampleId: "SMP-2024-0520-004",
-    patientId: "P000125",
-    patientPid: "PAT-2024-00047",
-    patientName: "Praveen Singh",
-    patientAgeGender: "45 Years / Male",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "praveen.singh@gmail.com",
-    doctorName: "Dr. Sarah Johnson",
-    doctorEmail: "rao.cardio@hospital.com",
-    testProfile: "Lipid Profile & Glucose Fasting",
-    recipient: "Emergency & Cardiology Station",
-    channel: "ICU / Ward",
-    dispatchedAt: "12:00 PM",
-    collectedOn: "20 May 2024, 10:45 AM",
-    reportedOn: "20 May 2024, 12:00 PM",
-    status: "DELIVERED",
-    ackDetails: "STAT alert sent directly to duty physician workstation",
-    clinicalRemarks:
-      "Marked elevation in Serum Triglycerides (480 mg/dL). High atherogenic risk index flagged.",
-    clinicalCorrelation:
-      "Urgent clinical correlation with cardiovascular risk evaluation and dietary regimen.",
-    parameters: [
-      {
-        parameter: "Total Cholesterol",
-        result: "245",
-        unit: "mg/dL",
-        referenceRange: "< 200",
-        status: "ABNORMAL",
-      },
-      {
-        parameter: "Triglycerides",
-        result: "480",
-        unit: "mg/dL",
-        referenceRange: "< 150",
-        status: "CRITICAL",
-      },
-      {
-        parameter: "HDL Cholesterol",
-        result: "32",
-        unit: "mg/dL",
-        referenceRange: "> 40",
-        status: "ABNORMAL",
-      },
-      {
-        parameter: "LDL Cholesterol",
-        result: "165",
-        unit: "mg/dL",
-        referenceRange: "< 100",
-        status: "ABNORMAL",
-      },
-    ],
-  },
-  {
-    id: "tx-5",
-    dispatchId: "DSP-9045",
-    reportId: "RPT-2024-0530-004",
-    sampleId: "SMP-2024-0520-005",
-    patientId: "P000126",
-    patientPid: "PAT-2024-00048",
-    patientName: "Naziya",
-    patientAgeGender: "31 Years / Female",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "naziya.k@email.com",
-    doctorName: "Dr. Sarah Johnson",
-    doctorEmail: "sharma.endo@hospital.com",
-    testProfile: "Thyroid Profile (T3, T4, TSH)",
-    recipient: "naziya.k@email.com (Patient)",
-    channel: "Email PDF",
-    dispatchedAt: "11:15 AM",
-    collectedOn: "20 May 2024, 09:30 AM",
-    reportedOn: "20 May 2024, 11:15 AM",
-    status: "QUEUED",
-    ackDetails: "Awaiting final pathologist signature before release",
-    clinicalRemarks:
-      "Thyroid parameters indicate euthyroid endocrine balance.",
-    clinicalCorrelation:
-      "Values concordant with baseline thyroid function.",
-    parameters: [
-      {
-        parameter: "Total T3",
-        result: "1.2",
-        unit: "ng/mL",
-        referenceRange: "0.8 - 2.0",
-        status: "NORMAL",
-      },
-      {
-        parameter: "Total T4",
-        result: "8.5",
-        unit: "µg/dL",
-        referenceRange: "5.1 - 14.1",
-        status: "NORMAL",
-      },
-      {
-        parameter: "TSH (Thyroid Stimulating)",
-        result: "2.85",
-        unit: "µIU/mL",
-        referenceRange: "0.4 - 4.2",
-        status: "NORMAL",
-      },
-    ],
-  },
-  {
-    id: "tx-6",
-    dispatchId: "DSP-9046",
-    reportId: "RPT-2024-0530-005",
-    sampleId: "SMP-2024-0520-006",
-    patientId: "P000127",
-    patientPid: "PAT-2024-00049",
-    patientName: "Meena Kumari",
-    patientAgeGender: "52 Years / Female",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "meena.kumari@gmail.com",
-    doctorName: "Dr. Sarah Johnson",
-    doctorEmail: "verma.icu@hospital.com",
-    testProfile: "Electrolytes & Arterial Blood Gas",
-    recipient: "ICU Ward 3 Bed 12",
-    channel: "ICU / Ward",
-    dispatchedAt: "09:50 AM",
-    collectedOn: "20 May 2024, 09:00 AM",
-    reportedOn: "20 May 2024, 09:50 AM",
-    status: "FAILED",
-    ackDetails: "Network socket timeout to Ward HL7 listener. Retry scheduled.",
-    clinicalRemarks:
-      "Electrolyte distribution within physiologic parameters.",
-    clinicalCorrelation: "Stable acid-base and electrolyte status.",
-    parameters: [
-      {
-        parameter: "Sodium (Na+)",
-        result: "139",
-        unit: "mmol/L",
-        referenceRange: "135 - 145",
-        status: "NORMAL",
-      },
-      {
-        parameter: "Potassium (K+)",
-        result: "4.2",
-        unit: "mmol/L",
-        referenceRange: "3.5 - 5.1",
-        status: "NORMAL",
-      },
-      {
-        parameter: "Chloride (Cl-)",
-        result: "101",
-        unit: "mmol/L",
-        referenceRange: "98 - 107",
-        status: "NORMAL",
-      },
-    ],
-  },
 ];
 
 function calculateAge(dob: string): number {
@@ -525,12 +312,22 @@ export default function ReportTransfer() {
         });
       });
 
-      // 2. Map verified / completed items that don't have a report yet so they appear in transfer queue
+      // 2. Map backend items that have had reports generated (item_status === "Report Generated" or approved in localStorage)
       const reportedOrderIds = new Set(dbReports.map((r) => r.lab_order_id));
       items.forEach((item, idx) => {
         if (reportedOrderIds.has(item.lab_order_id)) return;
         const rawStatus = (item.item_status || "").toUpperCase();
-        if (rawStatus !== "VERIFIED" && rawStatus !== "REPORT GENERATED" && rawStatus !== "COMPLETED") return;
+
+        const isApprovedInStorage = typeof window !== "undefined" && (
+          localStorage.getItem(`report_approved_item-${item.lab_order_item_id}`) === "GENERATED" ||
+          localStorage.getItem(`report_approved_${item.lab_order_item_id}`) === "GENERATED" ||
+          localStorage.getItem(`report_approved_${item.lab_order_id}`) === "GENERATED"
+        );
+
+        const isGenerated = rawStatus === "REPORT GENERATED" || isApprovedInStorage;
+
+        // STRICT REQUIREMENT: Only include items where a report has been GENERATED!
+        if (!isGenerated) return;
 
         const parentOrder = orderMap.get(item.lab_order_id) || item.lab_order;
         const patientId = parentOrder?.patient_history?.patient_id || parentOrder?.patient_history_id || `PAT00${idx + 1}`;
@@ -553,7 +350,10 @@ export default function ReportTransfer() {
           item.barcode ||
           `SMP-${item.lab_order_item_id.slice(-6)}`;
 
-        const isGenerated = rawStatus === "REPORT GENERATED" || rawStatus === "COMPLETED";
+        const isDelivered = typeof window !== "undefined" && (
+          localStorage.getItem(`report_transferred_${item.lab_order_item_id}`) === "true" ||
+          localStorage.getItem(`report_transferred_${item.lab_order_id}`) === "true"
+        );
 
         mappedTransfers.push({
           id: `item-${item.lab_order_item_id}`,
@@ -573,20 +373,163 @@ export default function ReportTransfer() {
           testProfile,
           recipient: `${doctorName} (Internal Medicine)`,
           channel: "EMR / Doctor",
-          dispatchedAt: "Queued",
-          status: isGenerated ? "SENT" : "QUEUED",
-          ackDetails: isGenerated ? "Report generated. Ready for portal transfer." : "Test verified. In dispatch queue.",
+          dispatchedAt: isDelivered ? "Dispatched" : "Queued",
+          status: isDelivered ? "DELIVERED" : "QUEUED",
+          ackDetails: isDelivered ? "Delivered and acknowledged in portal" : "Report generated. Ready for portal transfer.",
           collectedOn: formatReportDate((item as any)?.created_at || parentOrder?.order_datetime),
           reportedOn: formatReportDate((item as any)?.updated_at || new Date()),
-          clinicalRemarks: "Diagnostic results ready for clinical correlation and delivery.",
+          clinicalRemarks: "Diagnostic results certified by Pathologist and ready for delivery.",
           clinicalCorrelation: "Correlate with attending physician assessment.",
           parameters: DEFAULT_CBC_PARAMETERS,
         });
       });
 
-      if (mappedTransfers.length > 0) {
-        setTransfers(mappedTransfers);
-        setSelectedTransfer(mappedTransfers[0]);
+      // 3. Map any local reports that have been approved & generated in Report Generation
+      const priyaApproved = typeof window !== "undefined" && (
+        localStorage.getItem("report_approved_s3") === "GENERATED" ||
+        localStorage.getItem("report_approved_rep-s3") === "GENERATED" ||
+        localStorage.getItem("report_approved_rep_RPT-SMP-003") === "GENERATED" ||
+        localStorage.getItem("report_approved_smp_SMP-003") === "GENERATED"
+      );
+      if (priyaApproved) {
+        const alreadyInList = mappedTransfers.some(
+          (t) => t.reportId === "RPT-SMP-003" || t.sampleId === "SMP-003" || t.id === "s3" || t.id === "rep-s3"
+        );
+        if (!alreadyInList) {
+          const isDelivered = typeof window !== "undefined" && (
+            localStorage.getItem("report_transferred_s3") === "true" ||
+            localStorage.getItem("report_transferred_rep-s3") === "true" ||
+            localStorage.getItem("report_transferred_RPT-SMP-003") === "true"
+          );
+          mappedTransfers.push({
+            id: "tx-s3",
+            dispatchId: "DSP-9043",
+            reportId: "RPT-SMP-003",
+            sampleId: "SMP-003",
+            patientId: "P000124",
+            patientPid: "PAT-2024-00046",
+            patientName: "Priya",
+            patientAgeGender: "28 Years / Female",
+            patientAvatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=256&h=256",
+            patientEmail: "priya.clinical@gmail.com",
+            doctorName: "Dr. Sarah Johnson",
+            doctorEmail: "patel.nephro@hospital.com",
+            testProfile: "Kidney Function Test (KFT)",
+            recipient: "Dr. Patel (Nephrology)",
+            channel: "EMR / Doctor",
+            dispatchedAt: isDelivered ? "12:20 PM" : "Queued",
+            status: isDelivered ? "DELIVERED" : "QUEUED",
+            ackDetails: isDelivered ? "Received and acknowledged in physician portal" : "Report generated. Ready for portal transfer.",
+            collectedOn: "20 May 2024, 11:15 AM",
+            reportedOn: "20 May 2024, 12:20 PM",
+            clinicalRemarks: "Renal biomarkers within reference intervals. Serum creatinine indicates normal glomerular filtration.",
+            clinicalCorrelation: "Patient hydration adequate. No physiological indicators of renal insufficiency.",
+            parameters: [
+              { parameter: "Serum Creatinine", result: "0.85", unit: "mg/dL", referenceRange: "0.6 - 1.2", status: "NORMAL" },
+              { parameter: "Blood Urea Nitrogen (BUN)", result: "16.0", unit: "mg/dL", referenceRange: "7 - 20", status: "NORMAL" },
+              { parameter: "Uric Acid", result: "4.8", unit: "mg/dL", referenceRange: "3.5 - 7.2", status: "NORMAL" },
+              { parameter: "eGFR", result: "98", unit: "mL/min/1.73m²", referenceRange: "> 90", status: "NORMAL" },
+            ],
+          });
+        }
+      }
+
+      // Check any other sample completed & approved in Report Generation from registry
+      if (typeof window !== "undefined") {
+        const completedRegistry: any[] = JSON.parse(localStorage.getItem("completed_testing_samples") || "[]");
+        completedRegistry.forEach((cs, i) => {
+          const isApproved =
+            localStorage.getItem(`report_approved_${cs.id}`) === "GENERATED" ||
+            localStorage.getItem(`report_approved_rep-${cs.id}`) === "GENERATED" ||
+            localStorage.getItem(`report_approved_smp_${cs.sampleId}`) === "GENERATED";
+          if (!isApproved) return;
+
+          const reportId = `RPT-${cs.sampleId || cs.id}`;
+          const alreadyInList = mappedTransfers.some(
+            (t) => t.id === cs.id || t.id === `item-${cs.id}` || t.id === `tx-${cs.id}` || t.reportId === reportId
+          );
+          if (alreadyInList) return;
+
+          const isDelivered =
+            localStorage.getItem(`report_transferred_${cs.id}`) === "true" ||
+            localStorage.getItem(`report_transferred_${reportId}`) === "true";
+
+          mappedTransfers.push({
+            id: `tx-${cs.id}`,
+            dispatchId: `DSP-${9300 + i}`,
+            reportId,
+            sampleId: cs.barcode || `SMP-${cs.id}`,
+            patientId: cs.patientId || "P000124",
+            patientPid: cs.patientId || "P000124",
+            patientName: cs.patientName || "Patient",
+            patientAgeGender: "32 Years / Male",
+            patientAvatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=256&h=256",
+            patientEmail: "patient@email.com",
+            doctorName: "Dr. Sarah Johnson",
+            doctorEmail: "doctor@hospital.com",
+            testProfile: cs.testName || "Diagnostic Test",
+            recipient: "Dr. Sarah Johnson (Internal Medicine)",
+            channel: "EMR / Doctor",
+            dispatchedAt: isDelivered ? "Dispatched" : "Queued",
+            status: isDelivered ? "DELIVERED" : "QUEUED",
+            ackDetails: isDelivered ? "Delivered and acknowledged in portal" : "Report generated. Ready for portal transfer.",
+            collectedOn: formatReportDate(cs.receivedDate || new Date()),
+            reportedOn: formatReportDate(new Date()),
+            clinicalRemarks: cs.testResult || "Diagnostic test certified by Pathologist.",
+            clinicalCorrelation: "Correlate with attending physician assessment.",
+            parameters: cs.parameters ? cs.parameters.map((p: any) => ({
+              parameter: p.parameter || "Parameter",
+              result: String(p.result || "0.0"),
+              unit: p.unit || "",
+              referenceRange: p.referenceRange || "Normal",
+              status: ((p.status || "NORMAL").toUpperCase() === "COMPLETED" ? "NORMAL" : (p.status || "NORMAL").toUpperCase()) as any,
+            })) : DEFAULT_CBC_PARAMETERS,
+          });
+        });
+      }
+
+      // 4. Merge initial baseline generated reports (tx-1, tx-2 for Rahul Sharma CBC)
+      INITIAL_TRANSFERS.forEach((demo) => {
+        const exists = mappedTransfers.some(
+          (m) => m.id === demo.id || (m.reportId === demo.reportId && m.channel === demo.channel)
+        );
+        if (!exists) {
+          mappedTransfers.push(demo);
+        }
+      });
+
+      // 5. Final strict filter: ONLY reports that have been GENERATED are allowed in Report Transfer!
+      const generatedOnlyTransfers = mappedTransfers.filter((t) => {
+        // Any database report is generated
+        if (dbReports.some((r) => r.lab_report_id === t.id || r.report_number === t.reportId)) return true;
+        // Baseline generated demo report (Rahul Sharma CBC)
+        if (t.reportId === "RPT-2024-0530-001") return true;
+        // Check localStorage approval
+        const rawId = t.id.replace("item-", "").replace("tx-", "").replace("rep-", "");
+        if (
+          localStorage.getItem(`report_approved_${rawId}`) === "GENERATED" ||
+          localStorage.getItem(`report_approved_${t.id}`) === "GENERATED" ||
+          localStorage.getItem(`report_approved_rep_${t.reportId}`) === "GENERATED" ||
+          localStorage.getItem(`report_approved_smp_${t.sampleId}`) === "GENERATED"
+        ) {
+          return true;
+        }
+        // Backend order item is REPORT GENERATED
+        const matchingItem = items.find((it) => it.lab_order_item_id === rawId);
+        if (matchingItem && (matchingItem.item_status || "").toUpperCase() === "REPORT GENERATED") return true;
+
+        return false;
+      });
+
+      if (generatedOnlyTransfers.length > 0) {
+        setTransfers(generatedOnlyTransfers);
+        setSelectedTransfer((prev) => {
+          if (!prev) return generatedOnlyTransfers[0];
+          const found = generatedOnlyTransfers.find((r) => r.id === prev.id);
+          return found || generatedOnlyTransfers[0];
+        });
+      } else {
+        setTransfers([]);
       }
     } catch (err: any) {
       console.error("Error fetching transfer records:", err);
@@ -695,6 +638,13 @@ export default function ReportTransfer() {
         console.error("Failed to update report transfer in DB:", err);
       }
     }
+
+    try {
+      localStorage.setItem(`report_transferred_${selectedTransfer.id}`, "true");
+      localStorage.setItem(`report_transferred_${selectedTransfer.reportId}`, "true");
+      const rawId = selectedTransfer.id.replace("item-", "").replace("tx-", "");
+      localStorage.setItem(`report_transferred_${rawId}`, "true");
+    } catch {}
 
     setTransfers((prev) =>
       prev.map((t) =>
