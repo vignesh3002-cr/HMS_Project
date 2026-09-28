@@ -204,110 +204,6 @@ export function convertTestParamsToQCParams(params: any[]): QualityCheckParamete
   });
 }
 
-const INITIAL_REPORTS: ReportItem[] = [
-  {
-    id: "rep-1",
-    reportId: "RPT-2024-0530-001",
-    requestId: "TRF1256",
-    sampleId: "SMP-2024-0530-001",
-    patientId: "P000123",
-    patientPid: "PAT-2024-00045",
-    patientName: "Rahul Sharma",
-    patientAgeGender: "Male | 34 Years",
-    patientAvatar:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuBk5rMXMyViKhrEWS3OPs4EJKp41wiYn1yNbXA5l8RDhUEQ3edVPM-3o-jLtLS6HSXMEut3cfRaSBn5s33BhP0F6OAOZX42hZbHmmdVj65-ctAIdJRbm3Zz-9zEIo0TphDh1b4CrwJP4rmrJrZbPQyyErPeQlhLum-s5Zk9lFWs5P__X5-cb4t8OtGeYjeqonWaXkVvfzOF63hf9zgtRsnWsqeDqoPZEhiBztkX6UoF4fCIy7FpeUmamA",
-    patientEmail: "Rahul.sharma@email.com",
-    doctorName: "Dr. Johnson",
-    doctorEmail: "johnson@hospital.com",
-    testPanel: "Complete Blood Count (CBC)",
-    generatedDate: "20 May 2024 11:30 AM",
-    completedDate: "20 May 2024, 11:35 AM",
-    completedBy: "Lab Technician - John Doe",
-    sampleType: "Whole Blood Sample",
-    status: "GENERATED",
-    findingsSummary: "All parameters within normal clinical reference ranges.",
-    parameters: DEFAULT_QC_PARAMETERS,
-    overallDecision: "Approved",
-    reviewComments: "All CBC parameters verified and within acceptable limits.",
-    clinicalCorrelation:
-      "Patient is a 34-year-old male with no significant complaints. CBC results are within normal range. Correlate with clinical findings.",
-    approvalRemarks: "No abnormalities detected in the CBC parameters.",
-    approverName: "Dr. Sarah Johnson",
-    approverRole: "Senior Pathologist",
-    approvalDate: "20 May 2024, 12:10 PM",
-    signatureUrl: "certified-default",
-    sentOn: "20 May 2024, 12:12 PM",
-    deliveredOn: "20 May 2024, 12:13 PM",
-  },
-  {
-    id: "rep-s3",
-    reportId: "RPT-SMP-003",
-    requestId: "BC2405200003",
-    sampleId: "SMP-003",
-    patientId: "P000124",
-    patientPid: "PAT-2024-00046",
-    patientName: "Priya",
-    patientAgeGender: "Female | 28 Years",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "priya.clinical@email.com",
-    doctorName: "Dr. Patel",
-    doctorEmail: "patel.nephro@hospital.com",
-    testPanel: "Kidney Function Test (KFT)",
-    generatedDate: "20 May 2024 11:35 AM",
-    completedDate: "20 May 2024, 12:00 PM",
-    completedBy: "Lab Technician - John Doe",
-    sampleType: "Serum",
-    status: "UNDER_REVIEW",
-    findingsSummary: "Creatinine: 0.8 mg/dL, Urea: 22 mg/dL. Analyzer testing completed successfully.",
-    parameters: [
-      {
-        id: "kft-1",
-        parameter: "Serum Creatinine",
-        result: "0.85",
-        unit: "mg/dL",
-        referenceRange: "0.6 - 1.2",
-        status: "Normal",
-        approved: true,
-      },
-      {
-        id: "kft-2",
-        parameter: "Blood Urea Nitrogen (BUN)",
-        result: "16.0",
-        unit: "mg/dL",
-        referenceRange: "7 - 20",
-        status: "Normal",
-        approved: true,
-      },
-      {
-        id: "kft-3",
-        parameter: "Uric Acid",
-        result: "4.8",
-        unit: "mg/dL",
-        referenceRange: "3.5 - 7.2",
-        status: "Normal",
-        approved: true,
-      },
-      {
-        id: "kft-4",
-        parameter: "eGFR",
-        result: "98",
-        unit: "mL/min/1.73m²",
-        referenceRange: "> 90",
-        status: "Normal",
-        approved: true,
-      },
-    ],
-    overallDecision: "Pending",
-    clinicalCorrelation:
-      "Renal function parameters within healthy physiological range. Correlate with clinical findings.",
-    approvalRemarks: "Testing completed on analyzer bench. Awaiting final pathologist sign-off.",
-    approverName: "Dr. Sarah Johnson",
-    approverRole: "Senior Pathologist",
-    approvalDate: "20 May 2024, 12:15 PM",
-    signatureUrl: "certified-default",
-  },
-];
 
 function calculateAge(dob: string): number {
   const birth = new Date(dob);
@@ -340,7 +236,7 @@ export default function ReportGeneration() {
   };
 
   const [activeNav, setActiveNav] = useState("Report Generation");
-  const [reports, setReports] = useState<ReportItem[]>(INITIAL_REPORTS);
+  const [reports, setReports] = useState<ReportItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | "GENERATED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL"
@@ -586,7 +482,7 @@ export default function ReportGeneration() {
         const storedStatus = typeof window !== "undefined"
           ? localStorage.getItem(`testing_sample_status_${s.id}`)
           : null;
-        return storedStatus === "COMPLETED" || s.status === "COMPLETED";
+        return storedStatus === "COMPLETED";
       });
 
       // Check verified_samples_cache
@@ -714,7 +610,7 @@ export default function ReportGeneration() {
           testPanel: s.testName || "Diagnostic Test",
           generatedDate: formatReportDate(s.receivedDate || new Date()),
           completedDate: s.estimatedCompletion || "Today, 11:30 AM",
-          completedBy: s.receivedBy || "Lab Technician - John Doe",
+          completedBy: s.receivedBy || "Lab Technician",
           sampleType: s.sampleType || "Serum",
           status,
           findingsSummary,
@@ -732,20 +628,7 @@ export default function ReportGeneration() {
         if (barcode) existingBarcodes.add(barcode);
       });
 
-      // 4. Merge initial completed baseline reports if not already represented
-      INITIAL_REPORTS.forEach((demo) => {
-        if (demo.status === "DRAFT") return;
-        const exists = mappedList.some(
-          (m) =>
-            m.id === demo.id ||
-            m.reportId === demo.reportId ||
-            (demo.sampleId && m.sampleId === demo.sampleId)
-        );
-        if (!exists) {
-          mappedList.push(demo);
-        }
-      });
-
+      
       // Strict filter: ONLY samples that are tested and completed (or reports already generated) appear in Report Generation
       const completedOnlyReports = mappedList.filter((r) => {
         if (r.status === "GENERATED") return true;
@@ -781,8 +664,19 @@ export default function ReportGeneration() {
         );
         if (matchInitial && matchInitial.status === "COMPLETED") return true;
 
-        // 4. Baseline completed demo reports (e.g. rep-s3 Priya KFT, rep-1 Rahul CBC)
-        if (r.id === "rep-s3" || r.id === "rep-1") return true;
+        // 3. Check INITIAL_TESTING_SAMPLES explicitly marked completed
+        const matchInitial = INITIAL_TESTING_SAMPLES.find(
+          (ts) =>
+            ts.id === rawId ||
+            ts.sampleId === r.sampleId ||
+            (r.requestId && ts.barcode === r.requestId)
+        );
+        if (matchInitial) {
+          const initialStored = typeof window !== "undefined"
+            ? localStorage.getItem(`testing_sample_status_${matchInitial.id}`)
+            : null;
+          if (initialStored === "COMPLETED") return true;
+        }
 
         return false;
       });
@@ -796,6 +690,7 @@ export default function ReportGeneration() {
         });
       } else {
         setReports([]);
+        setSelectedReport(null);
       }
     } catch (err: any) {
       console.error("Error fetching lab reports:", err);
@@ -815,9 +710,7 @@ export default function ReportGeneration() {
   >("table");
 
   // Selected Report & Data
-  const [selectedReport, setSelectedReport] = useState<ReportItem>(
-    INITIAL_REPORTS[0],
-  );
+  const [selectedReport, setSelectedReport] = useState<ReportItem | null>(null);
 
   // Quality Check State
   const [currentParameters, setCurrentParameters] = useState<
@@ -829,17 +722,13 @@ export default function ReportGeneration() {
   const [reviewComments, setReviewComments] = useState("");
 
   // Approve Results State
-  const [clinicalCorrelation, setClinicalCorrelation] = useState(
-    "Patient is a 34-year-old male with no significant complaints. CBC results are within normal range. Correlate with clinical findings.",
+  const [clinicalCorrelation, setClinicalCorrelation] = useState("");
+  const [approvalRemarks, setApprovalRemarks] = useState("");
+  const [approverName, setApproverName] = useState(
+    currentUser?.username ? `Dr. ${currentUser.username}` : "Dr. Sarah Johnson"
   );
-  const [approvalRemarks, setApprovalRemarks] = useState(
-    "No abnormalities detected in the CBC parameters.",
-  );
-  const [approverName, setApproverName] = useState("Dr. Sarah Johnson");
   const [approverRole, setApproverRole] = useState("Senior Pathologist");
-  const [approvalDateTime, setApprovalDateTime] = useState(
-    "20 May 2024, 12:10 PM",
-  );
+  const [approvalDateTime, setApprovalDateTime] = useState("");
   const [digitalSignature, setDigitalSignature] = useState<string | null>(
     "certified-default",
   );
@@ -875,6 +764,7 @@ export default function ReportGeneration() {
   };
 
   const handleSubmitReview = (proceedToApproval = false) => {
+    if (!selectedReport) return;
     const updatedStatus: "GENERATED" | "CRITICAL" | "UNDER_REVIEW" =
       overallDecision === "Approved"
         ? "GENERATED"
@@ -896,7 +786,7 @@ export default function ReportGeneration() {
       ),
     );
 
-    setSelectedReport((prev) => ({
+    setSelectedReport((prev) => (prev ? {
       ...prev,
       status: updatedStatus,
       overallDecision,
@@ -926,16 +816,16 @@ export default function ReportGeneration() {
     setSelectedReport(report);
     setClinicalCorrelation(
       report.clinicalCorrelation ||
-        "Patient is a 34-year-old male with no significant complaints. CBC results are within normal range. Correlate with clinical findings.",
+        `Clinical correlation for ${report.patientName}: Test results correlate with clinical observations.`,
     );
     setApprovalRemarks(
       report.approvalRemarks ||
         report.findingsSummary ||
-        "No abnormalities detected in the CBC parameters.",
+        "All parameters verified and within acceptable limits.",
     );
-    setApproverName(report.approverName || "Dr. Sarah Johnson");
+    setApproverName(report.approverName || (currentUser?.username ? `Dr. ${currentUser.username}` : "Dr. Sarah Johnson"));
     setApproverRole(report.approverRole || "Senior Pathologist");
-    setApprovalDateTime(report.approvalDate || "20 May 2024, 12:10 PM");
+    setApprovalDateTime(report.approvalDate || new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }));
     setDigitalSignature(report.signatureUrl || "certified-default");
     setViewMode("approve-results");
   };
@@ -977,6 +867,7 @@ export default function ReportGeneration() {
   };
 
   const handleConfirmApproveAndSign = (viewDeliveredDirectly = false) => {
+    if (!selectedReport) return;
     if (!digitalSignature) {
       toast({
         title: "Digital Signature Required",
@@ -987,8 +878,15 @@ export default function ReportGeneration() {
       return;
     }
 
-    const nowSent = "20 May 2024, 12:12 PM";
-    const nowDelivered = "20 May 2024, 12:13 PM";
+    const nowFormatted = new Date().toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const nowSent = nowFormatted;
+    const nowDelivered = nowFormatted;
 
     setReports((prev) =>
       prev.map((r) =>
@@ -1088,7 +986,9 @@ export default function ReportGeneration() {
   const handleViewPortalReport = (portalName: string) => {
     toast({
       title: `Viewing in ${portalName}`,
-      description: `Opening diagnostic report ${selectedReport.reportId} portal preview.`,
+      description: selectedReport
+        ? `Opening diagnostic report ${selectedReport.reportId} portal preview.`
+        : "Opening portal preview.",
     });
   };
 
@@ -1160,7 +1060,7 @@ export default function ReportGeneration() {
 
       {/* Main Content Area */}
       <div className="flex-1 ml-64 min-h-screen flex flex-col min-w-0 bg-[#f8fafc]">
-        {viewMode === "delivered-status" ? (
+        {viewMode === "delivered-status" && selectedReport ? (
           /* ========================================================================= */
           /* BEGIN: Report Delivered Successfully View                                */
           /* ========================================================================= */
@@ -1256,7 +1156,7 @@ export default function ReportGeneration() {
                           Patient Portal
                         </h4>
                         <p className="text-sm text-slate-500 mt-1 font-mono">
-                          {selectedReport.patientEmail || "Rahul.sharma@email.com"}
+                          {selectedReport.patientEmail || "-"}
                         </p>
                       </div>
                     </div>
@@ -1297,10 +1197,10 @@ export default function ReportGeneration() {
                           Doctor Portal
                         </h4>
                         <p className="text-sm text-slate-500 mt-1 font-normal">
-                          {selectedReport.doctorName || "Dr. Johnson"}
+                          {selectedReport.doctorName || "Attending Physician"}
                         </p>
                         <p className="text-xs text-slate-400 font-mono">
-                          {selectedReport.doctorEmail || "johnson@hospital.com"}
+                          {selectedReport.doctorEmail || "-"}
                         </p>
                       </div>
                     </div>
@@ -1338,7 +1238,7 @@ export default function ReportGeneration() {
                       Sent On
                     </span>
                     <span className="text-base font-bold text-slate-900">
-                      {selectedReport.sentOn || "20 May 2024, 12:12 PM"}
+                      {selectedReport.sentOn || selectedReport.generatedDate || "-"}
                     </span>
                   </div>
                   {/* Delivered On */}
@@ -1347,7 +1247,7 @@ export default function ReportGeneration() {
                       Delivered On
                     </span>
                     <span className="text-base font-bold text-slate-900">
-                      {selectedReport.deliveredOn || "20 May 2024, 12:13 PM"}
+                      {selectedReport.deliveredOn || selectedReport.generatedDate || "-"}
                     </span>
                   </div>
                   {/* Report ID */}
@@ -1382,7 +1282,7 @@ export default function ReportGeneration() {
               </div>
             </div>
           </main>
-        ) : viewMode === "approve-results" ? (
+        ) : viewMode === "approve-results" && selectedReport ? (
           /* ========================================================================= */
           /* BEGIN: Approve Results View                                              */
           /* ========================================================================= */
@@ -1462,10 +1362,10 @@ export default function ReportGeneration() {
                           PID:{" "}
                           {selectedReport.patientPid ||
                             selectedReport.patientId ||
-                            "PAT-2024-00045"}
+                            "-"}
                         </p>
                         <p className="text-xs text-slate-400 font-normal mt-0.5">
-                          {selectedReport.patientAgeGender || "Male | 34 Years"}
+                          {selectedReport.patientAgeGender || "-"}
                         </p>
                       </div>
                     </div>
@@ -1477,7 +1377,7 @@ export default function ReportGeneration() {
                           SAMPLE ID
                         </p>
                         <p className="text-sm font-bold text-slate-800 mt-1 font-mono">
-                          {selectedReport.sampleId || "SMP-2024-0530-001"}
+                          {selectedReport.sampleId || "-"}
                         </p>
                       </div>
                       <div>
@@ -1742,7 +1642,7 @@ export default function ReportGeneration() {
               </section>
             </div>
           </main>
-        ) : viewMode === "quality-check" ? (
+        ) : viewMode === "quality-check" && selectedReport ? (
           /* ========================================================================= */
           /* BEGIN: Quality Check - Review Results View                               */
           /* ========================================================================= */
@@ -1813,7 +1713,7 @@ export default function ReportGeneration() {
                         Sample ID
                       </span>
                       <span className="font-semibold text-slate-900 font-mono">
-                        {selectedReport.sampleId || "SMP-2024-0530-001"}
+                        {selectedReport.sampleId || "-"}
                       </span>
                     </div>
                     <div className="flex items-baseline">
@@ -1843,7 +1743,7 @@ export default function ReportGeneration() {
                       </span>
                       <span className="font-semibold text-slate-900">
                         {selectedReport.completedBy ||
-                          "Lab Technician - John Doe"}
+                          "Lab Technician"}
                       </span>
                     </div>
                     {/* Row 3 */}
@@ -1852,7 +1752,7 @@ export default function ReportGeneration() {
                         Sample Type
                       </span>
                       <span className="font-semibold text-slate-900">
-                        {selectedReport.sampleType || "Whole Blood Sample"}
+                        {selectedReport.sampleType || "Specimen"}
                       </span>
                     </div>
                     <div className="flex items-center">

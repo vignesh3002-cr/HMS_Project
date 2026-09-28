@@ -100,64 +100,6 @@ const DEFAULT_CBC_PARAMETERS: DiagnosticParameter[] = [
   },
 ];
 
-const INITIAL_TRANSFERS: TransferItem[] = [
-  {
-    id: "tx-1",
-    dispatchId: "DSP-9041",
-    reportId: "RPT-2024-0530-001",
-    sampleId: "SMP-2024-0520-001",
-    patientId: "P000123",
-    patientPid: "PAT-2024-00045",
-    patientName: "Rahul Sharma",
-    patientAgeGender: "34 Years / Male",
-    patientAvatar:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuAjfujnVpyETzEdWcHQ6RNKwBvT-8TXthHKeuFQhPG1BihEgPOa1-DfFPSDNuorXmwAdeXA_MjunB4aO_8akEBbf5XwU2SQiNtWg03OCgS0mIunVfmk3Q8kl50YQ_VaxxPmXExjJQNbpQteiwpY_JzQ17KqzDIaPuu4BkrudGKpBLBCWJzUfb5ZKV6fVKrcrrprRjfCWBckriPXZ39nQctTHZi_crHP08XTwJc-BF50",
-    patientEmail: "Rahul Sharma @gmail.com",
-    doctorName: "Dr. Sarah Johnson",
-    doctorEmail: "johnson@hospital.com",
-    testProfile: "Complete Blood Count (CBC)",
-    recipient: "Dr. Sarah Johnson (Internal Medicine)",
-    channel: "EMR / Doctor",
-    dispatchedAt: "11:35 AM",
-    collectedOn: "20 May 2024, 10:30 AM",
-    reportedOn: "20 May 2024, 11:35 AM",
-    status: "DELIVERED",
-    ackDetails: "Auto-synced to Doctor EHR consultation note",
-    clinicalRemarks:
-      "All parameters are within normal limits. The blood counts show no signs of anemia, infection, or clotting disorders at this time.",
-    clinicalCorrelation:
-      "Correlate clinically with patient's physical symptoms and history.",
-    parameters: DEFAULT_CBC_PARAMETERS,
-  },
-  {
-    id: "tx-2",
-    dispatchId: "DSP-9042",
-    reportId: "RPT-2024-0530-001",
-    sampleId: "SMP-2024-0520-001",
-    patientId: "P000123",
-    patientPid: "PAT-2024-00045",
-    patientName: "Rahul Sharma",
-    patientAgeGender: "34 Years / Male",
-    patientAvatar:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuAjfujnVpyETzEdWcHQ6RNKwBvT-8TXthHKeuFQhPG1BihEgPOa1-DfFPSDNuorXmwAdeXA_MjunB4aO_8akEBbf5XwU2SQiNtWg03OCgS0mIunVfmk3Q8kl50YQ_VaxxPmXExjJQNbpQteiwpY_JzQ17KqzDIaPuu4BkrudGKpBLBCWJzUfb5ZKV6fVKrcrrprRjfCWBckriPXZ39nQctTHZi_crHP08XTwJc-BF50",
-    patientEmail: "Rahul Sharma @gmail.com",
-    doctorName: "Dr. Sarah Johnson",
-    doctorEmail: "johnson@hospital.com",
-    testProfile: "Complete Blood Count (CBC)",
-    recipient: "+91 98765 43210 (Patient)",
-    channel: "Patient SMS / WhatsApp",
-    dispatchedAt: "11:36 AM",
-    collectedOn: "20 May 2024, 10:30 AM",
-    reportedOn: "20 May 2024, 11:35 AM",
-    status: "DELIVERED",
-    ackDetails: "WhatsApp diagnostic link delivered with passcode",
-    clinicalRemarks:
-      "All parameters are within normal limits. The blood counts show no signs of anemia, infection, or clotting disorders at this time.",
-    clinicalCorrelation:
-      "Correlate clinically with patient's physical symptoms and history.",
-    parameters: DEFAULT_CBC_PARAMETERS,
-  },
-];
 
 function calculateAge(dob: string): number {
   const birth = new Date(dob);
@@ -190,7 +132,7 @@ export default function ReportTransfer() {
   };
 
   const [activeNav, setActiveNav] = useState("Report Transfer");
-  const [transfers, setTransfers] = useState<TransferItem[]>(INITIAL_TRANSFERS);
+  const [transfers, setTransfers] = useState<TransferItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | "DELIVERED" | "SENT" | "QUEUED" | "FAILED"
@@ -384,55 +326,7 @@ export default function ReportTransfer() {
         });
       });
 
-      // 3. Map any local reports that have been approved & generated in Report Generation
-      const priyaApproved = typeof window !== "undefined" && (
-        localStorage.getItem("report_approved_s3") === "GENERATED" ||
-        localStorage.getItem("report_approved_rep-s3") === "GENERATED" ||
-        localStorage.getItem("report_approved_rep_RPT-SMP-003") === "GENERATED" ||
-        localStorage.getItem("report_approved_smp_SMP-003") === "GENERATED"
-      );
-      if (priyaApproved) {
-        const alreadyInList = mappedTransfers.some(
-          (t) => t.reportId === "RPT-SMP-003" || t.sampleId === "SMP-003" || t.id === "s3" || t.id === "rep-s3"
-        );
-        if (!alreadyInList) {
-          const isDelivered = typeof window !== "undefined" && (
-            localStorage.getItem("report_transferred_s3") === "true" ||
-            localStorage.getItem("report_transferred_rep-s3") === "true" ||
-            localStorage.getItem("report_transferred_RPT-SMP-003") === "true"
-          );
-          mappedTransfers.push({
-            id: "tx-s3",
-            dispatchId: "DSP-9043",
-            reportId: "RPT-SMP-003",
-            sampleId: "SMP-003",
-            patientId: "P000124",
-            patientPid: "PAT-2024-00046",
-            patientName: "Priya",
-            patientAgeGender: "28 Years / Female",
-            patientAvatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=256&h=256",
-            patientEmail: "priya.clinical@gmail.com",
-            doctorName: "Dr. Sarah Johnson",
-            doctorEmail: "patel.nephro@hospital.com",
-            testProfile: "Kidney Function Test (KFT)",
-            recipient: "Dr. Patel (Nephrology)",
-            channel: "EMR / Doctor",
-            dispatchedAt: isDelivered ? "12:20 PM" : "Queued",
-            status: isDelivered ? "DELIVERED" : "QUEUED",
-            ackDetails: isDelivered ? "Received and acknowledged in physician portal" : "Report generated. Ready for portal transfer.",
-            collectedOn: "20 May 2024, 11:15 AM",
-            reportedOn: "20 May 2024, 12:20 PM",
-            clinicalRemarks: "Renal biomarkers within reference intervals. Serum creatinine indicates normal glomerular filtration.",
-            clinicalCorrelation: "Patient hydration adequate. No physiological indicators of renal insufficiency.",
-            parameters: [
-              { parameter: "Serum Creatinine", result: "0.85", unit: "mg/dL", referenceRange: "0.6 - 1.2", status: "NORMAL" },
-              { parameter: "Blood Urea Nitrogen (BUN)", result: "16.0", unit: "mg/dL", referenceRange: "7 - 20", status: "NORMAL" },
-              { parameter: "Uric Acid", result: "4.8", unit: "mg/dL", referenceRange: "3.5 - 7.2", status: "NORMAL" },
-              { parameter: "eGFR", result: "98", unit: "mL/min/1.73m²", referenceRange: "> 90", status: "NORMAL" },
-            ],
-          });
-        }
-      }
+      
 
       // Check any other sample completed & approved in Report Generation from registry
       if (typeof window !== "undefined") {
@@ -441,6 +335,7 @@ export default function ReportTransfer() {
           const isApproved =
             localStorage.getItem(`report_approved_${cs.id}`) === "GENERATED" ||
             localStorage.getItem(`report_approved_rep-${cs.id}`) === "GENERATED" ||
+            localStorage.getItem(`report_approved_rep_RPT-${cs.sampleId || cs.id}`) === "GENERATED" ||
             localStorage.getItem(`report_approved_smp_${cs.sampleId}`) === "GENERATED";
           if (!isApproved) return;
 
@@ -488,23 +383,12 @@ export default function ReportTransfer() {
         });
       }
 
-      // 4. Merge initial baseline generated reports (tx-1, tx-2 for Rahul Sharma CBC)
-      INITIAL_TRANSFERS.forEach((demo) => {
-        const exists = mappedTransfers.some(
-          (m) => m.id === demo.id || (m.reportId === demo.reportId && m.channel === demo.channel)
-        );
-        if (!exists) {
-          mappedTransfers.push(demo);
-        }
-      });
-
+      
       // 5. Final strict filter: ONLY reports that have been GENERATED are allowed in Report Transfer!
       const generatedOnlyTransfers = mappedTransfers.filter((t) => {
         // Any database report is generated
         if (dbReports.some((r) => r.lab_report_id === t.id || r.report_number === t.reportId)) return true;
-        // Baseline generated demo report (Rahul Sharma CBC)
-        if (t.reportId === "RPT-2024-0530-001") return true;
-        // Check localStorage approval
+                // Check localStorage approval
         const rawId = t.id.replace("item-", "").replace("tx-", "").replace("rep-", "");
         if (
           localStorage.getItem(`report_approved_${rawId}`) === "GENERATED" ||
@@ -530,6 +414,7 @@ export default function ReportTransfer() {
         });
       } else {
         setTransfers([]);
+        setSelectedTransfer(null);
       }
     } catch (err: any) {
       console.error("Error fetching transfer records:", err);
@@ -548,9 +433,7 @@ export default function ReportTransfer() {
     "table",
   );
   const [returnView, setReturnView] = useState<"table" | "forward">("forward");
-  const [selectedTransfer, setSelectedTransfer] = useState<TransferItem>(
-    INITIAL_TRANSFERS[0],
-  );
+  const [selectedTransfer, setSelectedTransfer] = useState<TransferItem | null>(null);
 
   // Forward Screen Recipient Controls
   const [sendToPatient, setSendToPatient] = useState(true);
@@ -602,6 +485,7 @@ export default function ReportTransfer() {
   };
 
   const handleSendReport = async () => {
+    if (!selectedTransfer) return;
     if (!sendToPatient && !sendToDoctor && additionalRecipients.length === 0) {
       toast({
         title: "No Recipients Selected",
@@ -778,7 +662,7 @@ export default function ReportTransfer() {
   );
 
   const activeParameters: DiagnosticParameter[] =
-    selectedTransfer.parameters && selectedTransfer.parameters.length > 0
+    selectedTransfer?.parameters && selectedTransfer.parameters.length > 0
       ? selectedTransfer.parameters
       : DEFAULT_CBC_PARAMETERS;
 
@@ -800,7 +684,7 @@ export default function ReportTransfer() {
 
       {/* Main Content Area */}
       <div className="flex-1 ml-64 min-h-screen flex flex-col min-w-0 bg-white">
-        {viewMode === "preview" ? (
+        {viewMode === "preview" && selectedTransfer ? (
           /* ========================================================================= */
           /* BEGIN: Clinical Precision Diagnostics - Preview Report View               */
           /* ========================================================================= */
@@ -861,7 +745,7 @@ export default function ReportTransfer() {
                       className="w-full h-full object-cover"
                       src={
                         selectedTransfer.patientAvatar ||
-                        "https://lh3.googleusercontent.com/aida-public/AB6AXuAjfujnVpyETzEdWcHQ6RNKwBvT-8TXthHKeuFQhPG1BihEgPOa1-DfFPSDNuorXmwAdeXA_MjunB4aO_8akEBbf5XwU2SQiNtWg03OCgS0mIunVfmk3Q8kl50YQ_VaxxPmXExjJQNbpQteiwpY_JzQ17KqzDIaPuu4BkrudGKpBLBCWJzUfb5ZKV6fVKrcrrprRjfCWBckriPXZ39nQctTHZi_crHP08XTwJc-BF50"
+                        "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256&h=256"
                       }
                       onError={(e) => {
                         (e.target as HTMLImageElement).src =
@@ -886,7 +770,7 @@ export default function ReportTransfer() {
                       AGE / GENDER:
                     </span>
                     <span className="text-gray-900">
-                      {selectedTransfer.patientAgeGender || "34 Years / Male"}
+                      {selectedTransfer.patientAgeGender || "-"}
                     </span>
                   </div>
                 </div>
@@ -910,13 +794,13 @@ export default function ReportTransfer() {
                       COLLECTED ON:
                     </span>
                     <span className="text-gray-900">
-                      {selectedTransfer.collectedOn || "20 May 2024, 10:30 AM"}
+                      {selectedTransfer.collectedOn || "-"}
                     </span>
                     <span className="font-bold text-black uppercase tracking-tight">
                       REPORTED ON:
                     </span>
                     <span className="text-gray-900">
-                      {selectedTransfer.reportedOn || "20 May 2024, 11:35 AM"}
+                      {selectedTransfer.reportedOn || "-"}
                     </span>
                   </div>
                 </div>
@@ -1106,7 +990,7 @@ export default function ReportTransfer() {
               {/* END: ActionButtons */}
             </div>
           </main>
-        ) : viewMode === "forward" ? (
+        ) : viewMode === "forward" && selectedTransfer ? (
           /* ========================================================================= */
           /* BEGIN: Forward Test Reports View                                         */
           /* ========================================================================= */
