@@ -655,15 +655,6 @@ export default function ReportGeneration() {
           return true;
         }
 
-        // 3. Check INITIAL_TESTING_SAMPLES
-        const matchInitial = INITIAL_TESTING_SAMPLES.find(
-          (ts) =>
-            ts.id === rawId ||
-            ts.sampleId === r.sampleId ||
-            (r.requestId && ts.barcode === r.requestId)
-        );
-        if (matchInitial && matchInitial.status === "COMPLETED") return true;
-
         // 3. Check INITIAL_TESTING_SAMPLES explicitly marked completed
         const matchInitial = INITIAL_TESTING_SAMPLES.find(
           (ts) =>
