@@ -2976,9 +2976,6 @@ export default function SampleVerification() {
                   <thead>
                     <tr className="bg-[#f8fafc] border-y border-slate-200/90 text-[13px] font-bold text-slate-600 tracking-wider">
                       <th className="py-5 px-8 font-bold" scope="col">
-                        SAMPLE ID
-                      </th>
-                      <th className="py-5 px-6 font-bold" scope="col">
                         BARCODE
                       </th>
                       <th className="py-5 px-6 font-bold" scope="col">
@@ -3011,7 +3008,7 @@ export default function SampleVerification() {
                     {isLoading ? (
                       <tr>
                         <td
-                          colSpan={7}
+                          colSpan={6}
                           className="py-16 text-center text-slate-500"
                         >
                           <div className="flex flex-col items-center justify-center gap-3">
@@ -3044,7 +3041,7 @@ export default function SampleVerification() {
                     ) : filteredSamples.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={7}
+                          colSpan={6}
                           className="py-16 text-center"
                         >
                           {samples.length === 0 ? (
@@ -3063,7 +3060,7 @@ export default function SampleVerification() {
                                 </p>
                                 <button
                                   type="button"
-                                  onClick={() => navigate("/doctor/lab/labdashboard")}
+                                  onClick={() => navigate("/lab/dashboard")}
                                   className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0052cc] hover:bg-blue-700 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors cursor-pointer"
                                 >
                                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3087,10 +3084,7 @@ export default function SampleVerification() {
                           onClick={() => handleSelectSample(s)}
                           className="hover:bg-slate-50/60 transition-colors cursor-pointer group"
                         >
-                          <td className="py-5 px-8 font-semibold text-slate-900 font-mono whitespace-nowrap">
-                            {s.sampleId}
-                          </td>
-                          <td className="py-5 px-6 font-semibold text-blue-600 font-mono whitespace-nowrap">
+                          <td className="py-5 px-8 font-semibold text-blue-600 font-mono whitespace-nowrap">
                             {s.barcode}
                           </td>
                           <td className="py-5 px-6 whitespace-nowrap">
