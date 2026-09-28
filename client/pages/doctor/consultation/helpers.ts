@@ -423,6 +423,29 @@ export const resolveDiagnosisId = async (
   return "";
 };
 
+/* The staging detail recorded in this visit (one per encounter), or "". */
+export const findStagingDetailForEncounter = async (
+  patientId: string,
+  encounterNo: string
+): Promise<string> => {
+  if (!patientId || !encounterNo) return "";
+  const response = await API.get<{
+    success: boolean;
+    data: { staging_detail_id: string }[];
+  }>("/oncology/staging-details", {
+    params: { patient_id: patientId, encounter_no: encounterNo, page: 1, limit: 1 },
+  });
+  return response.data.data?.[0]?.staging_detail_id ?? "";
+};
+
+/* The Consultation Notes part of an encounter's clinical_notes (the Past
+   History section after PAST_HISTORY_MARKER is left out). */
+export const consultationNotesOf = (clinicalNotes?: string | null) => {
+  const raw = clinicalNotes ?? "";
+  const markerIndex = raw.indexOf(PAST_HISTORY_MARKER);
+  return (markerIndex === -1 ? raw : raw.slice(0, markerIndex)).trim();
+};
+
 /* Resolve the patient's most recent staging_detail_id (persisted by
    the Diagnosis step, else the latest on record). */
 export const resolveStagingDetailId = async (patientId: string): Promise<string> => {

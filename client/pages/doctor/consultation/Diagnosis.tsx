@@ -15,10 +15,11 @@ import {
 } from "../../../components/ui/popover";
 import type { ConsultationState, FormData } from "./types";
 import {
+  findActiveEncounter,
+  findStagingDetailForEncounter,
   formatPickedDate,
   parsePickedDate,
   resolveDiagnosisId,
-  resolveStagingDetailId,
   toIsoDate,
 } from "./helpers";
 import {
@@ -816,20 +817,38 @@ type ForCancerType<T> = T & { cancerType: string };
 const Diagnosis: React.FC<{
   embedded?: boolean;
   patientId?: string;
+  /* The consultation's appointment / encounter - the visit this
+     diagnosis is recorded in. */
+  appointmentId?: string;
+  encounterNo?: string;
   onNext?: () => void;
   visitDate?: string;
   onVisitDateChange?: (value: string) => void;
 }> = ({
   embedded = false,
   patientId,
+  appointmentId,
+  encounterNo,
   onNext,
   visitDate = "",
   onVisitDateChange,
 }) => {
   const location = useLocation();
-  const statePatientId =
-    (location.state as ConsultationState | null)?.patientId ?? "";
+  const consultationState = location.state as ConsultationState | null;
+  const statePatientId = consultationState?.patientId ?? "";
   const resolvedPatientId = patientId || statePatientId;
+
+  /* The visit (encounter) this diagnosis is recorded in - each visit has
+     its own staging detail. */
+  const resolveVisitEncounterNo = async () => {
+    if (encounterNo) return encounterNo;
+    if (!resolvedPatientId) return "";
+    const { encounter } = await findActiveEncounter(
+      resolvedPatientId,
+      appointmentId ?? consultationState?.appointmentId
+    );
+    return encounter?.encounter_no ?? "";
+  };
 
   const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
   const [avatarLoading, setAvatarLoading] = useState<boolean>(() => !localStorage.getItem("user_photo"));
@@ -908,11 +927,20 @@ const Diagnosis: React.FC<{
     let cancelled = false;
     const hydrate = async () => {
       try {
+        /* This visit's own staging detail (the Diagnosis step reopened in
+           the same visit) seeds everything. Otherwise the latest earlier
+           one only carries the diagnosis / progression / relapse dates -
+           its visit date and notes belong to that earlier visit. */
+        const visitEncounterNo = await resolveVisitEncounterNo();
+        const ownStagingId = visitEncounterNo
+          ? await findStagingDetailForEncounter(resolvedPatientId, visitEncounterNo)
+          : "";
         const stored = JSON.parse(
           localStorage.getItem(`hms_staging_detail_id_${resolvedPatientId}`) ??
             "{}"
         ) as { staging_detail_id?: string } | null;
-        if (!stored?.staging_detail_id) return;
+        const sourceStagingId = ownStagingId || stored?.staging_detail_id;
+        if (!sourceStagingId || cancelled) return;
         const response = await API.get<{
           success: boolean;
           data: {
@@ -923,12 +951,11 @@ const Diagnosis: React.FC<{
             notes?: string | null;
           } | null;
         }>(
-          `/oncology/staging-details/${encodeURIComponent(
-            stored.staging_detail_id
-          )}`
+          `/oncology/staging-details/${encodeURIComponent(sourceStagingId)}`
         );
         const detail = response.data.data;
         if (!detail || cancelled) return;
+        const ownVisit = Boolean(ownStagingId);
         setFormData((previous) => ({
           ...previous,
           diagnosisDate:
@@ -938,9 +965,11 @@ const Diagnosis: React.FC<{
             toPickedDateValue(detail.progression_date),
           relapseDate:
             previous.relapseDate || toPickedDateValue(detail.relapse_date),
-          notes: previous.notes || detail.notes || "",
+          notes: ownVisit ? previous.notes || detail.notes || "" : previous.notes,
         }));
-        const visitDateIso = toDateInputValue(detail.visit_date ?? "");
+        const visitDateIso = ownVisit
+          ? toDateInputValue(detail.visit_date ?? "")
+          : "";
         if (visitDateIso) {
           const parsed = parsePickedDate(visitDateIso);
           if (parsed && onVisitDateChange) {
@@ -955,7 +984,7 @@ const Diagnosis: React.FC<{
     return () => {
       cancelled = true;
     };
-  }, [diagnosisDraftKey, resolvedPatientId, onVisitDateChange]);
+  }, [diagnosisDraftKey, resolvedPatientId, onVisitDateChange, encounterNo, appointmentId]);
 
   useEffect(() => {
     if (!resolvedPatientId) return;
@@ -1934,13 +1963,21 @@ const Diagnosis: React.FC<{
         ...(formData.notes.trim() ? { notes: formData.notes.trim() } : {}),
       };
 
+      /* One staging detail per visit: re-saving in this visit updates its
+         row; a new visit records a new row, so earlier visits keep their
+         diagnosis in the patient's history. */
+      let visitEncounterNo = "";
       let existingStagingDetailId = "";
       try {
-        existingStagingDetailId = await resolveStagingDetailId(
-          resolvedPatientId
-        );
+        visitEncounterNo = await resolveVisitEncounterNo();
+        existingStagingDetailId = visitEncounterNo
+          ? await findStagingDetailForEncounter(
+              resolvedPatientId,
+              visitEncounterNo
+            )
+          : "";
       } catch (error) {
-        console.error("Failed to resolve staging detail id:", error);
+        console.error("Failed to resolve this visit's staging detail:", error);
       }
 
       let stagingDetailId = existingStagingDetailId;
@@ -1966,6 +2003,7 @@ const Diagnosis: React.FC<{
           data: { staging_detail_id: string };
         }>("/oncology/staging-details", {
           patient_id: resolvedPatientId,
+          ...(visitEncounterNo ? { encounter_no: visitEncounterNo } : {}),
           ...stagingFields,
         });
         stagingDetailId = response.data.data?.staging_detail_id ?? "";

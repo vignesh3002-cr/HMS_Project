@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import API, { getActiveBranchId } from "../../../api/axios";
+import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
 import { getUser } from "../../../utils/token";
 import { chemoPlanCurrentItems, chemoPlanItemName } from "../../../api/chemotherapy.api";
 import { generatePrescriptionPdf } from "../../../utils/prescriptionPdf";
@@ -17,6 +18,7 @@ import {
   loadAllPlansForPatient,
 } from "./api";
 import { useLatestPatientVitals } from "./hooks";
+import { consultationNotesOf } from "../consultation/helpers";
 
 /* ============================================================
    HISTORY TAB
@@ -25,6 +27,21 @@ import { useLatestPatientVitals } from "./hooks";
    prescriptions. `embedded` renders it inside the patient details
    page; without it, it renders as a full page.
    ============================================================ */
+
+/* One visit of the Patient 360 history: an oncology diagnosis visit (its
+   staging detail) or an outpatient consultation (what the doctor recorded
+   in the Consultation tab). `date` is the visit date. */
+type Patient360Visit = {
+  key: string;
+  date: string;
+  staging: StagingDetailRecord | null;
+  consultation: {
+    chiefComplaint: string;
+    consultationNotes: string;
+    clinicalFindings: string;
+    discussion: string;
+  } | null;
+};
 
 const HistoryTab: React.FC<{
   embedded?: boolean;
@@ -48,10 +65,13 @@ const HistoryTab: React.FC<{
   const [activeCycleIndex, setActiveCycleIndex] = useState<number>(0);
   const timelineScrollRef = useRef<HTMLDivElement>(null);
 
-  /* Patient 360: every saved staging detail for THIS patient (newest first
-     from GET /oncology/staging-details?patient_id=). The first entry is the
-     latest visit shown on the card; the popup lists all of them ascending. */
+  /* Patient 360: the patient's visits - every saved staging detail
+     (GET /oncology/staging-details?patient_id=, newest visit first) and
+     the recent encounters (GET /encounters/latest) for the outpatient
+     consultations. The latest visit is shown on the card; the popup lists
+     all of them oldest first. */
   const [stagingDetails, setStagingDetails] = useState<StagingDetailRecord[]>([]);
+  const [visitEncounters, setVisitEncounters] = useState<EncounterRecord[]>([]);
   const [stagingDetailsLoading, setStagingDetailsLoading] = useState(false);
   const [stagingHistoryOpen, setStagingHistoryOpen] = useState(false);
   const stagingHistoryScrollRef = useRef<HTMLDivElement>(null);
@@ -67,7 +87,7 @@ const HistoryTab: React.FC<{
       { params: { patient_id: patientId, limit: 100 } },
     ];
 
-    (async () => {
+    const loadStaging = async (): Promise<StagingDetailRecord[]> => {
       for (const attempt of attempts) {
         try {
           const res = await API.get<{
@@ -80,8 +100,7 @@ const HistoryTab: React.FC<{
              under a different branch legitimately come back empty. Fall
              through to the branchless attempt before declaring none. */
           if (rows.length === 0) continue;
-          if (!cancelled) setStagingDetails(rows);
-          return;
+          return rows;
         } catch (err: any) {
           const message =
             err?.response?.data?.message || err?.message || "";
@@ -89,31 +108,96 @@ const HistoryTab: React.FC<{
             message
           );
           if (isScopeBlock) continue;
-          if (!cancelled) {
-            console.warn("Failed to load Patient 360 staging history:", err);
-            setStagingDetails([]);
-          }
-          return;
+          console.warn("Failed to load Patient 360 staging history:", err);
+          return [];
         }
       }
-      if (!cancelled) setStagingDetails([]);
-    })().finally(() => {
-      if (!cancelled) setStagingDetailsLoading(false);
-    });
+      return [];
+    };
+
+    /* Recent visits, newest first (branch-independent on the backend). */
+    const loadEncounters = encounterApi
+      .getLatest(patientId, 50)
+      .then((res) => res.data?.data?.encounters ?? [])
+      .catch((err) => {
+        console.warn("Failed to load Patient 360 visits:", err);
+        return [] as EncounterRecord[];
+      });
+
+    Promise.all([loadStaging(), loadEncounters])
+      .then(([rows, encounters]) => {
+        if (cancelled) return;
+        setStagingDetails(rows);
+        setVisitEncounters(encounters);
+      })
+      .finally(() => {
+        if (!cancelled) setStagingDetailsLoading(false);
+      });
 
     return () => {
       cancelled = true;
     };
   }, [patientId]);
 
-  /* Oldest-first list for the popup (the API returns newest first by
-     created_at - the save date - which is the approved 'visited date'). */
-  const stagingHistoryAscending = [...stagingDetails].sort((a, b) =>
-    (a.created_at || a.visit_date || "").localeCompare(
-      b.created_at || b.visit_date || ""
-    )
-  );
-  const latestStaging = stagingDetails[0] ?? null;
+  /* One entry per visit, oldest first, dated by the visit date:
+     - a visit (encounter) with a staging detail is an oncology diagnosis
+       visit - Diagnosis name, Notes, Disease Status;
+     - a visit without one is an outpatient consultation - Chief
+       Complaint, Consultation Notes, Clinical Findings, Discussion -
+       listed when any of those was recorded;
+     - a staging detail not linked to a loaded visit (saved before visits
+       were linked) is its own visit. */
+  const patient360Visits: Patient360Visit[] = (() => {
+    const loadedVisits = new Set(visitEncounters.map((encounter) => encounter.encounter_no));
+    const stagingByVisit = new Map(
+      stagingDetails
+        .filter((record) => record.encounter_no)
+        .map((record) => [record.encounter_no as string, record])
+    );
+
+    const encounterVisits = visitEncounters.flatMap((encounter): Patient360Visit[] => {
+      const staging = stagingByVisit.get(encounter.encounter_no) ?? null;
+      if (staging) {
+        return [{
+          key: encounter.encounter_no,
+          date: staging.visit_date || encounter.encounter_ts || encounter.created_at || "",
+          staging,
+          consultation: null,
+        }];
+      }
+      const consultation = {
+        chiefComplaint: (encounter.chief_complaint ?? "").trim(),
+        consultationNotes: consultationNotesOf(encounter.clinical_notes),
+        clinicalFindings: (encounter.clinical_findings ?? "").trim(),
+        discussion: (encounter.notes ?? "").trim(),
+      };
+      if (!Object.values(consultation).some(Boolean)) return [];
+      return [{
+        key: encounter.encounter_no,
+        date: encounter.encounter_ts || encounter.created_at || "",
+        staging: null,
+        consultation,
+      }];
+    });
+
+    const unlinkedStaging = stagingDetails
+      .filter((record) => !record.encounter_no || !loadedVisits.has(record.encounter_no))
+      .map((record): Patient360Visit => ({
+        key: record.staging_detail_id || `${record.visit_date}-${record.created_at}`,
+        date: record.visit_date || record.created_at || "",
+        staging: record,
+        consultation: null,
+      }));
+
+    const time = (value: string) => {
+      const t = new Date(value).getTime();
+      return Number.isNaN(t) ? 0 : t;
+    };
+    return [...encounterVisits, ...unlinkedStaging].sort(
+      (a, b) => time(a.date) - time(b.date)
+    );
+  })();
+  const latestVisit = patient360Visits[patient360Visits.length - 1] ?? null;
 
   /* Default focus on the most recent record when the popup opens: the list is
      ascending so the newest card sits at the bottom - scroll it into view. */
@@ -122,7 +206,7 @@ const HistoryTab: React.FC<{
     const el = stagingHistoryScrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [stagingHistoryOpen, stagingDetails]);
+  }, [stagingHistoryOpen, stagingDetails, visitEncounters]);
 
   useEffect(() => {
     const protocolId = plan?.source_protocol_id;
@@ -418,6 +502,47 @@ const HistoryTab: React.FC<{
       d.getMonth() + 1
     ).padStart(2, "0")}-${d.getFullYear()}`;
   };
+
+  const stagingDiagnosisName = (record: StagingDetailRecord) =>
+    record.cancer_subtypes?.subtype_name ||
+    record.pre_diagnosis ||
+    record.cancer_types?.cancer_type ||
+    "—";
+
+  /* A Patient 360 card row: icon, label and value. */
+  const renderPatient360Row = (
+    icon: string,
+    tone: string,
+    label: string,
+    value: string,
+    strong = false
+  ) => (
+    <div className="flex items-start">
+      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mr-3 ${tone}`}>
+        <i className={`${icon} text-sm`} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+          {label}
+        </p>
+        <p className={strong ? "font-semibold text-gray-800" : "text-gray-700 line-clamp-3 whitespace-pre-line"}>
+          {value}
+        </p>
+      </div>
+    </div>
+  );
+
+  /* A labelled line of a visit in the history popup. */
+  const renderVisitField = (label: string, value: string, strong = false) => (
+    <div className="flex">
+      <span className="w-36 shrink-0 text-[11px] uppercase tracking-wide text-gray-400 font-semibold pt-0.5">
+        {label}
+      </span>
+      <span className={strong ? "font-semibold text-gray-800" : "text-gray-700 whitespace-pre-line"}>
+        {value || "—"}
+      </span>
+    </div>
+  );
 
   const planCyclesSorted = [...(plan?.chemotherapy_cycle ?? [])].sort(
     (a, b) =>
@@ -1161,71 +1286,70 @@ const HistoryTab: React.FC<{
             {stagingDetailsLoading ? (
               <div className="flex items-center text-sm text-gray-500">
                 <i className="fa-solid fa-circle-notch fa-spin mr-2" />
-                Loading staging details...
+                Loading visit history...
               </div>
-            ) : latestStaging ? (
+            ) : latestVisit ? (
               <>
                 <div className="space-y-3 text-sm">
-                  <div className="flex items-start">
-                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 shrink-0 mr-3">
-                      <i className="fa-regular fa-calendar text-sm" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
-                        Visited date
-                      </p>
-                      <p className="font-semibold text-gray-800">
-                        {fmtHistoryDate(
-                          latestStaging.created_at || latestStaging.visit_date
-                        ) || "—"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start">
-                    <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center text-violet-600 shrink-0 mr-3">
-                      <i className="fa-solid fa-disease text-sm" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
-                        Diagnosis name
-                      </p>
-                      <p className="font-semibold text-gray-800">
-                        {latestStaging.cancer_subtypes?.subtype_name ||
-                          latestStaging.pre_diagnosis ||
-                          latestStaging.cancer_types?.cancer_type ||
-                          "—"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start">
-                    <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 shrink-0 mr-3">
-                      <i className="fa-regular fa-note-sticky text-sm" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
-                        Notes
-                      </p>
-                      <p className="text-gray-700 line-clamp-3">
-                        {latestStaging.notes || "—"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0 mr-3">
-                      <i className="fa-solid fa-heart-pulse text-sm" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
-                        Disease Status
-                      </p>
-                      <p className="font-semibold text-gray-800">
-                        {latestStaging.disease_status || "—"}
-                      </p>
-                    </div>
-                  </div>
+                  {renderPatient360Row(
+                    "fa-regular fa-calendar",
+                    "bg-blue-50 text-blue-600",
+                    "Visited date",
+                    fmtHistoryDate(latestVisit.date) || "—",
+                    true
+                  )}
+                  {latestVisit.staging ? (
+                    <>
+                      {renderPatient360Row(
+                        "fa-solid fa-disease",
+                        "bg-violet-50 text-violet-600",
+                        "Diagnosis name",
+                        stagingDiagnosisName(latestVisit.staging),
+                        true
+                      )}
+                      {renderPatient360Row(
+                        "fa-regular fa-note-sticky",
+                        "bg-amber-50 text-amber-600",
+                        "Notes",
+                        latestVisit.staging.notes || "—"
+                      )}
+                      {renderPatient360Row(
+                        "fa-solid fa-heart-pulse",
+                        "bg-emerald-50 text-emerald-600",
+                        "Disease Status",
+                        latestVisit.staging.disease_status || "—",
+                        true
+                      )}
+                    </>
+                  ) : latestVisit.consultation ? (
+                    <>
+                      {renderPatient360Row(
+                        "fa-solid fa-comment-medical",
+                        "bg-rose-50 text-rose-600",
+                        "Chief Complaint",
+                        latestVisit.consultation.chiefComplaint || "—",
+                        true
+                      )}
+                      {renderPatient360Row(
+                        "fa-regular fa-note-sticky",
+                        "bg-amber-50 text-amber-600",
+                        "Consultation Notes",
+                        latestVisit.consultation.consultationNotes || "—"
+                      )}
+                      {renderPatient360Row(
+                        "fa-solid fa-stethoscope",
+                        "bg-sky-50 text-sky-600",
+                        "Clinical Findings",
+                        latestVisit.consultation.clinicalFindings || "—"
+                      )}
+                      {renderPatient360Row(
+                        "fa-regular fa-comments",
+                        "bg-emerald-50 text-emerald-600",
+                        "Discussion",
+                        latestVisit.consultation.discussion || "—"
+                      )}
+                    </>
+                  ) : null}
                 </div>
 
                 <button
@@ -1238,7 +1362,7 @@ const HistoryTab: React.FC<{
               </>
             ) : (
               <p className="text-sm text-gray-500">
-                No staging details saved for this patient yet.
+                No visits recorded for this patient yet.
               </p>
             )}
           </div>
@@ -1712,13 +1836,13 @@ const HistoryTab: React.FC<{
         </button>
       </div>
 
-      {/* PATIENT 360 - STAGING HISTORY POPUP */}
+      {/* PATIENT 360 - VISIT HISTORY POPUP */}
       {stagingHistoryOpen && (
         <div
           className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-slate-900/50 backdrop-blur-sm p-4 sm:p-6"
           role="dialog"
           aria-modal="true"
-          aria-label="Staging history"
+          aria-label="Visit history"
           onClick={() => setStagingHistoryOpen(false)}
         >
           <div
@@ -1734,11 +1858,11 @@ const HistoryTab: React.FC<{
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-gray-900">
-                      Patient 360 Staging History
+                      Patient 360 Visit History
                     </h3>
                     <p className="text-xs text-gray-500">
-                      {stagingHistoryAscending.length} visit
-                      {stagingHistoryAscending.length === 1 ? "" : "s"} · oldest
+                      {patient360Visits.length} visit
+                      {patient360Visits.length === 1 ? "" : "s"} · oldest
                       first
                     </p>
                   </div>
@@ -1747,7 +1871,7 @@ const HistoryTab: React.FC<{
                   type="button"
                   onClick={() => setStagingHistoryOpen(false)}
                   className="w-8 h-8 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-800 flex items-center justify-center transition-colors"
-                  aria-label="Close staging history"
+                  aria-label="Close visit history"
                 >
                   <i className="fa-solid fa-xmark" />
                 </button>
@@ -1760,23 +1884,23 @@ const HistoryTab: React.FC<{
                 className="max-h-[330px] overflow-y-auto px-4 py-4 space-y-3 bg-gray-50/60"
                 style={{ scrollbarWidth: "thin" }}
               >
-                {stagingHistoryAscending.length === 0 ? (
+                {patient360Visits.length === 0 ? (
                   <p className="text-sm text-gray-500 py-6 text-center">
-                    No staging details saved for this patient yet.
+                    No visits recorded for this patient yet.
                   </p>
                 ) : (
-                  stagingHistoryAscending.map((record, index) => {
-                    const isLatest = index === stagingHistoryAscending.length - 1;
+                  patient360Visits.map((visit, index) => {
+                    const isLatest = index === patient360Visits.length - 1;
                     return (
                       <div
-                        key={record.staging_detail_id || `${record.visit_date}-${index}`}
+                        key={visit.key}
                         className={`rounded-xl border bg-white p-4 shadow-sm transition-all ${
                           isLatest
                             ? "border-[#004785] ring-1 ring-[#004785]/30"
                             : "border-gray-200"
                         }`}
                       >
-                        <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center justify-between gap-2 mb-3">
                           <div className="flex items-center gap-2">
                             <div
                               className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs ${
@@ -1788,9 +1912,16 @@ const HistoryTab: React.FC<{
                               <i className="fa-regular fa-calendar" />
                             </div>
                             <span className="text-sm font-bold text-gray-900">
-                              {fmtHistoryDate(
-                                record.created_at || record.visit_date
-                              ) || "—"}
+                              {fmtHistoryDate(visit.date) || "—"}
+                            </span>
+                            <span
+                              className={`text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset ${
+                                visit.staging
+                                  ? "bg-violet-50 text-violet-700 ring-violet-200"
+                                  : "bg-sky-50 text-sky-700 ring-sky-200"
+                              }`}
+                            >
+                              {visit.staging ? "Oncology diagnosis" : "Outpatient consultation"}
                             </span>
                           </div>
                           {isLatest && (
@@ -1801,33 +1932,20 @@ const HistoryTab: React.FC<{
                         </div>
 
                         <div className="space-y-2 text-sm">
-                          <div className="flex">
-                            <span className="w-32 shrink-0 text-[11px] uppercase tracking-wide text-gray-400 font-semibold pt-0.5">
-                              Diagnosis name
-                            </span>
-                            <span className="font-semibold text-gray-800">
-                              {record.cancer_subtypes?.subtype_name ||
-                                record.pre_diagnosis ||
-                                record.cancer_types?.cancer_type ||
-                                "—"}
-                            </span>
-                          </div>
-                          <div className="flex">
-                            <span className="w-32 shrink-0 text-[11px] uppercase tracking-wide text-gray-400 font-semibold pt-0.5">
-                              Notes
-                            </span>
-                            <span className="text-gray-700">
-                              {record.notes || "—"}
-                            </span>
-                          </div>
-                          <div className="flex">
-                            <span className="w-32 shrink-0 text-[11px] uppercase tracking-wide text-gray-400 font-semibold pt-0.5">
-                              Disease Status
-                            </span>
-                            <span className="font-semibold text-gray-800">
-                              {record.disease_status || "—"}
-                            </span>
-                          </div>
+                          {visit.staging ? (
+                            <>
+                              {renderVisitField("Diagnosis name", stagingDiagnosisName(visit.staging), true)}
+                              {renderVisitField("Notes", visit.staging.notes || "")}
+                              {renderVisitField("Disease Status", visit.staging.disease_status || "", true)}
+                            </>
+                          ) : visit.consultation ? (
+                            <>
+                              {renderVisitField("Chief Complaint", visit.consultation.chiefComplaint, true)}
+                              {renderVisitField("Consultation Notes", visit.consultation.consultationNotes)}
+                              {renderVisitField("Clinical Findings", visit.consultation.clinicalFindings)}
+                              {renderVisitField("Discussion", visit.consultation.discussion)}
+                            </>
+                          ) : null}
                         </div>
                       </div>
                     );

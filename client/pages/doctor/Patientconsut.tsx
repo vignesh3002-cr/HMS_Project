@@ -968,6 +968,8 @@ const Consultation: React.FC = () => {
                   <Diagnosis
                     embedded
                     patientId={patientDisplayId}
+                    appointmentId={consultationState?.appointmentId}
+                    encounterNo={encounter?.encounter_no}
                     visitDate={visitDate}
                     onVisitDateChange={setVisitDate}
                     onNext={() => { selectStep("TREATMENT PLAN", markStepCompleted("DIAGNOSIS")); }}

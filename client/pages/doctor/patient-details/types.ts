@@ -187,6 +187,8 @@ export interface StagingDetailRecord {
   staging_detail_id?: string;
   patient_id?: string;
   diagnosis_id?: string | null;
+  /* The visit (encounter) it was recorded in - one staging detail per visit. */
+  encounter_no?: string | null;
   visit_date?: string | null;
   diagnosis_date?: string | null;
   biopsy_date?: string | null;
