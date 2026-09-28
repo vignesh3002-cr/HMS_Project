@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
+import autoTable, { type RowInput, type Styles } from "jspdf-autotable";
 import API, { getActiveBranchId } from "../../../api/axios";
 import { appointmentApi } from "../../../api/appointment.api";
 import { getUser } from "../../../utils/token";
@@ -11,6 +11,7 @@ import { encounterApi } from "../../../api/encounter.api";
 import {
   chemotherapyApi,
   isChemoPlanClosed,
+  type ChemoPlanHydration,
   type ChemoPlanOrderHeader,
 } from "../../../api/chemotherapy.api";
 import {
@@ -98,6 +99,11 @@ type SummaryPlanItem = {
   remarks: string | null;
   cycle_day?: number | null;
   administration_day?: number | null;
+  drug_sequence?: number | null;
+  infusion_type?: string | null;
+  infusion_duration_minutes?: number | null;
+  timing_relative_to_primary?: string | null;
+  administration_detail?: string | null;
   medicine_master: {
     medicine_id?: string | null;
     medicine_name: string;
@@ -170,6 +176,7 @@ type SummaryPlan = {
 
 type SummaryPlanOrder = ChemoPlanOrderHeader & {
   chemotherapy_plan_items: SummaryPlanItem[];
+  chemotherapy_plan_hydration?: ChemoPlanHydration[] | null;
 };
 
 /* A plan item's display name: its medicine, else the typed name. */
@@ -200,6 +207,53 @@ type DischargeRow = {
   frequency: string;
   instruction: string;
   duration: string;
+};
+
+/* A row of the order's Hydration tab. */
+type HydrationSummaryRow = {
+  stage: "PRE" | "POST";
+  agent: string;
+  diluent: string;
+  volume: string;
+  guidance: string;
+};
+
+/* A drug's administration details (the order's Admin Instructions tab). */
+type AdminInstructionRow = {
+  drug: string;
+  category: string;
+  route: string;
+  infusion: string;
+  frequency: string;
+  timing: string;
+  detail: string;
+  remarks: string;
+};
+
+/* The Chemotherapy Order tab each drug role is listed on. */
+const DRUG_ROLE_CATEGORY: Record<string, string> = {
+  PRIMARY: "Chemotherapy",
+  PREMEDICATION: "Premedication",
+  SUPPORTIVE: "Supportive",
+  POSTMEDICATION: "Post-medication",
+};
+const DRUG_ROLE_ORDER = ["PRIMARY", "PREMEDICATION", "SUPPORTIVE", "POSTMEDICATION"];
+
+const CATEGORY_BADGE: Record<string, string> = {
+  Chemotherapy: "bg-indigo-50 text-indigo-700 ring-indigo-200",
+  Premedication: "bg-sky-50 text-sky-700 ring-sky-200",
+  Supportive: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  "Post-medication": "bg-amber-50 text-amber-700 ring-amber-200",
+};
+
+/* "500 mL" from a volume + unit (either may be missing). */
+const volumeLabel = (
+  volume: number | string | null | undefined,
+  unit: string | null | undefined
+) => {
+  if (volume == null || volume === "") return "";
+  const value = Number.isFinite(Number(volume)) ? String(Number(volume)) : String(volume);
+  return unit ? `${value} ${unit}` : value;
 };
 
 const Summary: React.FC<{
@@ -251,6 +305,10 @@ const Summary: React.FC<{
   const [dischargeLoading, setDischargeLoading] = useState(false);
   const [dischargeError, setDischargeError] = useState("");
   const [dischargeProtocolId, setDischargeProtocolId] = useState("");
+  /* The protocol, for its hydration template when the visit's order has
+     no saved hydration list. */
+  const [protocolDetail, setProtocolDetail] =
+    useState<RegimenProtocolDetail | null>(null);
   const [patientName, setPatientName] = useState("");
 
   const [summaryAllergies, setSummaryAllergies] = useState<string[]>([]);
@@ -711,6 +769,27 @@ const Summary: React.FC<{
     };
   }, [resolvedPatientId]);
 
+  useEffect(() => {
+    if (!dischargeProtocolId) {
+      setProtocolDetail(null);
+      return;
+    }
+    let cancelled = false;
+    API.get<{ success: boolean; data: RegimenProtocolDetail }>(
+      `/chemotherapy/regimen-protocols/${encodeURIComponent(dischargeProtocolId)}`
+    )
+      .then((response) => {
+        if (!cancelled) setProtocolDetail(response.data.data ?? null);
+      })
+      .catch((error) => {
+        console.error("Failed to load the protocol hydration template:", error);
+        if (!cancelled) setProtocolDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dischargeProtocolId]);
+
   /* This visit's drugs: the cycle day order(s) saved in this encounter,
      else the plan's current order, else its baseline (a plan saved before
      cycle day orders). A closed course orders nothing more. */
@@ -766,6 +845,74 @@ const Summary: React.FC<{
       time: item.frequency || "",
     }));
 
+  /* The cycle day(s) this visit orders, e.g. "Cycle 1 / Day 1". */
+  const visitCycleDay = visitOrders.map(cycleDayLabel).join(", ");
+
+  /* Hydration: the visit order's saved list, else the protocol's
+     hydration template (what the Chemotherapy Order tab shows for a day
+     that wasn't saved). A closed course without an order has none. */
+  const hydrationSaved = visitOrders.some((order) => order.hydration_saved);
+  const hydrationRows: HydrationSummaryRow[] = hydrationSaved
+    ? visitOrders
+        .filter((order) => order.hydration_saved)
+        .flatMap((order) => order.chemotherapy_plan_hydration ?? [])
+        .map((row): HydrationSummaryRow => ({
+          stage: row.hydration_stage === "POST" ? "POST" : "PRE",
+          agent: row.agent_name ?? "",
+          diluent: row.diluent ?? "",
+          volume: volumeLabel(row.dilution_volume, row.dilution_volume_unit),
+          guidance: row.guidance ?? "",
+        }))
+    : planClosed && visitOrders.length === 0
+      ? []
+      : (protocolDetail?.protocol_dilutions ?? [])
+          .filter((dilution) => !!dilution.hydration_stage)
+          .map((dilution): HydrationSummaryRow => ({
+            stage:
+              (dilution.hydration_stage ?? "").toUpperCase() === "POST" ? "POST" : "PRE",
+            agent:
+              dilution.medicine_master?.medicine_name || dilution.drug_brand_name || "",
+            diluent: dilution.diluent ?? "",
+            volume: volumeLabel(dilution.dilution_volume, dilution.dilution_volume_unit),
+            guidance: dilution.comment ?? "",
+          }))
+          .sort(
+            (a, b) =>
+              (a.stage === "PRE" ? 0 : 1) - (b.stage === "PRE" ? 0 : 1) ||
+              a.diluent.localeCompare(b.diluent)
+          );
+
+  /* Admin Instructions: every drug of the visit's order, in the order of
+     the Chemotherapy Order tabs. */
+  const roleRank = (role: string | null) => {
+    const rank = DRUG_ROLE_ORDER.indexOf((role ?? "").toUpperCase());
+    return rank === -1 ? DRUG_ROLE_ORDER.length : rank;
+  };
+  const adminInstructionRows: AdminInstructionRow[] = [...planItems]
+    .sort(
+      (a, b) =>
+        roleRank(a.drug_role) - roleRank(b.drug_role) ||
+        (a.drug_sequence ?? 0) - (b.drug_sequence ?? 0)
+    )
+    .map((item) => ({
+      drug: planItemName(item),
+      category:
+        DRUG_ROLE_CATEGORY[(item.drug_role ?? "").toUpperCase()] ?? item.drug_role ?? "",
+      route: item.administration_route ?? "",
+      infusion: [
+        item.infusion_type,
+        item.infusion_duration_minutes != null
+          ? `${item.infusion_duration_minutes} min`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      frequency: item.frequency ?? "",
+      timing: item.timing_relative_to_primary ?? "",
+      detail: item.administration_detail ?? "",
+      remarks: item.remarks ?? "",
+    }));
+
   const diagnosisSelectionFromStorage = (() => {
     try {
       const raw = localStorage.getItem("hms_diagnosis_selection");
@@ -817,13 +964,11 @@ const Summary: React.FC<{
     : "";
 
   const current = (() => {
-    const cycles = plan?.chemotherapy_cycle ?? [];
-    const latest = cycles[cycles.length - 1];
-    const cycleLabel = latest
-      ? `Cycle ${latest.cycle_number} / Day ${latest.cycle_day ?? ""}`
-      : "";
+    /* This visit's cycle day (every planned cycle row exists once the
+       first day is ordered, so the last cycle row isn't the current one). */
+    const cycleLabel = visitCycleDay;
     const status = plan?.treatment_status
-      ? ` (${plan.treatment_status})`
+      ? `${cycleLabel ? " " : ""}(${plan.treatment_status})`
       : "";
     return `${cycleLabel}${status}`;
   })();
@@ -868,29 +1013,77 @@ const Summary: React.FC<{
       fontStyle: "bold" as const,
     };
 
-    let y = 72;
+    let y = 88;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
 
+    /* A titled section table: an accent bar + title (with an optional
+       right-aligned note such as the cycle day), and a muted "none" row
+       when the list is empty. stageColumn colours PRE / POST. */
     const renderTable = (
       title: string,
       head: string[],
-      body: string[][]
+      body: string[][],
+      options: {
+        note?: string;
+        empty?: string;
+        columnStyles?: Record<number, Partial<Styles>>;
+        stageColumn?: number;
+      } = {}
     ) => {
-      if (y > 420) {
+      /* Keep a section title together with the start of its table. */
+      if (y > pageHeight - 110) {
         doc.addPage();
         y = 40;
       }
+      doc.setFillColor(0, 71, 133);
+      doc.rect(40, y - 9, 3, 12, "F");
       doc.setFontSize(11);
       doc.setTextColor(49, 46, 129);
-      doc.text(title, 40, y);
+      doc.text(title, 49, y);
+      if (options.note) {
+        doc.setFontSize(8.5);
+        doc.setTextColor(100, 116, 139);
+        doc.text(options.note, pageWidth - 40, y, { align: "right" });
+      }
       y += 8;
+      const rows: RowInput[] =
+        body.length > 0
+          ? body.map((row) => row.map((cell) => cell || "-"))
+          : [
+              [
+                {
+                  content: options.empty ?? "None recorded",
+                  colSpan: head.length,
+                  styles: {
+                    halign: "center",
+                    fontStyle: "italic",
+                    textColor: [148, 163, 184],
+                  },
+                },
+              ],
+            ];
       autoTable(doc, {
         startY: y,
         head: [head],
-        body,
-        styles: tableStyles,
+        body: rows,
+        styles: { ...tableStyles, valign: "top", overflow: "linebreak" },
         headStyles,
         alternateRowStyles: { fillColor: [247, 249, 251] },
-        margin: { left: 40, right: 40 },
+        columnStyles: options.columnStyles,
+        margin: { left: 40, right: 40, bottom: 40 },
+        didParseCell: (data) => {
+          if (
+            options.stageColumn !== undefined &&
+            body.length > 0 &&
+            data.section === "body" &&
+            data.column.index === options.stageColumn
+          ) {
+            data.cell.styles.fontStyle = "bold";
+            data.cell.styles.textColor =
+              data.cell.raw === "POST" ? [180, 83, 9] : [29, 78, 216];
+          }
+        },
       });
       y = (doc as any).lastAutoTable?.finalY ?? y;
       y += 24;
@@ -912,6 +1105,64 @@ const Summary: React.FC<{
       premedications.map((row) => [row.drug, row.dose, row.route, row.time])
     );
     renderTable(
+      "Hydration",
+      ["Stage", "Agent", "Diluent", "Volume", "Guidance"],
+      hydrationRows.map((row) => [
+        row.stage,
+        row.agent,
+        row.diluent,
+        row.volume,
+        row.guidance,
+      ]),
+      {
+        note: visitCycleDay,
+        empty: "No hydration ordered for this visit",
+        stageColumn: 0,
+        columnStyles: {
+          0: { cellWidth: 55 },
+          1: { cellWidth: 150 },
+          2: { cellWidth: 140 },
+          3: { cellWidth: 80 },
+        },
+      }
+    );
+    renderTable(
+      "Administration Instructions",
+      [
+        "Drug Name",
+        "Category",
+        "Route",
+        "Infusion",
+        "Frequency",
+        "Timing",
+        "Admin Detail",
+        "Remarks",
+      ],
+      adminInstructionRows.map((row) => [
+        row.drug,
+        row.category,
+        row.route,
+        row.infusion,
+        row.frequency,
+        row.timing,
+        row.detail,
+        row.remarks,
+      ]),
+      {
+        note: visitCycleDay,
+        empty: "No administration instructions for this visit",
+        columnStyles: {
+          0: { cellWidth: 115, fontStyle: "bold" },
+          1: { cellWidth: 78 },
+          2: { cellWidth: 50 },
+          3: { cellWidth: 82 },
+          4: { cellWidth: 70 },
+          5: { cellWidth: 80 },
+          7: { cellWidth: 110 },
+        },
+      }
+    );
+    renderTable(
       "Discharge Medication",
       ["Drug Name", "Dose", "Frequency", "Instruction", "Duration"],
       dischargeMedications.map((row) => [
@@ -924,10 +1175,30 @@ const Summary: React.FC<{
     );
 
     y += 8;
+    if (y > pageHeight - 50) {
+      doc.addPage();
+      y = 40;
+    }
     doc.setFontSize(9);
     doc.setTextColor(15, 23, 42);
     doc.text(`Next Visit Date: ${nextVisitDate || ""}`, 40, y);
     doc.text(`Next Cycle: ${nextCycle || ""}`, 300, y);
+
+    /* Footer on every page: when it was generated, and page x of n. */
+    const generatedAt = new Date().toLocaleString();
+    const pageCount = doc.getNumberOfPages();
+    for (let page = 1; page <= pageCount; page++) {
+      doc.setPage(page);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.5);
+      doc.line(40, pageHeight - 30, pageWidth - 40, pageHeight - 30);
+      doc.setFontSize(7.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text(`Generated ${generatedAt}`, 40, pageHeight - 18);
+      doc.text(`Page ${page} of ${pageCount}`, pageWidth - 40, pageHeight - 18, {
+        align: "right",
+      });
+    }
 
     const blob = doc.output("blob");
     const url = URL.createObjectURL(blob);
@@ -1849,6 +2120,134 @@ const Summary: React.FC<{
                 </tbody>
               </table>
             </div>
+          </section>
+
+          {/* =================================================
+              HYDRATION
+          ================================================== */}
+          <section>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-lg font-medium text-indigo-900">Hydration</h3>
+              {visitCycleDay && (
+                <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200">
+                  {visitCycleDay}
+                </span>
+              )}
+            </div>
+
+            {hydrationRows.length === 0 ? (
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                No hydration ordered for this visit.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[700px] text-left text-sm">
+                  <thead>
+                    <tr>
+                      <th className="w-24 pb-3 font-medium text-slate-900">Stage</th>
+                      <th className="w-1/5 pb-3 font-medium text-slate-900">Agent</th>
+                      <th className="w-1/5 pb-3 font-medium text-slate-900">Diluent</th>
+                      <th className="w-1/6 pb-3 font-medium text-slate-900">Volume</th>
+                      <th className="pb-3 font-medium text-slate-900">Guidance</th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="text-slate-800">
+                    {hydrationRows.map((row, index) => (
+                      <tr
+                        key={`${row.stage}-${row.agent}-${index}`}
+                        className="border-t border-slate-100 align-top"
+                      >
+                        <td className="py-3 pr-4">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${
+                              row.stage === "PRE"
+                                ? "bg-blue-50 text-blue-700 ring-blue-200"
+                                : "bg-amber-50 text-amber-700 ring-amber-200"
+                            }`}
+                          >
+                            {row.stage}
+                          </span>
+                        </td>
+                        <td className="py-3 pr-4 font-medium text-slate-900">
+                          {row.agent || "—"}
+                        </td>
+                        <td className="py-3 pr-4">{row.diluent || "—"}</td>
+                        <td className="py-3 pr-4">{row.volume || "—"}</td>
+                        <td className="py-3 text-slate-600">{row.guidance || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {/* =================================================
+              ADMINISTRATION INSTRUCTIONS
+          ================================================== */}
+          <section>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-lg font-medium text-indigo-900">
+                Administration Instructions
+              </h3>
+              {visitCycleDay && (
+                <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200">
+                  {visitCycleDay}
+                </span>
+              )}
+            </div>
+
+            {adminInstructionRows.length === 0 ? (
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                No administration instructions for this visit.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[960px] text-left text-sm">
+                  <thead>
+                    <tr>
+                      <th className="w-1/6 pb-3 font-medium text-slate-900">Drug Name</th>
+                      <th className="pb-3 font-medium text-slate-900">Route</th>
+                      <th className="pb-3 font-medium text-slate-900">Infusion</th>
+                      <th className="pb-3 font-medium text-slate-900">Frequency</th>
+                      <th className="pb-3 font-medium text-slate-900">Timing</th>
+                      <th className="w-1/5 pb-3 font-medium text-slate-900">Admin Detail</th>
+                      <th className="w-1/6 pb-3 font-medium text-slate-900">Remarks</th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="text-slate-800">
+                    {adminInstructionRows.map((row, index) => (
+                      <tr
+                        key={`${row.category}-${row.drug}-${index}`}
+                        className="border-t border-slate-100 align-top"
+                      >
+                        <td className="py-3 pr-4">
+                          <p className="font-medium text-slate-900">{row.drug || "—"}</p>
+                          {row.category && (
+                            <span
+                              className={`mt-1 inline-flex rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ring-1 ring-inset ${
+                                CATEGORY_BADGE[row.category] ??
+                                "bg-slate-50 text-slate-600 ring-slate-200"
+                              }`}
+                            >
+                              {row.category}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 pr-4">{row.route || "—"}</td>
+                        <td className="py-3 pr-4">{row.infusion || "—"}</td>
+                        <td className="py-3 pr-4">{row.frequency || "—"}</td>
+                        <td className="py-3 pr-4">{row.timing || "—"}</td>
+                        <td className="py-3 pr-4 text-slate-600">{row.detail || "—"}</td>
+                        <td className="py-3 text-slate-600">{row.remarks || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
 
           {/* =================================================
