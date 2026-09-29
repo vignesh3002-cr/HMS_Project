@@ -221,12 +221,17 @@ export default function ReportTransfer() {
 
         let parsedMeta: any = null;
         if (rep.report_comment) {
-          try {
-            parsedMeta = JSON.parse(rep.report_comment);
-          } catch {
-            // plain text
+          if (typeof rep.report_comment === "object") {
+            parsedMeta = rep.report_comment;
+          } else if (typeof rep.report_comment === "string") {
+            try {
+              parsedMeta = JSON.parse(rep.report_comment);
+            } catch {
+              // plain text
+            }
           }
         }
+        const commentString = typeof rep.report_comment === "string" ? rep.report_comment : "";
 
         const deliveredTimeStr = rep.delivered_datetime
           ? new Date(rep.delivered_datetime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -256,7 +261,7 @@ export default function ReportTransfer() {
           ackDetails: isDelivered ? "Delivered and acknowledged in portal" : "Pending dispatch queue",
           collectedOn: formatReportDate((orderItem as any)?.created_at || order?.order_datetime),
           reportedOn: formatReportDate(rep.generated_datetime || rep.created_at),
-          clinicalRemarks: parsedMeta?.text || rep.report_comment || "All parameters evaluated. Laboratory diagnostics complete.",
+          clinicalRemarks: parsedMeta?.text || commentString || "All parameters evaluated. Laboratory diagnostics complete.",
           clinicalCorrelation: parsedMeta?.clinicalCorrelation || "Correlate clinically with physical findings and history.",
           parameters: parsedMeta?.parameters && parsedMeta.parameters.length > 0 ? parsedMeta.parameters : DEFAULT_CBC_PARAMETERS,
         });

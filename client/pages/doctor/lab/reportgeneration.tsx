@@ -376,12 +376,17 @@ export default function ReportGeneration() {
 
         let parsedMeta: any = null;
         if (rep.report_comment) {
-          try {
-            parsedMeta = JSON.parse(rep.report_comment);
-          } catch {
-            // plain text
+          if (typeof rep.report_comment === "object") {
+            parsedMeta = rep.report_comment;
+          } else if (typeof rep.report_comment === "string") {
+            try {
+              parsedMeta = JSON.parse(rep.report_comment);
+            } catch {
+              // plain text
+            }
           }
         }
+        const commentString = typeof rep.report_comment === "string" ? rep.report_comment : "";
 
         const rawStatus = (rep.report_status || "GENERATED").toUpperCase();
         let status: "GENERATED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL" = "GENERATED";
@@ -422,12 +427,12 @@ export default function ReportGeneration() {
           completedBy: rep.employees ? `Dr. ${rep.employees.first_name} ${rep.employees.last_name || ""}`.trim() : "Pathology Lab",
           sampleType,
           status,
-          findingsSummary: parsedMeta?.text || rep.report_comment || "Diagnostic results verified within reference ranges.",
+          findingsSummary: parsedMeta?.text || commentString || "Diagnostic results verified within reference ranges.",
           parameters: parsedMeta?.parameters && parsedMeta.parameters.length > 0 ? parsedMeta.parameters : getDefaultQCParametersForPanel(testPanel),
           overallDecision: parsedMeta?.overallDecision || "Approved",
-          reviewComments: parsedMeta?.text || rep.report_comment || "",
+          reviewComments: parsedMeta?.text || commentString || "",
           clinicalCorrelation: parsedMeta?.clinicalCorrelation || "Correlate clinically with physical examination and history.",
-          approvalRemarks: rep.report_comment || "Parameters approved.",
+          approvalRemarks: commentString || parsedMeta?.text || "Parameters approved.",
           approverName: rep.employees ? `Dr. ${rep.employees.first_name} ${rep.employees.last_name || ""}`.trim() : "Dr. Sarah Johnson",
           approverRole: rep.employees?.designation || "Senior Pathologist",
           approvalDate: formatReportDate(rep.approved_datetime),
