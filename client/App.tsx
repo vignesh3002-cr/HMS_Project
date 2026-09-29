@@ -97,9 +97,6 @@ import DoctorProfile from "./pages/doctor/Profile";
 import DoctorNotifications from "./pages/doctor/DoctorNotifications";
 import Consultation from "./pages/doctor/Patientconsut";
 import DoctorPatientProfile from "./pages/doctor/notes and doc";
-<<<<<<< HEAD
-import PatientDetails from "./pages/doctor/patient-details/PatientDetails";
-=======
 import PatientDetails from "./pages/doctor/patient-details";
 import LabDashboard from "./pages/doctor/lab/labdashboard";
 import SampleVerification from "./pages/doctor/lab/sampleverification";
@@ -107,7 +104,6 @@ import TestingSamples from "./pages/doctor/lab/testingsamples";
 import ReportGeneration from "./pages/doctor/lab/reportgeneration";
 import ReportTransfer from "./pages/doctor/lab/reporttransfer";
 import LabProfile from "./pages/doctor/lab/labprofile";
->>>>>>> 1dafd6de30f7c5f4b78fa8304588323acf5ca525
 
 // ============================================================
 // HOOKS / AUTH
