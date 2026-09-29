@@ -473,7 +473,7 @@ export default function ReportGeneration() {
           item.sample_collection?.[0]?.barcode ||
           item.barcode ||
           (item.remarks?.match(/Barcode:\s*([A-Za-z0-9_-]+)/i)?.[1]) ||
-          `SMP-${item.lab_order_item_id.slice(-6)}`;
+          getDisplayBarcode({ id: item.lab_order_item_id, requestId: item.lab_order_id });
 
         const isApproved = typeof window !== "undefined" && (
           localStorage.getItem(`report_approved_item-${item.lab_order_item_id}`) === "GENERATED" ||
@@ -669,7 +669,7 @@ export default function ReportGeneration() {
           id: `rep-${s.id}`,
           reportId,
           requestId: barcode || `TRF-${sampleId}`,
-          barcode: barcode || sampleId,
+          barcode: getDisplayBarcode({ id: s.id, sampleId, barcode }),
           sampleId,
           patientId: s.patientId || "P000124",
           patientPid: s.patientPid || s.patientId || "P000124",
