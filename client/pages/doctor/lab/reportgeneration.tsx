@@ -393,7 +393,12 @@ export default function ReportGeneration() {
         const sampleBarcode =
           orderItem?.sample_collection?.[0]?.barcode ||
           orderItem?.barcode ||
-          `SMP-${rep.lab_report_id.slice(-8)}`;
+          (orderItem?.remarks?.match(/Barcode:\s*([A-Za-z0-9_-]+)/i)?.[1]) ||
+          getDisplayBarcode({
+            id: rep.lab_report_id,
+            sampleId: orderItem?.sample_collection?.[0]?.sample_collection_id,
+            requestId: rep.lab_order_id,
+          });
 
         existingSampleIds.add(sampleBarcode);
         if (orderItem?.lab_order_item_id) existingReportIds.add(orderItem.lab_order_item_id);
