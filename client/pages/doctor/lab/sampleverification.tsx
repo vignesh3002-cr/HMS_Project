@@ -3084,8 +3084,10 @@ export default function SampleVerification() {
                           onClick={() => handleSelectSample(s)}
                           className="hover:bg-slate-50/60 transition-colors cursor-pointer group"
                         >
-                          <td className="py-5 px-8 font-semibold text-blue-600 font-mono whitespace-nowrap">
-                            {s.barcode}
+                          <td className="py-5 px-8 whitespace-nowrap">
+                            <span className="font-mono text-slate-900 text-sm font-semibold">
+                              {s.barcode}
+                            </span>
                           </td>
                           <td className="py-5 px-6 whitespace-nowrap">
                             <span className="font-semibold text-slate-900 block group-hover:text-blue-600 transition-colors">
