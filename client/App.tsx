@@ -96,7 +96,7 @@ import DoctorProfile from "./pages/doctor/Profile";
 import DoctorNotifications from "./pages/doctor/DoctorNotifications";
 import Consultation from "./pages/doctor/Patientconsut";
 import DoctorPatientProfile from "./pages/doctor/notes and doc";
-import PatientDetails from "./pages/doctor/patient-details";
+import PatientDetails from "./pages/doctor/patient-details/PatientDetails";
 
 // ============================================================
 // HOOKS / AUTH
