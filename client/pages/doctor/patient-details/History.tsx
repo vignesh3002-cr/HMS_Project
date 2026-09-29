@@ -1,80 +1,28 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import API, { getActiveBranchId } from "../../../api/axios";
-import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
 import { getUser } from "../../../utils/token";
-import { chemoPlanCurrentItems, chemoPlanItemName } from "../../../api/chemotherapy.api";
 import { generatePrescriptionPdf } from "../../../utils/prescriptionPdf";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
 import {
-  LineChart,
-  Grid as ChartGrid,
-  XAxis as ChartXAxis,
-  YAxis as ChartYAxis,
-  Line as ChartLine,
-  Tooltip as ChartTooltip,
-  Legend as ChartLegend,
-} from "@/components/hms/LineChart";
-import type {
-  SummaryPlanItem,
   SummaryPlan,
   StagingDetailRecord,
-  ChemoCycleDetail,
-} from "./types";
-import {
   loadLatestChemoPlan,
+  ChemoCycleDetail,
   loadCycleDetail,
   loadCyclesForPlan,
   loadAllPlansForPatient,
-} from "./api";
-import { useLatestPatientVitals } from "./hooks";
-import { consultationNotesOf } from "../consultation/helpers";
+  useLatestPatientVitals,
+} from "./shared";
 
 /* ============================================================
-   HISTORY TAB
-   The patient's treatment history: every cycle of the chemotherapy
-   plan with its medicines, vitals and adverse events, and past
-   prescriptions. `embedded` renders it inside the patient details
-   page; without it, it renders as a full page.
-   ============================================================ */
+   HISTORY DASHBOARD COMPONENT
+   (combined from client/pages/doctor/history.tsx —
+    renamed HealthcareDashboard → HistoryDashboard so it can
+    live in this file as an embedded step, embedded prop added,
+    original history.tsx file left untouched)
+============================================================ */
 
-/* One visit of the Patient 360 history: an oncology diagnosis visit (its
-   staging detail) or an outpatient consultation (what the doctor recorded
-   in the Consultation tab). `date` is the visit date. */
-type Patient360Visit = {
-  key: string;
-  date: string;
-  staging: StagingDetailRecord | null;
-  consultation: {
-    chiefComplaint: string;
-    consultationNotes: string;
-    clinicalFindings: string;
-    discussion: string;
-  } | null;
-};
-
-/* Placeholder sample series for the Treatment Trend chart -- frontend-only
-   for now, not wired to a real API yet. Six illustrative data points spaced
-   ~3 weeks apart (roughly one per chemo cycle), ending today, so the chart
-   always renders with plausible-looking dates. Replace with real per-cycle
-   tumor marker / weight readings once that data is available from the API. */
-function buildTreatmentTrendDummyData() {
-  const today = new Date();
-  const points = [
-    { cyclesAgo: 15, tumorMarker: 128 },
-    { cyclesAgo: 12, tumorMarker: 104 },
-    { cyclesAgo: 9, tumorMarker: 81 },
-    { cyclesAgo: 6, tumorMarker: 63 },
-    { cyclesAgo: 3, tumorMarker: 47 },
-    { cyclesAgo: 0, tumorMarker: 34 },
-  ];
-  return points.map((p) => {
-    const date = new Date(today);
-    date.setDate(date.getDate() - p.cyclesAgo * 7);
-    return { date, tumorMarker: p.tumorMarker };
-  });
-}
-
-const HistoryTab: React.FC<{
+export const HistoryDashboard: React.FC<{
   embedded?: boolean;
   patientId?: string;
   initialPlan?: SummaryPlan | null;
@@ -96,13 +44,10 @@ const HistoryTab: React.FC<{
   const [activeCycleIndex, setActiveCycleIndex] = useState<number>(0);
   const timelineScrollRef = useRef<HTMLDivElement>(null);
 
-  /* Patient 360: the patient's visits - every saved staging detail
-     (GET /oncology/staging-details?patient_id=, newest visit first) and
-     the recent encounters (GET /encounters/latest) for the outpatient
-     consultations. The latest visit is shown on the card; the popup lists
-     all of them oldest first. */
+  /* Patient 360: every saved staging detail for THIS patient (newest first
+     from GET /oncology/staging-details?patient_id=). The first entry is the
+     latest visit shown on the card; the popup lists all of them ascending. */
   const [stagingDetails, setStagingDetails] = useState<StagingDetailRecord[]>([]);
-  const [visitEncounters, setVisitEncounters] = useState<EncounterRecord[]>([]);
   const [stagingDetailsLoading, setStagingDetailsLoading] = useState(false);
   const [stagingHistoryOpen, setStagingHistoryOpen] = useState(false);
   const stagingHistoryScrollRef = useRef<HTMLDivElement>(null);
@@ -118,7 +63,7 @@ const HistoryTab: React.FC<{
       { params: { patient_id: patientId, limit: 100 } },
     ];
 
-    const loadStaging = async (): Promise<StagingDetailRecord[]> => {
+    (async () => {
       for (const attempt of attempts) {
         try {
           const res = await API.get<{
@@ -131,7 +76,8 @@ const HistoryTab: React.FC<{
              under a different branch legitimately come back empty. Fall
              through to the branchless attempt before declaring none. */
           if (rows.length === 0) continue;
-          return rows;
+          if (!cancelled) setStagingDetails(rows);
+          return;
         } catch (err: any) {
           const message =
             err?.response?.data?.message || err?.message || "";
@@ -139,96 +85,31 @@ const HistoryTab: React.FC<{
             message
           );
           if (isScopeBlock) continue;
-          console.warn("Failed to load Patient 360 staging history:", err);
-          return [];
+          if (!cancelled) {
+            console.warn("Failed to load Patient 360 staging history:", err);
+            setStagingDetails([]);
+          }
+          return;
         }
       }
-      return [];
-    };
-
-    /* Recent visits, newest first (branch-independent on the backend). */
-    const loadEncounters = encounterApi
-      .getLatest(patientId, 50)
-      .then((res) => res.data?.data?.encounters ?? [])
-      .catch((err) => {
-        console.warn("Failed to load Patient 360 visits:", err);
-        return [] as EncounterRecord[];
-      });
-
-    Promise.all([loadStaging(), loadEncounters])
-      .then(([rows, encounters]) => {
-        if (cancelled) return;
-        setStagingDetails(rows);
-        setVisitEncounters(encounters);
-      })
-      .finally(() => {
-        if (!cancelled) setStagingDetailsLoading(false);
-      });
+      if (!cancelled) setStagingDetails([]);
+    })().finally(() => {
+      if (!cancelled) setStagingDetailsLoading(false);
+    });
 
     return () => {
       cancelled = true;
     };
   }, [patientId]);
 
-  /* One entry per visit, oldest first, dated by the visit date:
-     - a visit (encounter) with a staging detail is an oncology diagnosis
-       visit - Diagnosis name, Notes, Disease Status;
-     - a visit without one is an outpatient consultation - Chief
-       Complaint, Consultation Notes, Clinical Findings, Discussion -
-       listed when any of those was recorded;
-     - a staging detail not linked to a loaded visit (saved before visits
-       were linked) is its own visit. */
-  const patient360Visits: Patient360Visit[] = (() => {
-    const loadedVisits = new Set(visitEncounters.map((encounter) => encounter.encounter_no));
-    const stagingByVisit = new Map(
-      stagingDetails
-        .filter((record) => record.encounter_no)
-        .map((record) => [record.encounter_no as string, record])
-    );
-
-    const encounterVisits = visitEncounters.flatMap((encounter): Patient360Visit[] => {
-      const staging = stagingByVisit.get(encounter.encounter_no) ?? null;
-      if (staging) {
-        return [{
-          key: encounter.encounter_no,
-          date: staging.visit_date || encounter.encounter_ts || encounter.created_at || "",
-          staging,
-          consultation: null,
-        }];
-      }
-      const consultation = {
-        chiefComplaint: (encounter.chief_complaint ?? "").trim(),
-        consultationNotes: consultationNotesOf(encounter.clinical_notes),
-        clinicalFindings: (encounter.clinical_findings ?? "").trim(),
-        discussion: (encounter.notes ?? "").trim(),
-      };
-      if (!Object.values(consultation).some(Boolean)) return [];
-      return [{
-        key: encounter.encounter_no,
-        date: encounter.encounter_ts || encounter.created_at || "",
-        staging: null,
-        consultation,
-      }];
-    });
-
-    const unlinkedStaging = stagingDetails
-      .filter((record) => !record.encounter_no || !loadedVisits.has(record.encounter_no))
-      .map((record): Patient360Visit => ({
-        key: record.staging_detail_id || `${record.visit_date}-${record.created_at}`,
-        date: record.visit_date || record.created_at || "",
-        staging: record,
-        consultation: null,
-      }));
-
-    const time = (value: string) => {
-      const t = new Date(value).getTime();
-      return Number.isNaN(t) ? 0 : t;
-    };
-    return [...encounterVisits, ...unlinkedStaging].sort(
-      (a, b) => time(a.date) - time(b.date)
-    );
-  })();
-  const latestVisit = patient360Visits[patient360Visits.length - 1] ?? null;
+  /* Oldest-first list for the popup (the API returns newest first by
+     created_at - the save date - which is the approved 'visited date'). */
+  const stagingHistoryAscending = [...stagingDetails].sort((a, b) =>
+    (a.created_at || a.visit_date || "").localeCompare(
+      b.created_at || b.visit_date || ""
+    )
+  );
+  const latestStaging = stagingDetails[0] ?? null;
 
   /* Default focus on the most recent record when the popup opens: the list is
      ascending so the newest card sits at the bottom - scroll it into view. */
@@ -237,7 +118,7 @@ const HistoryTab: React.FC<{
     const el = stagingHistoryScrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [stagingHistoryOpen, stagingDetails, visitEncounters]);
+  }, [stagingHistoryOpen, stagingDetails]);
 
   useEffect(() => {
     const protocolId = plan?.source_protocol_id;
@@ -253,7 +134,7 @@ const HistoryTab: React.FC<{
         }
       })
       .catch((err) => {
-        console.warn("Failed to load regimen protocol in HistoryTab:", err);
+        console.warn("Failed to load regimen protocol in HistoryDashboard:", err);
       });
     return () => {
       cancelled = true;
@@ -285,7 +166,7 @@ const HistoryTab: React.FC<{
       patient_allergies: null,
       patient_symptoms: null,
       prescription_items: (p.prescription_items || []).map((it: any) => ({
-        medicine_name: it.medicine_master?.medicine_name || it.drug_name || '',
+        medicine_name: it.medicine_master?.medicine_name || '',
         medicine_master: it.medicine_master,
         dosage: it.dosage,
         unit: it.unit,
@@ -534,47 +415,6 @@ const HistoryTab: React.FC<{
     ).padStart(2, "0")}-${d.getFullYear()}`;
   };
 
-  const stagingDiagnosisName = (record: StagingDetailRecord) =>
-    record.cancer_subtypes?.subtype_name ||
-    record.pre_diagnosis ||
-    record.cancer_types?.cancer_type ||
-    "—";
-
-  /* A Patient 360 card row: icon, label and value. */
-  const renderPatient360Row = (
-    icon: string,
-    tone: string,
-    label: string,
-    value: string,
-    strong = false
-  ) => (
-    <div className="flex items-start">
-      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mr-3 ${tone}`}>
-        <i className={`${icon} text-sm`} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
-          {label}
-        </p>
-        <p className={strong ? "font-semibold text-gray-800" : "text-gray-700 line-clamp-3 whitespace-pre-line"}>
-          {value}
-        </p>
-      </div>
-    </div>
-  );
-
-  /* A labelled line of a visit in the history popup. */
-  const renderVisitField = (label: string, value: string, strong = false) => (
-    <div className="flex">
-      <span className="w-36 shrink-0 text-[11px] uppercase tracking-wide text-gray-400 font-semibold pt-0.5">
-        {label}
-      </span>
-      <span className={strong ? "font-semibold text-gray-800" : "text-gray-700 whitespace-pre-line"}>
-        {value || "—"}
-      </span>
-    </div>
-  );
-
   const planCyclesSorted = [...(plan?.chemotherapy_cycle ?? [])].sort(
     (a, b) =>
       (b.planned_date ?? "").localeCompare(a.planned_date ?? "") ||
@@ -606,14 +446,13 @@ const HistoryTab: React.FC<{
 
   /* Cycle-history table rows: agent/dose come from the plan's
      PRIMARY items (or all items if not tagged); outcome is the real cycle_status. */
-  const planDrugItems = chemoPlanCurrentItems<SummaryPlanItem>(plan);
-  const primaryPlanItems = planDrugItems.filter(
+  const primaryPlanItems = (plan?.chemotherapy_plan_items ?? []).filter(
     (item) => (item.drug_role ?? "").toUpperCase() === "PRIMARY"
   );
   const relevantPlanItems =
     primaryPlanItems.length > 0
       ? primaryPlanItems
-      : planDrugItems;
+      : (plan?.chemotherapy_plan_items ?? []);
 
   const cyclesToDisplay =
     planCyclesSorted.length > 0
@@ -661,7 +500,7 @@ const HistoryTab: React.FC<{
         .map((item) => {
           const dose = item.protocol_dose ?? item.calculated_dose;
           if (!dose) return null;
-          const name = chemoPlanItemName(item);
+          const name = item.medicine_master?.medicine_name;
           const unit = item.protocol_dose_unit || item.calculated_dose_unit || "";
           return relevantPlanItems.length > 1 && name
             ? `${name}: ${dose} ${unit}`.trim()
@@ -697,7 +536,7 @@ const HistoryTab: React.FC<{
         .join(" - "),
       agent:
         relevantPlanItems
-          .map((item) => chemoPlanItemName(item))
+          .map((item) => item.medicine_master?.medicine_name)
           .filter(Boolean)
           .join(", ") ||
         plan?.regimen_name ||
@@ -709,8 +548,8 @@ const HistoryTab: React.FC<{
   });
 
   /* Medication history rows from the plan's saved items. */
-  const medicationRows = planDrugItems.map((item) => ({
-    medication: chemoPlanItemName(item) || "—",
+  const medicationRows = (plan?.chemotherapy_plan_items ?? []).map((item) => ({
+    medication: item.medicine_master?.medicine_name ?? "—",
     start: fmtHistoryDate(plan?.treatment_start_date),
     end:
       (plan?.treatment_status ?? "").toUpperCase() === "COMPLETED"
@@ -898,7 +737,7 @@ const HistoryTab: React.FC<{
         const num = Number(item.administration_day ?? item.cycle_day);
         if (Number.isFinite(num) && num > 0) set.add(num);
       });
-      planDrugItems.forEach((item) => {
+      (plan?.chemotherapy_plan_items ?? []).forEach((item) => {
         const num = Number(item.administration_day ?? item.cycle_day);
         if (Number.isFinite(num) && num > 0) set.add(num);
       });
@@ -1050,13 +889,13 @@ const HistoryTab: React.FC<{
         }
 
         // Dynamic description from drugs scheduled for this day, remarks, or adverse events
-        const dayMedicines = planDrugItems
+        const dayMedicines = (plan?.chemotherapy_plan_items ?? [])
           .filter((item) => {
             if (!hasManyDays) return true;
             const itemDay = Number(item.administration_day ?? item.cycle_day ?? 1);
             return itemDay === dNum;
           })
-          .map((item) => chemoPlanItemName(item))
+          .map((item) => item.medicine_master?.medicine_name)
           .filter(Boolean);
 
         let description = "";
@@ -1144,9 +983,6 @@ const HistoryTab: React.FC<{
 
     return items;
   })();
-
-  // Placeholder chart series -- see buildTreatmentTrendDummyData for why.
-  const treatmentTrendData = useMemo(() => buildTreatmentTrendDummyData(), []);
 
   /* =========================================================
      CONTENT (PATIENT HEADER + HISTORY SECTIONS + ACTIONS)
@@ -1320,70 +1156,71 @@ const HistoryTab: React.FC<{
             {stagingDetailsLoading ? (
               <div className="flex items-center text-sm text-gray-500">
                 <i className="fa-solid fa-circle-notch fa-spin mr-2" />
-                Loading visit history...
+                Loading staging details...
               </div>
-            ) : latestVisit ? (
+            ) : latestStaging ? (
               <>
                 <div className="space-y-3 text-sm">
-                  {renderPatient360Row(
-                    "fa-regular fa-calendar",
-                    "bg-blue-50 text-blue-600",
-                    "Visited date",
-                    fmtHistoryDate(latestVisit.date) || "—",
-                    true
-                  )}
-                  {latestVisit.staging ? (
-                    <>
-                      {renderPatient360Row(
-                        "fa-solid fa-disease",
-                        "bg-violet-50 text-violet-600",
-                        "Diagnosis name",
-                        stagingDiagnosisName(latestVisit.staging),
-                        true
-                      )}
-                      {renderPatient360Row(
-                        "fa-regular fa-note-sticky",
-                        "bg-amber-50 text-amber-600",
-                        "Notes",
-                        latestVisit.staging.notes || "—"
-                      )}
-                      {renderPatient360Row(
-                        "fa-solid fa-heart-pulse",
-                        "bg-emerald-50 text-emerald-600",
-                        "Disease Status",
-                        latestVisit.staging.disease_status || "—",
-                        true
-                      )}
-                    </>
-                  ) : latestVisit.consultation ? (
-                    <>
-                      {renderPatient360Row(
-                        "fa-solid fa-comment-medical",
-                        "bg-rose-50 text-rose-600",
-                        "Chief Complaint",
-                        latestVisit.consultation.chiefComplaint || "—",
-                        true
-                      )}
-                      {renderPatient360Row(
-                        "fa-regular fa-note-sticky",
-                        "bg-amber-50 text-amber-600",
-                        "Consultation Notes",
-                        latestVisit.consultation.consultationNotes || "—"
-                      )}
-                      {renderPatient360Row(
-                        "fa-solid fa-stethoscope",
-                        "bg-sky-50 text-sky-600",
-                        "Clinical Findings",
-                        latestVisit.consultation.clinicalFindings || "—"
-                      )}
-                      {renderPatient360Row(
-                        "fa-regular fa-comments",
-                        "bg-emerald-50 text-emerald-600",
-                        "Discussion",
-                        latestVisit.consultation.discussion || "—"
-                      )}
-                    </>
-                  ) : null}
+                  <div className="flex items-start">
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 shrink-0 mr-3">
+                      <i className="fa-regular fa-calendar text-sm" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+                        Visited date
+                      </p>
+                      <p className="font-semibold text-gray-800">
+                        {fmtHistoryDate(
+                          latestStaging.created_at || latestStaging.visit_date
+                        ) || "—"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start">
+                    <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center text-violet-600 shrink-0 mr-3">
+                      <i className="fa-solid fa-disease text-sm" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+                        Diagnosis name
+                      </p>
+                      <p className="font-semibold text-gray-800">
+                        {latestStaging.cancer_subtypes?.subtype_name ||
+                          latestStaging.pre_diagnosis ||
+                          latestStaging.cancer_types?.cancer_type ||
+                          "—"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start">
+                    <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 shrink-0 mr-3">
+                      <i className="fa-regular fa-note-sticky text-sm" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+                        Notes
+                      </p>
+                      <p className="text-gray-700 line-clamp-3">
+                        {latestStaging.notes || "—"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0 mr-3">
+                      <i className="fa-solid fa-heart-pulse text-sm" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+                        Disease Status
+                      </p>
+                      <p className="font-semibold text-gray-800">
+                        {latestStaging.disease_status || "—"}
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
                 <button
@@ -1396,7 +1233,7 @@ const HistoryTab: React.FC<{
               </>
             ) : (
               <p className="text-sm text-gray-500">
-                No visits recorded for this patient yet.
+                No staging details saved for this patient yet.
               </p>
             )}
           </div>
@@ -1556,33 +1393,6 @@ const HistoryTab: React.FC<{
             </div>
           </div>
         </div>
-
-      {/* TREATMENT TREND -- frontend-only placeholder chart for now, not
-          wired to a real API yet (see buildTreatmentTrendDummyData above). */}
-      <section id="treatment-trend-section" className="px-6 pb-6">
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="flex justify-between items-center p-5 border-b border-gray-200 bg-gray-50/50">
-            <div className="flex items-center gap-2">
-              <i className="fa-solid fa-chart-simple text-blue-600" />
-              <h2 className="text-lg font-bold text-gray-900">Treatment Trend</h2>
-            </div>
-            <span className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">
-              Preview data
-            </span>
-          </div>
-
-          <div className="p-5">
-            <LineChart data={treatmentTrendData} x="date" height={260}>
-              <ChartGrid />
-              <ChartXAxis />
-              <ChartYAxis />
-              <ChartLine y="tumorMarker" name="Tumor Marker (CA-125)" curve="smooth" area dots />
-              <ChartTooltip />
-              <ChartLegend />
-            </LineChart>
-          </div>
-        </div>
-      </section>
 
       {/* CHEMOTHERAPY CYCLE HISTORY */}
       <section id="chemotherapy-cycle-history" className="px-6 pb-6">
@@ -1897,13 +1707,13 @@ const HistoryTab: React.FC<{
         </button>
       </div>
 
-      {/* PATIENT 360 - VISIT HISTORY POPUP */}
+      {/* PATIENT 360 - STAGING HISTORY POPUP */}
       {stagingHistoryOpen && (
         <div
           className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-slate-900/50 backdrop-blur-sm p-4 sm:p-6"
           role="dialog"
           aria-modal="true"
-          aria-label="Visit history"
+          aria-label="Staging history"
           onClick={() => setStagingHistoryOpen(false)}
         >
           <div
@@ -1919,11 +1729,11 @@ const HistoryTab: React.FC<{
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-gray-900">
-                      Patient 360 Visit History
+                      Patient 360 Staging History
                     </h3>
                     <p className="text-xs text-gray-500">
-                      {patient360Visits.length} visit
-                      {patient360Visits.length === 1 ? "" : "s"} · oldest
+                      {stagingHistoryAscending.length} visit
+                      {stagingHistoryAscending.length === 1 ? "" : "s"} · oldest
                       first
                     </p>
                   </div>
@@ -1932,7 +1742,7 @@ const HistoryTab: React.FC<{
                   type="button"
                   onClick={() => setStagingHistoryOpen(false)}
                   className="w-8 h-8 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-800 flex items-center justify-center transition-colors"
-                  aria-label="Close visit history"
+                  aria-label="Close staging history"
                 >
                   <i className="fa-solid fa-xmark" />
                 </button>
@@ -1945,23 +1755,23 @@ const HistoryTab: React.FC<{
                 className="max-h-[330px] overflow-y-auto px-4 py-4 space-y-3 bg-gray-50/60"
                 style={{ scrollbarWidth: "thin" }}
               >
-                {patient360Visits.length === 0 ? (
+                {stagingHistoryAscending.length === 0 ? (
                   <p className="text-sm text-gray-500 py-6 text-center">
-                    No visits recorded for this patient yet.
+                    No staging details saved for this patient yet.
                   </p>
                 ) : (
-                  patient360Visits.map((visit, index) => {
-                    const isLatest = index === patient360Visits.length - 1;
+                  stagingHistoryAscending.map((record, index) => {
+                    const isLatest = index === stagingHistoryAscending.length - 1;
                     return (
                       <div
-                        key={visit.key}
+                        key={record.staging_detail_id || `${record.visit_date}-${index}`}
                         className={`rounded-xl border bg-white p-4 shadow-sm transition-all ${
                           isLatest
                             ? "border-[#004785] ring-1 ring-[#004785]/30"
                             : "border-gray-200"
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2 mb-3">
+                        <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-2">
                             <div
                               className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs ${
@@ -1973,16 +1783,9 @@ const HistoryTab: React.FC<{
                               <i className="fa-regular fa-calendar" />
                             </div>
                             <span className="text-sm font-bold text-gray-900">
-                              {fmtHistoryDate(visit.date) || "—"}
-                            </span>
-                            <span
-                              className={`text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset ${
-                                visit.staging
-                                  ? "bg-violet-50 text-violet-700 ring-violet-200"
-                                  : "bg-sky-50 text-sky-700 ring-sky-200"
-                              }`}
-                            >
-                              {visit.staging ? "Oncology diagnosis" : "Outpatient consultation"}
+                              {fmtHistoryDate(
+                                record.created_at || record.visit_date
+                              ) || "—"}
                             </span>
                           </div>
                           {isLatest && (
@@ -1993,20 +1796,33 @@ const HistoryTab: React.FC<{
                         </div>
 
                         <div className="space-y-2 text-sm">
-                          {visit.staging ? (
-                            <>
-                              {renderVisitField("Diagnosis name", stagingDiagnosisName(visit.staging), true)}
-                              {renderVisitField("Notes", visit.staging.notes || "")}
-                              {renderVisitField("Disease Status", visit.staging.disease_status || "", true)}
-                            </>
-                          ) : visit.consultation ? (
-                            <>
-                              {renderVisitField("Chief Complaint", visit.consultation.chiefComplaint, true)}
-                              {renderVisitField("Consultation Notes", visit.consultation.consultationNotes)}
-                              {renderVisitField("Clinical Findings", visit.consultation.clinicalFindings)}
-                              {renderVisitField("Discussion", visit.consultation.discussion)}
-                            </>
-                          ) : null}
+                          <div className="flex">
+                            <span className="w-32 shrink-0 text-[11px] uppercase tracking-wide text-gray-400 font-semibold pt-0.5">
+                              Diagnosis name
+                            </span>
+                            <span className="font-semibold text-gray-800">
+                              {record.cancer_subtypes?.subtype_name ||
+                                record.pre_diagnosis ||
+                                record.cancer_types?.cancer_type ||
+                                "—"}
+                            </span>
+                          </div>
+                          <div className="flex">
+                            <span className="w-32 shrink-0 text-[11px] uppercase tracking-wide text-gray-400 font-semibold pt-0.5">
+                              Notes
+                            </span>
+                            <span className="text-gray-700">
+                              {record.notes || "—"}
+                            </span>
+                          </div>
+                          <div className="flex">
+                            <span className="w-32 shrink-0 text-[11px] uppercase tracking-wide text-gray-400 font-semibold pt-0.5">
+                              Disease Status
+                            </span>
+                            <span className="font-semibold text-gray-800">
+                              {record.disease_status || "—"}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     );
@@ -2108,5 +1924,3 @@ const HistoryTab: React.FC<{
     </>
   );
 };
-
-export default HistoryTab;

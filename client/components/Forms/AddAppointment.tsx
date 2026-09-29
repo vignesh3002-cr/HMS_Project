@@ -5,6 +5,7 @@ import { ArrowLeft, CalendarPlus, Calendar as CalendarIcon, Plus, Loader2, Hospi
 import { useToast } from "@/hooks/use-toast";
 import { usePermission } from "@/context/PermissionContext";
 import { FormDropdown } from "@/components/ui/form-dropdown";
+import { Dropdown } from "@/components/ui/dropdown";
 import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
 import CalendarPicker from "@/components/hms/Calender";
 import { PatientConflictWarningDialog, type PatientConflictAppointment } from "@/components/hms/PatientConflictWarningDialog";
@@ -307,6 +308,11 @@ export default function AddAppointment() {
   // and their branch/department auto-filled.
   const preselectedDoctorId = (location.state as { doctorId?: string } | null)?.doctorId;
 
+  // Arriving from the IPD tab's "New Admission" button -- opens straight
+  // into the Inpatient admission-request flow (ward/bed section included)
+  // instead of defaulting to an OPD consultation.
+  const defaultPatientType = (location.state as { defaultPatientType?: string } | null)?.defaultPatientType;
+
   // Arriving from the Day/Week View grids' "New slot available" click carries
   // the exact doctor/branch/department/date (and the Day View's hour) that
   // cell represented, so everything except the patient is already decided --
@@ -360,8 +366,18 @@ export default function AddAppointment() {
         ...(doctorBooking.departmentId ? { departmentId: doctorBooking.departmentId } : {}),
       };
     }
+    if (defaultPatientType === "Inpatient (IPD)") {
+      base = {
+        ...base,
+        patientType: "Inpatient (IPD)",
+        patientVisitType: "Admission",
+      };
+    }
     return base;
   });
+
+  const [addWardOpen, setAddWardOpen] = useState(false);
+  const [addBedOpen, setAddBedOpen] = useState(false);
 
   // Edit mode - load appointment data
   const [loadingAppointment, setLoadingAppointment] = useState(isEditMode || isAdmissionEditMode);
@@ -512,9 +528,6 @@ export default function AddAppointment() {
   // its own success dialog since there is no AppointmentResponse for it.
   const [ipdResult, setIpdResult] = useState<AdmissionRecord | null>(null);
 
-  // "+ Add" ward/bed helpers inside the Admission Details card.
-  const [addWardOpen, setAddWardOpen] = useState(false);
-  const [addBedOpen, setAddBedOpen] = useState(false);
   const [showConflictWarning, setShowConflictWarning] = useState(false);
   const [conflictSeverity, setConflictSeverity] = useState<"warning" | "high" | "critical">("warning");
   const [conflictAppointments, setConflictAppointments] = useState<PatientConflictAppointment[]>([]);
@@ -577,6 +590,19 @@ export default function AddAppointment() {
   const [beds, setBeds] = useState<BedRecord[]>([]);
   const [loadingWards, setLoadingWards] = useState(false);
   const [loadingBeds, setLoadingBeds] = useState(false);
+
+  const handleWardCreated = (ward: WardRecord) => {
+    setFormData((prev) => ({ ...prev, requestedWardId: ward.ward_id, requestedBedId: "" }));
+    ipdApi.getWards(formData.branchId).then((res) => setWards(res.data?.data || [])).catch(() => {});
+    ipdApi.getBeds(ward.ward_id, formData.branchId || undefined).then((res) => setBeds((res.data?.data || []).filter((b) => b.status !== "MAINTENANCE"))).catch(() => setBeds([]));
+  };
+
+  const handleBedCreated = (bed: BedRecord) => {
+    if (formData.requestedWardId && bed.ward_id === formData.requestedWardId) {
+      setBeds((prev) => (prev.some((b) => b.bed_id === bed.bed_id) ? prev : [...prev, bed]));
+      setFormData((prev) => ({ ...prev, requestedBedId: bed.bed_id }));
+    }
+  };
 
   // Edit mode: load doctor's schedules, assigned branches, and changes
   // without overwriting the existing date/time.
@@ -1655,43 +1681,11 @@ const isDirty = Boolean(
   // IPD bookings collapse Branch/Department/Doctor/Date into the Admission
   // Details card and hide the slot picker, so these core field blocks are
   // extracted once and reused in both the OPD grid and the IPD card.
-  const isIpdBooking = formData.patientType === "Inpatient (IPD)";
-  const showWardBed =
-    formData.patientVisitType === "Admission" || formData.patientVisitType === "Daycare";
+   const isIpdBooking = formData.patientType === "Inpatient (IPD)";
+   const showWardBed =
+     formData.patientVisitType === "Admission" || formData.patientVisitType === "Daycare";
 
-  // The AddWard/AddBed dialogs take BranchFilterContext's branch shape
-  // ({id,name,area,hospital_name}); project the form's local branches onto it.
-  const branchFilterBranches = useMemo(
-    () =>
-      branches.map((b) => ({
-        id: b.branch_id,
-        name: b.branch_name || b.branch_id,
-        area: "",
-        hospital_name: "",
-      })),
-    [branches],
-  );
-
-  const handleWardCreated = (ward: WardRecord) => {
-    setFormData((prev) => ({ ...prev, requestedWardId: ward.ward_id, requestedBedId: "" }));
-    ipdApi
-      .getWards(formData.branchId)
-      .then((res) => setWards(res.data?.data || []))
-      .catch(() => {});
-    ipdApi
-      .getBeds(ward.ward_id, formData.branchId || undefined)
-      .then((res) => setBeds((res.data?.data || []).filter((b) => b.status !== "MAINTENANCE")))
-      .catch(() => setBeds([]));
-  };
-
-  const handleBedCreated = (bed: BedRecord) => {
-    if (formData.requestedWardId && bed.ward_id === formData.requestedWardId) {
-      setBeds((prev) => (prev.some((b) => b.bed_id === bed.bed_id) ? prev : [...prev, bed]));
-      setFormData((prev) => ({ ...prev, requestedBedId: bed.bed_id }));
-    }
-  };
-
-  const branchField = (
+const branchField = (
     <div>
       <label className={labelClass}>Branch {requiredStar}</label>
       <FormDropdown
@@ -2112,15 +2106,15 @@ const isDirty = Boolean(
                               {(can("ward.manage") || can("admission.create")) && (
                                 <button
                                   type="button"
-                                  onClick={() => setAddWardOpen(true)}
-                                  className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium inline-flex items-center gap-0.5"
-                                >
-                                  <Plus className="w-3 h-3" /> Add Ward
+onClick={() => setAddWardOpen(true)}
+                                   className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium inline-flex items-center gap-0.5"
+                                 >
+                                   <Plus className="w-3 h-3" /> Add Ward
                                 </button>
                               )}
                             </div>
-                            <FormDropdown
-                              className={inputClass}
+                            <Dropdown
+                              className="w-full"
                               options={[
                                 { label: "None", value: "" },
                                 ...wards.map((w) => ({
@@ -2129,7 +2123,7 @@ const isDirty = Boolean(
                                 })),
                               ]}
                               value={formData.requestedWardId}
-                              onValueChange={(val) => {
+                              onChange={(val) => {
                                 setFormData((prev) => ({
                                   ...prev,
                                   requestedWardId: val,
@@ -2155,30 +2149,28 @@ const isDirty = Boolean(
                               {(can("bed.manage") || can("admission.create")) && (
                                 <button
                                   type="button"
-                                  onClick={() => setAddBedOpen(true)}
-                                  className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium inline-flex items-center gap-0.5"
-                                >
-                                  <Plus className="w-3 h-3" /> Add Bed
+                                   onClick={() => setAddBedOpen(true)}
+                                   className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium inline-flex items-center gap-0.5"
+                                 >
+                                   <Plus className="w-3 h-3" /> Add Bed
                                 </button>
                               )}
                             </div>
-                            <FormDropdown
-                              className={inputClass}
+                            <Dropdown
+                              className="w-full"
                               options={[
                                 { label: "No bed preference", value: "" },
                                 ...beds.map((b) => {
                                   const isOccupied = b.status !== "AVAILABLE";
                                   return {
-                                    label: `Bed ${b.bed_number}${b.bed_type ? ` (${b.bed_type})` : ""}`,
+                                    label: `Bed ${b.bed_number}${b.bed_type ? ` (${b.bed_type})` : ""}${isOccupied ? " (Occupied)" : ""}`,
                                     value: b.bed_id,
                                     disabled: isOccupied,
-                                    badge: isOccupied ? "Occupied" : undefined,
-                                    badgeTone: "danger" as const,
                                   };
                                 }),
                               ]}
                               value={formData.requestedBedId}
-                              onValueChange={(val) =>
+                              onChange={(val) =>
                                 setFormData((prev) => ({ ...prev, requestedBedId: val }))
                               }
                               placeholder={
@@ -2393,8 +2385,8 @@ const isDirty = Boolean(
     placeholder="Describe the reason for the visit (optional)"
   />
 </div>
-                       {/* Actions Footer */}
-            <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-4 mt-10 pt-6 border-t border-gray-100">
+                       {/* Actions Footer -- spans the full grid so the buttons sit at the right edge */}
+            <div className="lg:col-span-3 flex flex-col-reverse sm:flex-row items-center justify-end gap-4 mt-10 pt-6 border-t border-gray-100">
               <button
                 type="button"
                 onClick={handleCancel}
@@ -2414,7 +2406,7 @@ const isDirty = Boolean(
                 ) : (
                   <Plus className="w-4 h-4 transition-transform duration-200 group-hover:rotate-90" />
                 )}
-                {submitting ? "Creating..." : isIpdBooking || isAdmissionEditMode ? "Confirm Admission Request" : "Confirm Appointment"}
+                {submitting ? "Creating..." : isIpdBooking || isAdmissionEditMode ? "Confirm Admission" : "Confirm Appointment"}
               </button>
             </div>
 
@@ -2431,7 +2423,7 @@ const isDirty = Boolean(
         onConfirm={handleConfirmCreate}
         onCancel={() => setShowConfirm(false)}
         type="question"
-        title={isIpdBooking || isAdmissionEditMode ? "Confirm Admission Request" : "Confirm Appointment"}
+        title={isIpdBooking || isAdmissionEditMode ? "Confirm Admission" : "Confirm Appointment"}
         description={
           isIpdBooking || isAdmissionEditMode
             ? "A planned admission request will be created. The ward/bed are assigned when the patient is actually admitted."
@@ -2565,18 +2557,16 @@ const isDirty = Boolean(
       <AddWardDialog
         open={addWardOpen}
         onOpenChange={setAddWardOpen}
-        branches={branchFilterBranches}
-        defaultBranchId={formData.branchId || branchFilterBranches[0]?.id || ""}
+        branches={branches}
+        defaultBranchId={formData.branchId}
         onCreated={handleWardCreated}
       />
-
       <AddBedDialog
         open={addBedOpen}
         onOpenChange={setAddBedOpen}
-        wards={wards}
-        branches={branchFilterBranches}
-        defaultWardId={formData.requestedWardId || wards[0]?.ward_id || ""}
-        defaultBranchId={formData.branchId || branchFilterBranches[0]?.id || ""}
+        branches={branches}
+        defaultBranchId={formData.branchId}
+        defaultWardId={formData.requestedWardId}
         onCreated={handleBedCreated}
       />
     </div>

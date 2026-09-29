@@ -29,9 +29,9 @@ import { getToken, getUser } from "@/utils/token";
 
 import AddBranch from "@/components/Forms/AddBranch";
 import AddEmployee from "@/components/Forms/Addemployee";
+import AddAppointment from "@/components/Forms/AddAppointment";
 import PatientRegistrationForm from "@/components/Forms/PatientRegistrationForm";
 import EditPatientForm from "@/components/Forms/edit/EditPatientForm";
-import AddAppointment from "@/components/Forms/AddAppointment";
 
 // ============================================================
 // VIEW FORMS
@@ -49,6 +49,7 @@ import Security from "@/components/Forms/view/Security";
 // ============================================================
 
 import Appointments from "./pages/Appointments";
+import BedMaster from "./pages/BedMaster";
 import Departments from "./pages/Departments";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
@@ -337,6 +338,12 @@ const protectedRoutes = [
   {
     path: "/ipd",
     element: <Appointments defaultTab="ipd" />,
+    permission: "admission.read",
+  },
+
+  {
+    path: "/ipd/beds",
+    element: <BedMaster />,
     permission: "admission.read",
   },
 
