@@ -6,6 +6,7 @@ import {
   FileText,
   CalendarCheck,
 } from "lucide-react";
+import { Logo } from "@/components/hms/Logo";
 
 interface DoctorSidebarProps {
   activeItem?: string;
@@ -48,14 +49,8 @@ const DoctorSidebar: React.FC<DoctorSidebarProps> = ({
   return (
     <aside className="w-[280px] h-screen bg-[#f3f4f6] flex flex-col border-r border-gray-200">
       {/* Header */}
-      <div className="px-8 pt-10 pb-12">
-        <h1 className="text-[22px] font-bold text-[#0f3d91] leading-tight tracking-tight">
-          HMS Portal
-        </h1>
-
-        <p className="text-[13px] font-medium text-gray-600 tracking-wider mt-1.5 uppercase">
-          Doctor Dashboard
-        </p>
+      <div className="px-6 pt-7 pb-6">
+        <Logo className="w-full max-w-[175px] h-auto" iconPosition="left" />
       </div>
 
       {/* Navigation */}

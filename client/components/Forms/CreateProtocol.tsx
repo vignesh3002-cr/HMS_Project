@@ -16,6 +16,7 @@ import {
   Plus,
   Copy,
   Calculator,
+  X,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FormProtocolDropdown } from "@/components/ui/form-protocol-dropdown";
@@ -123,6 +124,7 @@ interface Premed {
   id: string;
   medication: string;
   brandName?: string;
+  form: string;
   dose: string;
   unit: string;
   adminNotes: string;
@@ -133,6 +135,7 @@ interface ChemoPlan {
   id: string;
   medication: string;
   brandName?: string;
+  form: string;
   doseCalc: string;
   dose: string;
   unit: string;
@@ -147,6 +150,9 @@ interface SupportiveCare {
   id: string;
   medication: string;
   brandName?: string;
+  form: string;
+  dose?: string;
+  unit?: string;
   adminNotes: string;
   remarks: string;
   dilutions?: DilutionDetail[];
@@ -194,6 +200,222 @@ const getDurationUnitOptions = (
   }
   return options;
 };
+
+const DOSAGE_FORM_OPTIONS = [
+  "Injection",
+  "Infusion",
+  "Tablet",
+  "Capsule",
+  "Oral Solution",
+  "Oral Suspension",
+  "Concentrate for Infusion",
+  "Powder for Injection",
+  "Powder for Infusion",
+  "Cream",
+  "Gel",
+  "Ointment",
+  "Intrathecal Injection",
+  "Implant",
+  "Others",
+];
+
+// Legacy protocol items store the role name in drug_type; a real dosage form
+// replaces that value while drug_role keeps PREMEDICATION/PRIMARY/SUPPORTIVE.
+const ROLE_DRUG_TYPES = new Set(["PREMEDICATION", "PRIMARY", "SUPPORTIVE"]);
+const formFromDrugType = (drugType?: string | null): string =>
+  drugType && !ROLE_DRUG_TYPES.has(drugType) ? drugType : "";
+
+const OTHERS_LABEL = "Others";
+const ensureOthersLastStr = (opts: string[]): string[] => [
+  ...opts.filter((o) => o !== OTHERS_LABEL),
+  OTHERS_LABEL,
+];
+const ensureOthersLastOpts = <T extends { label: string; value: string }>(
+  opts: T[],
+): T[] => [
+  ...opts.filter((o) => o.label !== OTHERS_LABEL && o.value !== OTHERS_LABEL),
+  { label: OTHERS_LABEL, value: OTHERS_LABEL } as T,
+];
+
+const PROTOCOL_OTHERS_INPUT_CLS =
+  "w-full h-9 pl-3 pr-8 bg-[#f8fafc] border border-[#dde4ec] rounded-[11px] text-[13.5px] text-[#17212e] placeholder:text-[#a7b2bf] outline-none transition-all duration-150 hover:border-[#c7d2dd] hover:bg-[#f5f8fb] focus:border-[#12335c] focus:bg-white focus:ring-3 focus:ring-[#12335c]/15 disabled:bg-[#f1f3f5] disabled:text-[#9aa5b1] disabled:cursor-not-allowed";
+
+type ProtocolSelectOption = string | { label: string; value: string };
+
+interface ProtocolSelectProps {
+  options: ProtocolSelectOption[];
+  value?: string;
+  onValueChange?: (value: string) => void;
+  placeholder?: string;
+  emptyMessage?: string;
+  disabled?: boolean;
+  loading?: boolean;
+  className?: string;
+}
+
+function ProtocolSelect({
+  options,
+  value,
+  onValueChange,
+  placeholder,
+  emptyMessage,
+  disabled,
+  loading,
+  className,
+}: ProtocolSelectProps) {
+  const [othersMode, setOthersMode] = useState(value === OTHERS_LABEL);
+  const [customText, setCustomText] = useState("");
+
+  useEffect(() => {
+    if (value === OTHERS_LABEL) setOthersMode(true);
+  }, [value]);
+
+  if (othersMode && !loading) {
+    const shown = value === OTHERS_LABEL ? customText : value ?? "";
+    return (
+      <div className="relative w-full">
+        <input
+          value={shown}
+          onChange={(e) => {
+            const v = e.target.value;
+            setCustomText(v);
+            onValueChange?.(v === "" ? OTHERS_LABEL : v);
+          }}
+          placeholder="Type other..."
+          disabled={disabled}
+          className={`${PROTOCOL_OTHERS_INPUT_CLS} ${className ?? ""}`}
+        />
+        {!disabled ? (
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label="Back to options"
+            onClick={() => {
+              setOthersMode(false);
+              setCustomText("");
+              onValueChange?.("");
+            }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors focus:outline-none"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <FormProtocolDropdown
+      options={options}
+      value={value}
+      onValueChange={(v) => {
+        if (v === OTHERS_LABEL) {
+          setOthersMode(true);
+          setCustomText("");
+        } else {
+          setOthersMode(false);
+          setCustomText("");
+        }
+        onValueChange?.(v);
+      }}
+      placeholder={placeholder}
+      emptyMessage={emptyMessage}
+      disabled={disabled}
+      loading={loading}
+      className={className}
+    />
+  );
+}
+
+interface ProtocolMultiSelectProps {
+  options: { label: string; value: string }[];
+  values: string[];
+  onValuesChange: (values: string[]) => void;
+  placeholder?: string;
+  emptyMessage?: string;
+  disabled?: boolean;
+  loading?: boolean;
+  className?: string;
+}
+
+function ProtocolMultiSelect({
+  options,
+  values,
+  onValuesChange,
+  placeholder,
+  emptyMessage,
+  disabled,
+  loading,
+  className,
+}: ProtocolMultiSelectProps) {
+  const [customOpts, setCustomOpts] = useState<{ label: string; value: string }[]>([]);
+  const [customText, setCustomText] = useState("");
+  const merged = [
+    ...options,
+    ...customOpts.filter((c) => !options.some((o) => o.value === c.value)),
+  ];
+  const showOthersInput = values.includes(OTHERS_LABEL);
+
+  const addCustom = () => {
+    const t = customText.trim();
+    if (!t) return;
+    setCustomOpts((prev) => [
+      ...prev.filter((c) => c.value !== t),
+      { label: t, value: t },
+    ]);
+    onValuesChange(values.filter((v) => v !== OTHERS_LABEL).concat(t));
+    setCustomText("");
+  };
+
+  return (
+    <div className="w-full">
+      <FormProtocolMultiSelect
+        options={merged}
+        values={values}
+        onValuesChange={onValuesChange}
+        placeholder={placeholder}
+        emptyMessage={emptyMessage}
+        disabled={disabled}
+        loading={loading}
+        className={className}
+      />
+      {showOthersInput && !disabled ? (
+        <div className="flex items-center gap-1.5 mt-1.5">
+          <input
+            value={customText}
+            onChange={(e) => setCustomText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addCustom();
+              }
+            }}
+            placeholder="Type other..."
+            className={`${PROTOCOL_OTHERS_INPUT_CLS} flex-1`}
+          />
+          <button
+            type="button"
+            onClick={addCustom}
+            className="h-9 px-3 rounded-[11px] text-[12.5px] font-semibold bg-[#12335c] text-white hover:bg-[#0d2748] transition-colors focus:outline-none"
+          >
+            Add
+          </button>
+          <button
+            type="button"
+            aria-label="Remove others"
+            onClick={() => {
+              setCustomText("");
+              onValuesChange(values.filter((v) => v !== OTHERS_LABEL));
+            }}
+            className="h-9 w-9 grid place-items-center rounded-[11px] border border-[#dde4ec] text-gray-400 hover:text-gray-600 hover:bg-[#f5f8fb] transition-colors focus:outline-none"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 const DOSE_CALC_OPTIONS = [
   "BSA (mg/m²)",
@@ -245,9 +467,9 @@ export default function CreateProtocol() {
   const [days, setDays] = useState<Array<{ dayNumber: number; protocolDayId?: string; sameAsDay?: number }>>([{ dayNumber: 1 }]);
   const [activeDay, setActiveDay] = useState(1);
 
-  const emptyPremed = (): Premed => ({ id: "", medication: "", brandName: "", dose: "", unit: "", adminNotes: "", remarks: "", dilutions: [] });
-  const emptyChemo = (): ChemoPlan => ({ id: "", medication: "", brandName: "", doseCalc: "", dose: "", unit: "", patientDose: "", patientUnit: "", adminNotes: "", toxicity: "", remarks: "", dilutions: [] });
-  const emptySupportive = (): SupportiveCare => ({ id: "", medication: "", brandName: "", adminNotes: "", remarks: "", dilutions: [] });
+  const emptyPremed = (): Premed => ({ id: "", medication: "", brandName: "", form: "", dose: "", unit: "", adminNotes: "", remarks: "", dilutions: [] });
+  const emptyChemo = (): ChemoPlan => ({ id: "", medication: "", brandName: "", form: "", doseCalc: "", dose: "", unit: "", patientDose: "", patientUnit: "", adminNotes: "", toxicity: "", remarks: "", dilutions: [] });
+  const emptySupportive = (): SupportiveCare => ({ id: "", medication: "", brandName: "", form: "", dose: "", unit: "", adminNotes: "", remarks: "", dilutions: [] });
     const emptyDilution = (): DilutionDetail => ({ dilutionId: "", id: "", medication: "", brandName: "", form: "", dose: "", unit: "", volume: "", volumeUnit: "", diluent: "" });
     const emptyPost = (): PostTreatment => ({ id: "", form: "", medication: "", brandName: "", dose: "", unit: "", frequency: "", instructions: "", duration: "", durationDays: "D", remarks: "" });
 
@@ -291,6 +513,63 @@ export default function CreateProtocol() {
     if (selectedVal && !opts.some((o) => o.value === selectedVal)) {
       opts.unshift({ label: brandVal || selectedVal, value: selectedVal });
     }
+    return ensureOthersLastOpts(opts);
+  };
+
+  // Shared BRAND dropdown options: current value + brands already used in the
+  // section + medicine/generic names from the loaded list (common brand source).
+  const getBrandDropdownOptions = (
+    rows: Array<{ brandName?: string }>,
+    current: string | undefined,
+    meds: MedicineOption[] = [],
+    selectedMedId?: string,
+  ) => {
+    const seen = new Set<string>();
+    const opts: string[] = [];
+    const push = (v?: string | null) => {
+      const t = (v ?? "").trim();
+      if (t && !seen.has(t)) {
+        seen.add(t);
+        opts.push(t);
+      }
+    };
+    push(current);
+    rows.forEach((r) => push(r.brandName));
+    meds.forEach((m) => {
+      push(m.medicine_name);
+      push(m.generic_name);
+    });
+    const selectedMed = meds.find((m) => m.medicine_id === selectedMedId);
+    if (selectedMed) {
+      push(selectedMed.medicine_name);
+      push(selectedMed.generic_name);
+    }
+    if (opts.length === 0) opts.push("Brand name");
+    return ensureOthersLastStr(opts);
+  };
+
+  const COMMON_PROTOCOL_DOSES = [
+    "0.5", "1", "1.5", "2", "2.5", "4", "5", "7.5", "8", "10", "12.5", "15",
+    "20", "25", "30", "40", "50", "60", "75", "80", "100", "120", "125", "140",
+    "150", "160", "200", "210", "250", "300", "350", "400", "450", "500", "600",
+    "750", "800", "1000", "1200", "1400", "1500", "2000", "2500", "3000", "3500", "4000",
+  ];
+
+  // Shared DOSE dropdown options: current value + doses used in the section +
+  // common protocol doses (always searchable/filterable).
+  const getDoseDropdownOptions = (rows: Array<{ dose?: string }>, current?: string) => {
+    const seen = new Set<string>();
+    const opts: string[] = [];
+    const push = (v?: string | null) => {
+      const t = String(v ?? "").trim();
+      if (t && !seen.has(t)) {
+        seen.add(t);
+        opts.push(t);
+      }
+    };
+    push(current);
+    rows.forEach((r) => push(r.dose));
+    COMMON_PROTOCOL_DOSES.forEach((d) => push(d));
     return opts;
   };
   const [fieldOptions, setFieldOptions] = useState<{
@@ -573,6 +852,7 @@ export default function CreateProtocol() {
                         id: (x.protocol_item_id as string) ?? "",
                         medication: x.medicine_id ?? x.medicine_master?.medicine_name ?? "",
                         brandName: x.drug_brand_name ?? "",
+                        form: formFromDrugType(x.drug_type),
                         dose: (x.patient_dose as any) ?? "",
                         unit: x.patient_dose_unit ?? "",
                         adminNotes: x.administration_detail ?? "",
@@ -595,6 +875,7 @@ export default function CreateProtocol() {
                         id: (x.protocol_item_id as string) ?? "",
                         medication: x.medicine_id ?? "",
                         brandName: x.drug_brand_name ?? "",
+                        form: formFromDrugType(x.drug_type),
                         doseCalc: (x as any).dose_calculation_method ?? "",
                         dose: (x.dosage as any) ?? "",
                         unit: x.dosage_unit ?? "",
@@ -622,6 +903,9 @@ export default function CreateProtocol() {
                           id: (x.protocol_item_id as string) ?? "",
                           medication: x.medicine_id ?? "",
                           brandName: x.drug_brand_name ?? "",
+                          form: formFromDrugType(x.drug_type),
+                          dose: x.dosage != null ? String(x.dosage) : "",
+                          unit: x.dosage_unit ?? "",
                           adminNotes: x.administration_detail ?? "",
                           remarks: x.remarks ?? "",
                           dilutions: xs.map((d) => ({
@@ -644,6 +928,9 @@ export default function CreateProtocol() {
                           id: (x.protocol_item_id as string) ?? "",
                           medication: x.medicine_id ?? "",
                           brandName: x.drug_brand_name ?? "",
+                          form: formFromDrugType(x.drug_type),
+                          dose: x.dosage != null ? String(x.dosage) : "",
+                          unit: x.dosage_unit ?? "",
                           adminNotes: x.administration_detail ?? "",
                           remarks: x.remarks ?? "",
                           dilutions: [{
@@ -663,6 +950,9 @@ export default function CreateProtocol() {
                           id: (x.protocol_item_id as string) ?? "",
                           medication: x.medicine_id ?? "",
                           brandName: x.drug_brand_name ?? "",
+                          form: formFromDrugType(x.drug_type),
+                          dose: x.dosage != null ? String(x.dosage) : "",
+                          unit: x.dosage_unit ?? "",
                           adminNotes: x.administration_detail ?? "",
                           remarks: x.remarks ?? "",
                           dilutions: [],
@@ -878,7 +1168,7 @@ export default function CreateProtocol() {
             medicine_id: row.medication.trim(),
             drug_brand_name: row.brandName?.trim() || null,
             drug_role: "PREMEDICATION",
-            drug_type: "PREMEDICATION",
+            drug_type: row.form?.trim() || "PREMEDICATION",
             drug_sequence: seq++,
             patient_dose: row.dose || null,
             patient_dose_unit: row.unit || null,
@@ -906,7 +1196,7 @@ export default function CreateProtocol() {
             medicine_id: row.medication.trim(),
             drug_brand_name: row.brandName?.trim() || null,
             drug_role: "PRIMARY",
-            drug_type: "PRIMARY",
+            drug_type: row.form?.trim() || "PRIMARY",
             drug_sequence: seq++,
             dosage: row.dose || null,
             dosage_unit: row.unit || null,
@@ -938,8 +1228,10 @@ export default function CreateProtocol() {
             medicine_id: row.medication.trim(),
             drug_brand_name: row.brandName?.trim() || null,
             drug_role: "SUPPORTIVE",
-            drug_type: "SUPPORTIVE",
+            drug_type: row.form?.trim() || "SUPPORTIVE",
             drug_sequence: seq++,
+            dosage: row.dose || null,
+            dosage_unit: row.unit || null,
             administration_detail: row.adminNotes || null,
             remarks: row.remarks || null,
             administration_day: dayNum,
@@ -1080,12 +1372,12 @@ export default function CreateProtocol() {
     }
   };
 
-  const addPremed = () => setPremeds([...premeds, { id: "", medication: "", dose: "", unit: "", adminNotes: "", remarks: "" }]);
+  const addPremed = () => setPremeds([...premeds, { id: "", medication: "", form: "", dose: "", unit: "", adminNotes: "", remarks: "" }]);
   const removePremed = (idx: number) => setPremeds(premeds.filter((_, i) => i !== idx));
   const addChemoPlan = () =>
-    setChemoPlans([...chemoPlans, { id: "", medication: "", doseCalc: "", dose: "", unit: "", patientDose: "", patientUnit: "", adminNotes: "", toxicity: "", remarks: "" }]);
+    setChemoPlans([...chemoPlans, { id: "", medication: "", form: "", doseCalc: "", dose: "", unit: "", patientDose: "", patientUnit: "", adminNotes: "", toxicity: "", remarks: "" }]);
   const removeChemoPlan = (idx: number) => setChemoPlans(chemoPlans.filter((_, i) => i !== idx));
-  const addSupportive = () => setSupportive([...supportive, { id: "", medication: "", adminNotes: "", remarks: "" }]);
+  const addSupportive = () => setSupportive([...supportive, { id: "", medication: "", form: "", dose: "", unit: "", adminNotes: "", remarks: "" }]);
   const removeSupportive = (idx: number) => setSupportive(supportive.filter((_, i) => i !== idx));
   const addDilution = () => setDilution([...dilution, { dilutionId: "", id: "", medication: "", form: "", dose: "", unit: "", volume: "", volumeUnit: "", diluent: "" }]);
   const removeDilution = (idx: number) => setDilution(dilution.filter((_, i) => i !== idx));
@@ -1137,9 +1429,11 @@ export default function CreateProtocol() {
     for (const m of premedMeds) {
       if (m?.medicine_id && m?.medicine_name && !map.has(m.medicine_id)) map.set(m.medicine_id, m.medicine_name);
     }
-    return Array.from(map.entries())
-      .map(([value, label]) => ({ label, value }))
-      .sort((a, b) => a.label.localeCompare(b.label));
+    return ensureOthersLastOpts(
+      Array.from(map.entries())
+        .map(([value, label]) => ({ label, value }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    );
   })();
 
   const selectedCancerTypeName = cancerTypes
@@ -1383,7 +1677,7 @@ export default function CreateProtocol() {
                     <label className={labelCls}>
                       Cancer Type(s) <Req />
                     </label>
-                    <FormProtocolMultiSelect
+                    <ProtocolMultiSelect
                       options={cancerTypes.map((c) => ({ label: c.cancer_type, value: c.cancer_type_id }))}
                       values={cancerTypeIds}
                       onValuesChange={setCancerTypeIds}
@@ -1393,7 +1687,7 @@ export default function CreateProtocol() {
                   </div>
                   <div>
                     <label className={labelCls}>Cancer Subtype(s)</label>
-                    <FormProtocolMultiSelect
+                    <ProtocolMultiSelect
                       options={subtypes.map((s) => ({ label: s.subtype_name, value: s.subtype_id }))}
                       values={subtypeIds}
                       onValuesChange={setSubtypeIds}
@@ -1403,7 +1697,7 @@ export default function CreateProtocol() {
                   </div>
                   <div>
                     <label className={labelCls}>Treatment Plan</label>
-                    <FormProtocolDropdown
+                    <ProtocolSelect
                       options={treatmentIntentOptions.map((t) => ({ label: t, value: t }))}
                       value={treatmentIntent}
                       onValueChange={setTreatmentIntent}
@@ -1573,20 +1867,36 @@ export default function CreateProtocol() {
               {sections.premeds && (
                 <>
                   <ProtocolGridTable
-                    columns={["#", "MEDICATION / DRUG *", "BRAND", "DOSE", "UNIT", "ADMIN NOTES", "REMARKS", "ACTIONS"]}
-                    template="44px 1.5fr 1.2fr 1fr 140px 1.5fr 1.5fr 40px"
+                    columns={["#", "FORM", "MEDICATION / DRUG *", "BRAND", "DOSE", "UNIT", "ADMIN NOTES", "REMARKS", "ACTIONS"]}
+                    template="44px 1.1fr 1.4fr 1.1fr 0.9fr 130px 1.3fr 1.3fr 40px"
                     addLabel="+ Add Row"
                     onAdd={addPremed}
                     disabled={disabled}
                     rows={premeds.map((row, idx) => [
                       idx + 1,
-                      <FormProtocolDropdown
+                      <ProtocolSelect
+                        key="f"
+                        options={ensureOthersLastStr(Array.from(new Set([...DOSAGE_FORM_OPTIONS, ...fieldOptions.dilution_forms, row.form].filter(Boolean))))}
+                        value={row.form}
+                        onValueChange={(v) => {
+                          const n = [...premeds];
+                          n[idx].form = v;
+                          setPremeds(n);
+                        }}
+                        placeholder="Select form"
+                        emptyMessage="No forms found"
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <ProtocolSelect
                         key="m"
                         options={getDropdownOptions(premedMeds, row.medication, row.brandName)}
                         value={row.medication}
                         onValueChange={(v) => {
                           const n = [...premeds];
                           n[idx].medication = v;
+                          const med = premedMeds.find((m) => m.medicine_id === v);
+                          if (!n[idx].form && med?.dosage_form) n[idx].form = med.dosage_form;
                           setPremeds(n);
                         }}
                         placeholder={
@@ -1607,33 +1917,35 @@ export default function CreateProtocol() {
                         disabled={disabled || cancerTypeIds.length === 0}
                         className="h-8"
                       />,
-                      <input
+                      <ProtocolSelect
                         key="b"
-                        type="text"
+                        options={getBrandDropdownOptions(premeds, row.brandName, premedMeds, row.medication)}
                         value={row.brandName ?? ""}
-                        onChange={(e) => {
+                        onValueChange={(v) => {
                           const n = [...premeds];
-                          n[idx].brandName = e.target.value;
+                          n[idx].brandName = v;
                           setPremeds(n);
                         }}
-                        className={ptInput}
-                        placeholder="Brand name"
+                        placeholder="Select brand"
+                        emptyMessage="No brand options"
                         disabled={disabled}
+                        className="h-8"
                       />,
-                      <input
+                      <ProtocolSelect
                         key="d"
-                        type="text"
+                        options={getDoseDropdownOptions(premeds, row.dose)}
                         value={row.dose}
-                        onChange={(e) => {
+                        onValueChange={(v) => {
                           const n = [...premeds];
-                          n[idx].dose = e.target.value;
+                          n[idx].dose = v;
                           setPremeds(n);
                         }}
-                        className={ptInput}
-                        placeholder="Enter dose"
+                        placeholder="Select dose"
+                        emptyMessage="No dose options"
                         disabled={disabled}
+                        className="h-8"
                       />,
-                      <FormProtocolDropdown
+                      <ProtocolSelect
                         key="u"
                         options={Array.from(new Set([...fieldOptions.dosage_units, row.unit].filter(Boolean)))}
                         value={row.unit}
@@ -1721,14 +2033,28 @@ export default function CreateProtocol() {
               {sections.chemo && (
                 <>
                   <ProtocolGridTable
-                    columns={["#", "MEDICATION *", "BRAND", "DOSE CALC", "DOSE", "UNIT", "PATIENT DOSE", "UNIT", "ADMIN NOTES", "TOXICITY", "REMARKS", "ACTIONS"]}
-                    template="44px 1.8fr 1.2fr 1.1fr 0.7fr 1.2fr 0.7fr 1.0fr 1.4fr 0.9fr 0.9fr 68px"
+                    columns={["#", "FORM", "MEDICATION *", "BRAND", "DOSE", "DOSE CALC", "UNIT", "PATIENT DOSE", "UNIT", "ADMIN NOTES", "TOXICITY", "REMARKS", "ACTIONS"]}
+                    template="44px 1.1fr 1.6fr 1.1fr 0.7fr 1.1fr 1.1fr 0.7fr 1.0fr 1.3fr 0.9fr 0.9fr 68px"
                     addLabel="+ Add Row"
                     onAdd={addChemoPlan}
                     disabled={disabled}
                     rows={chemoPlans.map((row, idx) => [
                       idx + 1,
-                      <FormProtocolDropdown
+                      <ProtocolSelect
+                        key="f"
+                        options={ensureOthersLastStr(Array.from(new Set([...DOSAGE_FORM_OPTIONS, ...fieldOptions.dilution_forms, row.form].filter(Boolean))))}
+                        value={row.form}
+                        onValueChange={(v) => {
+                          const n = [...chemoPlans];
+                          n[idx].form = v;
+                          setChemoPlans(n);
+                        }}
+                        placeholder="Select form"
+                        emptyMessage="No forms found"
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <ProtocolSelect
                         key="m"
                         options={getDropdownOptions(chemoMeds, row.medication, row.brandName)}
                         value={row.medication}
@@ -1742,6 +2068,7 @@ export default function CreateProtocol() {
                             else if (inferred === "Weight") n[idx].doseCalc = "Weight (mg/kg)";
                             else n[idx].doseCalc = "BSA (mg/m²)";
                           }
+                          if (!n[idx].form && medObj?.dosage_form) n[idx].form = medObj.dosage_form;
                           setChemoPlans(n);
                         }}
                         placeholder={
@@ -1762,20 +2089,44 @@ export default function CreateProtocol() {
                         disabled={disabled || cancerTypeIds.length === 0}
                         className="h-8"
                       />,
-                      <input
+                      <ProtocolSelect
                         key="b"
-                        type="text"
+                        options={getBrandDropdownOptions(chemoPlans, row.brandName, chemoMeds, row.medication)}
                         value={row.brandName ?? ""}
-                        onChange={(e) => {
+                        onValueChange={(v) => {
                           const n = [...chemoPlans];
-                          n[idx].brandName = e.target.value;
+                          n[idx].brandName = v;
                           setChemoPlans(n);
                         }}
-                        className={ptInput}
-                        placeholder="Brand name"
+                        placeholder="Select brand"
+                        emptyMessage="No brand options"
                         disabled={disabled}
+                        className="h-8"
                       />,
-                      <FormProtocolDropdown
+                      <ProtocolSelect
+                        key="d"
+                        options={getDoseDropdownOptions(chemoPlans, row.dose)}
+                        value={row.dose}
+                        onValueChange={(v) => {
+                          const n = [...chemoPlans];
+                          n[idx].dose = v;
+                          const numDose = parseFloat(v);
+                          if (!isNaN(numDose) && numDose > 0 && n[idx].doseCalc) {
+                            const calcPatientDose = calculatePatientDoseFromTemplate(numDose, n[idx].doseCalc);
+                            if (calcPatientDose != null) {
+                              n[idx].patientDose = String(calcPatientDose);
+                            }
+                          } else if (!v.trim()) {
+                            n[idx].patientDose = "";
+                          }
+                          setChemoPlans(n);
+                        }}
+                        placeholder="Select dose"
+                        emptyMessage="No dose options"
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <ProtocolSelect
                         key="dc"
                         options={DOSE_CALC_OPTIONS}
                         value={row.doseCalc}
@@ -1802,30 +2153,7 @@ export default function CreateProtocol() {
                         disabled={disabled}
                         className="h-8"
                       />,
-                      <input
-                        key="d"
-                        type="text"
-                        value={row.dose}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          const n = [...chemoPlans];
-                          n[idx].dose = val;
-                          const numDose = parseFloat(val);
-                          if (!isNaN(numDose) && numDose > 0 && n[idx].doseCalc) {
-                            const calcPatientDose = calculatePatientDoseFromTemplate(numDose, n[idx].doseCalc);
-                            if (calcPatientDose != null) {
-                              n[idx].patientDose = String(calcPatientDose);
-                            }
-                          } else if (!val.trim()) {
-                            n[idx].patientDose = "";
-                          }
-                          setChemoPlans(n);
-                        }}
-                        className={ptInput}
-                        placeholder="8"
-                        disabled={disabled}
-                      />,
-                      <FormProtocolDropdown
+                      <ProtocolSelect
                         key="u"
                         options={Array.from(new Set([...fieldOptions.dosage_units, row.unit, "mg/m²", "mg/kg", "AUC", "mg", "g", "mcg"].filter(Boolean)))}
                         value={row.unit}
@@ -1969,20 +2297,36 @@ export default function CreateProtocol() {
               {sections.supportive && (
                 <>
                   <ProtocolGridTable
-                    columns={["#", "SUPPORTIVE MEDICINE *", "BRAND", "ADMIN NOTES", "REMARKS", "ACTIONS"]}
-                    template="44px 2fr 1.2fr 1.5fr 1.5fr 40px"
+                    columns={["#", "FORM", "SUPPORTIVE MEDICINE *", "BRAND", "DOSE", "UNIT", "ADMIN NOTES", "REMARKS", "ACTIONS"]}
+                    template="44px 1.1fr 1.7fr 1.1fr 1fr 130px 1.4fr 1.4fr 40px"
                     addLabel="+ Add Row"
                     onAdd={addSupportive}
                     disabled={disabled}
                     rows={supportive.map((row, idx) => [
                       idx + 1,
-                      <FormProtocolDropdown
+                      <ProtocolSelect
+                        key="f"
+                        options={ensureOthersLastStr(Array.from(new Set([...DOSAGE_FORM_OPTIONS, ...fieldOptions.dilution_forms, row.form].filter(Boolean))))}
+                        value={row.form}
+                        onValueChange={(v) => {
+                          const n = [...supportive];
+                          n[idx].form = v;
+                          setSupportive(n);
+                        }}
+                        placeholder="Select form"
+                        emptyMessage="No forms found"
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <ProtocolSelect
                         key="m"
                         options={getDropdownOptions(supportiveMeds, row.medication, row.brandName)}
                         value={row.medication}
                         onValueChange={(v) => {
                           const n = [...supportive];
                           n[idx].medication = v;
+                          const med = supportiveMeds.find((m) => m.medicine_id === v);
+                          if (!n[idx].form && med?.dosage_form) n[idx].form = med.dosage_form;
                           setSupportive(n);
                         }}
                         placeholder={
@@ -2003,18 +2347,47 @@ export default function CreateProtocol() {
                         disabled={disabled || cancerTypeIds.length === 0}
                         className="h-8"
                       />,
-                      <input
+                      <ProtocolSelect
                         key="b"
-                        type="text"
+                        options={getBrandDropdownOptions(supportive, row.brandName, supportiveMeds, row.medication)}
                         value={row.brandName ?? ""}
-                        onChange={(e) => {
+                        onValueChange={(v) => {
                           const n = [...supportive];
-                          n[idx].brandName = e.target.value;
+                          n[idx].brandName = v;
                           setSupportive(n);
                         }}
-                        className={ptInput}
-                        placeholder="Brand name"
+                        placeholder="Select brand"
+                        emptyMessage="No brand options"
                         disabled={disabled}
+                        className="h-8"
+                      />,
+                      <ProtocolSelect
+                        key="d"
+                        options={getDoseDropdownOptions(supportive, row.dose)}
+                        value={row.dose ?? ""}
+                        onValueChange={(v) => {
+                          const n = [...supportive];
+                          n[idx].dose = v;
+                          setSupportive(n);
+                        }}
+                        placeholder="Select dose"
+                        emptyMessage="No dose options"
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <ProtocolSelect
+                        key="u"
+                        options={Array.from(new Set([...fieldOptions.dosage_units, row.unit].filter(Boolean)))}
+                        value={row.unit ?? ""}
+                        onValueChange={(v) => {
+                          const n = [...supportive];
+                          n[idx].unit = v;
+                          setSupportive(n);
+                        }}
+                        placeholder="Select unit"
+                        emptyMessage="No units found"
+                        disabled={disabled}
+                        className="h-8"
                       />,
                       <input
                         key="an"
@@ -2070,44 +2443,16 @@ export default function CreateProtocol() {
               {sections.dilution && (
                 <>
                   <ProtocolGridTable
-                    columns={["#", "MEDICATION", "BRAND", "FORM", "DOSE", "DOSE UNIT", "DILUTION VOLUME", "VOLUME UNIT", "DILUENT", "ACTIONS"]}
-                    template="44px 1.8fr 1.2fr 1.1fr 0.8fr 1.1fr 1fr 1.1fr 1.5fr 40px"
+                    columns={["#", "FORM", "MEDICATION", "BRAND", "DOSE", "DOSE UNIT", "DILUTION VOLUME", "VOLUME UNIT", "DILUENT", "ACTIONS"]}
+                    template="44px 1.1fr 1.8fr 1.2fr 0.8fr 1.1fr 1fr 1.1fr 1.5fr 40px"
                     addLabel="+ Add Row"
                     onAdd={addDilution}
                     disabled={disabled}
                     rows={dilution.map((row, idx) => [
                       idx + 1,
-                      <FormProtocolDropdown
-                        key="m"
-                        options={allAvailableDilutionMeds}
-                        value={row.medication}
-                        onValueChange={(v) => {
-                          const n = [...dilution];
-                          n[idx].medication = v;
-                          setDilution(n);
-                        }}
-                        placeholder={loadingDilutionMeds ? "Loading medicines..." : "Select medicine"}
-                        emptyMessage="No medicines found"
-                        loading={loadingDilutionMeds}
-                        disabled={disabled}
-                        className="h-8"
-                      />,
-                      <input
-                        key="b"
-                        type="text"
-                        value={row.brandName ?? ""}
-                        onChange={(e) => {
-                          const n = [...dilution];
-                          n[idx].brandName = e.target.value;
-                          setDilution(n);
-                        }}
-                        className={ptInput}
-                        placeholder="Brand"
-                        disabled={disabled}
-                      />,
-                      <FormProtocolDropdown
+                      <ProtocolSelect
                         key="f"
-                        options={fieldOptions.dilution_forms}
+                        options={ensureOthersLastStr(Array.from(new Set([...DOSAGE_FORM_OPTIONS, ...fieldOptions.dilution_forms, row.form].filter(Boolean))))}
                         value={row.form}
                         onValueChange={(v) => {
                           const n = [...dilution];
@@ -2119,15 +2464,45 @@ export default function CreateProtocol() {
                         disabled={disabled}
                         className="h-8"
                       />,
-                      <input
-                        key="d"
-                        type="text"
-                        value={row.dose}
-                        onChange={(e) => {
-                          const val = e.target.value;
+                      <ProtocolSelect
+                        key="m"
+                        options={allAvailableDilutionMeds}
+                        value={row.medication}
+                        onValueChange={(v) => {
                           const n = [...dilution];
-                          n[idx].dose = val;
-                          const numDose = parseFloat(val);
+                          n[idx].medication = v;
+                          const med = dilutionMeds.find((m) => m.medicine_id === v);
+                          if (!n[idx].form && med?.dosage_form) n[idx].form = med.dosage_form;
+                          setDilution(n);
+                        }}
+                        placeholder={loadingDilutionMeds ? "Loading medicines..." : "Select medicine"}
+                        emptyMessage="No medicines found"
+                        loading={loadingDilutionMeds}
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <ProtocolSelect
+                        key="b"
+                        options={getBrandDropdownOptions(dilution, row.brandName, dilutionMeds, row.medication)}
+                        value={row.brandName ?? ""}
+                        onValueChange={(v) => {
+                          const n = [...dilution];
+                          n[idx].brandName = v;
+                          setDilution(n);
+                        }}
+                        placeholder="Select brand"
+                        emptyMessage="No brand options"
+                        disabled={disabled}
+                        className="h-8"
+                      />,
+                      <ProtocolSelect
+                        key="d"
+                        options={getDoseDropdownOptions(dilution, row.dose)}
+                        value={row.dose}
+                        onValueChange={(v) => {
+                          const n = [...dilution];
+                          n[idx].dose = v;
+                          const numDose = parseFloat(v);
                           if (!isNaN(numDose) && numDose > 0 && n[idx].unit) {
                             const vol = convertMassToVolume(numDose, n[idx].unit, n[idx].volumeUnit || "CC");
                             if (vol != null) {
@@ -2137,11 +2512,12 @@ export default function CreateProtocol() {
                           }
                           setDilution(n);
                         }}
-                        className={ptInput}
-                        placeholder="Dose"
+                        placeholder="Select dose"
+                        emptyMessage="No dose options"
                         disabled={disabled}
+                        className="h-8"
                       />,
-                      <FormProtocolDropdown
+                      <ProtocolSelect
                         key="du"
                         options={Array.from(new Set([...fieldOptions.dilution_dose_units, row.unit, "mg", "g", "mcg", "kg"].filter(Boolean)))}
                         value={row.unit}
@@ -2184,7 +2560,7 @@ export default function CreateProtocol() {
                         placeholder="100"
                         disabled={disabled}
                       />,
-                      <FormProtocolDropdown
+                      <ProtocolSelect
                         key="vu"
                         options={Array.from(new Set([...fieldOptions.dilution_volume_units, row.volumeUnit, "CC", "mL", "L"].filter(Boolean)))}
                         value={row.volumeUnit}
@@ -2206,7 +2582,7 @@ export default function CreateProtocol() {
                         disabled={disabled}
                         className="h-8"
                       />,
-                      <FormProtocolDropdown
+                      <ProtocolSelect
                         key="dl"
                         options={fieldOptions.diluents}
                         value={row.diluent}
@@ -2249,7 +2625,7 @@ export default function CreateProtocol() {
                 <>
                   <ProtocolGridTable
                     columns={["#", "FORM", "MEDICATION", "BRAND", "DOSE", "UNIT", "FREQUENCY", "INSTRUCTIONS", "DURATION", "DAYS", "REMARKS", "ACTIONS"]}
-                    template="44px 85px 200px 130px 75px 70px 105px 140px 75px 120px 120px 60px"
+                    template="44px 140px 200px 130px 75px 70px 105px 140px 75px 120px 120px 60px"
                     addLabel="+ Add Row"
                     onAdd={addPost}
                     disabled={disabled}
@@ -2258,26 +2634,30 @@ export default function CreateProtocol() {
                       const isDurationFilledWithNumber = /^\d+(\.\d+)?$/.test(String(row.duration ?? "").trim());
                       return [
                         idx + 1,
-                      <input
+                      <ProtocolSelect
                         key="f"
-                        type="text"
+                        options={ensureOthersLastStr(Array.from(new Set([...DOSAGE_FORM_OPTIONS, ...fieldOptions.dilution_forms, row.form].filter(Boolean))))}
                         value={row.form}
-                        onChange={(e) => {
+                        onValueChange={(v) => {
                           const n = [...post];
-                          n[idx].form = e.target.value;
+                          n[idx].form = v;
                           setPost(n);
                         }}
-                        className={ptInput}
-                        placeholder="Tab"
+                        placeholder="Select form"
+                        emptyMessage="No forms found"
                         disabled={disabled}
+                        className="h-8"
                       />,
-                      <FormProtocolDropdown
+                      <ProtocolSelect
                         key="m"
                         options={getDropdownOptions(dischargeMeds.length > 0 ? dischargeMeds : premedMeds, row.medication, row.brandName)}
                         value={row.medication}
                         onValueChange={(v) => {
                           const n = [...post];
                           n[idx].medication = v;
+                          const medList = dischargeMeds.length > 0 ? dischargeMeds : premedMeds;
+                          const med = medList.find((m) => m.medicine_id === v);
+                          if (!n[idx].form && med?.dosage_form) n[idx].form = med.dosage_form;
                           setPost(n);
                         }}
                         placeholder={
@@ -2376,7 +2756,7 @@ export default function CreateProtocol() {
                         placeholder="Duration"
                         disabled={disabled}
                       />,
-                      <FormProtocolDropdown
+                      <ProtocolSelect
                         key="days"
                         options={getDurationUnitOptions(row.duration, row.durationDays)}
                         value={getDurationUnitCode(row.durationDays)}

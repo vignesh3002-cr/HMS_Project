@@ -16,6 +16,23 @@ export interface LabOrderRecord {
   patient_history_id?: string | null;
   created_at?: string;
   updated_at?: string;
+  patient_history?: {
+    patient_history_id: string;
+    patient_id: string;
+    visit_type?: string | null;
+    visit_status?: string | null;
+  } | null;
+  employees?: {
+    employee_id: string;
+    first_name: string;
+    last_name?: string | null;
+    designation?: string | null;
+  } | null;
+  department_master?: {
+    department_id: string;
+    department_name: string;
+  } | null;
+  lab_order_item?: LabOrderItemRecord[];
 }
 
 export interface LabOrderItemRecord {
@@ -29,6 +46,9 @@ export interface LabOrderItemRecord {
   net_amount?: number | string | null;
   item_status?: string | null;
   remarks?: string | null;
+  barcode?: string | null;
+  sample_id?: string | null;
+  specimen_type?: string | null;
   created_at?: string;
   updated_at?: string;
   branch_id?: string | null;
@@ -46,8 +66,20 @@ export interface LabOrderItemRecord {
     test_name: string;
     test_code?: string | null;
     unit?: string | null;
+    sample_type?: string | null;
     reference_range?: string | null;
+    tat_hours?: number | string | null;
   } | null;
+  sample_collection?: {
+    id?: number;
+    sample_collection_id: string;
+    lab_order_item_id: string;
+    barcode?: string | null;
+    container_type?: string | null;
+    collection_status?: string | null;
+    remarks?: string | null;
+    collected_by?: string | null;
+  }[];
 }
 
 export const labOrderApi = {
@@ -63,6 +95,17 @@ export const labOrderApi = {
 
   getAll: () =>
     API.get<{ success: boolean; data: LabOrderRecord[] }>("/lab-order"),
+
+  getById: (id: string) =>
+    API.get<{ success: boolean; data: LabOrderRecord }>(
+      `/lab-order/${encodeURIComponent(id)}`
+    ),
+
+  update: (id: string, payload: Partial<LabOrderRecord>) =>
+    API.put<{ success: boolean; data: LabOrderRecord }>(
+      `/lab-order/${encodeURIComponent(id)}`,
+      payload
+    ),
 };
 
 export const labOrderItemApi = {
@@ -85,5 +128,17 @@ export const labOrderItemApi = {
   getById: (id: string) =>
     API.get<{ success: boolean; data: LabOrderItemRecord }>(
       `/lab-order-item/${encodeURIComponent(id)}`
+    ),
+
+  update: (id: string, payload: Partial<LabOrderItemRecord>) =>
+    API.put<{ success: boolean; data: LabOrderItemRecord }>(
+      `/lab-order-item/${encodeURIComponent(id)}`,
+      payload
+    ),
+
+  generateBarcode: (items: { lab_order_item_id: string; barcode: string; sample_type?: string }[]) =>
+    API.post<{ success: boolean; message: string; data: any }>(
+      "/lab-order-item/generate-barcode",
+      { items }
     ),
 };

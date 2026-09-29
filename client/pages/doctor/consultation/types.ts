@@ -21,19 +21,25 @@ export interface MeasurementValues {
 }
 
 export type FormData = {
+  /* DD-MM-YYYY, picked from the calendar popovers. */
+  diagnosisDate: string;
+  progressionDate: string;
+  relapseDate: string;
   preDiagnosis: string;
-  molecularTesting: string;
-  molecularTestingNote: string;
-  molecularTestingDate: string;
   diseaseStatus: string;
-  laterality: string;
-  bodySite: string;
+  /* Laterality / Body Site / Grade / Score are grouped per selected cancer
+     type like T/N/M; values are qualified as `${cancerType}|${label}`. */
+  laterality: string[];
+  bodySite: string[];
   survivor: string;
+  /* Primary (first) cancer type, plus the full multi-select list. */
   type: string;
+  cancerTypes: string[];
   subType: string[];
   histomorphology: string;
   cancerStage: string[];
-  grade: string;
+  grade: string[];
+  score: string[];
   tStage: string[];
   nStage: string[];
   mStage: string[];
@@ -71,13 +77,34 @@ export type Drug = {
   unit: string;
   volume: string;
   planItemId?: string;
+  /* The medicine_master drug. Without one, `name` is a drug name the
+     doctor typed for this patient (saved as the plan item's drug_name). */
   medicineId?: string;
-  /* Unscaled protocol dose (item.dosage / protocol_dose). Rows derived
-     from the protocol carry this so the displayed dose can be re-scaled
-     live when the dose calculator selection changes (BMI vs BSA). Rows
-     the doctor typed or edited themselves have no raw dosage and are
-     never re-scaled. */
+  /* Legacy drafts only: before the per-row Dose Cal, `dose` held the
+     BSA-scaled dose and this held the protocol dose. */
   rawDose?: number | null;
+  /* Dose Cal (PRIMARY rows): selected formula (DoseCalcMethod), the
+     protocol template's own method hint ("BSA", "AUC 5", ...) and the
+     target AUC for Calvert rows. `dose` is the protocol dose. */
+  doseCalc?: string;
+  protocolDoseCalc?: string | null;
+  targetAuc?: string;
+  /* Administration details (Admin Instructions tab), saved on the plan
+     item. */
+  route?: string;
+  infusionType?: string;
+  infusionDuration?: string; // minutes
+  frequency?: string;
+  timing?: string;
+  remarks?: string;
+  administrationDetail?: string;
+  /* Plan item columns the tables don't show, carried so a saved order
+     copied to another cycle day ("As Cycle X / Day Y") stays identical. */
+  drugType?: string | null;
+  infusionRate?: string | null;
+  dilutionSolution?: string | null;
+  maximumDose?: number | null;
+  minimumDose?: number | null;
 };
 
 export type RegimenProtocolDay = {
@@ -104,6 +131,7 @@ export type RegimenProtocolItem = {
   administration_day: number | null;
   cycle_day: number | null;
   frequency: string | null;
+  dose_calculation_method?: string | null;
   timing_relative_to_primary: string | null;
   remarks: string | null;
   administration_detail: string | null;
