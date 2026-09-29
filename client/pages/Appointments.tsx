@@ -43,6 +43,13 @@ import { CriticalWrapper, CriticalCorner, CriticalDot } from "@/components/hms/C
 import { AppointmentActionMenu } from "@/components/hms/AppointmentActionMenu";
 import { AdmissionActionMenu } from "@/components/hms/AdmissionActionMenu";
 
+// Inpatients are a roster, not a day's schedule -- with no explicit status
+// filter applied, the IPD tab defaults to "currently in the hospital"
+// (everything short of discharged/cancelled) so a patient stays listed
+// until they're actually discharged, regardless of which day they were
+// admitted.
+const IPD_ACTIVE_STATUSES = ["PLANNED", "ADMITTED", "TRANSFERRED"];
+
 import DayView from "./Day view";
 import WeekView from "./Week view";
 import ExportReport from "@/components/ui/ExportReport";
@@ -367,8 +374,6 @@ const AppointmentSchedule: React.FC<{ defaultTab?: "opd" | "ipd" }> = ({ default
   const [admissions, setAdmissions] = useState<AdmissionRecord[]>([]);
   const [admissionsLoading, setAdmissionsLoading] = useState(true);
   const [ipdSearch, setIpdSearch] = useState("");
-  const [ipdSelectedDate, setIpdSelectedDate] = useState(new Date());
-  const [isIpdCalendarOpen, setIsIpdCalendarOpen] = useState(false);
   const [ipdPage, setIpdPage] = useState(1);
   const [ipdRowsPerPage, setIpdRowsPerPage] = useState(10);
   const [ipdTotal, setIpdTotal] = useState(0);
@@ -377,6 +382,15 @@ const AppointmentSchedule: React.FC<{ defaultTab?: "opd" | "ipd" }> = ({ default
   // IPD sort state — same header-toggling mechanism as the OPD table.
   const [ipdSortField, setIpdSortField] = useState("admission_date");
   const [ipdSortDirection, setIpdSortDirection] = useState<"asc" | "desc">("desc");
+
+  // IPD Date Navigator (mirrors OPD's < Today > control). `ipdNavDate` always
+  // drives the navigator label/calendar; `ipdDateFilter` stays null while the
+  // "All Active" chip is selected -- the default live in-hospital census -- and
+  // holds the chosen day once the user steps through dates, at which point the
+  // roster becomes "admissions on that day".
+  const [ipdNavDate, setIpdNavDate] = useState<Date>(new Date());
+  const [ipdDateFilter, setIpdDateFilter] = useState<Date | null>(null);
+  const [isIpdCalendarOpen, setIsIpdCalendarOpen] = useState(false);
 
   // IPD workflow state (transfer / discharge / details)
   const [activeAdmission, setActiveAdmission] = useState<AdmissionRecord | null>(null);
@@ -448,6 +462,12 @@ const AppointmentSchedule: React.FC<{ defaultTab?: "opd" | "ipd" }> = ({ default
     [ipdAppliedFilterValues.status],
   );
 
+  // The "All Active" chip only carries a count while the table is the
+  // untouched live roster (no date / search / status narrowing), so the badge
+  // always reads as the current in-hospital census, never a filtered subset.
+  const ipdShowActiveCount =
+    !ipdDateFilter && ipdAppliedStatus.length === 0 && !ipdSearch.trim();
+
   // Load Wards (for the transfer dialog)
   const fetchWards = useCallback(async () => {
     try {
@@ -464,10 +484,20 @@ const AppointmentSchedule: React.FC<{ defaultTab?: "opd" | "ipd" }> = ({ default
   const fetchAdmissions = useCallback(async () => {
     setAdmissionsLoading(true);
     try {
+      // Date mode turns the roster into a single-day admissions log, so the
+      // implicit "currently in hospital" status default is dropped there (an
+      // admission from that day may already be discharged). Explicit status
+      // picks from the filter panel still win in either mode.
+      const statusFilter = ipdAppliedStatus.length
+        ? ipdAppliedStatus
+        : ipdDateFilter
+          ? []
+          : IPD_ACTIVE_STATUSES;
+
       const res = await ipdApi.getAll({
         branchId: effectiveBranchId,
-        status: ipdAppliedStatus.length ? ipdAppliedStatus.join(",") : undefined,
-        date: format(ipdSelectedDate, "yyyy-MM-dd"),
+        status: statusFilter.length ? statusFilter.join(",") : undefined,
+        date: ipdDateFilter ? format(ipdDateFilter, "yyyy-MM-dd") : undefined,
         search: ipdSearch.trim() || undefined,
         page: ipdPage,
         limit: ipdRowsPerPage,
@@ -489,7 +519,7 @@ const AppointmentSchedule: React.FC<{ defaultTab?: "opd" | "ipd" }> = ({ default
     } finally {
       setAdmissionsLoading(false);
     }
-  }, [effectiveBranchId, ipdAppliedStatus, ipdSelectedDate, ipdSearch, ipdPage, ipdRowsPerPage, ipdSortField, ipdSortDirection, toast]);
+  }, [effectiveBranchId, ipdAppliedStatus, ipdDateFilter, ipdSearch, ipdPage, ipdRowsPerPage, ipdSortField, ipdSortDirection, toast]);
 
   useEffect(() => {
     if (activeTab !== "ipd") return;
@@ -509,6 +539,20 @@ const AppointmentSchedule: React.FC<{ defaultTab?: "opd" | "ipd" }> = ({ default
       setIpdSortField(field);
       setIpdSortDirection("asc");
     }
+    setIpdPage(1);
+  };
+
+  // Date Navigator handlers -- any interaction (stepping or a calendar pick)
+  // enters date mode; "All Active" clears back to the live census while the
+  // navigator keeps its position, so stepping resumes from the same day.
+  const handleIpdDateSelect = (date: Date) => {
+    setIpdNavDate(date);
+    setIpdDateFilter(date);
+    setIpdPage(1);
+  };
+
+  const handleIpdShowAllActive = () => {
+    setIpdDateFilter(null);
     setIpdPage(1);
   };
 
@@ -1005,7 +1049,12 @@ const ipdColumns: HmsColumn<AdmissionRecord>[] = [
 
               {can("appointment.create") && (
                 <button
-                  onClick={() => navigate("/appointments/add")}
+                  onClick={() =>
+                    navigate(
+                      "/appointments/add",
+                      activeTab === "ipd" ? { state: { defaultPatientType: "Inpatient (IPD)" } } : undefined,
+                    )
+                  }
                   className="flex items-center gap-2 px-4 py-2 bg-[#004785] rounded-lg text-white text-xs font-semibold shadow-sm hover:bg-[#003a6b] transition-colors"
                 >
                   <Plus className="w-4 h-4" />
@@ -1173,92 +1222,110 @@ const ipdColumns: HmsColumn<AdmissionRecord>[] = [
                   </div>
                 </>
               ) : (
-                <div className="flex items-center gap-3 flex-wrap">
-                  {/* Search */}
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="Search IP, patient, UHID..."
-                      value={ipdSearch}
-                      onChange={(e) => {
-                        setIpdSearch(e.target.value);
-                        setIpdPage(1);
-                      }}
-                      className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[220px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[260px]"
-                    />
-                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
-                  </div>
+                <>
+                  {/* Empty left slot -- OPD has its View Mode selector here;
+                      IPD has no equivalent, but the outer toolbar row uses
+                      justify-between across two children, so this keeps the
+                      search/filter/refresh group pinned to the right instead
+                      of collapsing to the left the way a single child would. */}
+                  <div />
 
-                  {/* Date nav */}
-                  <div className="flex items-center">
-                    <button
-                      onClick={() => {
-                        setIpdSelectedDate((prev) => subDays(prev, 1));
-                        setIpdPage(1);
-                      }}
-                      className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
-                    >
-                      <ChevronLeft className="w-3 h-3 text-[#424752]" />
-                    </button>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {/* Search */}
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Search IP, patient, UHID..."
+                        value={ipdSearch}
+                        onChange={(e) => {
+                          setIpdSearch(e.target.value);
+                          setIpdPage(1);
+                        }}
+                        className="pl-8 pr-3 py-1.5 bg-[#F2F4F6] text-xs text-[#6B7280] placeholder:text-[#6B7280] outline-none w-[150px] sm:w-[220px] rounded-md transition-all duration-200 focus:rounded-none focus:w-[200px] sm:focus:w-[260px]"
+                      />
+                      <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#424752]" />
+                    </div>
 
-                    <Popover open={isIpdCalendarOpen} onOpenChange={setIsIpdCalendarOpen}>
-                      <PopoverTrigger asChild>
-                        <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
-                          {isToday(ipdSelectedDate)
-                            ? "Today"
-                            : isYesterday(ipdSelectedDate)
-                              ? "Yesterday"
-                              : isTomorrow(ipdSelectedDate)
-                                ? "Tomorrow"
-                                : format(ipdSelectedDate, "dd/MM/yyyy")}
+                    {/* All Active chip + Date Navigator -- "All Active" is the
+                        default live census; stepping or picking a date filters
+                        admissions to that day, mirroring the OPD navigator. */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleIpdShowAllActive}
+                        className={`flex items-center h-[27px] px-3 rounded-lg text-xs font-semibold border transition-colors duration-150 ${
+                          !ipdDateFilter
+                            ? "bg-[#D6E3FF] border-[#D6E3FF] text-[#00488D]"
+                            : "bg-white border-[#E5E7EB] text-[#6B7280] hover:bg-[#F2F4F6]"
+                        }`}
+                      >
+                        All Active{ipdShowActiveCount ? ` (${ipdTotal})` : ""}
+                      </button>
+
+                      <div className="flex items-center">
+                        <button
+                          onClick={() => handleIpdDateSelect(subDays(ipdNavDate, 1))}
+                          className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-l-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                        >
+                          <ChevronLeft className="w-3 h-3 text-[#424752]" />
                         </button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
-                        <CalendarPicker
-                          selected={ipdSelectedDate}
-                          hideThemePicker
-                          onSelect={(date) => {
-                            if (date instanceof Date) {
-                              setIpdSelectedDate(date);
-                              setIpdPage(1);
-                              setIsIpdCalendarOpen(false);
-                            }
-                          }}
-                        />
-                      </PopoverContent>
-                    </Popover>
 
-                    <button
-                      onClick={() => {
-                        setIpdSelectedDate((prev) => addDays(prev, 1));
+                        <Popover open={isIpdCalendarOpen} onOpenChange={setIsIpdCalendarOpen}>
+                          <PopoverTrigger asChild>
+                            <button className="flex items-center justify-center h-[27px] w-[90px] px-2 border-t border-b border-[#E5E7EB] bg-white text-xs font-medium transition-colors duration-150 hover:bg-[#F2F4F6]">
+                              {isToday(ipdNavDate)
+                                ? "Today"
+                                : isYesterday(ipdNavDate)
+                                  ? "Yesterday"
+                                  : isTomorrow(ipdNavDate)
+                                    ? "Tomorrow"
+                                    : format(ipdNavDate, "dd/MM/yyyy")}
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0 border-[#E5E7EB] shadow-lg">
+                            <CalendarPicker
+                              selected={ipdNavDate}
+                              hideThemePicker
+                              onSelect={(date) => {
+                                if (date instanceof Date) {
+                                  handleIpdDateSelect(date);
+                                  setIsIpdCalendarOpen(false);
+                                }
+                              }}
+                            />
+                          </PopoverContent>
+                        </Popover>
+
+                        <button
+                          onClick={() => handleIpdDateSelect(addDays(ipdNavDate, 1))}
+                          className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
+                        >
+                          <ChevronRight className="w-3 h-3 text-[#424752]" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Filters */}
+                    <ToolbarFilter
+                      title="Filters"
+                      fields={ipdFilterFields}
+                      values={ipdFilterValues}
+                      onChange={handleIpdFilterChange}
+                      onApply={() => {
+                        handleApplyIpdFilter();
                         setIpdPage(1);
                       }}
-                      className="flex items-center justify-center w-[25px] h-[27px] border border-[#E5E7EB] rounded-r-lg transition-colors duration-150 hover:bg-[#F2F4F6]"
-                    >
-                      <ChevronRight className="w-3 h-3 text-[#424752]" />
-                    </button>
+                      onClear={() => {
+                        handleClearIpdFilter();
+                        setIpdPage(1);
+                      }}
+                      open={isIpdFilterOpen}
+                      onOpenChange={setIsIpdFilterOpen}
+                    />
+
+                    <RefreshButton onClick={fetchAdmissions} isLoading={admissionsLoading} />
                   </div>
-
-                  {/* Filters */}
-                  <ToolbarFilter
-                    title="Filters"
-                    fields={ipdFilterFields}
-                    values={ipdFilterValues}
-                    onChange={handleIpdFilterChange}
-                    onApply={() => {
-                      handleApplyIpdFilter();
-                      setIpdPage(1);
-                    }}
-                    onClear={() => {
-                      handleClearIpdFilter();
-                      setIpdPage(1);
-                    }}
-                    open={isIpdFilterOpen}
-                    onOpenChange={setIsIpdFilterOpen}
-                  />
-
-                  <RefreshButton onClick={fetchAdmissions} isLoading={admissionsLoading} />
-                </div>
+                </>
               )}
 
             </div>
@@ -1380,7 +1447,11 @@ const ipdColumns: HmsColumn<AdmissionRecord>[] = [
                   onPageChange={setIpdPage}
                   onRowsPerPageChange={(val) => { setIpdRowsPerPage(val); setIpdPage(1); }}
                   rowsPerPageOptions={[5, 10, 20]}
-                  emptyMessage="No inpatient admissions found matching your criteria."
+                  emptyMessage={
+                    ipdDateFilter
+                      ? `No patients were admitted on ${format(ipdDateFilter, "dd MMM yyyy")}.`
+                      : "No inpatient admissions found matching your criteria."
+                  }
                   rowKey={(row: AdmissionRecord) => row.admission_id}
                 />
               )

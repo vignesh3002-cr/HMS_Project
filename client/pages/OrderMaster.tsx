@@ -108,12 +108,10 @@ function isOverdue(iso: string | null | undefined): boolean {
 
 function OrderActionMenu({
   onView,
-  onUpdateStatus,
   onExport,
   onPharmacySlip,
 }: {
   onView: () => void;
-  onUpdateStatus: () => void;
   onExport: () => void;
   onPharmacySlip: () => void;
 }) {
@@ -124,9 +122,8 @@ function OrderActionMenu({
   const { can } = usePermission();
 
   const canView = can("chemo.plan.read") || can("chemo.plan.update");
-  const canUpdate = can("chemo.plan.update");
 
-  if (!canView && !canUpdate && !can("report.export")) return null;
+  if (!canView && !can("report.export")) return null;
 
   const placeMenu = () => {
     const btn = btnRef.current;
@@ -163,7 +160,6 @@ function OrderActionMenu({
   const items: Array<{ label: string; onClick: () => void; danger?: boolean }> = [];
   if (canView) items.push({ label: "View Order", onClick: onView });
   if (canView) items.push({ label: "Pharmacy Slip", onClick: onPharmacySlip });
-  if (canUpdate) items.push({ label: "Update Status", onClick: onUpdateStatus });
   if (can("report.export")) items.push({ label: "Export Order", onClick: onExport });
 
   return (
@@ -270,8 +266,6 @@ export default function OrderMaster() {
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
   const [newOrderOpen, setNewOrderOpen] = useState(false);
-  const [statusTarget, setStatusTarget] = useState<OrderRow | null>(null);
-  const [statusLoading, setStatusLoading] = useState(false);
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -316,10 +310,18 @@ export default function OrderMaster() {
       setRows(mapped);
       setLabs({});
       setLabsLoading({});
-    } catch {
+    } catch (e: any) {
       setRows([]);
       setLabs({});
       setLabsLoading({});
+      // Surface the backend's own message: a failed fetch is otherwise
+      // indistinguishable from a genuine empty result, so a 400 renders as
+      // "No orders found" and hides the real cause entirely.
+      toast({
+        title: "Failed to load chemo orders",
+        description: e?.response?.data?.message ?? e?.message ?? "Something went wrong.",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -541,51 +543,6 @@ export default function OrderMaster() {
     navigate(`/orders/${row.plan_id}/pharmacy-slip`);
   };
 
-  const PLAN_TRANSITIONS: Record<string, string[]> = {
-    PLANNED: ["ACTIVE", "CANCELLED"],
-    ACTIVE: ["COMPLETED", "DISCONTINUED"],
-    COMPLETED: [],
-    DISCONTINUED: [],
-    CANCELLED: [],
-  };
-
-  const availableTransitions = statusTarget ? PLAN_TRANSITIONS[statusTarget.raw_status] ?? [] : [];
-
-  const [confirmStatus, setConfirmStatus] = useState<string>("");
-  const [confirmReason, setConfirmReason] = useState<string>("");
-
-  const openStatusDialog = (row: OrderRow) => {
-    setStatusTarget(row);
-    const transitions = PLAN_TRANSITIONS[row.raw_status] ?? [];
-    setConfirmStatus(transitions[0] ?? "");
-    setConfirmReason("");
-  };
-
-  const confirmStatusChange = async () => {
-    if (!statusTarget || !confirmStatus) return;
-    setStatusLoading(true);
-    try {
-      await chemotherapyApi.changePlanStatus(statusTarget.plan_id, {
-        status: confirmStatus,
-        reason: confirmReason.trim() || undefined,
-      });
-      toast({
-        title: "Order status updated",
-        description: `Order for ${statusTarget.patient_name} moved to ${confirmStatus}.`,
-      });
-      setStatusTarget(null);
-      void fetchOrders();
-    } catch (e: any) {
-      toast({
-        title: "Update failed",
-        description: e.response?.data?.message ?? e.message,
-        variant: "destructive",
-      });
-    } finally {
-      setStatusLoading(false);
-    }
-  };
-
   const statCards = [
     { label: "Active Chemo Orders", value: stats.active, trend: "Currently scheduled / running", icon: HeartPulse, color: "#004785" },
     { label: "Patients Under Treatment", value: stats.patients, trend: "On active plans", icon: UserRound, color: "#059669" },
@@ -783,7 +740,6 @@ export default function OrderMaster() {
                           <OrderActionMenu
                             onView={() => handleView(row)}
                             onPharmacySlip={() => handlePharmacySlip(row)}
-                            onUpdateStatus={() => openStatusDialog(row)}
                             onExport={() => {
                               const single = [row];
                               downloadExportPdf({
@@ -933,46 +889,6 @@ export default function OrderMaster() {
             }}
             onCancel={() => setNewOrderOpen(false)}
           />
-
-          {/* ==================== UPDATE STATUS DIALOG ==================== */}
-          <ConfirmationDialog
-            open={!!statusTarget}
-            type="question"
-            title="Update Order Status"
-            description={
-              statusTarget
-                ? `Change status for ${statusTarget.patient_name} (${statusTarget.protocol}): current ${statusOf(statusTarget)}.`
-                : ""
-            }
-            confirmText="Update Status"
-            cancelText="Cancel"
-            loading={statusLoading}
-            onConfirm={confirmStatusChange}
-            onCancel={() => setStatusTarget(null)}
-          >
-            <div className="w-full flex flex-col gap-2 text-left">
-              <select
-                value={confirmStatus}
-                onChange={(e) => setConfirmStatus(e.target.value)}
-                disabled={availableTransitions.length === 0}
-                className="w-full px-3 py-2 bg-white border border-[#E5E7EB] rounded-md text-sm text-[#424752] outline-none focus:border-[#00488D]"
-              >
-                {availableTransitions.length === 0 && <option value="">No transitions available</option>}
-                {availableTransitions.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-              {confirmStatus === "CANCELLED" || confirmStatus === "DISCONTINUED" ? (
-                <input
-                  type="text"
-                  value={confirmReason}
-                  onChange={(e) => setConfirmReason(e.target.value)}
-                  placeholder={`Reason (required to ${confirmStatus})`}
-                  className="w-full px-3 py-2 bg-white border border-[#E5E7EB] rounded-md text-sm text-[#424752] outline-none focus:border-[#00488D]"
-                />
-              ) : null}
-            </div>
-          </ConfirmationDialog>
 
         </main>
       </div>

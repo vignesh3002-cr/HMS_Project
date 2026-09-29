@@ -35,6 +35,9 @@ import {
   ClipboardList,
   ClipboardPlus,
   Activity,
+  BedDouble,
+  Building2,
+  Bed,
 } from "lucide-react";
 
 const navIcon: Record<string, React.ReactNode> = {
@@ -44,6 +47,9 @@ const navIcon: Record<string, React.ReactNode> = {
   Patients: <UserRound size={16} />,
   Appointment: <Calendar size={16} />,
   "Reschedule Queue": <ClipboardList size={16} />,
+  "Inpatient (IPD)": <BedDouble size={16} />,
+  Admissions: <Building2 size={16} />,
+  "Ward & Bed Master": <Bed size={16} />,
   Billing: <Receipt size={16} />,
   Protocol: <FileText size={16} />,
   Cancer: <Activity size={16} />,
@@ -97,19 +103,27 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
   // instead of linking directly to the Protocol master page.
   const isProtocolSectionActive = /^\/protocol(\/|$)/i.test(location.pathname);
 
+  // Inpatient (IPD) is also a dropdown header, covering both the admissions
+  // roster (/ipd) and the admission-details sub-page (/admissions/view/...),
+  // so landing on either keeps the section expanded and highlighted.
+  const isIpdSectionActive = /^\/(ipd|admissions)(\/|$)/i.test(location.pathname);
+
   // Tracks which dropdown section is currently expanded (by label).
   const [openMenu, setOpenMenu] = useState<string | null>(() =>
     isAdminSectionActive
       ? "Admin"
       : isProtocolSectionActive
         ? "Protocol"
-        : null,
+        : isIpdSectionActive
+          ? "Inpatient (IPD)"
+          : null,
   );
 
   useEffect(() => {
     if (isAdminSectionActive) setOpenMenu("Admin");
     else if (isProtocolSectionActive) setOpenMenu("Protocol");
-  }, [isAdminSectionActive, isProtocolSectionActive]);
+    else if (isIpdSectionActive) setOpenMenu("Inpatient (IPD)");
+  }, [isAdminSectionActive, isProtocolSectionActive, isIpdSectionActive]);
 
   const [logoutOpen, setLogoutOpen] = useState(false);
 
@@ -159,6 +173,17 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
   // Protocol master page always loads.
   const protocolChildren = [{ label: "Cancer", to: "/protocol/cancer" }];
 
+  // Inpatient (IPD) is a dropdown header whose sub-pages are the admissions
+  // roster (Appointments.tsx's IPD tab, previously only reachable via the
+  // in-page OPD/IPD tab switch or a Dashboard KPI click) and the ward/bed
+  // inventory page (BedMaster.tsx, previously unreachable from any nav at
+  // all). `end: true` on Admissions keeps it from matching /ipd/beds too,
+  // since /ipd is a literal prefix of that path.
+  const ipdChildren = [
+    { label: "Admissions", to: "/ipd", end: true },
+    { label: "Ward & Bed Master", to: "/ipd/beds" },
+  ];
+
   const navItems = [
     { label: "Dashboard", to: "/dashboard" },
     { label: "Staff", to: "/staff", permission: "employee.read" },
@@ -173,6 +198,11 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
       label: "Reschedule Queue",
       to: "/appointments/reschedule-queue",
       permission: "doctor.transfer",
+    },
+    {
+      label: "Inpatient (IPD)",
+      permission: "admission.read",
+      children: ipdChildren,
     },
     { label: "Billing", to: "/billing" },
     {
@@ -315,7 +345,9 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
                         ? isAdminSectionActive
                         : item.label === "Protocol"
                           ? isProtocolSectionActive
-                          : false)
+                          : item.label === "Inpatient (IPD)"
+                            ? isIpdSectionActive
+                            : false)
                         ? "bg-[#00488D] text-white shadow-sm"
                         : "text-[#475569] hover:bg-[#E6E8EA]",
                     )}
@@ -336,6 +368,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
                         <NavLink
                           key={child.to}
                           to={child.to}
+                          end={Boolean((child as { end?: boolean }).end)}
                           className={({ isActive }) =>
                             cn(
                               "flex items-center gap-2 px-3 py-2 rounded-[4px] text-xs font-semibold tracking-[0.6px] capitalize",

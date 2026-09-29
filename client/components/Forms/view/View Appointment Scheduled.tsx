@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { appointmentApi, type AppointmentRecord } from "@/api/appointment.api";
 import { encounterApi, type EncounterRecord } from "@/api/encounter.api";
+import { chemoPlanCurrentItems, chemoPlanItemName } from "@/api/chemotherapy.api";
 import API from "@/api/axios";
 import { formatMobile } from "@/utils/formatters";
 import { StatusBadge, type StatusTone } from "@/components/hms/StatusBadge";
@@ -248,9 +249,10 @@ const AppointmentDetails: React.FC = () => {
   const allMedications: MedicationItemDisplay[] = useMemo(() => {
     const list: MedicationItemDisplay[] = [];
 
-    // From Chemotherapy Plan items
-    if (chemoPlan?.chemotherapy_plan_items && Array.isArray(chemoPlan.chemotherapy_plan_items)) {
-      chemoPlan.chemotherapy_plan_items.forEach((item: any, idx: number) => {
+    // From Chemotherapy Plan items (the current cycle day order, else the baseline)
+    const chemoPlanItems = chemoPlanCurrentItems<any>(chemoPlan);
+    if (Array.isArray(chemoPlanItems)) {
+      chemoPlanItems.forEach((item: any, idx: number) => {
         const roleUpper = (item.drug_role ?? "").toUpperCase();
         let role: MedicationItemDisplay["role"] = "PRIMARY";
         if (roleUpper === "PREMEDICATION") role = "PREMEDICATION";
@@ -259,7 +261,7 @@ const AppointmentDetails: React.FC = () => {
 
         list.push({
           id: item.chemotherapy_plan_item_id || `plan-item-${idx}`,
-          name: item.medicine_master?.medicine_name || item.medicine_name || "—",
+          name: chemoPlanItemName(item) || item.medicine_name || "—",
           genericName: item.medicine_master?.generic_name,
           role,
           form: item.formulation || item.medicine_master?.dosage_form,
@@ -301,7 +303,7 @@ const AppointmentDetails: React.FC = () => {
 
         list.push({
           id: pItem.prescription_item_id || `rx-item-${idx}`,
-          name: pItem.medicine_master?.medicine_name || pItem.medicine_name || "—",
+          name: pItem.medicine_master?.medicine_name || pItem.medicine_name || pItem.drug_name || "—",
           genericName: pItem.medicine_master?.generic_name,
           role,
           dose: pItem.dosage ? `${pItem.dosage} ${pItem.unit || ""}`.trim() : undefined,
@@ -415,7 +417,7 @@ const AppointmentDetails: React.FC = () => {
         icd10_code: p.diagnosis?.icd_code || "",
       },
       prescription_items: (p.prescription_items || []).map((it: any) => ({
-        medicine_name: it.medicine_master?.medicine_name || it.medicine_name || "",
+        medicine_name: it.medicine_master?.medicine_name || it.medicine_name || it.drug_name || "",
         medicine_master: it.medicine_master,
         dosage: it.dosage,
         unit: it.unit,
@@ -460,7 +462,7 @@ const AppointmentDetails: React.FC = () => {
         icd10_code: p.diagnosis?.icd_code || "",
       },
       prescription_items: (p.prescription_items || []).map((it: any) => ({
-        medicine_name: it.medicine_master?.medicine_name || it.medicine_name || "",
+        medicine_name: it.medicine_master?.medicine_name || it.medicine_name || it.drug_name || "",
         medicine_master: it.medicine_master,
         dosage: it.dosage,
         unit: it.unit,

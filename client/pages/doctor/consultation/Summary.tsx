@@ -1,13 +1,19 @@
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
+import autoTable, { type RowInput, type Styles } from "jspdf-autotable";
 import API, { getActiveBranchId } from "../../../api/axios";
 import { appointmentApi } from "../../../api/appointment.api";
 import { getUser } from "../../../utils/token";
 import { clinicalDetailsApi } from "../../../api/clinicalDetails.api";
 import { patientApi } from "../../../api/patient.api";
 import { encounterApi } from "../../../api/encounter.api";
+import {
+  chemotherapyApi,
+  isChemoPlanClosed,
+  type ChemoPlanHydration,
+  type ChemoPlanOrderHeader,
+} from "../../../api/chemotherapy.api";
 import {
   consultationApi,
   type PersonalHistoryItem,
@@ -25,6 +31,7 @@ import type {
   RegimenProtocolDetail,
 } from "./types";
 import {
+  COURSE_CLOSED_MESSAGE,
   computeProtocolNextVisitDate,
   findActiveEncounter,
   PAST_HISTORY_MARKER,
@@ -73,13 +80,18 @@ const computeNextVisitDateForPatient = async (
   }
 };
 
+/* A plan drug: a medicine, or (medicine_id null) a drug name the doctor
+   typed for this patient. */
 type SummaryPlanItem = {
   chemotherapy_plan_item_id: string;
   medicine_id?: string | null;
+  drug_name?: string | null;
+  drug_type?: string | null;
   drug_role: string | null;
   protocol_dose: number | null;
   protocol_dose_unit: string | null;
   calculated_dose?: number | string | null;
+  calculated_dose_unit?: string | null;
   formulation: string | null;
   dilution_volume: string | null;
   administration_route: string | null;
@@ -87,6 +99,11 @@ type SummaryPlanItem = {
   remarks: string | null;
   cycle_day?: number | null;
   administration_day?: number | null;
+  drug_sequence?: number | null;
+  infusion_type?: string | null;
+  infusion_duration_minutes?: number | null;
+  timing_relative_to_primary?: string | null;
+  administration_detail?: string | null;
   medicine_master: {
     medicine_id?: string | null;
     medicine_name: string;
@@ -96,8 +113,12 @@ type SummaryPlanItem = {
   } | null;
 };
 
+/* medicine_id for a medicine_master drug, else the typed drug_name. */
 type PrescriptionMedicinePayload = {
-  medicine_id: string;
+  medicine_id?: string;
+  drug_name?: string;
+  drug_role?: string;
+  drug_type?: string;
   dosage?: string;
   unit?: string;
   route?: string;
@@ -148,7 +169,22 @@ type SummaryPlan = {
   }[] | null;
   chemotherapy_plan_items: SummaryPlanItem[] | null;
   oncology_staging_detail: StagingDetailRecord | null;
+  /* Saved cycle day orders (by cycle / day) and the current one. */
+  plan_orders?: ChemoPlanOrderHeader[] | null;
+  current_order?: SummaryPlanOrder | null;
 };
+
+type SummaryPlanOrder = ChemoPlanOrderHeader & {
+  chemotherapy_plan_items: SummaryPlanItem[];
+  chemotherapy_plan_hydration?: ChemoPlanHydration[] | null;
+};
+
+/* A plan item's display name: its medicine, else the typed name. */
+const planItemName = (item: SummaryPlanItem) =>
+  item.medicine_master?.medicine_name ||
+  item.medicine_master?.generic_name ||
+  item.drug_name ||
+  "";
 
 type ChemoOrderRow = {
   drug: string;
@@ -171,6 +207,53 @@ type DischargeRow = {
   frequency: string;
   instruction: string;
   duration: string;
+};
+
+/* A row of the order's Hydration tab. */
+type HydrationSummaryRow = {
+  stage: "PRE" | "POST";
+  agent: string;
+  diluent: string;
+  volume: string;
+  guidance: string;
+};
+
+/* A drug's administration details (the order's Admin Instructions tab). */
+type AdminInstructionRow = {
+  drug: string;
+  category: string;
+  route: string;
+  infusion: string;
+  frequency: string;
+  timing: string;
+  detail: string;
+  remarks: string;
+};
+
+/* The Chemotherapy Order tab each drug role is listed on. */
+const DRUG_ROLE_CATEGORY: Record<string, string> = {
+  PRIMARY: "Chemotherapy",
+  PREMEDICATION: "Premedication",
+  SUPPORTIVE: "Supportive",
+  POSTMEDICATION: "Post-medication",
+};
+const DRUG_ROLE_ORDER = ["PRIMARY", "PREMEDICATION", "SUPPORTIVE", "POSTMEDICATION"];
+
+const CATEGORY_BADGE: Record<string, string> = {
+  Chemotherapy: "bg-indigo-50 text-indigo-700 ring-indigo-200",
+  Premedication: "bg-sky-50 text-sky-700 ring-sky-200",
+  Supportive: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  "Post-medication": "bg-amber-50 text-amber-700 ring-amber-200",
+};
+
+/* "500 mL" from a volume + unit (either may be missing). */
+const volumeLabel = (
+  volume: number | string | null | undefined,
+  unit: string | null | undefined
+) => {
+  if (volume == null || volume === "") return "";
+  const value = Number.isFinite(Number(volume)) ? String(Number(volume)) : String(volume);
+  return unit ? `${value} ${unit}` : value;
 };
 
 const Summary: React.FC<{
@@ -212,6 +295,8 @@ const Summary: React.FC<{
   );
 
   const [plan, setPlan] = useState<SummaryPlan | null>(null);
+  /* The cycle day order(s) saved in this visit's encounter. */
+  const [encounterOrders, setEncounterOrders] = useState<SummaryPlanOrder[]>([]);
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState("");
   const [dischargeMedications, setDischargeMedications] = useState<
@@ -220,6 +305,10 @@ const Summary: React.FC<{
   const [dischargeLoading, setDischargeLoading] = useState(false);
   const [dischargeError, setDischargeError] = useState("");
   const [dischargeProtocolId, setDischargeProtocolId] = useState("");
+  /* The protocol, for its hydration template when the visit's order has
+     no saved hydration list. */
+  const [protocolDetail, setProtocolDetail] =
+    useState<RegimenProtocolDetail | null>(null);
   const [patientName, setPatientName] = useState("");
 
   const [summaryAllergies, setSummaryAllergies] = useState<string[]>([]);
@@ -375,6 +464,9 @@ const Summary: React.FC<{
             enc?.general_examination_lymphadenopathy
               ? "Lymphadenopathy"
               : "",
+            ...(enc?.general_examination_others ?? []).map(
+              (finding) => finding.name
+            ),
           ].filter(Boolean)
         );
         setSummaryPastHistoryTreatment(
@@ -475,23 +567,14 @@ const Summary: React.FC<{
     let cancelled = false;
     setPlanLoading(true);
     setPlanError("");
-    const branchId =
-      getActiveBranchId() ?? getUser()?.branch_id ?? undefined;
-    API.get<{ success: boolean; data: SummaryPlan[] }>(
-      "/chemotherapy/plans",
-      {
-        params: { patient_id: resolvedPatientId, branchId, page: 1, limit: 1 },
-      }
+    /* The patient's open plan (one course at a time), else their latest,
+       with its cycle day orders. */
+    API.get<{ success: boolean; data: SummaryPlan | null }>(
+      "/chemotherapy/plans/latest-for-patient",
+      { params: { patient_id: resolvedPatientId } }
     )
       .then((response) => {
-        if (cancelled) return;
-        const planId = response.data.data?.[0]?.chemotherapy_plan_id;
-        if (!planId) return;
-        return API.get<{ success: boolean; data: SummaryPlan }>(
-          `/chemotherapy/plans/${planId}`
-        ).then((detail) => {
-          if (!cancelled) setPlan(detail.data.data);
-        });
+        if (!cancelled) setPlan(response.data.data ?? null);
       })
       .catch((error) => {
         console.error("Failed to load chemotherapy plan:", error);
@@ -509,6 +592,43 @@ const Summary: React.FC<{
       cancelled = true;
     };
   }, [resolvedPatientId]);
+
+  /* This visit's cycle day order(s): those saved in its encounter. The
+     current order is usually one of them; any other is fetched. */
+  const visitEncounterNo = encounterNo || resolvedSummaryEncounterNo;
+  useEffect(() => {
+    if (!plan || !visitEncounterNo) {
+      setEncounterOrders([]);
+      return;
+    }
+    let cancelled = false;
+    const headers = (plan.plan_orders ?? []).filter(
+      (order) => order.encounter_no === visitEncounterNo
+    );
+    Promise.all(
+      headers.map((header) =>
+        plan.current_order?.plan_order_id === header.plan_order_id
+          ? Promise.resolve(plan.current_order)
+          : chemotherapyApi
+              .getPlanOrder(plan.chemotherapy_plan_id, header.cycle_number, header.cycle_day)
+              .then((response) => response.data.data as unknown as SummaryPlanOrder | null)
+      )
+    )
+      .then((orders) => {
+        if (!cancelled) {
+          setEncounterOrders(
+            orders.filter((order): order is SummaryPlanOrder => Boolean(order))
+          );
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load this visit's chemotherapy order:", error);
+        if (!cancelled) setEncounterOrders([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [plan, visitEncounterNo]);
 
   /* Keep the Next Visit Date in sync with the selected protocol's
      cycle interval and the treatment start date so the Summary reflects
@@ -649,20 +769,69 @@ const Summary: React.FC<{
     };
   }, [resolvedPatientId]);
 
-  const planItems = plan?.chemotherapy_plan_items ?? [];
+  useEffect(() => {
+    if (!dischargeProtocolId) {
+      setProtocolDetail(null);
+      return;
+    }
+    let cancelled = false;
+    API.get<{ success: boolean; data: RegimenProtocolDetail }>(
+      `/chemotherapy/regimen-protocols/${encodeURIComponent(dischargeProtocolId)}`
+    )
+      .then((response) => {
+        if (!cancelled) setProtocolDetail(response.data.data ?? null);
+      })
+      .catch((error) => {
+        console.error("Failed to load the protocol hydration template:", error);
+        if (!cancelled) setProtocolDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dischargeProtocolId]);
+
+  /* This visit's drugs: the cycle day order(s) saved in this encounter,
+     else the plan's current order, else its baseline (a plan saved before
+     cycle day orders). A closed course orders nothing more. */
+  const planClosed = isChemoPlanClosed(plan);
+  const visitOrders: SummaryPlanOrder[] =
+    encounterOrders.length > 0
+      ? encounterOrders
+      : !planClosed && plan?.current_order
+        ? [plan.current_order]
+        : [];
+  const planItems: SummaryPlanItem[] =
+    visitOrders.length > 0
+      ? visitOrders.flatMap((order) => order.chemotherapy_plan_items ?? [])
+      : planClosed
+        ? []
+        : plan?.chemotherapy_plan_items ?? [];
+  const cycleDayLabel = (order: ChemoPlanOrderHeader) =>
+    `Cycle ${order.cycle_number} / Day ${order.cycle_day}`;
+  const orderOfItem = (item: SummaryPlanItem) =>
+    visitOrders.find((order) =>
+      (order.chemotherapy_plan_items ?? []).includes(item)
+    );
 
   const chemotherapyOrders: ChemoOrderRow[] = planItems
     .filter((item) => item.drug_role === "PRIMARY")
     .map((item) => ({
-      drug:
-        item.medicine_master?.medicine_name ||
-        item.medicine_master?.generic_name ||
-        "",
+      drug: planItemName(item),
       form:
         item.formulation || item.medicine_master?.dosage_form || "",
-      dose: item.protocol_dose != null ? String(item.protocol_dose) : "",
+      /* Patient dose (Dose Cal result) when calculated, else the
+         protocol dose. */
+      dose:
+        item.calculated_dose != null
+          ? String(Number(item.calculated_dose))
+          : item.protocol_dose != null
+            ? String(item.protocol_dose)
+            : "",
       unit:
-        item.protocol_dose_unit || item.medicine_master?.unit || "",
+        (item.calculated_dose != null && item.calculated_dose_unit) ||
+        item.protocol_dose_unit ||
+        item.medicine_master?.unit ||
+        "",
       volume:
         item.dilution_volume != null ? String(item.dilution_volume) : "",
     }));
@@ -670,13 +839,78 @@ const Summary: React.FC<{
   const premedications: PremedRow[] = planItems
     .filter((item) => item.drug_role === "PREMEDICATION")
     .map((item) => ({
-      drug:
-        item.medicine_master?.medicine_name ||
-        item.medicine_master?.generic_name ||
-        "",
+      drug: planItemName(item),
       dose: item.protocol_dose != null ? String(item.protocol_dose) : "",
       route: item.administration_route || "",
       time: item.frequency || "",
+    }));
+
+  /* The cycle day(s) this visit orders, e.g. "Cycle 1 / Day 1". */
+  const visitCycleDay = visitOrders.map(cycleDayLabel).join(", ");
+
+  /* Hydration: the visit order's saved list, else the protocol's
+     hydration template (what the Chemotherapy Order tab shows for a day
+     that wasn't saved). A closed course without an order has none. */
+  const hydrationSaved = visitOrders.some((order) => order.hydration_saved);
+  const hydrationRows: HydrationSummaryRow[] = hydrationSaved
+    ? visitOrders
+        .filter((order) => order.hydration_saved)
+        .flatMap((order) => order.chemotherapy_plan_hydration ?? [])
+        .map((row): HydrationSummaryRow => ({
+          stage: row.hydration_stage === "POST" ? "POST" : "PRE",
+          agent: row.agent_name ?? "",
+          diluent: row.diluent ?? "",
+          volume: volumeLabel(row.dilution_volume, row.dilution_volume_unit),
+          guidance: row.guidance ?? "",
+        }))
+    : planClosed && visitOrders.length === 0
+      ? []
+      : (protocolDetail?.protocol_dilutions ?? [])
+          .filter((dilution) => !!dilution.hydration_stage)
+          .map((dilution): HydrationSummaryRow => ({
+            stage:
+              (dilution.hydration_stage ?? "").toUpperCase() === "POST" ? "POST" : "PRE",
+            agent:
+              dilution.medicine_master?.medicine_name || dilution.drug_brand_name || "",
+            diluent: dilution.diluent ?? "",
+            volume: volumeLabel(dilution.dilution_volume, dilution.dilution_volume_unit),
+            guidance: dilution.comment ?? "",
+          }))
+          .sort(
+            (a, b) =>
+              (a.stage === "PRE" ? 0 : 1) - (b.stage === "PRE" ? 0 : 1) ||
+              a.diluent.localeCompare(b.diluent)
+          );
+
+  /* Admin Instructions: every drug of the visit's order, in the order of
+     the Chemotherapy Order tabs. */
+  const roleRank = (role: string | null) => {
+    const rank = DRUG_ROLE_ORDER.indexOf((role ?? "").toUpperCase());
+    return rank === -1 ? DRUG_ROLE_ORDER.length : rank;
+  };
+  const adminInstructionRows: AdminInstructionRow[] = [...planItems]
+    .sort(
+      (a, b) =>
+        roleRank(a.drug_role) - roleRank(b.drug_role) ||
+        (a.drug_sequence ?? 0) - (b.drug_sequence ?? 0)
+    )
+    .map((item) => ({
+      drug: planItemName(item),
+      category:
+        DRUG_ROLE_CATEGORY[(item.drug_role ?? "").toUpperCase()] ?? item.drug_role ?? "",
+      route: item.administration_route ?? "",
+      infusion: [
+        item.infusion_type,
+        item.infusion_duration_minutes != null
+          ? `${item.infusion_duration_minutes} min`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      frequency: item.frequency ?? "",
+      timing: item.timing_relative_to_primary ?? "",
+      detail: item.administration_detail ?? "",
+      remarks: item.remarks ?? "",
     }));
 
   const diagnosisSelectionFromStorage = (() => {
@@ -693,10 +927,12 @@ const Summary: React.FC<{
     }
   })();
 
+  /* The plan's own cancer type first: with a multi-type diagnosis it is
+     the cancer the chosen protocol treats, not necessarily the primary. */
   const cancerType =
+    plan?.cancer_type ||
     diagnosisSelectionFromStorage?.cancer_type ||
     plan?.oncology_staging_detail?.cancer_types?.cancer_type ||
-    plan?.cancer_type ||
     "";
 
   const stage =
@@ -728,13 +964,11 @@ const Summary: React.FC<{
     : "";
 
   const current = (() => {
-    const cycles = plan?.chemotherapy_cycle ?? [];
-    const latest = cycles[cycles.length - 1];
-    const cycleLabel = latest
-      ? `Cycle ${latest.cycle_number} / Day ${latest.cycle_day ?? ""}`
-      : "";
+    /* This visit's cycle day (every planned cycle row exists once the
+       first day is ordered, so the last cycle row isn't the current one). */
+    const cycleLabel = visitCycleDay;
     const status = plan?.treatment_status
-      ? ` (${plan.treatment_status})`
+      ? `${cycleLabel ? " " : ""}(${plan.treatment_status})`
       : "";
     return `${cycleLabel}${status}`;
   })();
@@ -779,29 +1013,77 @@ const Summary: React.FC<{
       fontStyle: "bold" as const,
     };
 
-    let y = 72;
+    let y = 88;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
 
+    /* A titled section table: an accent bar + title (with an optional
+       right-aligned note such as the cycle day), and a muted "none" row
+       when the list is empty. stageColumn colours PRE / POST. */
     const renderTable = (
       title: string,
       head: string[],
-      body: string[][]
+      body: string[][],
+      options: {
+        note?: string;
+        empty?: string;
+        columnStyles?: Record<number, Partial<Styles>>;
+        stageColumn?: number;
+      } = {}
     ) => {
-      if (y > 420) {
+      /* Keep a section title together with the start of its table. */
+      if (y > pageHeight - 110) {
         doc.addPage();
         y = 40;
       }
+      doc.setFillColor(0, 71, 133);
+      doc.rect(40, y - 9, 3, 12, "F");
       doc.setFontSize(11);
       doc.setTextColor(49, 46, 129);
-      doc.text(title, 40, y);
+      doc.text(title, 49, y);
+      if (options.note) {
+        doc.setFontSize(8.5);
+        doc.setTextColor(100, 116, 139);
+        doc.text(options.note, pageWidth - 40, y, { align: "right" });
+      }
       y += 8;
+      const rows: RowInput[] =
+        body.length > 0
+          ? body.map((row) => row.map((cell) => cell || "-"))
+          : [
+              [
+                {
+                  content: options.empty ?? "None recorded",
+                  colSpan: head.length,
+                  styles: {
+                    halign: "center",
+                    fontStyle: "italic",
+                    textColor: [148, 163, 184],
+                  },
+                },
+              ],
+            ];
       autoTable(doc, {
         startY: y,
         head: [head],
-        body,
-        styles: tableStyles,
+        body: rows,
+        styles: { ...tableStyles, valign: "top", overflow: "linebreak" },
         headStyles,
         alternateRowStyles: { fillColor: [247, 249, 251] },
-        margin: { left: 40, right: 40 },
+        columnStyles: options.columnStyles,
+        margin: { left: 40, right: 40, bottom: 40 },
+        didParseCell: (data) => {
+          if (
+            options.stageColumn !== undefined &&
+            body.length > 0 &&
+            data.section === "body" &&
+            data.column.index === options.stageColumn
+          ) {
+            data.cell.styles.fontStyle = "bold";
+            data.cell.styles.textColor =
+              data.cell.raw === "POST" ? [180, 83, 9] : [29, 78, 216];
+          }
+        },
       });
       y = (doc as any).lastAutoTable?.finalY ?? y;
       y += 24;
@@ -823,6 +1105,64 @@ const Summary: React.FC<{
       premedications.map((row) => [row.drug, row.dose, row.route, row.time])
     );
     renderTable(
+      "Hydration",
+      ["Stage", "Agent", "Diluent", "Volume", "Guidance"],
+      hydrationRows.map((row) => [
+        row.stage,
+        row.agent,
+        row.diluent,
+        row.volume,
+        row.guidance,
+      ]),
+      {
+        note: visitCycleDay,
+        empty: "No hydration ordered for this visit",
+        stageColumn: 0,
+        columnStyles: {
+          0: { cellWidth: 55 },
+          1: { cellWidth: 150 },
+          2: { cellWidth: 140 },
+          3: { cellWidth: 80 },
+        },
+      }
+    );
+    renderTable(
+      "Administration Instructions",
+      [
+        "Drug Name",
+        "Category",
+        "Route",
+        "Infusion",
+        "Frequency",
+        "Timing",
+        "Admin Detail",
+        "Remarks",
+      ],
+      adminInstructionRows.map((row) => [
+        row.drug,
+        row.category,
+        row.route,
+        row.infusion,
+        row.frequency,
+        row.timing,
+        row.detail,
+        row.remarks,
+      ]),
+      {
+        note: visitCycleDay,
+        empty: "No administration instructions for this visit",
+        columnStyles: {
+          0: { cellWidth: 115, fontStyle: "bold" },
+          1: { cellWidth: 78 },
+          2: { cellWidth: 50 },
+          3: { cellWidth: 82 },
+          4: { cellWidth: 70 },
+          5: { cellWidth: 80 },
+          7: { cellWidth: 110 },
+        },
+      }
+    );
+    renderTable(
       "Discharge Medication",
       ["Drug Name", "Dose", "Frequency", "Instruction", "Duration"],
       dischargeMedications.map((row) => [
@@ -835,10 +1175,30 @@ const Summary: React.FC<{
     );
 
     y += 8;
+    if (y > pageHeight - 50) {
+      doc.addPage();
+      y = 40;
+    }
     doc.setFontSize(9);
     doc.setTextColor(15, 23, 42);
     doc.text(`Next Visit Date: ${nextVisitDate || ""}`, 40, y);
     doc.text(`Next Cycle: ${nextCycle || ""}`, 300, y);
+
+    /* Footer on every page: when it was generated, and page x of n. */
+    const generatedAt = new Date().toLocaleString();
+    const pageCount = doc.getNumberOfPages();
+    for (let page = 1; page <= pageCount; page++) {
+      doc.setPage(page);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.5);
+      doc.line(40, pageHeight - 30, pageWidth - 40, pageHeight - 30);
+      doc.setFontSize(7.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text(`Generated ${generatedAt}`, 40, pageHeight - 18);
+      doc.text(`Page ${page} of ${pageCount}`, pageWidth - 40, pageHeight - 18, {
+        align: "right",
+      });
+    }
 
     const blob = doc.output("blob");
     const url = URL.createObjectURL(blob);
@@ -860,37 +1220,54 @@ const Summary: React.FC<{
      Created on Submit against the current appointment's OPEN
      encounter, with every medicine on the chemotherapy plan:
      PRIMARY (chemo orders) + PREMEDICATION + SUPPORTIVE /
-     POSTMEDICATION (discharge). Duplicate medicine ids are skipped
-     - the backend rejects duplicates within one prescription.
+     POSTMEDICATION (discharge) of this visit's cycle day order. A drug
+     name typed on the order goes as free text (drug_name). Duplicate
+     medicine ids / names are skipped - the backend rejects duplicate
+     medicines within one prescription.
   ------------------------------------------------------------ */
 
   const buildPrescriptionMedicines = (): PrescriptionMedicinePayload[] => {
-    const seenMedicineIds = new Set<string>();
+    const seenDrugs = new Set<string>();
     const medicines: PrescriptionMedicinePayload[] = [];
 
     for (const item of planItems) {
       const medicineId =
         item.medicine_id ?? item.medicine_master?.medicine_id ?? "";
-      if (!medicineId || seenMedicineIds.has(medicineId)) continue;
-      seenMedicineIds.add(medicineId);
+      const drugName = medicineId ? "" : (item.drug_name ?? "").trim();
+      const drugKey = medicineId || `name:${drugName.toLowerCase()}`;
+      if ((!medicineId && !drugName) || seenDrugs.has(drugKey)) continue;
+      seenDrugs.add(drugKey);
 
+      const order = orderOfItem(item);
       const instructionParts = [
         item.remarks ?? "",
         item.formulation ? `Formulation: ${item.formulation}` : "",
         item.dilution_volume
           ? `Dilution volume: ${item.dilution_volume}`
           : "",
-        item.cycle_day != null ? `Cycle day ${item.cycle_day}` : "",
+        order
+          ? cycleDayLabel(order)
+          : item.cycle_day != null
+            ? `Cycle day ${item.cycle_day}`
+            : "",
       ].filter(Boolean);
 
+      const hasPatientDose = item.calculated_dose != null;
       const unit =
-        item.protocol_dose_unit || item.medicine_master?.unit || "";
+        (hasPatientDose && item.calculated_dose_unit) ||
+        item.protocol_dose_unit ||
+        item.medicine_master?.unit ||
+        "";
 
       medicines.push({
-        medicine_id: medicineId,
-        ...(item.protocol_dose != null
-          ? { dosage: String(item.protocol_dose) }
-          : {}),
+        ...(medicineId ? { medicine_id: medicineId } : { drug_name: drugName }),
+        ...(item.drug_role ? { drug_role: item.drug_role } : {}),
+        ...(item.drug_type ? { drug_type: item.drug_type } : {}),
+        ...(hasPatientDose
+          ? { dosage: String(Number(item.calculated_dose)) }
+          : item.protocol_dose != null
+            ? { dosage: String(item.protocol_dose) }
+            : {}),
         ...(unit ? { unit } : {}),
         ...(item.administration_route
           ? { route: item.administration_route }
@@ -1050,7 +1427,7 @@ const Summary: React.FC<{
   const handleEditReport = (report: EncounterReportRecord) => {
     setReportForm({
       encounter_report_id: report.encounter_report_id,
-      lab_test_id: report.lab_test_id,
+      lab_test_id: report.lab_test_id ?? "",
       report_completed_date: report.report_completed_date
         ? report.report_completed_date.slice(0, 10)
         : "",
@@ -1071,6 +1448,26 @@ const Summary: React.FC<{
         error?.response?.data?.message || "Failed to remove report."
       );
     }
+  };
+
+  const closingCycleDay = () => {
+    const pending = visitOrders.filter(
+      (order) => order.order_status !== "COMPLETED"
+    );
+    const days = (plan?.chemotherapy_plan_items ?? []).map((item) => {
+      const day = Number(item.administration_day ?? item.cycle_day ?? 1);
+      return Number.isFinite(day) && day > 0 ? day : 1;
+    });
+    if (!plan || pending.length === 0 || days.length === 0) return null;
+    const lastDay = Math.max(...days);
+    const closing = pending.find((order) => order.cycle_day >= lastDay);
+    if (!closing) return null;
+    return {
+      cycle: closing.cycle_number,
+      label: cycleDayLabel(closing),
+      closesCourse:
+        (plan.completed_cycles ?? 0) + 1 >= (plan.planned_cycles ?? 0),
+    };
   };
 
   const handleSubmitSummary = async () => {
@@ -1108,8 +1505,24 @@ const Summary: React.FC<{
 
       if (medicines.length === 0) {
         setSummarySubmitMessage(
-          "No medicines found in the chemotherapy plan. Complete the Treatment Plan step first."
+          planClosed
+            ? COURSE_CLOSED_MESSAGE
+            : "No medicines found in the chemotherapy plan. Complete the Treatment Plan step first."
         );
+        return;
+      }
+
+      /* Submitting completes this visit's cycle day order. Say so first
+         when that closes a cycle - or the whole course. */
+      const closing = closingCycleDay();
+      if (
+        closing &&
+        !window.confirm(
+          closing.closesCourse
+            ? `This completes ${closing.label}, the last day of the last cycle. The chemotherapy course will be closed and no more orders can be added to it. Continue?`
+            : `This completes ${closing.label}, the last day of Cycle ${closing.cycle}. Continue?`
+        )
+      ) {
         return;
       }
 
@@ -1121,10 +1534,38 @@ const Summary: React.FC<{
 
       await saveAdminInstructions();
 
+      /* The visit's cycle day order is now completed (read-only); its
+         last day completes the cycle, the last cycle the course. */
+      let completionNote = "";
+      if (plan && !planClosed) {
+        try {
+          const completion = await chemotherapyApi.completePlanOrders(
+            plan.chemotherapy_plan_id,
+            targetEncounterNo
+          );
+          const result = completion.data.data;
+          const done = (result?.completed_orders ?? []).map(
+            (order) => `Cycle ${order.cycle_number} / Day ${order.cycle_day}`
+          );
+          completionNote = result?.plan_completed
+            ? " The chemotherapy course is completed."
+            : done.length > 0
+              ? ` ${done.join(", ")} completed.`
+              : "";
+        } catch (completionError: any) {
+          console.error("Failed to complete the cycle day order:", completionError);
+          completionNote = ` The cycle day could not be marked completed: ${
+            completionError?.response?.data?.message ??
+            completionError?.message ??
+            "please try again"
+          }.`;
+        }
+      }
+
       localStorage.removeItem(`hms_diagnosis_form_${resolvedPatientId}`);
       setSummarySubmitted(true);
       setSummarySubmitMessage(
-        "Prescription created successfully for this visit."
+        `Prescription created successfully for this visit.${completionNote}`
       );
     } catch (error: any) {
       console.error("Failed to create prescription:", error);
@@ -1570,7 +2011,9 @@ const Summary: React.FC<{
                     summaryReports.map((report) => (
                       <tr key={report.encounter_report_id}>
                         <td className="py-3">
-                          {report.lab_test_master?.test_name ?? "—"}
+                          {report.lab_test_master?.test_name ??
+                            report.test_name ??
+                            "—"}
                         </td>
                         <td className="py-3">
                           {report.report_completed_date
@@ -1677,6 +2120,134 @@ const Summary: React.FC<{
                 </tbody>
               </table>
             </div>
+          </section>
+
+          {/* =================================================
+              HYDRATION
+          ================================================== */}
+          <section>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-lg font-medium text-indigo-900">Hydration</h3>
+              {visitCycleDay && (
+                <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200">
+                  {visitCycleDay}
+                </span>
+              )}
+            </div>
+
+            {hydrationRows.length === 0 ? (
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                No hydration ordered for this visit.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[700px] text-left text-sm">
+                  <thead>
+                    <tr>
+                      <th className="w-24 pb-3 font-medium text-slate-900">Stage</th>
+                      <th className="w-1/5 pb-3 font-medium text-slate-900">Agent</th>
+                      <th className="w-1/5 pb-3 font-medium text-slate-900">Diluent</th>
+                      <th className="w-1/6 pb-3 font-medium text-slate-900">Volume</th>
+                      <th className="pb-3 font-medium text-slate-900">Guidance</th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="text-slate-800">
+                    {hydrationRows.map((row, index) => (
+                      <tr
+                        key={`${row.stage}-${row.agent}-${index}`}
+                        className="border-t border-slate-100 align-top"
+                      >
+                        <td className="py-3 pr-4">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${
+                              row.stage === "PRE"
+                                ? "bg-blue-50 text-blue-700 ring-blue-200"
+                                : "bg-amber-50 text-amber-700 ring-amber-200"
+                            }`}
+                          >
+                            {row.stage}
+                          </span>
+                        </td>
+                        <td className="py-3 pr-4 font-medium text-slate-900">
+                          {row.agent || "—"}
+                        </td>
+                        <td className="py-3 pr-4">{row.diluent || "—"}</td>
+                        <td className="py-3 pr-4">{row.volume || "—"}</td>
+                        <td className="py-3 text-slate-600">{row.guidance || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {/* =================================================
+              ADMINISTRATION INSTRUCTIONS
+          ================================================== */}
+          <section>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-lg font-medium text-indigo-900">
+                Administration Instructions
+              </h3>
+              {visitCycleDay && (
+                <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200">
+                  {visitCycleDay}
+                </span>
+              )}
+            </div>
+
+            {adminInstructionRows.length === 0 ? (
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                No administration instructions for this visit.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[960px] text-left text-sm">
+                  <thead>
+                    <tr>
+                      <th className="w-1/6 pb-3 font-medium text-slate-900">Drug Name</th>
+                      <th className="pb-3 font-medium text-slate-900">Route</th>
+                      <th className="pb-3 font-medium text-slate-900">Infusion</th>
+                      <th className="pb-3 font-medium text-slate-900">Frequency</th>
+                      <th className="pb-3 font-medium text-slate-900">Timing</th>
+                      <th className="w-1/5 pb-3 font-medium text-slate-900">Admin Detail</th>
+                      <th className="w-1/6 pb-3 font-medium text-slate-900">Remarks</th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="text-slate-800">
+                    {adminInstructionRows.map((row, index) => (
+                      <tr
+                        key={`${row.category}-${row.drug}-${index}`}
+                        className="border-t border-slate-100 align-top"
+                      >
+                        <td className="py-3 pr-4">
+                          <p className="font-medium text-slate-900">{row.drug || "—"}</p>
+                          {row.category && (
+                            <span
+                              className={`mt-1 inline-flex rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ring-1 ring-inset ${
+                                CATEGORY_BADGE[row.category] ??
+                                "bg-slate-50 text-slate-600 ring-slate-200"
+                              }`}
+                            >
+                              {row.category}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 pr-4">{row.route || "—"}</td>
+                        <td className="py-3 pr-4">{row.infusion || "—"}</td>
+                        <td className="py-3 pr-4">{row.frequency || "—"}</td>
+                        <td className="py-3 pr-4">{row.timing || "—"}</td>
+                        <td className="py-3 pr-4 text-slate-600">{row.detail || "—"}</td>
+                        <td className="py-3 text-slate-600">{row.remarks || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
 
           {/* =================================================

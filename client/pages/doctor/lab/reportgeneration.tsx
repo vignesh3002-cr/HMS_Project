@@ -25,6 +25,7 @@ export interface ReportItem {
   id: string;
   reportId: string;
   requestId: string;
+  barcode?: string;
   sampleId: string;
   patientId: string;
   patientPid?: string;
@@ -204,303 +205,6 @@ export function convertTestParamsToQCParams(params: any[]): QualityCheckParamete
   });
 }
 
-const INITIAL_REPORTS: ReportItem[] = [
-  {
-    id: "rep-1",
-    reportId: "RPT-2024-0530-001",
-    requestId: "TRF1256",
-    sampleId: "SMP-2024-0530-001",
-    patientId: "P000123",
-    patientPid: "PAT-2024-00045",
-    patientName: "Rahul Sharma",
-    patientAgeGender: "Male | 34 Years",
-    patientAvatar:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuBk5rMXMyViKhrEWS3OPs4EJKp41wiYn1yNbXA5l8RDhUEQ3edVPM-3o-jLtLS6HSXMEut3cfRaSBn5s33BhP0F6OAOZX42hZbHmmdVj65-ctAIdJRbm3Zz-9zEIo0TphDh1b4CrwJP4rmrJrZbPQyyErPeQlhLum-s5Zk9lFWs5P__X5-cb4t8OtGeYjeqonWaXkVvfzOF63hf9zgtRsnWsqeDqoPZEhiBztkX6UoF4fCIy7FpeUmamA",
-    patientEmail: "Rahul.sharma@email.com",
-    doctorName: "Dr. Johnson",
-    doctorEmail: "johnson@hospital.com",
-    testPanel: "Complete Blood Count (CBC)",
-    generatedDate: "20 May 2024 11:30 AM",
-    completedDate: "20 May 2024, 11:35 AM",
-    completedBy: "Lab Technician - John Doe",
-    sampleType: "Whole Blood Sample",
-    status: "GENERATED",
-    findingsSummary: "All parameters within normal clinical reference ranges.",
-    parameters: DEFAULT_QC_PARAMETERS,
-    overallDecision: "Approved",
-    reviewComments: "All CBC parameters verified and within acceptable limits.",
-    clinicalCorrelation:
-      "Patient is a 34-year-old male with no significant complaints. CBC results are within normal range. Correlate with clinical findings.",
-    approvalRemarks: "No abnormalities detected in the CBC parameters.",
-    approverName: "Dr. Sarah Johnson",
-    approverRole: "Senior Pathologist",
-    approvalDate: "20 May 2024, 12:10 PM",
-    signatureUrl: "certified-default",
-    sentOn: "20 May 2024, 12:12 PM",
-    deliveredOn: "20 May 2024, 12:13 PM",
-  },
-  {
-    id: "rep-s3",
-    reportId: "RPT-SMP-003",
-    requestId: "BC2405200003",
-    sampleId: "SMP-003",
-    patientId: "P000124",
-    patientPid: "PAT-2024-00046",
-    patientName: "Priya",
-    patientAgeGender: "Female | 28 Years",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "priya.clinical@email.com",
-    doctorName: "Dr. Patel",
-    doctorEmail: "patel.nephro@hospital.com",
-    testPanel: "Kidney Function Test (KFT)",
-    generatedDate: "20 May 2024 11:35 AM",
-    completedDate: "20 May 2024, 12:00 PM",
-    completedBy: "Lab Technician - John Doe",
-    sampleType: "Serum",
-    status: "UNDER_REVIEW",
-    findingsSummary: "Creatinine: 0.8 mg/dL, Urea: 22 mg/dL. Analyzer testing completed successfully.",
-    parameters: [
-      {
-        id: "kft-1",
-        parameter: "Serum Creatinine",
-        result: "0.85",
-        unit: "mg/dL",
-        referenceRange: "0.6 - 1.2",
-        status: "Normal",
-        approved: true,
-      },
-      {
-        id: "kft-2",
-        parameter: "Blood Urea Nitrogen (BUN)",
-        result: "16.0",
-        unit: "mg/dL",
-        referenceRange: "7 - 20",
-        status: "Normal",
-        approved: true,
-      },
-      {
-        id: "kft-3",
-        parameter: "Uric Acid",
-        result: "4.8",
-        unit: "mg/dL",
-        referenceRange: "3.5 - 7.2",
-        status: "Normal",
-        approved: true,
-      },
-      {
-        id: "kft-4",
-        parameter: "eGFR",
-        result: "98",
-        unit: "mL/min/1.73m²",
-        referenceRange: "> 90",
-        status: "Normal",
-        approved: true,
-      },
-    ],
-    overallDecision: "Pending",
-    clinicalCorrelation:
-      "Renal function parameters within healthy physiological range. Correlate with clinical findings.",
-    approvalRemarks: "Testing completed on analyzer bench. Awaiting final pathologist sign-off.",
-    approverName: "Dr. Sarah Johnson",
-    approverRole: "Senior Pathologist",
-    approvalDate: "20 May 2024, 12:15 PM",
-    signatureUrl: "certified-default",
-  },
-  {
-    id: "rep-3",
-    reportId: "RPT-2024-0530-003",
-    requestId: "TRF1258",
-    sampleId: "SMP-2024-0530-004",
-    patientId: "P000125",
-    patientPid: "PAT-2024-00047",
-    patientName: "Praveen Singh",
-    patientAgeGender: "Male | 45 Years",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "praveen.singh@email.com",
-    doctorName: "Dr. Rao",
-    doctorEmail: "rao.cardio@hospital.com",
-    testPanel: "Lipid Profile & Glucose Fasting",
-    generatedDate: "03 Apr 2026 11:50 AM",
-    completedDate: "03 Apr 2026, 11:15 AM",
-    completedBy: "Lab Technician - John Doe",
-    sampleType: "Plasma",
-    status: "CRITICAL",
-    findingsSummary:
-      "Severe hypertriglyceridemia flagged. Urgent doctor notification advised.",
-    parameters: [
-      {
-        id: "lp-1",
-        parameter: "Total Cholesterol",
-        result: "245",
-        unit: "mg/dL",
-        referenceRange: "< 200",
-        status: "Abnormal",
-        approved: true,
-      },
-      {
-        id: "lp-2",
-        parameter: "Triglycerides",
-        result: "480",
-        unit: "mg/dL",
-        referenceRange: "< 150",
-        status: "Critical",
-        approved: false,
-      },
-      {
-        id: "lp-3",
-        parameter: "HDL Cholesterol",
-        result: "32",
-        unit: "mg/dL",
-        referenceRange: "> 40",
-        status: "Abnormal",
-        approved: true,
-      },
-      {
-        id: "lp-4",
-        parameter: "LDL Cholesterol",
-        result: "165",
-        unit: "mg/dL",
-        referenceRange: "< 100",
-        status: "Abnormal",
-        approved: true,
-      },
-    ],
-    overallDecision: "Pending",
-    reviewComments: "High triglycerides require supervisor counter-sign.",
-    clinicalCorrelation:
-      "Critical elevation in serum Triglycerides (480 mg/dL). High cardiovascular risk profile. Immediate physician review recommended.",
-    approvalRemarks: "Requires stat clinical notification and fasting verification.",
-    approverName: "Dr. Sarah Johnson",
-    approverRole: "Senior Pathologist",
-    approvalDate: "03 Apr 2026, 12:20 PM",
-    sentOn: "03 Apr 2026, 12:22 PM",
-    deliveredOn: "03 Apr 2026, 12:24 PM",
-  },
-  {
-    id: "rep-4",
-    reportId: "RPT-2024-0530-004",
-    requestId: "TRF1259",
-    sampleId: "SMP-2024-0530-005",
-    patientId: "P000126",
-    patientPid: "PAT-2024-00048",
-    patientName: "Naziya",
-    patientAgeGender: "Female | 31 Years",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "naziya.k@email.com",
-    doctorName: "Dr. Johnson",
-    doctorEmail: "johnson@hospital.com",
-    testPanel: "Thyroid Profile (T3, T4, TSH)",
-    generatedDate: "05 Apr 2026 10:55 AM",
-    completedDate: "05 Apr 2026, 10:20 AM",
-    completedBy: "Lab Technician - John Doe",
-    sampleType: "Serum",
-    status: "UNDER_REVIEW",
-    findingsSummary:
-      "Awaiting Pathologist signature and hormone value confirmation.",
-    parameters: [
-      {
-        id: "tp-1",
-        parameter: "Total T3",
-        result: "1.2",
-        unit: "ng/mL",
-        referenceRange: "0.8 - 2.0",
-        status: "Normal",
-        approved: true,
-      },
-      {
-        id: "tp-2",
-        parameter: "Total T4",
-        result: "8.5",
-        unit: "µg/dL",
-        referenceRange: "5.1 - 14.1",
-        status: "Normal",
-        approved: true,
-      },
-      {
-        id: "tp-3",
-        parameter: "TSH (Thyroid Stimulating)",
-        result: "2.85",
-        unit: "µIU/mL",
-        referenceRange: "0.4 - 4.2",
-        status: "Normal",
-        approved: true,
-      },
-    ],
-    overallDecision: "Pending",
-    clinicalCorrelation:
-      "Thyroid profile consistent with euthyroid metabolic state. Hormonal levels are concordant.",
-    approvalRemarks: "Awaiting final pathologist sign-off.",
-    approverName: "Dr. Sarah Johnson",
-    approverRole: "Senior Pathologist",
-    approvalDate: "05 Apr 2026, 11:15 AM",
-    sentOn: "05 Apr 2026, 11:18 AM",
-    deliveredOn: "05 Apr 2026, 11:20 AM",
-  },
-  {
-    id: "rep-5",
-    reportId: "RPT-2024-0530-005",
-    requestId: "TRF1260",
-    sampleId: "SMP-2024-0530-006",
-    patientId: "P000127",
-    patientPid: "PAT-2024-00049",
-    patientName: "Meena Kumari",
-    patientAgeGender: "Female | 52 Years",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "meena.kumari@email.com",
-    doctorName: "Dr. Johnson",
-    doctorEmail: "johnson@hospital.com",
-    testPanel: "Electrolytes & Arterial Blood Gas",
-    generatedDate: "10 Apr 2026 09:40 AM",
-    completedDate: "10 Apr 2026, 09:15 AM",
-    completedBy: "Lab Technician - John Doe",
-    sampleType: "Whole Blood (Heparin)",
-    status: "DRAFT",
-    findingsSummary:
-      "Preliminary analyzer readings imported; awaiting technician review.",
-    parameters: [
-      {
-        id: "elec-1",
-        parameter: "Sodium (Na+)",
-        result: "139",
-        unit: "mmol/L",
-        referenceRange: "135 - 145",
-        status: "Normal",
-        approved: false,
-      },
-      {
-        id: "elec-2",
-        parameter: "Potassium (K+)",
-        result: "4.2",
-        unit: "mmol/L",
-        referenceRange: "3.5 - 5.1",
-        status: "Normal",
-        approved: false,
-      },
-      {
-        id: "elec-3",
-        parameter: "Chloride (Cl-)",
-        result: "101",
-        unit: "mmol/L",
-        referenceRange: "98 - 107",
-        status: "Normal",
-        approved: false,
-      },
-    ],
-    overallDecision: "Pending",
-    clinicalCorrelation:
-      "Electrolyte panel indicates normonatremic, normokalemic status with normal anion balance.",
-    approvalRemarks: "Initial analyzer data pending pathologist approval.",
-    approverName: "Dr. Sarah Johnson",
-    approverRole: "Senior Pathologist",
-    approvalDate: "10 Apr 2026, 10:00 AM",
-    sentOn: "10 Apr 2026, 10:05 AM",
-    deliveredOn: "10 Apr 2026, 10:06 AM",
-  },
-];
 
 function calculateAge(dob: string): number {
   const birth = new Date(dob);
@@ -518,6 +222,74 @@ function formatReportDate(dateVal?: string | Date | null): string {
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+export function getDisplayBarcode(r?: {
+  barcode?: string;
+  sampleId?: string;
+  id?: string;
+  requestId?: string;
+} | null): string {
+  if (!r) return "-";
+  if (
+    r.barcode &&
+    r.barcode.startsWith("BC") &&
+    !r.barcode.startsWith("BC-s") &&
+    !r.barcode.startsWith("BC-SMP") &&
+    !r.barcode.startsWith("BC-item")
+  ) {
+    return r.barcode;
+  }
+
+  if (typeof window !== "undefined") {
+    const rawId = (r.id || "").replace(/^(rep-|item-)/, "");
+    if (rawId) {
+      const storedItem = localStorage.getItem(`generated_barcode_item_${rawId}`);
+      if (storedItem && storedItem.startsWith("BC")) return storedItem;
+      const storedTesting = localStorage.getItem(`testing_sample_barcode_${rawId}`);
+      if (storedTesting && storedTesting.startsWith("BC")) return storedTesting;
+    }
+    if (r.sampleId) {
+      const storedSmpBc = localStorage.getItem(`testing_sample_barcode_${r.sampleId}`);
+      if (storedSmpBc && storedSmpBc.startsWith("BC")) return storedSmpBc;
+    }
+  }
+
+  const rawId = (r.id || "").replace(/^(rep-|item-)/, "");
+  const matchInitial = INITIAL_TESTING_SAMPLES.find(
+    (its) =>
+      its.id === r.id ||
+      its.id === rawId ||
+      (r.sampleId && its.sampleId === r.sampleId) ||
+      (r.barcode && its.barcode === r.barcode)
+  );
+  if (matchInitial?.barcode) return matchInitial.barcode;
+
+  const sampleNumMatch = (r.sampleId || r.id || r.requestId || "").match(/SMP-?0*(\d+)/i);
+  if (sampleNumMatch) {
+    const num = parseInt(sampleNumMatch[1], 10);
+    return `BC240520${String(num).padStart(4, "0")}`;
+  }
+
+  if (r.barcode && r.barcode.startsWith("BC-")) {
+    const cleanNum = r.barcode.replace(/\D/g, "");
+    if (cleanNum) {
+      return `BC240520${cleanNum.slice(-4).padStart(4, "0")}`;
+    }
+  }
+
+  if (
+    r.barcode &&
+    !r.barcode.startsWith("SMP-") &&
+    !r.barcode.startsWith("RPT-") &&
+    !r.barcode.startsWith("TRF-") &&
+    !r.barcode.startsWith("REQ")
+  ) {
+    return r.barcode;
+  }
+
+  const digits = (r.id || r.sampleId || r.requestId || "1").replace(/\D/g, "").slice(-4) || "0001";
+  return `BC240520${digits.padStart(4, "0")}`;
+}
+
 export default function ReportGeneration() {
   const navigate = useNavigate();
   const currentUser = getUser();
@@ -533,7 +305,7 @@ export default function ReportGeneration() {
   };
 
   const [activeNav, setActiveNav] = useState("Report Generation");
-  const [reports, setReports] = useState<ReportItem[]>(INITIAL_REPORTS);
+  const [reports, setReports] = useState<ReportItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | "GENERATED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL"
@@ -604,12 +376,17 @@ export default function ReportGeneration() {
 
         let parsedMeta: any = null;
         if (rep.report_comment) {
-          try {
-            parsedMeta = JSON.parse(rep.report_comment);
-          } catch {
-            // plain text
+          if (typeof rep.report_comment === "object") {
+            parsedMeta = rep.report_comment;
+          } else if (typeof rep.report_comment === "string") {
+            try {
+              parsedMeta = JSON.parse(rep.report_comment);
+            } catch {
+              // plain text
+            }
           }
         }
+        const commentString = typeof rep.report_comment === "string" ? rep.report_comment : "";
 
         const rawStatus = (rep.report_status || "GENERATED").toUpperCase();
         let status: "GENERATED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL" = "GENERATED";
@@ -621,7 +398,12 @@ export default function ReportGeneration() {
         const sampleBarcode =
           orderItem?.sample_collection?.[0]?.barcode ||
           orderItem?.barcode ||
-          `SMP-${rep.lab_report_id.slice(-8)}`;
+          (orderItem?.remarks?.match(/Barcode:\s*([A-Za-z0-9_-]+)/i)?.[1]) ||
+          getDisplayBarcode({
+            id: rep.lab_report_id,
+            sampleId: orderItem?.sample_collection?.[0]?.sample_collection_id,
+            requestId: rep.lab_order_id,
+          });
 
         existingSampleIds.add(sampleBarcode);
         if (orderItem?.lab_order_item_id) existingReportIds.add(orderItem.lab_order_item_id);
@@ -630,6 +412,7 @@ export default function ReportGeneration() {
           id: rep.lab_report_id,
           reportId: rep.report_number || `RPT-${rep.lab_report_id.slice(-6)}`,
           requestId: rep.lab_order_id,
+          barcode: sampleBarcode,
           sampleId: sampleBarcode,
           patientId,
           patientPid: patient?.patient_id || patientId,
@@ -644,12 +427,12 @@ export default function ReportGeneration() {
           completedBy: rep.employees ? `Dr. ${rep.employees.first_name} ${rep.employees.last_name || ""}`.trim() : "Pathology Lab",
           sampleType,
           status,
-          findingsSummary: parsedMeta?.text || rep.report_comment || "Diagnostic results verified within reference ranges.",
+          findingsSummary: parsedMeta?.text || commentString || "Diagnostic results verified within reference ranges.",
           parameters: parsedMeta?.parameters && parsedMeta.parameters.length > 0 ? parsedMeta.parameters : getDefaultQCParametersForPanel(testPanel),
           overallDecision: parsedMeta?.overallDecision || "Approved",
-          reviewComments: parsedMeta?.text || rep.report_comment || "",
+          reviewComments: parsedMeta?.text || commentString || "",
           clinicalCorrelation: parsedMeta?.clinicalCorrelation || "Correlate clinically with physical examination and history.",
-          approvalRemarks: rep.report_comment || "Parameters approved.",
+          approvalRemarks: commentString || parsedMeta?.text || "Parameters approved.",
           approverName: rep.employees ? `Dr. ${rep.employees.first_name} ${rep.employees.last_name || ""}`.trim() : "Dr. Sarah Johnson",
           approverRole: rep.employees?.designation || "Senior Pathologist",
           approvalDate: formatReportDate(rep.approved_datetime),
@@ -666,6 +449,11 @@ export default function ReportGeneration() {
           ? localStorage.getItem(`testing_sample_status_${item.lab_order_item_id}`)
           : null;
         const isTestingCompleted = rawItemStatus === "COMPLETED" || storedItemStatus === "COMPLETED";
+
+        // ONLY include items where testing has completed or report is already generated
+        if (!isTestingCompleted && rawItemStatus !== "REPORT GENERATED") {
+          return;
+        }
 
         // If this order already has a report and this item is NOT newly completed, skip
         if (existingReportOrderIds.has(item.lab_order_id) && !isTestingCompleted) return;
@@ -689,25 +477,23 @@ export default function ReportGeneration() {
         const testName = item.lab_test_master?.test_name || "Diagnostic Test";
         const sampleType = item.lab_test_master?.sample_type || item.specimen_type || "Whole Blood (EDTA)";
 
-        const isVerified = rawItemStatus === "VERIFIED" || isTestingCompleted;
+        const isVerified = true;
 
         const sampleBarcode =
           item.sample_collection?.[0]?.barcode ||
           item.barcode ||
           (item.remarks?.match(/Barcode:\s*([A-Za-z0-9_-]+)/i)?.[1]) ||
-          `SMP-${item.lab_order_item_id.slice(-6)}`;
+          getDisplayBarcode({ id: item.lab_order_item_id, requestId: item.lab_order_id });
 
         const isApproved = typeof window !== "undefined" && (
           localStorage.getItem(`report_approved_item-${item.lab_order_item_id}`) === "GENERATED" ||
           localStorage.getItem(`report_approved_${item.lab_order_item_id}`) === "GENERATED"
         );
 
-        const status: "GENERATED" | "UNDER_REVIEW" | "DRAFT" =
+        const status: "GENERATED" | "UNDER_REVIEW" =
           isApproved || rawItemStatus === "REPORT GENERATED"
             ? "GENERATED"
-            : isVerified
-              ? "UNDER_REVIEW"
-              : "DRAFT";
+            : "UNDER_REVIEW";
 
         // Read custom test parameters if recorded in Testing Samples
         const storedParamsStr = typeof window !== "undefined"
@@ -740,6 +526,7 @@ export default function ReportGeneration() {
           id: `item-${item.lab_order_item_id}`,
           reportId: `RPT-PENDING-${item.lab_order_item_id.slice(-6)}`,
           requestId: item.lab_order_id,
+          barcode: sampleBarcode,
           sampleId: sampleBarcode,
           patientId,
           patientPid: patient?.patient_id || patientId,
@@ -776,7 +563,7 @@ export default function ReportGeneration() {
         const storedStatus = typeof window !== "undefined"
           ? localStorage.getItem(`testing_sample_status_${s.id}`)
           : null;
-        return storedStatus === "COMPLETED" || s.status === "COMPLETED";
+        return storedStatus === "COMPLETED";
       });
 
       // Check verified_samples_cache
@@ -892,6 +679,7 @@ export default function ReportGeneration() {
           id: `rep-${s.id}`,
           reportId,
           requestId: barcode || `TRF-${sampleId}`,
+          barcode: getDisplayBarcode({ id: s.id, sampleId, barcode }),
           sampleId,
           patientId: s.patientId || "P000124",
           patientPid: s.patientPid || s.patientId || "P000124",
@@ -904,7 +692,7 @@ export default function ReportGeneration() {
           testPanel: s.testName || "Diagnostic Test",
           generatedDate: formatReportDate(s.receivedDate || new Date()),
           completedDate: s.estimatedCompletion || "Today, 11:30 AM",
-          completedBy: s.receivedBy || "Lab Technician - John Doe",
+          completedBy: s.receivedBy || "Lab Technician",
           sampleType: s.sampleType || "Serum",
           status,
           findingsSummary,
@@ -922,26 +710,61 @@ export default function ReportGeneration() {
         if (barcode) existingBarcodes.add(barcode);
       });
 
-      // 4. Merge any initial demo reports (like rep-1, rep-3, rep-4, rep-5) if not already represented
-      INITIAL_REPORTS.forEach((demo) => {
-        const exists = mappedList.some(
-          (m) =>
-            m.id === demo.id ||
-            m.reportId === demo.reportId ||
-            (demo.sampleId && m.sampleId === demo.sampleId)
-        );
-        if (!exists) {
-          mappedList.push(demo);
+      
+      // Strict filter: ONLY samples that are tested and completed (or reports already generated) appear in Report Generation
+      const completedOnlyReports = mappedList.filter((r) => {
+        if (r.status === "GENERATED") return true;
+        if (r.status === "DRAFT") return false;
+
+        const rawId = r.id.replace("rep-", "").replace("item-", "");
+
+        // 1. Check if marked completed in localStorage
+        const storedStatus = typeof window !== "undefined"
+          ? localStorage.getItem(`testing_sample_status_${rawId}`) ||
+            localStorage.getItem(`testing_sample_status_${r.id}`)
+          : null;
+        if (storedStatus === "COMPLETED") return true;
+
+        // 2. Check completed_testing_samples registry
+        if (
+          completedRegistry.some(
+            (cs: any) =>
+              cs.id === rawId ||
+              cs.sampleId === r.sampleId ||
+              (r.requestId && cs.barcode === r.requestId)
+          )
+        ) {
+          return true;
         }
+
+        // 3. Check INITIAL_TESTING_SAMPLES explicitly marked completed
+        const matchInitial = INITIAL_TESTING_SAMPLES.find(
+          (ts) =>
+            ts.id === rawId ||
+            ts.sampleId === r.sampleId ||
+            (r.barcode && ts.barcode === r.barcode) ||
+            (r.requestId && ts.barcode === r.requestId)
+        );
+        if (matchInitial) {
+          const initialStored = typeof window !== "undefined"
+            ? localStorage.getItem(`testing_sample_status_${matchInitial.id}`)
+            : null;
+          if (initialStored === "COMPLETED") return true;
+        }
+
+        return false;
       });
 
-      if (mappedList.length > 0) {
-        setReports(mappedList);
+      if (completedOnlyReports.length > 0) {
+        setReports(completedOnlyReports);
         setSelectedReport((prev) => {
-          if (!prev) return mappedList[0];
-          const found = mappedList.find((r) => r.id === prev.id);
-          return found || mappedList[0];
+          if (!prev) return completedOnlyReports[0];
+          const found = completedOnlyReports.find((r) => r.id === prev.id);
+          return found || completedOnlyReports[0];
         });
+      } else {
+        setReports([]);
+        setSelectedReport(null);
       }
     } catch (err: any) {
       console.error("Error fetching lab reports:", err);
@@ -961,9 +784,7 @@ export default function ReportGeneration() {
   >("table");
 
   // Selected Report & Data
-  const [selectedReport, setSelectedReport] = useState<ReportItem>(
-    INITIAL_REPORTS[0],
-  );
+  const [selectedReport, setSelectedReport] = useState<ReportItem | null>(null);
 
   // Quality Check State
   const [currentParameters, setCurrentParameters] = useState<
@@ -975,17 +796,13 @@ export default function ReportGeneration() {
   const [reviewComments, setReviewComments] = useState("");
 
   // Approve Results State
-  const [clinicalCorrelation, setClinicalCorrelation] = useState(
-    "Patient is a 34-year-old male with no significant complaints. CBC results are within normal range. Correlate with clinical findings.",
+  const [clinicalCorrelation, setClinicalCorrelation] = useState("");
+  const [approvalRemarks, setApprovalRemarks] = useState("");
+  const [approverName, setApproverName] = useState(
+    currentUser?.username ? `Dr. ${currentUser.username}` : "Dr. Sarah Johnson"
   );
-  const [approvalRemarks, setApprovalRemarks] = useState(
-    "No abnormalities detected in the CBC parameters.",
-  );
-  const [approverName, setApproverName] = useState("Dr. Sarah Johnson");
   const [approverRole, setApproverRole] = useState("Senior Pathologist");
-  const [approvalDateTime, setApprovalDateTime] = useState(
-    "20 May 2024, 12:10 PM",
-  );
+  const [approvalDateTime, setApprovalDateTime] = useState("");
   const [digitalSignature, setDigitalSignature] = useState<string | null>(
     "certified-default",
   );
@@ -1021,6 +838,7 @@ export default function ReportGeneration() {
   };
 
   const handleSubmitReview = (proceedToApproval = false) => {
+    if (!selectedReport) return;
     const updatedStatus: "GENERATED" | "CRITICAL" | "UNDER_REVIEW" =
       overallDecision === "Approved"
         ? "GENERATED"
@@ -1042,13 +860,13 @@ export default function ReportGeneration() {
       ),
     );
 
-    setSelectedReport((prev) => ({
+    setSelectedReport((prev) => (prev ? {
       ...prev,
       status: updatedStatus,
       overallDecision,
       reviewComments,
       parameters: currentParameters,
-    }));
+    } : null));
 
     if (proceedToApproval) {
       handleOpenApproveResults({
@@ -1072,16 +890,16 @@ export default function ReportGeneration() {
     setSelectedReport(report);
     setClinicalCorrelation(
       report.clinicalCorrelation ||
-        "Patient is a 34-year-old male with no significant complaints. CBC results are within normal range. Correlate with clinical findings.",
+        `Clinical correlation for ${report.patientName}: Test results correlate with clinical observations.`,
     );
     setApprovalRemarks(
       report.approvalRemarks ||
         report.findingsSummary ||
-        "No abnormalities detected in the CBC parameters.",
+        "All parameters verified and within acceptable limits.",
     );
-    setApproverName(report.approverName || "Dr. Sarah Johnson");
+    setApproverName(report.approverName || (currentUser?.username ? `Dr. ${currentUser.username}` : "Dr. Sarah Johnson"));
     setApproverRole(report.approverRole || "Senior Pathologist");
-    setApprovalDateTime(report.approvalDate || "20 May 2024, 12:10 PM");
+    setApprovalDateTime(report.approvalDate || new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }));
     setDigitalSignature(report.signatureUrl || "certified-default");
     setViewMode("approve-results");
   };
@@ -1123,6 +941,7 @@ export default function ReportGeneration() {
   };
 
   const handleConfirmApproveAndSign = (viewDeliveredDirectly = false) => {
+    if (!selectedReport) return;
     if (!digitalSignature) {
       toast({
         title: "Digital Signature Required",
@@ -1133,8 +952,15 @@ export default function ReportGeneration() {
       return;
     }
 
-    const nowSent = "20 May 2024, 12:12 PM";
-    const nowDelivered = "20 May 2024, 12:13 PM";
+    const nowFormatted = new Date().toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const nowSent = nowFormatted;
+    const nowDelivered = nowFormatted;
 
     setReports((prev) =>
       prev.map((r) =>
@@ -1234,7 +1060,9 @@ export default function ReportGeneration() {
   const handleViewPortalReport = (portalName: string) => {
     toast({
       title: `Viewing in ${portalName}`,
-      description: `Opening diagnostic report ${selectedReport.reportId} portal preview.`,
+      description: selectedReport
+        ? `Opening diagnostic report ${selectedReport.reportId} portal preview.`
+        : "Opening portal preview.",
     });
   };
 
@@ -1265,6 +1093,8 @@ export default function ReportGeneration() {
         rep.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         rep.requestId.toLowerCase().includes(searchQuery.toLowerCase()) ||
         rep.reportId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (rep.barcode && rep.barcode.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        getDisplayBarcode(rep).toLowerCase().includes(searchQuery.toLowerCase()) ||
         rep.doctorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         rep.testPanel.toLowerCase().includes(searchQuery.toLowerCase());
 
@@ -1306,7 +1136,7 @@ export default function ReportGeneration() {
 
       {/* Main Content Area */}
       <div className="flex-1 ml-64 min-h-screen flex flex-col min-w-0 bg-[#f8fafc]">
-        {viewMode === "delivered-status" ? (
+        {viewMode === "delivered-status" && selectedReport ? (
           /* ========================================================================= */
           /* BEGIN: Report Delivered Successfully View                                */
           /* ========================================================================= */
@@ -1402,7 +1232,7 @@ export default function ReportGeneration() {
                           Patient Portal
                         </h4>
                         <p className="text-sm text-slate-500 mt-1 font-mono">
-                          {selectedReport.patientEmail || "Rahul.sharma@email.com"}
+                          {selectedReport.patientEmail || "-"}
                         </p>
                       </div>
                     </div>
@@ -1443,10 +1273,10 @@ export default function ReportGeneration() {
                           Doctor Portal
                         </h4>
                         <p className="text-sm text-slate-500 mt-1 font-normal">
-                          {selectedReport.doctorName || "Dr. Johnson"}
+                          {selectedReport.doctorName || "Attending Physician"}
                         </p>
                         <p className="text-xs text-slate-400 font-mono">
-                          {selectedReport.doctorEmail || "johnson@hospital.com"}
+                          {selectedReport.doctorEmail || "-"}
                         </p>
                       </div>
                     </div>
@@ -1484,7 +1314,7 @@ export default function ReportGeneration() {
                       Sent On
                     </span>
                     <span className="text-base font-bold text-slate-900">
-                      {selectedReport.sentOn || "20 May 2024, 12:12 PM"}
+                      {selectedReport.sentOn || selectedReport.generatedDate || "-"}
                     </span>
                   </div>
                   {/* Delivered On */}
@@ -1493,7 +1323,7 @@ export default function ReportGeneration() {
                       Delivered On
                     </span>
                     <span className="text-base font-bold text-slate-900">
-                      {selectedReport.deliveredOn || "20 May 2024, 12:13 PM"}
+                      {selectedReport.deliveredOn || selectedReport.generatedDate || "-"}
                     </span>
                   </div>
                   {/* Report ID */}
@@ -1528,7 +1358,7 @@ export default function ReportGeneration() {
               </div>
             </div>
           </main>
-        ) : viewMode === "approve-results" ? (
+        ) : viewMode === "approve-results" && selectedReport ? (
           /* ========================================================================= */
           /* BEGIN: Approve Results View                                              */
           /* ========================================================================= */
@@ -1608,10 +1438,10 @@ export default function ReportGeneration() {
                           PID:{" "}
                           {selectedReport.patientPid ||
                             selectedReport.patientId ||
-                            "PAT-2024-00045"}
+                            "-"}
                         </p>
                         <p className="text-xs text-slate-400 font-normal mt-0.5">
-                          {selectedReport.patientAgeGender || "Male | 34 Years"}
+                          {selectedReport.patientAgeGender || "-"}
                         </p>
                       </div>
                     </div>
@@ -1620,10 +1450,10 @@ export default function ReportGeneration() {
                     <div className="space-y-5">
                       <div>
                         <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">
-                          SAMPLE ID
+                          BARCODE
                         </p>
                         <p className="text-sm font-bold text-slate-800 mt-1 font-mono">
-                          {selectedReport.sampleId || "SMP-2024-0530-001"}
+                          {getDisplayBarcode(selectedReport)}
                         </p>
                       </div>
                       <div>
@@ -1888,7 +1718,7 @@ export default function ReportGeneration() {
               </section>
             </div>
           </main>
-        ) : viewMode === "quality-check" ? (
+        ) : viewMode === "quality-check" && selectedReport ? (
           /* ========================================================================= */
           /* BEGIN: Quality Check - Review Results View                               */
           /* ========================================================================= */
@@ -1956,10 +1786,10 @@ export default function ReportGeneration() {
                     {/* Row 1 */}
                     <div className="flex items-baseline">
                       <span className="w-36 text-slate-500 font-normal shrink-0">
-                        Sample ID
+                        Barcode
                       </span>
                       <span className="font-semibold text-slate-900 font-mono">
-                        {selectedReport.sampleId || "SMP-2024-0530-001"}
+                        {getDisplayBarcode(selectedReport)}
                       </span>
                     </div>
                     <div className="flex items-baseline">
@@ -1989,7 +1819,7 @@ export default function ReportGeneration() {
                       </span>
                       <span className="font-semibold text-slate-900">
                         {selectedReport.completedBy ||
-                          "Lab Technician - John Doe"}
+                          "Lab Technician"}
                       </span>
                     </div>
                     {/* Row 3 */}
@@ -1998,7 +1828,7 @@ export default function ReportGeneration() {
                         Sample Type
                       </span>
                       <span className="font-semibold text-slate-900">
-                        {selectedReport.sampleType || "Whole Blood Sample"}
+                        {selectedReport.sampleType || "Specimen"}
                       </span>
                     </div>
                     <div className="flex items-center">
@@ -2530,7 +2360,7 @@ export default function ReportGeneration() {
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full pl-10 pr-4 py-2.5 bg-white text-sm text-slate-800 placeholder-slate-400 border border-slate-300 rounded-lg focus:outline-none focus:border-slate-500 focus:ring-1 focus:ring-slate-500 transition-colors"
-                        placeholder="Search Patient, Report ID, Doctor..."
+                        placeholder="Search Patient, Barcode, Doctor..."
                         type="text"
                       />
                       {searchQuery && (
@@ -2682,7 +2512,7 @@ export default function ReportGeneration() {
                     <thead>
                       <tr className="bg-[#f8fafc] border-y border-slate-200/90 text-[13px] font-bold text-slate-600 tracking-wider">
                         <th className="py-5 px-8 font-bold" scope="col">
-                          REPORT &amp; REQUISITION
+                          BARCODE
                         </th>
                         <th className="py-5 px-6 font-bold" scope="col">
                           PATIENT NAME
@@ -2731,11 +2561,8 @@ export default function ReportGeneration() {
                             className="hover:bg-slate-50/60 transition-colors cursor-pointer"
                           >
                             <td className="py-5 px-8 whitespace-nowrap">
-                              <span className="font-semibold text-slate-900 font-mono block">
-                                {r.reportId}
-                              </span>
-                              <span className="font-mono text-blue-600 text-xs font-semibold">
-                                {r.requestId}
+                              <span className="font-mono text-slate-900 text-sm font-semibold">
+                                {getDisplayBarcode(r)}
                               </span>
                             </td>
                             <td className="py-5 px-6 whitespace-nowrap">

@@ -1,8 +1,15 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation } from "react-router-dom";
-import API, { getActiveBranchId } from "../../../api/axios";
+import API from "../../../api/axios";
+import {
+  chemotherapyApi,
+  isChemoPlanClosed,
+  type ChemoPlanHydration,
+  type ChemoPlanItem,
+  type ChemoPlanOrder,
+  type ChemoPlanOrderHeader,
+} from "../../../api/chemotherapy.api";
 import { getUser } from "../../../utils/token";
-import { computeBmi, computeBsa } from "../../../utils/vitals";
 import { Calendar } from "../../../components/ui/calendar";
 import {
   Popover,
@@ -21,14 +28,35 @@ import type {
   RegimenProtocolItem,
 } from "./types";
 import {
+  COURSE_CLOSED_MESSAGE,
   createChemotherapyPlanForPatient,
+  findActiveEncounter,
   formatDateDMY,
+  orderDosingFromSnapshot,
   formatPickedDate,
   parseDateValue,
   parsePickedDate,
   toIsoDate,
 } from "./helpers";
 import { BackIcon, BellIcon, CheckIcon } from "./icons";
+import { SingleSelectDropdown } from "../../../components/ui/single-select-dropdown";
+import type { MultiSelectOption } from "../../../components/ui/multi-select-dropdown";
+import {
+  DOSE_CALC_OPTIONS,
+  buildDosingSnapshot,
+  buildPlanItemsFromOrder,
+  computePatientDose,
+  defaultDoseCalc,
+  normalizeDoseCalc,
+  normalizeLegacyDraftDrug,
+  parseSex,
+  resolveDoseCalc,
+  resolveTargetAuc,
+  summarizeDosingInputs,
+  toPositiveNumber,
+  type DosingInputs,
+  type PatientDoseResult,
+} from "./doseCalculation";
 
 /* ============================================================
    CHEMOTHERAPY ORDER COMPONENT
@@ -47,82 +75,61 @@ const parseMeasureString = (value: string): number | null => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
 
-/* Plain BSA (Mosteller) of the patient derived from height/weight:
-   BSA (m²) = √(height_cm × weight_kg / 3600). Applied directly to the
-   protocol dose so larger patients get a higher dose and smaller
-   patients a lower one. Returns 1 when BSA cannot be derived so doses
-   stay unchanged. */
-const bsaDoseScaleFactor = (
-  measurements?: MeasurementValues
-): number => {
-  const height = parseMeasureString(measurements?.height ?? "");
-  const weight = parseMeasureString(measurements?.weight ?? "");
-  const bsa = computeBsa(height, weight);
-  if (bsa === null) return 1;
-  return Math.round(bsa * 1000) / 1000;
+/* A saved plan item (baseline or a cycle day order's row): a
+   medicine_master drug, or - medicine_id null - a drug name typed for this
+   patient (drug_name). */
+type ChemotherapyPlanItem = ChemoPlanItem;
+
+/* chemotherapy_plan_hydration row. */
+type PlanHydrationRecord = ChemoPlanHydration;
+
+/* Editable Hydration tab row: the plan's own saved list, or a copy of the
+   protocol's hydration template (document Section 3). */
+type HydrationRow = {
+  id: number;
+  sourceDilutionId: string | null;
+  stage: "PRE" | "POST";
+  agent: string;
+  diluent: string;
+  volume: string;
+  volumeUnit: string;
+  guidance: string;
 };
 
-/* Creatinine clearance by Cockcroft-Gault:
-   CrCl (mL/min) = ((140 − age) × weight_kg) / (72 × serum_creatinine),
-   multiplied by 0.85 for females. */
-const computeCockcroftGault = (
-  weightKg: number | null,
-  ageYears: number | null,
-  serumCreatinine: number | null,
-  isFemale: boolean
-): number | null => {
-  if (
-    weightKg === null ||
-    ageYears === null ||
-    serumCreatinine === null ||
-    weightKg <= 0 ||
-    ageYears <= 0 ||
-    serumCreatinine <= 0
-  ) {
-    return null;
-  }
-  const base = ((140 - ageYears) * weightKg) / (72 * serumCreatinine);
-  const value = isFemale ? base * 0.85 : base;
-  return Math.round(value * 10) / 10;
-};
+const dilutionToHydrationRow = (
+  dilution: RegimenProtocolDilution,
+  index: number
+): HydrationRow => ({
+  id: index,
+  sourceDilutionId: dilution.protocol_dilution_id,
+  stage: (dilution.hydration_stage ?? "").toUpperCase() === "POST" ? "POST" : "PRE",
+  agent:
+    dilution.medicine_master?.medicine_name || dilution.drug_brand_name || "",
+  diluent: dilution.diluent ?? "",
+  volume:
+    dilution.dilution_volume != null ? String(Number(dilution.dilution_volume)) : "",
+  volumeUnit: dilution.dilution_volume_unit ?? "",
+  guidance: dilution.comment ?? "",
+});
 
-/* Carboplatin dose by the Calvert formula:
-   Dose (mg) = target AUC × (CrCl + 25). */
-const computeCalvertCarboplatin = (
-  auc: number | null,
-  crcl: number | null
-): number | null => {
-  if (auc === null || crcl === null || auc <= 0 || crcl <= 0) return null;
-  return Math.round(auc * (crcl + 25) * 10) / 10;
-};
-
-/* Dose calculator options shown next to the Chemotherapy Orders tab. */
-const DOSE_CALCULATOR_OPTIONS = [
-  "Body Surface Area (BSA)",
-  "Body Mass Index (BMI)",
-  "Dosing Body Weight (Ideal & Adjusted)",
-  "Creatinine Clearance (CrCl) — Cockcroft-Gault",
-  "Carboplatin Dose — Calvert Formula",
-];
-
-type ChemotherapyPlanItem = {
-  chemotherapy_plan_item_id: string;
-  medicine_id: string;
-  drug_role: string | null;
-  protocol_dose: number | null;
-  protocol_dose_unit: string | null;
-  formulation: string | null;
-  dilution_volume: number | null;
-  medicine_master: {
-    medicine_name: string;
-    generic_name: string | null;
-    dosage_form: string | null;
-    unit: string | null;
-  } | null;
-};
+const planHydrationToRow = (
+  record: PlanHydrationRecord,
+  index: number
+): HydrationRow => ({
+  id: index,
+  sourceDilutionId: record.source_dilution_id,
+  stage: record.hydration_stage === "POST" ? "POST" : "PRE",
+  agent: record.agent_name ?? "",
+  diluent: record.diluent ?? "",
+  volume:
+    record.dilution_volume != null ? String(Number(record.dilution_volume)) : "",
+  volumeUnit: record.dilution_volume_unit ?? "",
+  guidance: record.guidance ?? "",
+});
 
 type ChemotherapyPlan = {
   chemotherapy_plan_id: string;
+  source_protocol_id?: string | null;
   protocol_name: string | null;
   regimen_name: string | null;
   regimen_code: string | null;
@@ -140,19 +147,52 @@ type ChemotherapyPlan = {
     regimen_code: string | null;
     regimen_name: string | null;
   } | null;
+  /* Saved cycle day orders (by cycle / day) and the current one. */
+  plan_orders?: ChemoPlanOrderHeader[] | null;
+  current_order?: ChemoPlanOrder | null;
 };
+
+const orderKey = (cycle: number, day: number) => `${cycle}/${day}`;
+
+const byCycleDay = (a: ChemoPlanOrderHeader, b: ChemoPlanOrderHeader) =>
+  a.cycle_number - b.cycle_number || a.cycle_day - b.cycle_day;
+
+/* A cycle closed by its last day (or cancelled) takes no more orders. */
+const isClosedCycleOrder = (order: ChemoPlanOrderHeader) =>
+  ["COMPLETED", "CANCELLED"].includes(
+    String(order.chemotherapy_cycle?.cycle_status ?? "").toUpperCase()
+  );
+
+/* The Hydration tab rows as saved on a cycle day order. */
+const hydrationPayload = (rows: HydrationRow[]) =>
+  rows.map((row) => ({
+    source_dilution_id: row.sourceDilutionId,
+    hydration_stage: row.stage,
+    agent_name: row.agent.trim() || null,
+    diluent: row.diluent.trim() || null,
+    dilution_volume: row.volume.trim() ? Number(row.volume) : null,
+    dilution_volume_unit: row.volumeUnit.trim() || null,
+    guidance: row.guidance.trim() || null,
+  }));
+
+/* Marks a Drug Name value that is a typed name, not a medicine. */
+const CUSTOM_DRUG_VALUE = "__custom_drug__";
+
+type RowKind = "drug" | "premedication" | "supportive";
 
 const ChemotherapyOrder: React.FC<{
   embedded?: boolean;
   patientId?: string;
   measurements?: MeasurementValues;
   gender?: string;
+  age?: string | number | null;
   onNext?: () => void;
 }> = ({
   embedded = false,
   patientId,
   measurements,
   gender,
+  age,
   onNext,
 }) => {
   const [userAvatarUrl, setUserAvatarUrl] = useState<string>(() => localStorage.getItem("user_photo") || "");
@@ -164,150 +204,23 @@ const ChemotherapyOrder: React.FC<{
   );
   const resolvedPatientId = patientId || statePatientId;
 
-  /* Dose calculator dropdown (next to the Chemotherapy Orders tab):
-     selected option and the inputs used to compute the chosen value. */
-  const [doseCalculator, setDoseCalculator] = useState("");
-  const [calcAgeYears, setCalcAgeYears] = useState("");
-  const [calcSerumCreatinine, setCalcSerumCreatinine] = useState("");
-  const [calcTargetAuc, setCalcTargetAuc] = useState("");
-  /* Sub-selection inside the "Dosing Body Weight" calculator:
-     "Ideal Body Weight (IBW)" or "Adjusted Body Weight". When nothing is
-     picked the BSA factor is used instead. */
-  const [dosingWeightType, setDosingWeightType] = useState("");
+  /* Serum creatinine for Cockcroft-Gault CrCl, used by Carboplatin -
+     Calvert rows. It is a lab value, not a vital, so it is entered here. */
+  const [serumCreatinine, setSerumCreatinine] = useState("");
 
-  /* Derived values for the dose-calculator dropdown. BMI uses the
-     recorded height/weight; CrCl (Cockcroft-Gault) and the Carboplatin
-     (Calvert) dose compute live from the entered age, serum creatinine
-     and target AUC. */
-  const calcHeight = parseMeasureString(measurements?.height ?? "");
-  const calcWeight = parseMeasureString(measurements?.weight ?? "");
-  const calcIsFemale = (gender ?? "").trim().toLowerCase() === "female";
-
-  const calcBmiValue = computeBmi(calcHeight, calcWeight);
-  const calcBsaValue = computeBsa(calcHeight, calcWeight);
-  const calcCrClValue = computeCockcroftGault(
-    calcWeight,
-    calcAgeYears ? Number(calcAgeYears) : null,
-    calcSerumCreatinine ? Number(calcSerumCreatinine) : null,
-    calcIsFemale
+  /* Inputs every PRIMARY row's Dose Cal formula uses: height / weight
+     from the banner vitals, age / sex from the patient record. */
+  const dosingInputs: DosingInputs = useMemo(
+    () => ({
+      heightCm: parseMeasureString(measurements?.height ?? ""),
+      weightKg: parseMeasureString(measurements?.weight ?? ""),
+      ageYears: toPositiveNumber(age),
+      sex: parseSex(gender),
+      serumCreatinine: toPositiveNumber(serumCreatinine),
+    }),
+    [measurements?.height, measurements?.weight, age, gender, serumCreatinine]
   );
-  const calcCarboplatinValue = computeCalvertCarboplatin(
-    calcTargetAuc ? Number(calcTargetAuc) : null,
-    calcCrClValue
-  );
-
-  /* Ideal Body Weight (IBW) by the Devine formula. Height is converted
-     from cm to inches (cm / 2.54) for:
-     Men:   IBW (kg) = 50   + 2.3 × [Height(in) − 60]
-     Women: IBW (kg) = 45.5 + 2.3 × [Height(in) − 60]
-     Used to scale the drug dose when the "Dosing Body Weight (Ideal &
-     Adjusted)" calculator is selected. */
-  const calcHeightIn =
-    calcHeight !== null ? Math.round((calcHeight / 2.54) * 100) / 100 : null;
-  const calcIbwValue =
-    calcHeightIn !== null
-      ? Math.round(
-          ((calcIsFemale ? 45.5 : 50) + 2.3 * (calcHeightIn - 60)) * 10
-        ) / 10
-      : null;
-
-  /* Adjusted Body Weight (AdjBW) for the "Adjusted Body Weight"
-     sub-selection inside the "Dosing Body Weight" calculator:
-     AdjBW (kg) = IBW + 0.4 × (Actual Weight − IBW). */
-  const calcAdjBwValue =
-    calcWeight !== null && calcIbwValue !== null
-      ? Math.round((calcIbwValue + 0.4 * (calcWeight - calcIbwValue)) * 10) /
-        10
-      : null;
-
-  const calcBmiDisplay =
-    calcBmiValue !== null
-      ? `${String(Math.round(calcBmiValue * 10) / 10)} kg/m²`
-      : "Enter height & weight";
-  const calcBsaDisplay =
-    calcBsaValue !== null
-      ? `${String(Math.round(calcBsaValue * 1000) / 1000)} m²`
-      : "Enter height & weight";
-  const calcCrClDisplay =
-    calcCrClValue !== null
-      ? `${String(calcCrClValue)} mL/min`
-      : "Enter age & serum creatinine";
-  const calcCarboplatinDisplay =
-    calcCarboplatinValue !== null
-      ? `${String(calcCarboplatinValue)} mg`
-      : calcCrClValue !== null
-        ? "Enter target AUC"
-        : "Complete CrCl calculation first";
-
-  const calcIbwDisplay =
-    calcIbwValue !== null
-      ? `${String(calcIbwValue)} kg`
-      : "Enter height";
-  const calcAdjBwDisplay =
-    calcAdjBwValue !== null
-      ? `${String(calcAdjBwValue)} kg`
-      : "Enter height & weight";
-
-  /* Dose scale factor used to auto-adjust drug doses (increase/decrease)
-     across all three tabs. When the "Body Mass Index (BMI)" calculator
-     is selected in the dropdown, doses scale by the patient's BMI
-     (weight kg / height m²). When the "Creatinine Clearance (CrCl) —
-     Cockcroft-Gault" calculator is selected, doses scale by the value
-     from CrCl (mL/min) = ((140 − age) × weight kg) / (72 × serum
-     creatinine), × 0.85 for women. When the "Carboplatin Dose —
-     Calvert Formula" calculator is selected, doses scale by the total
-     dose (mg) = target AUC × (CrCl + 25). When the "Dosing Body Weight
-     (Ideal & Adjusted)" calculator is selected, doses scale by the
-     sub-selected dosing weight: "Ideal Body Weight (IBW)" (Devine:
-     50 + 2.3 × [height(in) − 60] for men, 45.5 + 2.3 × [height(in) − 60]
-     for women) or "Adjusted Body Weight" (IBW + 0.4 × (actual weight −
-     IBW)). Any other selection (or none) falls back to BSA (Mosteller)
-     derived from height/weight. Falls back to BSA (and 1 when BSA is
-     unavailable) until the selected calculator's inputs are complete. */
-  const doseScaleFactor = useMemo(() => {
-    const bsa = bsaDoseScaleFactor(measurements);
-    const height = parseMeasureString(measurements?.height ?? "");
-    const weight = parseMeasureString(measurements?.weight ?? "");
-    const bmi = computeBmi(height, weight);
-    if (doseCalculator === "Body Mass Index (BMI)") {
-      return bmi !== null ? Math.round(bmi * 1000) / 1000 : bsa;
-    }
-    if (
-      doseCalculator ===
-      "Creatinine Clearance (CrCl) — Cockcroft-Gault"
-    ) {
-      return calcCrClValue !== null
-        ? Math.round(calcCrClValue * 1000) / 1000
-        : bsa;
-    }
-    if (doseCalculator === "Carboplatin Dose — Calvert Formula") {
-      return calcCarboplatinValue !== null
-        ? Math.round(calcCarboplatinValue * 1000) / 1000
-        : bsa;
-    }
-    if (doseCalculator === "Dosing Body Weight (Ideal & Adjusted)") {
-      if (dosingWeightType === "Ideal Body Weight (IBW)") {
-        return calcIbwValue !== null
-          ? Math.round(calcIbwValue * 1000) / 1000
-          : bsa;
-      }
-      if (dosingWeightType === "Adjusted Body Weight") {
-        return calcAdjBwValue !== null
-          ? Math.round(calcAdjBwValue * 1000) / 1000
-          : bsa;
-      }
-      return bsa;
-    }
-    return bsa;
-  }, [
-    doseCalculator,
-    measurements,
-    calcCrClValue,
-    calcCarboplatinValue,
-    calcIbwValue,
-    calcAdjBwValue,
-    dosingWeightType,
-  ]);
+  const dosingSummary = summarizeDosingInputs(dosingInputs);
 
   const [cycleDay, setCycleDay] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -332,32 +245,8 @@ const ChemotherapyOrder: React.FC<{
     drugs: false,
     premedication: false,
     supportive: false,
+    hydration: false,
   });
-
-  /* Re-scale protocol-derived doses live whenever the dose calculator
-     selection changes: "Body Mass Index (BMI)" multiplies doses by the
-     patient's BMI (weight kg / height m²), "Dosing Body Weight (Ideal &
-     Adjusted)" scales by the sub-selected IBW / AdjBW, any other
-     selection (or none) keeps the BSA (Mosteller) factor. Only rows
-     carrying an unscaled rawDose are touched; doses the doctor typed or
-     edited are preserved. */
-  useEffect(() => {
-    const rescale = (group: Drug[]) =>
-      group.map((drug) =>
-        drug.rawDose != null
-          ? {
-              ...drug,
-              dose: String(
-                Math.round(drug.rawDose * doseScaleFactor * 10) / 10
-              ),
-            }
-          : drug
-      );
-
-    setDrugs((current) => rescale(current));
-    setPremedicationDrugs((current) => rescale(current));
-    setSupportiveDrugs((current) => rescale(current));
-  }, [doseScaleFactor]);
 
   const protocolRef = useRef<RegimenProtocolDetail | null>(null);
   const protocolDaysRef = useRef<RegimenProtocolDay[]>([]);
@@ -371,41 +260,56 @@ const ChemotherapyOrder: React.FC<{
   const planItemsRef = useRef<ChemotherapyPlanItem[]>([]);
   const selectedProtocolIdRef = useRef<string>("");
 
-  /* Administration instructions derived from the selected regimen
-     protocol items (route, infusion, frequency, timing, remarks,
-     administration detail). */
-  type AdminInstruction = {
-    id: number;
-    medicineName: string;
-    route: string;
-    infusion: string;
-    frequency: string;
-    timing: string;
-    remarks: string;
-    administrationDetail: string;
-  };
-  const [adminInstructions, setAdminInstructions] = useState<
-    AdminInstruction[]
-  >([]);
+  /* Hydration tab rows (template copy, or the plan's own saved list). */
+  const [hydrationRows, setHydrationRows] = useState<HydrationRow[]>([]);
+  const [hydrationDraft, setHydrationDraft] = useState<HydrationRow | null>(
+    null
+  );
 
-  /* Hydration rows seeded on the selected regimen protocol (document
-     Section 3). Each row carries a hydration_stage of PRE or POST. */
-  const [hydrationRows, setHydrationRows] = useState<RegimenProtocolDilution[]>(
+  /* The plan's saved cycle day orders: headers (by cycle / day) and the
+     full orders loaded so far, keyed "cycle/day". The tables show the
+     displayed cycle day's order, else the protocol template for that day. */
+  const [planOrders, setPlanOrders] = useState<ChemoPlanOrderHeader[]>([]);
+  const planOrdersRef = useRef<ChemoPlanOrderHeader[]>([]);
+  const ordersRef = useRef<Map<string, ChemoPlanOrder>>(new Map());
+  const [orderLoading, setOrderLoading] = useState(false);
+  const loadingOrderKeysRef = useRef<Set<string>>(new Set());
+  /* The plan (one course) is completed / discontinued / cancelled. */
+  const [planClosed, setPlanClosed] = useState(false);
+  /* The protocol day the tables show (a rest day snaps to the next). */
+  const displayedDayRef = useRef<number | null>(null);
+  const [displayedDay, setDisplayedDay] = useState<number | null>(null);
+  const encounterNoRef = useRef<string>("");
+  /* "Copy as Cycle X / Day Y": copy an earlier cycle day's order. */
+  const [copyMenuOpen, setCopyMenuOpen] = useState(false);
+  const copyMenuRef = useRef<HTMLDivElement>(null);
+  const [copying, setCopying] = useState(false);
+
+  /* medicine_master for the Drug Name editor, loaded on the first edit. */
+  const [medicineOptions, setMedicineOptions] = useState<MultiSelectOption[]>(
     []
+  );
+  const medicinesRequestedRef = useRef(false);
+  /* Route of each medicine_master drug, to prefill an empty Route. */
+  const medicineRoutesRef = useRef<Map<string, string>>(new Map());
+  /* A row added with "Add Medicine" that hasn't been saved yet: Cancel
+     drops it again. */
+  const newRowRef = useRef<{ kind: RowKind | "hydration"; id: number } | null>(
+    null
   );
 
   /* Edit-in-place state (medication rows) */
   const [editingRow, setEditingRow] = useState<{
-    kind: "drug" | "premedication" | "supportive";
+    kind: RowKind | "hydration";
     id: number;
+    /* The table the row is edited in: its own tab, Admin Instructions or
+       Hydration. */
+    view: "row" | "admin" | "hydration";
   } | null>(null);
   const [editDraft, setEditDraft] = useState<Drug | null>(null);
   const [savingPlan, setSavingPlan] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState("");
-  const latestCycleRef = useRef<
-    NonNullable<ChemotherapyPlan["chemotherapy_cycle"]>[number] | null
-  >(null);
 
   /* Single source of truth for cycle/day: always keeps the ref in sync
      with the state so async protocol loads filter by the CURRENT day
@@ -417,10 +321,6 @@ const ChemotherapyOrder: React.FC<{
 
   const applyNextCycle = (
     protocol: RegimenProtocolDetail | null,
-    latestCycle: {
-      cycle_number: number;
-      cycle_day: number | null;
-    } | null,
     baseDateValue?: string | null
   ) => {
     if (!protocol || !resolvedPatientId) return;
@@ -433,7 +333,6 @@ const ChemotherapyOrder: React.FC<{
       protocol.standard_cycles && protocol.standard_cycles > 0
         ? protocol.standard_cycles
         : Number.POSITIVE_INFINITY;
-    const latestCycleNumber = latestCycle?.cycle_number ?? 0;
 
     /* The cycle/day to be administered on this visit is whatever the
        previous visit scheduled as its "next" (hms_next_cycle). This makes
@@ -448,16 +347,15 @@ const ChemotherapyOrder: React.FC<{
        1, never a leftover hms_next_cycle value from an abandoned earlier
        session - which this very function (and the follow-up effect) also
        rewrite during the same mount. */
+    /* A plan with saved cycle day orders resumes from them instead: its
+       first day still ORDERED, else the day after the last completed. */
     const storedParsed =
-      latestCycle || planIdRef.current
+      cycleDayFromOrders(protocol) ??
+      (planIdRef.current
         ? getCycleAndDay(storedNextCycleRef.current)
-        : null;
+        : null);
 
-    let formCycleNumber = storedParsed
-      ? storedParsed.cycle
-      : latestCycleNumber > 0
-      ? latestCycleNumber + 1
-      : 1;
+    let formCycleNumber = storedParsed ? storedParsed.cycle : 1;
     if (formCycleNumber > maxCycles) {
       formCycleNumber = maxCycles;
     }
@@ -577,6 +475,29 @@ const ChemotherapyOrder: React.FC<{
     return `Cycle ${current.cycle + 1} / Day 1`;
   };
 
+  /* The cycle / day a plan with saved orders resumes at: the first day
+     still ORDERED (on an open cycle), else the medication day after the
+     latest COMPLETED one. Null without saved orders. */
+  const cycleDayFromOrders = (
+    protocol: RegimenProtocolDetail | null
+  ): { cycle: number; day: number } | null => {
+    const orders = planOrdersRef.current;
+    const pending = orders.find(
+      (order) => order.order_status !== "COMPLETED" && !isClosedCycleOrder(order)
+    );
+    if (pending) return { cycle: pending.cycle_number, day: pending.cycle_day };
+    const last = [...orders]
+      .reverse()
+      .find((order) => order.order_status === "COMPLETED");
+    if (!last) return null;
+    return getCycleAndDay(
+      computeNextCycle(
+        `Cycle ${last.cycle_number} / Day ${last.cycle_day}`,
+        protocol?.no_of_days ?? null
+      )
+    );
+  };
+
   /* A protocol item's day within a cycle, using the field the backend
      actually populates (administration_day) or, failing that, the legacy
      cycle_day. Items without any explicit day belong to Day 1. */
@@ -649,15 +570,126 @@ const ChemotherapyOrder: React.FC<{
       item.medicine_master?.dosage_form ||
       item.administration_route ||
       "",
-    dose:
-      item.dosage != null
-        ? String(Math.round(item.dosage * doseScaleFactor * 10) / 10)
-        : "",
-    unit: item.dosage_unit || item.medicine_master?.unit || "",
+    /* Protocol dose as written (mg/m², mg/kg, ...); the Patient Dose
+       column applies the row's Dose Cal formula. The unit comes from the
+       protocol only - medicine_master.unit is "mg" for almost every drug
+       and would turn per-m² doses into flat ones. */
+    dose: item.dosage != null ? String(Number(item.dosage)) : "",
+    unit: item.dosage_unit || "",
     volume: "",
     medicineId: item.medicine_id,
-    rawDose: item.dosage ?? null,
+    drugType: item.drug_type ?? null,
+    protocolDoseCalc: item.dose_calculation_method ?? null,
+    doseCalc: defaultDoseCalc(item.dosage_unit, item.dose_calculation_method),
+    route: item.administration_route ?? "",
+    infusionType: item.infusion_type ?? "",
+    infusionDuration:
+      item.infusion_duration_minutes != null
+        ? String(item.infusion_duration_minutes)
+        : "",
+    frequency: item.frequency ?? "",
+    timing: item.timing_relative_to_primary ?? "",
+    remarks: item.remarks ?? "",
+    administrationDetail: item.administration_detail ?? "",
   });
+
+  /* A saved plan item as a table row - a medicine, or the drug name typed
+     for this patient. The protocol's own method hint (e.g. "AUC 5") comes
+     from the matching template item. */
+  const planItemToDrug = (item: ChemotherapyPlanItem, index: number): Drug => {
+    const template = item.medicine_id
+      ? (protocolRef.current?.chemotherapy_regimen_protocol_items ?? []).find(
+          (candidate) =>
+            candidate.medicine_id === item.medicine_id &&
+            (candidate.drug_role ?? "").toUpperCase() ===
+              (item.drug_role ?? "").toUpperCase()
+        )
+      : undefined;
+    const numberOrNull = (value: string | number | null | undefined) =>
+      value != null && Number.isFinite(Number(value)) ? Number(value) : null;
+    return {
+      id: index,
+      planItemId: item.chemotherapy_plan_item_id,
+      name:
+        item.medicine_master?.medicine_name ||
+        item.medicine_master?.generic_name ||
+        item.drug_name ||
+        "",
+      form: item.formulation || item.medicine_master?.dosage_form || "",
+      dose: item.protocol_dose != null ? String(Number(item.protocol_dose)) : "",
+      unit: item.protocol_dose_unit || "",
+      volume: item.dilution_volume != null ? `${item.dilution_volume}` : "",
+      medicineId: item.medicine_id ?? undefined,
+      drugType: item.drug_type ?? null,
+      infusionRate: item.infusion_rate ?? null,
+      dilutionSolution: item.dilution_solution ?? null,
+      maximumDose: numberOrNull(item.maximum_dose),
+      minimumDose: numberOrNull(item.minimum_dose),
+      doseCalc: normalizeDoseCalc(item.dose_calculation_method) ?? undefined,
+      protocolDoseCalc: template?.dose_calculation_method ?? null,
+      route: item.administration_route ?? "",
+      infusionType: item.infusion_type ?? "",
+      infusionDuration:
+        item.infusion_duration_minutes != null
+          ? String(item.infusion_duration_minutes)
+          : "",
+      frequency: item.frequency ?? "",
+      timing: item.timing_relative_to_primary ?? "",
+      remarks: item.remarks ?? "",
+      administrationDetail: item.administration_detail ?? "",
+    };
+  };
+
+  const planItemsForRole = (items: ChemotherapyPlanItem[], role: string) =>
+    items
+      .filter((item) => (item.drug_role ?? "").toUpperCase() === role)
+      .sort((a, b) => (a.drug_sequence ?? 0) - (b.drug_sequence ?? 0))
+      .map(planItemToDrug);
+
+  const templateHydration = () =>
+    (protocolRef.current?.protocol_dilutions ?? [])
+      .filter((dilution) => !!dilution.hydration_stage)
+      .sort((a, b) => {
+        const rank = (stage: string | null) =>
+          (stage ?? "").toUpperCase() === "PRE" ? 0 : 1;
+        const byStage = rank(a.hydration_stage) - rank(b.hydration_stage);
+        if (byStage !== 0) return byStage;
+        return (a.diluent ?? "").localeCompare(b.diluent ?? "");
+      })
+      .map(dilutionToHydrationRow);
+
+  /* Keeps a saved cycle day order (from a load or a save) and its header. */
+  const cacheOrder = (order: ChemoPlanOrder | null | undefined) => {
+    if (!order) return;
+    ordersRef.current.set(orderKey(order.cycle_number, order.cycle_day), order);
+    const previous = planOrdersRef.current.find(
+      (header) => header.plan_order_id === order.plan_order_id
+    );
+    const next = [
+      ...planOrdersRef.current.filter(
+        (header) => header.plan_order_id !== order.plan_order_id
+      ),
+      {
+        ...order,
+        chemotherapy_cycle:
+          order.chemotherapy_cycle ?? previous?.chemotherapy_cycle ?? null,
+      },
+    ].sort(byCycleDay);
+    planOrdersRef.current = next;
+    setPlanOrders(next);
+  };
+
+  const loadOrder = async (cycle: number, day: number) => {
+    if (!planIdRef.current) return null;
+    const response = await chemotherapyApi.getPlanOrder(
+      planIdRef.current,
+      cycle,
+      day
+    );
+    const order = response.data.data;
+    cacheOrder(order);
+    return order ?? null;
+  };
 
   const applyCycleDayDrugs = (
     dayValue: string,
@@ -676,61 +708,98 @@ const ChemotherapyOrder: React.FC<{
       dayNumber = fallback;
     }
 
-    // Show only the medicines mapped to the selected cycle's day. Protocols
-    // with items that have no explicit day treat all of them as Day 1. If a
-    // valid day is missing, show nothing (never dump the whole cycle across
-    // every day).
-    const items =
-      dayNumber != null ? resolveProtocolDayItems(days, dayNumber) : [];
+    displayedDayRef.current = dayNumber ?? null;
+    setDisplayedDay(dayNumber ?? null);
+    const cycleNumber = getCycleNumber(dayValue) ?? 1;
 
-    setDrugs(
-      items
-        .filter((item) => item.drug_role === "PRIMARY")
-        .map(toDrugFromItem)
-    );
-    setPremedicationDrugs(
-      items
-        .filter((item) => item.drug_role?.toUpperCase() === "PREMEDICATION")
-        .map(toDrugFromItem)
-    );
-    setSupportiveDrugs(
-      items
-        .filter((item) => item.drug_role === "SUPPORTIVE")
-        .map(toDrugFromItem)
-    );
-    setAdminInstructions(
-      items.map((item, index) => ({
-        id: index,
-        medicineName:
-          item.medicine_master?.medicine_name ||
-          item.medicine_master?.generic_name ||
-          "",
-        route: item.administration_route || "",
-        infusion: [
-          item.infusion_type,
-          item.infusion_duration_minutes != null
-            ? `${item.infusion_duration_minutes} min`
-            : "",
-        ]
-          .filter(Boolean)
-          .join(" · "),
-        frequency: item.frequency || "",
-        timing: item.timing_relative_to_primary || "",
-        remarks: item.remarks || "",
-        administrationDetail: item.administration_detail || "",
-      }))
-    );
-    setHydrationRows(
-      (protocolRef.current?.protocol_dilutions ?? [])
-        .filter((dilution) => !!dilution.hydration_stage)
-        .sort((a, b) => {
-          const rank = (stage: string | null) =>
-            (stage ?? "").toUpperCase() === "PRE" ? 0 : 1;
-          const byStage = rank(a.hydration_stage) - rank(b.hydration_stage);
-          if (byStage !== 0) return byStage;
-          return (a.diluent ?? "").localeCompare(b.diluent ?? "");
+    /* A different cycle day: any open row edit (or unsaved added row)
+       belongs to the old one. */
+    newRowRef.current = null;
+    setEditingRow(null);
+    setEditDraft(null);
+    setHydrationDraft(null);
+
+    /* The saved order of this cycle day (every tab, including Hydration)
+       wins over the protocol template. One saved but not loaded yet is
+       fetched first. */
+    const key = dayNumber != null ? orderKey(cycleNumber, dayNumber) : "";
+    const saved = key ? ordersRef.current.get(key) : undefined;
+    const savedHeader = key
+      ? planOrdersRef.current.find(
+          (order) =>
+            order.cycle_number === cycleNumber && order.cycle_day === dayNumber
+        )
+      : undefined;
+
+    if (!saved && savedHeader && dayNumber != null) {
+      setDrugs([]);
+      setPremedicationDrugs([]);
+      setSupportiveDrugs([]);
+      setHydrationRows([]);
+      if (loadingOrderKeysRef.current.has(key)) return;
+      loadingOrderKeysRef.current.add(key);
+      setOrderLoading(true);
+      loadOrder(cycleNumber, dayNumber)
+        .catch((error) => {
+          console.error("Failed to load the cycle day order:", error);
+          setEditError(
+            errorMessage(error, "Failed to load the saved order for this day.")
+          );
         })
-    );
+        .finally(() => {
+          loadingOrderKeysRef.current.delete(key);
+          setOrderLoading(loadingOrderKeysRef.current.size > 0);
+          /* Still showing that cycle day: show its rows now. */
+          if (
+            ordersRef.current.has(key) &&
+            getCycleNumber(cycleDayRef.current) === cycleNumber &&
+            displayedDayRef.current === dayNumber
+          ) {
+            applyCycleDayDrugs(cycleDayRef.current, protocolDaysRef.current);
+          }
+        });
+      return;
+    }
+
+    if (saved) {
+      const items = saved.chemotherapy_plan_items ?? [];
+      setDrugs(planItemsForRole(items, "PRIMARY"));
+      setPremedicationDrugs(planItemsForRole(items, "PREMEDICATION"));
+      setSupportiveDrugs(planItemsForRole(items, "SUPPORTIVE"));
+      setHydrationRows(
+        saved.hydration_saved
+          ? (saved.chemotherapy_plan_hydration ?? []).map(planHydrationToRow)
+          : templateHydration()
+      );
+      return;
+    }
+
+    /* Else the protocol template for this day. */
+    {
+      // Show only the medicines mapped to the selected cycle's day.
+      // Protocols with items that have no explicit day treat all of them as
+      // Day 1. If a valid day is missing, show nothing (never dump the whole
+      // cycle across every day).
+      const items =
+        dayNumber != null ? resolveProtocolDayItems(days, dayNumber) : [];
+
+      setDrugs(
+        items
+          .filter((item) => item.drug_role === "PRIMARY")
+          .map(toDrugFromItem)
+      );
+      setPremedicationDrugs(
+        items
+          .filter((item) => item.drug_role?.toUpperCase() === "PREMEDICATION")
+          .map(toDrugFromItem)
+      );
+      setSupportiveDrugs(
+        items
+          .filter((item) => item.drug_role === "SUPPORTIVE")
+          .map(toDrugFromItem)
+      );
+    }
+    setHydrationRows(templateHydration());
   };
 
   const orderDraftKey = `hms_chemo_order_${resolvedPatientId}`;
@@ -751,6 +820,7 @@ const ChemotherapyOrder: React.FC<{
         discussion?: string;
         postChemoInstructions?: string;
         additionalNotes?: string;
+        serumCreatinine?: string;
       };
 
       if (data.cycleDay) {
@@ -770,13 +840,17 @@ const ChemotherapyOrder: React.FC<{
         setAdditionalNotes(data.additionalNotes);
       }
 
+      if (data.serumCreatinine) {
+        setSerumCreatinine(data.serumCreatinine);
+      }
+
       if (data.startDate) {
         setStartDate(data.startDate);
         userTouched.current.startDate = true;
       }
 
       if (Array.isArray(data.drugs) && data.drugs.length > 0) {
-        setDrugs(data.drugs);
+        setDrugs(data.drugs.map(normalizeLegacyDraftDrug));
         userTouched.current.drugs = true;
       }
 
@@ -784,7 +858,9 @@ const ChemotherapyOrder: React.FC<{
         Array.isArray(data.premedicationDrugs) &&
         data.premedicationDrugs.length > 0
       ) {
-        setPremedicationDrugs(data.premedicationDrugs);
+        setPremedicationDrugs(
+          data.premedicationDrugs.map(normalizeLegacyDraftDrug)
+        );
         userTouched.current.premedication = true;
       }
 
@@ -792,7 +868,7 @@ const ChemotherapyOrder: React.FC<{
         Array.isArray(data.supportiveDrugs) &&
         data.supportiveDrugs.length > 0
       ) {
-        setSupportiveDrugs(data.supportiveDrugs);
+        setSupportiveDrugs(data.supportiveDrugs.map(normalizeLegacyDraftDrug));
         userTouched.current.supportive = true;
       }
     } catch (error) {
@@ -817,6 +893,13 @@ const ChemotherapyOrder: React.FC<{
         discussion,
         postChemoInstructions,
         additionalNotes,
+        serumCreatinine,
+        /* Discharge Medication re-saves these rows as the order of this
+           plan's cycle day, with the same Dose Cal inputs. */
+        dosingInputs,
+        planId: planIdRef.current || null,
+        orderCycle: getCycleNumber(cycleDay),
+        orderDay: displayedDayRef.current,
       })
     );
   }, [
@@ -828,6 +911,10 @@ const ChemotherapyOrder: React.FC<{
     discussion,
     postChemoInstructions,
     additionalNotes,
+    serumCreatinine,
+    dosingInputs,
+    displayedDay,
+    planOrders,
     orderDraftKey,
     resolvedPatientId,
   ]);
@@ -943,6 +1030,13 @@ const ChemotherapyOrder: React.FC<{
   const handleNext = async () => {
     if (savingPlan) return;
 
+    /* Nothing to save on a completed day or a closed course. */
+    if (orderLocked) {
+      setPlanError("");
+      onNext?.();
+      return;
+    }
+
     if (!resolvedPatientId) {
       setPlanError(
         "Patient is not selected. Open this page from a patient consultation to continue."
@@ -971,54 +1065,12 @@ const ChemotherapyOrder: React.FC<{
     const navigateTimer = setTimeout(navigateNext, 500);
 
     const saveOrder = async () => {
-      const planItems: Array<{
-        medicine_id: string;
-        drug_role: string;
-        drug_sequence: number;
-        dosage?: number;
-        dosage_unit?: string;
-        administration_route?: string;
-        remarks?: string;
-      }> = [];
-
-      drugs.forEach((drug, index) => {
-        if (drug.medicineId) {
-          planItems.push({
-            medicine_id: drug.medicineId,
-            drug_role: "PRIMARY",
-            drug_sequence: index + 1,
-            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
-            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
-            administration_route: "IV",
-          });
-        }
-      });
-
-      premedicationDrugs.forEach((drug, index) => {
-        if (drug.medicineId) {
-          planItems.push({
-            medicine_id: drug.medicineId,
-            drug_role: "PREMEDICATION",
-            drug_sequence: 90 + index,
-            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
-            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
-            administration_route: "IV",
-          });
-        }
-      });
-
-      supportiveDrugs.forEach((drug, index) => {
-        if (drug.medicineId) {
-          planItems.push({
-            medicine_id: drug.medicineId,
-            drug_role: "SUPPORTIVE",
-            drug_sequence: 100 + index,
-            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
-            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
-            administration_route: "IV",
-          });
-        }
-      });
+      const planItems = buildPlanItemsFromOrder(
+        drugs,
+        premedicationDrugs,
+        supportiveDrugs,
+        dosingInputs
+      );
 
       const planStartDate =
         toIsoDate(startDate) ||
@@ -1027,13 +1079,32 @@ const ChemotherapyOrder: React.FC<{
         ) ||
         toIsoDate(new Date().toISOString());
 
-      return createChemotherapyPlanForPatient(
+      /* The rows are the order of the displayed cycle day, saved with
+         every tab (Hydration included). */
+      const result = await createChemotherapyPlanForPatient(
         resolvedPatientId,
         planStartDate,
         planItems.length > 0 ? planItems : undefined,
         undefined,
-        discussion
+        discussion,
+        buildDosingSnapshot(dosingInputs),
+        {
+          order: {
+            cycle: getCycleNumber(cycleDayRef.current) ?? 1,
+            day: displayedDayRef.current ?? 1,
+            hydration: hydrationPayload(hydrationRows),
+          },
+        }
       );
+
+      if (result.courseClosed) {
+        setPlanClosed(true);
+      }
+      if (!result.error && result.planId) {
+        planIdRef.current = result.planId;
+      }
+
+      return result;
     };
 
     try {
@@ -1125,7 +1196,7 @@ const ChemotherapyOrder: React.FC<{
         protocolRef.current = protocol;
         protocolDaysRef.current = protocol.chemotherapy_regimen_protocol_days ?? [];
         applyCycleDayDrugs(cycleDayRef.current, protocolDaysRef.current);
-        applyNextCycle(protocol, latestCycleRef.current, savedStartDate);
+        applyNextCycle(protocol, savedStartDate);
       } catch (error) {
         console.error("Failed to load regimen protocol:", error);
         if (!cancelled) {
@@ -1141,103 +1212,58 @@ const ChemotherapyOrder: React.FC<{
       void loadRegimenProtocol(savedProtocolId);
     }
 
-    API.get<{ success: boolean; data: ChemotherapyPlan[] }>(
-      "/chemotherapy/plans",
-      {
-        params: {
-          patient_id: resolvedPatientId,
-          branchId:
-            getActiveBranchId() ?? getUser()?.branch_id ?? undefined,
-        },
-      }
+    /* The patient's open plan (one course at a time), else their latest -
+       with its saved cycle day orders and the current one. */
+    API.get<{ success: boolean; data: ChemotherapyPlan | null }>(
+      "/chemotherapy/plans/latest-for-patient",
+      { params: { patient_id: resolvedPatientId } }
     )
       .then((response) => {
         if (cancelled) return;
-        const plans = response.data.data;
-        const plan = plans[0];
+        const plan = response.data.data;
         if (!plan) return;
 
         planIdRef.current = plan.chemotherapy_plan_id;
+        setPlanClosed(isChemoPlanClosed(plan));
 
         const planItems = plan.chemotherapy_plan_items ?? [];
         planItemsRef.current = planItems;
+        ordersRef.current = new Map();
+        planOrdersRef.current = [...(plan.plan_orders ?? [])].sort(byCycleDay);
+        setPlanOrders(planOrdersRef.current);
+        cacheOrder(plan.current_order);
 
         if (!userTouched.current.startDate) {
           setStartDate(formatDateDMY(plan.treatment_start_date));
         }
 
-        const cycles = plan.chemotherapy_cycle ?? [];
-        const latestCycle = cycles[cycles.length - 1] ?? null;
-        latestCycleRef.current = latestCycle;
+        /* Resume at the saved orders' cycle day (snapped to a medication
+           day once the protocol is known). */
+        const resumeAt = cycleDayFromOrders(protocolRef.current);
         if (!userTouched.current.cycleDay) {
           updateCycleDay(
-            latestCycle
-              ? `Cycle ${latestCycle.cycle_number} / Day ${
-                  latestCycle.cycle_day ?? ""
-                }`
+            resumeAt
+              ? `Cycle ${resumeAt.cycle} / Day ${resumeAt.day}`
               : "Cycle 1 / Day 1"
           );
         }
-        applyNextCycle(
-          protocolRef.current,
-          latestCycle,
-          plan.treatment_start_date
-        );
+        applyNextCycle(protocolRef.current, plan.treatment_start_date);
+
+        /* The protocol may have loaded first: show the plan's saved order
+           for the displayed day now that it is known. */
+        if (protocolRef.current) {
+          applyCycleDayDrugs(cycleDayRef.current, protocolDaysRef.current);
+        }
 
         if (!savedProtocolId) {
           setProtocolName(
             plan.protocol_name || plan.regimen_name || ""
           );
-          const toPlanDrug = (
-            item: ChemotherapyPlanItem,
-            index: number
-          ): Drug => ({
-            id: index,
-            planItemId: item.chemotherapy_plan_item_id,
-            name:
-              item.medicine_master?.medicine_name ||
-              item.medicine_master?.generic_name ||
-              "",
-            form:
-              item.formulation ||
-              item.medicine_master?.dosage_form ||
-              "",
-            dose:
-              item.protocol_dose != null
-                ? String(
-                    Math.round(item.protocol_dose * doseScaleFactor * 10) / 10
-                  )
-                : "",
-            unit:
-              item.protocol_dose_unit ||
-              item.medicine_master?.unit ||
-              "",
-            volume:
-              item.dilution_volume != null
-                ? `${item.dilution_volume}`
-                : "",
-            medicineId: item.medicine_id,
-            rawDose: item.protocol_dose ?? null,
-          });
-
-          setDrugs(
-            planItems
-              .filter((item) => item.drug_role === "PRIMARY")
-              .map(toPlanDrug)
-          );
-          setPremedicationDrugs(
-            planItems
-              .filter((item) => item.drug_role?.toUpperCase() === "PREMEDICATION")
-
-
-
-              .map(toPlanDrug)
-          );
-          setSupportiveDrugs(
-            planItems
-              .filter((item) => item.drug_role === "SUPPORTIVE")
-              .map(toPlanDrug)
-          );
+          const shownItems =
+            plan.current_order?.chemotherapy_plan_items ?? planItems;
+          setDrugs(planItemsForRole(shownItems, "PRIMARY"));
+          setPremedicationDrugs(planItemsForRole(shownItems, "PREMEDICATION"));
+          setSupportiveDrugs(planItemsForRole(shownItems, "SUPPORTIVE"));
 
           const protocolId =
             plan.chemotherapy_regimen_protocol?.protocol_id;
@@ -1301,10 +1327,179 @@ const ChemotherapyOrder: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cycleDay, resolvedPatientId]);
 
-  const handleAddDrug = () => {
-    userTouched.current.drugs = true;
+  const rowsOf = (kind: RowKind) =>
+    kind === "drug"
+      ? drugs
+      : kind === "premedication"
+        ? premedicationDrugs
+        : supportiveDrugs;
 
-    const newDrug: Drug = {
+  const setRowsOf = (kind: RowKind, rows: Drug[]) => {
+    if (kind === "drug") setDrugs(rows);
+    else if (kind === "premedication") setPremedicationDrugs(rows);
+    else setSupportiveDrugs(rows);
+  };
+
+  /* All three tables, with one of them replaced. */
+  const withRows = (kind: RowKind, rows: Drug[]): Record<RowKind, Drug[]> => ({
+    drug: kind === "drug" ? rows : drugs,
+    premedication: kind === "premedication" ? rows : premedicationDrugs,
+    supportive: kind === "supportive" ? rows : supportiveDrugs,
+  });
+
+  const touch = (kind: RowKind) => {
+    userTouched.current[kind === "drug" ? "drugs" : kind] = true;
+  };
+
+  const errorMessage = (error: any, fallback: string) =>
+    error?.response?.data?.message || error?.message || fallback;
+
+  /* The encounter this visit's orders are saved in (the consultation's
+     submit completes them), looked up once. */
+  const resolveEncounterNo = async () => {
+    if (encounterNoRef.current || !resolvedPatientId) {
+      return encounterNoRef.current;
+    }
+    try {
+      const { encounter } = await findActiveEncounter(resolvedPatientId);
+      encounterNoRef.current = encounter?.encounter_no ?? "";
+    } catch (error) {
+      console.error("Failed to resolve the encounter for the order:", error);
+    }
+    return encounterNoRef.current;
+  };
+
+  /* Saves the displayed cycle day's full order - every row of the
+     Chemotherapy Orders, Premedication and Supportive tabs (Admin
+     Instructions edits those same rows) and the Hydration list - as that
+     cycle day's order, in one call. Other cycle days are untouched.
+     Without a plan yet the rows stay local; Next creates the plan with
+     them. */
+  const saveOrderToPlan = async (
+    next: Record<RowKind, Drug[]>,
+    hydration: HydrationRow[] = hydrationRows,
+    copiedFromOrderId?: string
+  ) => {
+    if (!planIdRef.current) return;
+    const cycle = getCycleNumber(cycleDayRef.current) ?? 1;
+    const day = displayedDayRef.current ?? 1;
+    const encounterNo = await resolveEncounterNo();
+    const response = await chemotherapyApi.savePlanOrder(
+      planIdRef.current,
+      cycle,
+      day,
+      {
+        items: buildPlanItemsFromOrder(
+          next.drug,
+          next.premedication,
+          next.supportive,
+          dosingInputs
+        ),
+        hydration: hydrationPayload(hydration),
+        dosing: orderDosingFromSnapshot(buildDosingSnapshot(dosingInputs)),
+        encounter_no: encounterNo || null,
+        ...(copiedFromOrderId ? { copied_from_order_id: copiedFromOrderId } : {}),
+      }
+    );
+    cacheOrder(response.data.data);
+  };
+
+  /* Remove: saved to the plan straight away with the rest of the order. */
+  const removeRow = async (kind: RowKind, id: number) => {
+    if (editingRow || savingEdit) return;
+    const rows = rowsOf(kind).filter((drug) => drug.id !== id);
+    try {
+      setSavingEdit(true);
+      setEditError("");
+      await saveOrderToPlan(withRows(kind, rows));
+      touch(kind);
+      setRowsOf(kind, rows);
+    } catch (error: any) {
+      console.error("Failed to remove the medication:", error);
+      setEditError(
+        errorMessage(error, "Failed to remove the medication. Please try again.")
+      );
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDelete = (id: number) => void removeRow("drug", id);
+  const handleDeletePremedication = (id: number) =>
+    void removeRow("premedication", id);
+  const handleDeleteSupportive = (id: number) =>
+    void removeRow("supportive", id);
+
+  /* An Admin Instructions row is a drug of the order: removing it removes
+     the drug. */
+  const handleDeleteAdminRow = (kind: RowKind, drug: Drug) => {
+    if (
+      window.confirm(
+        `Remove ${drug.name || "this drug"} from this order? It is removed from its ${
+          kind === "drug" ? "Chemotherapy Orders" : kind === "premedication" ? "Premedication" : "Supportive"
+        } list too.`
+      )
+    ) {
+      void removeRow(kind, drug.id);
+    }
+  };
+
+  /* Dose Cal / target AUC change on a PRIMARY row that isn't in edit mode. */
+  const updatePrimaryDrug = (id: number, patch: Partial<Drug>) => {
+    userTouched.current.drugs = true;
+    setDrugs((current) =>
+      current.map((drug) => (drug.id === id ? { ...drug, ...patch } : drug))
+    );
+  };
+
+  const ensureMedicineOptions = () => {
+    if (medicinesRequestedRef.current) return;
+    medicinesRequestedRef.current = true;
+    API.get<{
+      success: boolean;
+      data: {
+        medicine_id: string;
+        medicine_name: string;
+        dosage_form: string | null;
+        route?: string | null;
+      }[];
+    }>("/chemotherapy/medicines")
+      .then((response) => {
+        const medicines = response.data.data ?? [];
+        medicineRoutesRef.current = new Map(
+          medicines
+            .filter((medicine) => medicine.route)
+            .map((medicine) => [medicine.medicine_id, medicine.route as string])
+        );
+        setMedicineOptions(
+          medicines.map((medicine) => ({
+            label: medicine.medicine_name,
+            value: medicine.medicine_id,
+            hint: medicine.dosage_form ?? undefined,
+          }))
+        );
+      })
+      .catch((error) => {
+        medicinesRequestedRef.current = false;
+        console.error("Failed to load medicines:", error);
+      });
+  };
+
+  const startEdit = (kind: RowKind, drug: Drug, view: "row" | "admin" = "row") => {
+    if (editingRow || savingEdit) return;
+    ensureMedicineOptions();
+    setEditError("");
+    setEditingRow({ kind, id: drug.id, view });
+    setEditDraft({ ...drug });
+  };
+
+  /* "Add Medicine": a blank row at the end of that list, opened for
+     editing (drug from medicine_master or a typed name, and its columns).
+     Saving it saves this patient's cycle day order only - the regimen
+     protocol and its master tables are never changed. */
+  const addMedicineRow = (kind: RowKind) => {
+    if (editingRow || savingEdit || copying || orderLocked) return;
+    const drug: Drug = {
       id: Date.now(),
       name: "",
       form: "",
@@ -1312,292 +1507,277 @@ const ChemotherapyOrder: React.FC<{
       unit: "",
       volume: "",
     };
-
-    setDrugs((current) => [...current, newDrug]);
-  };
-
-  const handleDelete = (id: number) => {
-    userTouched.current.drugs = true;
-
-    setDrugs((current) =>
-      current.filter((drug) => drug.id !== id)
-    );
-  };
-
-  const startEdit = (
-    kind: "drug" | "premedication" | "supportive",
-    drug: Drug
-  ) => {
-    if (editingRow || savingEdit) return;
-
-    userTouched.current[
-      kind === "drug" ? "drugs" : kind === "premedication" ? "premedication" : "supportive"
-    ] = true;
-    setEditError("");
-    setEditingRow({ kind, id: drug.id });
-    setEditDraft({ ...drug });
+    setRowsOf(kind, [...rowsOf(kind), drug]);
+    newRowRef.current = { kind, id: drug.id };
+    startEdit(kind, drug);
   };
 
   const handleEdit = (id: number) => {
     const drug = drugs.find((item) => item.id === id);
-
-    if (drug) {
-      startEdit("drug", drug);
-    }
+    if (drug) startEdit("drug", drug);
   };
 
   const handleEditPremedication = (id: number) => {
-    const drug = premedicationDrugs.find(
-      (item) => item.id === id
-    );
-
-    if (drug) {
-      startEdit("premedication", drug);
-    }
+    const drug = premedicationDrugs.find((item) => item.id === id);
+    if (drug) startEdit("premedication", drug);
   };
 
   const handleEditSupportive = (id: number) => {
     const drug = supportiveDrugs.find((item) => item.id === id);
-
-    if (drug) {
-      startEdit("supportive", drug);
-    }
+    if (drug) startEdit("supportive", drug);
   };
 
   const cancelEdit = () => {
     if (savingEdit) return;
-
+    /* An added row that was never saved goes away again. */
+    const added = newRowRef.current;
+    if (added && editingRow && added.kind === editingRow.kind && added.id === editingRow.id) {
+      if (added.kind === "hydration") {
+        setHydrationRows((rows) => rows.filter((row) => row.id !== added.id));
+      } else {
+        setRowsOf(added.kind, rowsOf(added.kind).filter((drug) => drug.id !== added.id));
+      }
+    }
+    newRowRef.current = null;
     setEditingRow(null);
     setEditDraft(null);
+    setHydrationDraft(null);
     setEditError("");
   };
 
   const updateEditDraft = (field: keyof Drug, value: string) => {
     setEditDraft((previous) =>
-      previous
-        ? {
-            ...previous,
-            [field]: value,
-          }
-        : previous
+      previous ? { ...previous, [field]: value } : previous
     );
   };
 
-  const resolvePlanItemId = (
-    kind: "drug" | "premedication" | "supportive",
-    name: string,
-    medicineId?: string
-  ) => {
-    const role =
-      kind === "drug"
-        ? "PRIMARY"
-        : kind === "premedication"
-        ? "PREMEDICATION"
-        : "SUPPORTIVE";
-    const normalizedName = name.trim().toLowerCase();
-
-    // 1. Exact medicine_id match within same role
-    if (medicineId) {
-      const byId = planItemsRef.current.find(
-        (item) =>
-          item.medicine_id === medicineId &&
-          item.drug_role?.toUpperCase() === role
-      );
-      if (byId) return byId.chemotherapy_plan_item_id;
-
-      // 2. Exact medicine_id match across any role
-      const byIdAnyRole = planItemsRef.current.find(
-        (item) => item.medicine_id === medicineId
-      );
-      if (byIdAnyRole) return byIdAnyRole.chemotherapy_plan_item_id;
-    }
-
-    // 3. Name match within same role
-    const candidates = planItemsRef.current.filter(
-      (item) =>
-        !item.drug_role || item.drug_role.toUpperCase() === role
-    );
-
-    let matched =
-      candidates.find(
-        (item) =>
-          (
-            item.medicine_master?.medicine_name ||
-            item.medicine_master?.generic_name ||
-            ""
-          )
-            .trim()
-            .toLowerCase() === normalizedName
-      );
-
-    // 4. Name match across any role
-    if (!matched) {
-      matched = planItemsRef.current.find(
-        (item) =>
-          (
-            item.medicine_master?.medicine_name ||
-            item.medicine_master?.generic_name ||
-            ""
-          )
-            .trim()
-            .toLowerCase() === normalizedName
-      );
-    }
-
-    // 5. Partial name match
-    if (!matched && normalizedName) {
-      matched = planItemsRef.current.find(
-        (item) => {
-          const item_name = (
-            item.medicine_master?.medicine_name ||
-            item.medicine_master?.generic_name ||
-            ""
-          ).trim().toLowerCase();
-          return item_name.includes(normalizedName) || normalizedName.includes(item_name);
-        }
-      );
-    }
-
-    return matched?.chemotherapy_plan_item_id ?? "";
-  };
-
+  /* Save an edited row (any column) and the rest of the day's order onto
+     the plan. */
   const saveEditedDrug = async () => {
-    if (!editDraft || !editingRow || savingEdit) return;
+    if (!editDraft || !editingRow || editingRow.kind === "hydration" || savingEdit) {
+      return;
+    }
+    const kind = editingRow.kind;
 
-    const trimmedDose = editDraft.dose.trim();
-
-    if (trimmedDose && Number.isNaN(Number(trimmedDose))) {
+    if (!editDraft.medicineId && !editDraft.name.trim()) {
+      setEditError("Select a drug from the list or type a drug name.");
+      return;
+    }
+    const dose = editDraft.dose.trim();
+    if (dose && Number.isNaN(Number(dose))) {
       setEditError("Dose must be a valid number.");
       return;
     }
+    const minutes = (editDraft.infusionDuration ?? "").trim();
+    if (minutes && !/^\d+$/.test(minutes)) {
+      setEditError("Infusion duration must be whole minutes.");
+      return;
+    }
+
+    const rows = rowsOf(kind).map((drug) =>
+      drug.id === editingRow.id ? { ...editDraft } : drug
+    );
 
     try {
       setSavingEdit(true);
       setEditError("");
-
-      let planItemId = "";
-
-      if (planIdRef.current) {
-        planItemId =
-          editDraft.planItemId ||
-          resolvePlanItemId(editingRow.kind, editDraft.name, editDraft.medicineId);
-
-        if (!planItemId && editDraft.medicineId) {
-          try {
-            const createRes = await API.post(
-              `/chemotherapy/plans/${planIdRef.current}/items`,
-              {
-                medicine_id: editDraft.medicineId,
-                drug_role:
-                  editingRow.kind === "drug"
-                    ? "PRIMARY"
-                    : editingRow.kind === "premedication"
-                    ? "PREMEDICATION"
-                    : "SUPPORTIVE",
-                drug_sequence: planItemsRef.current.length + 1,
-                dosage: trimmedDose === "" ? null : Number(trimmedDose),
-                dosage_unit: editDraft.unit.trim() || null,
-              }
-            );
-            const planData = createRes.data?.data;
-            const newItems: ChemotherapyPlanItem[] = planData?.chemotherapy_plan_items ?? [];
-            const created = newItems.find(
-              (i) => i.medicine_id === editDraft.medicineId
-            );
-            if (created) {
-              planItemId = created.chemotherapy_plan_item_id;
-              editDraft.planItemId = planItemId;
-              planItemsRef.current = newItems;
-            }
-          } catch (createErr: any) {
-            console.error("Failed to create plan item:", createErr);
-          }
-        }
-
-        if (!planItemId) {
-          console.error("resolvePlanItemId failed:", {
-            kind: editingRow.kind,
-            name: editDraft.name,
-            medicineId: editDraft.medicineId,
-            planItemCount: planItemsRef.current.length,
-            planItems: planItemsRef.current.map((i) => ({
-              id: i.chemotherapy_plan_item_id,
-              medicineId: i.medicine_id,
-              name: i.medicine_master?.medicine_name,
-              role: i.drug_role,
-            })),
-          });
-          throw new Error(
-            "Could not match this medication to the patient's chemotherapy plan. The plan may not have been saved yet — complete the Treatment Plan step first."
-          );
-        }
-
-        await API.put(
-          `/chemotherapy/plans/${planIdRef.current}/items/${planItemId}`,
-          {
-            dosage: trimmedDose === "" ? null : Number(trimmedDose),
-            dosage_unit: editDraft.unit.trim() || null,
-          }
-        );
-
-        editDraft.planItemId = planItemId;
-      } else {
-        throw new Error(
-          "No chemotherapy plan found for this patient. Complete the Treatment Plan step first."
-        );
-      }
-
-      const updatedDrug: Drug = {
-        ...editDraft,
-        rawDose: null,
-      };
-
-      if (editingRow.kind === "drug") {
-        setDrugs((current) =>
-          current.map((item) =>
-            item.id === editingRow.id ? updatedDrug : item
-          )
-        );
-      } else if (editingRow.kind === "premedication") {
-        setPremedicationDrugs((current) =>
-          current.map((item) =>
-            item.id === editingRow.id ? updatedDrug : item
-          )
-        );
-      } else {
-        setSupportiveDrugs((current) =>
-          current.map((item) =>
-            item.id === editingRow.id ? updatedDrug : item
-          )
-        );
-      }
-
+      await saveOrderToPlan(withRows(kind, rows));
+      touch(kind);
+      setRowsOf(kind, rows);
+      newRowRef.current = null;
       setEditingRow(null);
       setEditDraft(null);
     } catch (error: any) {
       console.error("Failed to save medication changes:", error);
       setEditError(
-        error?.response?.data?.message ||
-          error?.message ||
-          "Failed to save the medication changes. Please try again."
+        errorMessage(error, "Failed to save the medication changes. Please try again.")
       );
     } finally {
       setSavingEdit(false);
     }
   };
 
-  const handleDeletePremedication = (id: number) => {
-    userTouched.current.premedication = true;
+  /* ---------------- Hydration rows ---------------- */
 
-    setPremedicationDrugs((current) =>
-      current.filter((drug) => drug.id !== id)
+  /* A Hydration change is saved with the rest of the day's order. */
+  const commitHydration = async (rows: HydrationRow[]) => {
+    await saveOrderToPlan(withRows("drug", drugs), rows);
+    userTouched.current.hydration = true;
+    setHydrationRows(rows);
+  };
+
+  /* ---------------- "Copy as Cycle X / Day Y" ---------------- */
+
+  /* The copy menu closes on an outside click or Escape. */
+  useEffect(() => {
+    if (!copyMenuOpen) return;
+    const closeOnOutside = (event: MouseEvent) => {
+      if (!copyMenuRef.current?.contains(event.target as Node)) {
+        setCopyMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCopyMenuOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [copyMenuOpen]);
+
+  const displayedCycleNumber = getCycleNumber(cycleDay) ?? 1;
+  const displayedOrder =
+    displayedDay != null
+      ? planOrders.find(
+          (order) =>
+            order.cycle_number === displayedCycleNumber &&
+            order.cycle_day === displayedDay
+        )
+      : undefined;
+  /* A completed cycle day (its consultation was submitted) or a closed
+     course is read-only. */
+  const orderLocked = planClosed || displayedOrder?.order_status === "COMPLETED";
+
+  /* Saved orders before the displayed cycle day, latest first. */
+  const copySources = planIdRef.current
+    ? planOrders
+        .filter(
+          (order) =>
+            order.cycle_number < displayedCycleNumber ||
+            (order.cycle_number === displayedCycleNumber &&
+              order.cycle_day < (displayedDay ?? 1))
+        )
+        .sort((a, b) => byCycleDay(b, a))
+    : [];
+
+  /* Copies a previous cycle day's whole order - Chemotherapy Orders,
+     Premedication, Supportive, Hydration and Admin Instructions - into the
+     displayed cycle day and saves it. Patient Dose is recalculated from
+     today's vitals. */
+  const copyFromOrder = async (source: ChemoPlanOrderHeader) => {
+    setCopyMenuOpen(false);
+    if (copying || savingEdit || editingRow || orderLocked || !planIdRef.current) {
+      return;
+    }
+    const from = `Cycle ${source.cycle_number} / Day ${source.cycle_day}`;
+    const target = `Cycle ${displayedCycleNumber} / Day ${displayedDay ?? 1}`;
+    if (
+      displayedOrder &&
+      !window.confirm(
+        `Replace the saved ${target} order with a copy of ${from}? Its Chemotherapy Orders, Premedication, Supportive, Hydration and Admin Instructions are all replaced.`
+      )
+    ) {
+      return;
+    }
+    try {
+      setCopying(true);
+      setEditError("");
+      const order =
+        ordersRef.current.get(orderKey(source.cycle_number, source.cycle_day)) ??
+        (await loadOrder(source.cycle_number, source.cycle_day));
+      if (!order) {
+        throw new Error(`${from} has no saved order to copy.`);
+      }
+      const items = order.chemotherapy_plan_items ?? [];
+      const next: Record<RowKind, Drug[]> = {
+        drug: planItemsForRole(items, "PRIMARY"),
+        premedication: planItemsForRole(items, "PREMEDICATION"),
+        supportive: planItemsForRole(items, "SUPPORTIVE"),
+      };
+      const hydration = order.hydration_saved
+        ? (order.chemotherapy_plan_hydration ?? []).map(planHydrationToRow)
+        : templateHydration();
+      await saveOrderToPlan(next, hydration, order.plan_order_id);
+      userTouched.current.drugs = true;
+      userTouched.current.premedication = true;
+      userTouched.current.supportive = true;
+      userTouched.current.hydration = true;
+      setDrugs(next.drug);
+      setPremedicationDrugs(next.premedication);
+      setSupportiveDrugs(next.supportive);
+      setHydrationRows(hydration);
+    } catch (error: any) {
+      console.error("Failed to copy the cycle day order:", error);
+      setEditError(errorMessage(error, `Failed to copy the ${from} order.`));
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  const startHydrationEdit = (row: HydrationRow) => {
+    if (editingRow || savingEdit) return;
+    setEditError("");
+    setEditingRow({ kind: "hydration", id: row.id, view: "hydration" });
+    setHydrationDraft({ ...row });
+  };
+
+  /* "Add Medicine" on Hydration: a blank row for this cycle day only. */
+  const addHydrationRow = () => {
+    if (editingRow || savingEdit || copying || orderLocked) return;
+    const row: HydrationRow = {
+      id: Date.now(),
+      sourceDilutionId: null,
+      stage: "PRE",
+      agent: "",
+      diluent: "",
+      volume: "",
+      volumeUnit: "mL",
+      guidance: "",
+    };
+    setHydrationRows((rows) => [...rows, row]);
+    newRowRef.current = { kind: "hydration", id: row.id };
+    startHydrationEdit(row);
+  };
+
+  const updateHydrationDraft = (field: keyof HydrationRow, value: string) => {
+    setHydrationDraft((previous) =>
+      previous ? { ...previous, [field]: value } : previous
     );
   };
 
-  const handleDeleteSupportive = (id: number) => {
-    userTouched.current.supportive = true;
+  const saveHydrationRow = async () => {
+    if (!hydrationDraft || savingEdit) return;
+    if (!hydrationDraft.agent.trim() && !hydrationDraft.diluent.trim()) {
+      setEditError("Enter the agent or the diluent.");
+      return;
+    }
+    const volume = hydrationDraft.volume.trim();
+    if (volume && (Number.isNaN(Number(volume)) || Number(volume) < 0)) {
+      setEditError("Volume must be a number.");
+      return;
+    }
+    const rows = hydrationRows.map((row) =>
+      row.id === hydrationDraft.id ? { ...hydrationDraft } : row
+    );
+    try {
+      setSavingEdit(true);
+      setEditError("");
+      await commitHydration(rows);
+      newRowRef.current = null;
+      setEditingRow(null);
+      setHydrationDraft(null);
+    } catch (error: any) {
+      console.error("Failed to save hydration:", error);
+      setEditError(errorMessage(error, "Failed to save the hydration row."));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
-    setSupportiveDrugs((current) => current.filter((drug) => drug.id !== id));
+  const removeHydrationRow = async (id: number) => {
+    if (editingRow || savingEdit) return;
+    try {
+      setSavingEdit(true);
+      setEditError("");
+      await commitHydration(hydrationRows.filter((row) => row.id !== id));
+    } catch (error: any) {
+      console.error("Failed to remove hydration row:", error);
+      setEditError(errorMessage(error, "Failed to remove the hydration row."));
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   /* Icons (scoped inside the component) */
@@ -1711,6 +1891,233 @@ const ChemotherapyOrder: React.FC<{
       />
     </svg>
   );
+
+  /* Dose Cal cell: formula select (+ target AUC for Calvert). */
+  const renderDoseCalcCell = (
+    drug: Drug,
+    onChange: (patch: Partial<Drug>) => void,
+    disabled = false
+  ) => {
+    const method = resolveDoseCalc(drug);
+    return (
+      <div className="flex min-w-[200px] flex-col gap-1.5">
+        <select
+          aria-label={`Dose calculation for ${drug.name}`}
+          value={method}
+          onChange={(event) => onChange({ doseCalc: event.target.value })}
+          disabled={disabled}
+          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-500"
+        >
+          {DOSE_CALC_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        {method === "AUC" && (
+          <label className="flex items-center gap-1.5 text-xs font-medium text-gray-500">
+            Target AUC
+            <input
+              type="number"
+              min="0"
+              step="0.5"
+              value={drug.targetAuc ?? String(resolveTargetAuc(drug) ?? "")}
+              onChange={(event) => onChange({ targetAuc: event.target.value })}
+              disabled={disabled}
+              className="w-20 rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            />
+          </label>
+        )}
+      </div>
+    );
+  };
+
+  const renderPatientDoseCell = (result: PatientDoseResult) =>
+    result.value !== null ? (
+      <div>
+        <span className="text-base font-semibold text-gray-900">
+          {result.value} {result.unit}
+        </span>
+        {result.note && (
+          <p className="mt-0.5 text-xs text-gray-500">{result.note}</p>
+        )}
+      </div>
+    ) : (
+      <span className="text-xs font-medium text-amber-600">
+        {result.message}
+      </span>
+    );
+
+  const usesCalvert = drugs.some((drug) => resolveDoseCalc(drug) === "AUC");
+
+  const EDIT_INPUT_CLASS =
+    "w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
+
+  /* Drug Name editor: a drug from medicine_master, or any name the doctor
+     types for this patient - kept on this cycle day's order only, never
+     added to medicine_master. */
+  const renderDrugNameEditor = () =>
+    editDraft && (
+      <div className="min-w-[220px]">
+        <SingleSelectDropdown
+          options={medicineOptions}
+          value={
+            editDraft.medicineId ??
+            (editDraft.name.trim() ? CUSTOM_DRUG_VALUE : "")
+          }
+          valueLabel={editDraft.name}
+          onValueChange={(medicineId) => {
+            const option = medicineOptions.find((item) => item.value === medicineId);
+            setEditDraft((previous) =>
+              previous
+                ? {
+                    ...previous,
+                    medicineId: medicineId || undefined,
+                    name: option?.label ?? "",
+                    form: option?.hint || previous.form,
+                    route:
+                      previous.route ||
+                      medicineRoutesRef.current.get(medicineId) ||
+                      "",
+                  }
+                : previous
+            );
+          }}
+          onCreateOption={(typed) =>
+            setEditDraft((previous) =>
+              previous
+                ? { ...previous, medicineId: undefined, name: typed.trim() }
+                : previous
+            )
+          }
+          createLabel="Use"
+          placeholder={medicineOptions.length > 0 ? "Select or type a drug" : "Loading drugs..."}
+          className="h-10 rounded-md border-gray-300 text-base shadow-none"
+        />
+        {!editDraft.medicineId && editDraft.name.trim() && (
+          <p className="mt-1 text-xs text-gray-500">
+            Custom name - saved for this patient only
+          </p>
+        )}
+      </div>
+    );
+
+  const renderEditInput = (field: keyof Drug, placeholder?: string) => (
+    <input
+      type="text"
+      value={(editDraft?.[field] as string | undefined) ?? ""}
+      onChange={(event) => updateEditDraft(field, event.target.value)}
+      placeholder={placeholder}
+      className={EDIT_INPUT_CLASS}
+    />
+  );
+
+  const renderEditTextarea = (field: keyof Drug, placeholder?: string) => (
+    <textarea
+      value={(editDraft?.[field] as string | undefined) ?? ""}
+      onChange={(event) => updateEditDraft(field, event.target.value)}
+      placeholder={placeholder}
+      rows={2}
+      className={`${EDIT_INPUT_CLASS} min-w-[180px] resize-y text-sm`}
+    />
+  );
+
+  const renderEditActions = (onSave: () => void) => (
+    <div className="flex items-center justify-end gap-2">
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={savingEdit}
+        className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {savingEdit ? "Saving" : "Save"}
+      </button>
+
+      <button
+        type="button"
+        onClick={cancelEdit}
+        disabled={savingEdit}
+        className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        Cancel
+      </button>
+    </div>
+  );
+
+  const renderRowActions = (
+    label: string,
+    onEdit: () => void,
+    onDelete: () => void
+  ) => (
+    <div className={`flex items-center justify-end gap-3 text-gray-500${orderLocked ? " hidden" : ""}`}>
+      <button
+        type="button"
+        aria-label={`Edit ${label}`}
+        onClick={onEdit}
+        disabled={savingEdit}
+        className="transition-colors hover:text-gray-900 focus:outline-none disabled:opacity-40"
+      >
+        <EditIcon />
+      </button>
+
+      <button
+        type="button"
+        aria-label={`Delete ${label}`}
+        onClick={onDelete}
+        disabled={savingEdit}
+        className="transition-colors hover:text-red-600 focus:outline-none disabled:opacity-40"
+      >
+        <DeleteIcon />
+      </button>
+    </div>
+  );
+
+  const renderRowError = () =>
+    editError && (
+      <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+        {editError}
+      </div>
+    );
+
+  /* Admin Instructions: one row per drug of the order (all three tabs). */
+  const adminRows: { kind: RowKind; drug: Drug }[] = [
+    ...drugs.map((drug) => ({ kind: "drug" as const, drug })),
+    ...premedicationDrugs.map((drug) => ({ kind: "premedication" as const, drug })),
+    ...supportiveDrugs.map((drug) => ({ kind: "supportive" as const, drug })),
+  ];
+
+  const tablesLoading = planLoading || orderLoading;
+
+  /* "Add Medicine" under a list (hidden on a completed day / closed
+     course). */
+  const renderAddMedicineButton = (onAdd: () => void) =>
+    !orderLocked && (
+      <div className="mt-4 flex justify-start">
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={Boolean(editingRow) || savingEdit || copying || tablesLoading}
+          className="inline-flex items-center gap-2 rounded-md border border-dashed border-blue-400 bg-white px-4 py-2 text-sm font-semibold text-blue-600 transition-colors hover:border-blue-600 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path
+              fillRule="evenodd"
+              d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
+              clipRule="evenodd"
+            />
+          </svg>
+          Add Medicine
+        </button>
+      </div>
+    );
+
+  const infusionLabel = (drug: Drug) =>
+    [drug.infusionType, drug.infusionDuration ? `${drug.infusionDuration} min` : ""]
+      .filter(Boolean)
+      .join(" · ");
+
+  const formatInput = (value: number | null | undefined, unit: string) =>
+    value != null ? `${value} ${unit}` : "—";
 
   const content = (
     <div className="w-full space-y-8">
@@ -1883,6 +2290,24 @@ const ChemotherapyOrder: React.FC<{
           </div>
         </div>
 
+        {/* A completed cycle day / closed course is read-only. */}
+        {orderLocked && (
+          <div className="mx-8 mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+            {planClosed && <p>{COURSE_CLOSED_MESSAGE}</p>}
+            {displayedOrder?.order_status === "COMPLETED" && (
+              <p>
+                Cycle {displayedOrder.cycle_number} / Day {displayedOrder.cycle_day} was
+                completed
+                {displayedOrder.completed_at
+                  ? ` on ${formatDateDMY(displayedOrder.completed_at)}`
+                  : ""}
+                . Its order is read-only
+                {planClosed ? "." : " - pick another day to order, or reuse it there with its \"Copy as Cycle\" button."}
+              </p>
+            )}
+          </div>
+        )}
+
         {/* ================= TABS ================= */}
         <div className="border-b border-gray-200 px-8">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
@@ -1907,276 +2332,112 @@ const ChemotherapyOrder: React.FC<{
                       {tab}
                     </button>
 
-                    {/* Dose calculator dropdown placed next to the
-                        Chemotherapy Orders tab, outside the order table. */}
-                    {tab === "Chemotherapy Orders" && (
-                      <div className="flex items-end pb-3 pl-1">
-                        <select
-                          id="dose-calculator"
-                          value={doseCalculator}
-                          onChange={(event) =>
-                            setDoseCalculator(event.target.value)
-                          }
-                          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                        >
-                          <option value="">Select a calculator…</option>
-                          {DOSE_CALCULATOR_OPTIONS.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
                   </React.Fragment>
                 );
               })}
             </nav>
 
-            {/* Next */}
+            {/* Copy as Cycle X / Day Y + Next */}
             <div className="flex flex-col items-end gap-2 pb-3">
               {planError && (
                 <div className="text-sm font-medium text-red-600">{planError}</div>
               )}
-              <button
-                type="button"
-                onClick={handleNext}
-                disabled={savingPlan}
-                className="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {savingPlan ? "Saving..." : "Next"}
-              </button>
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                {/* Copy an earlier cycle day's whole order into this one;
+                    the chevron lists every earlier saved cycle day. */}
+                {!orderLocked && copySources.length > 0 && (
+                  <div ref={copyMenuRef} className="relative inline-flex rounded-md shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => void copyFromOrder(copySources[0])}
+                      disabled={copying || savingEdit || Boolean(editingRow)}
+                      title={`Copy the Cycle ${copySources[0].cycle_number} / Day ${copySources[0].cycle_day} order (every tab) into this cycle day`}
+                      className="inline-flex items-center rounded-l-md border border-blue-600 bg-white px-4 py-2.5 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {copying
+                        ? "Copying..."
+                        : `Copy as Cycle ${copySources[0].cycle_number} / Day ${copySources[0].cycle_day}`}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Copy from another cycle day"
+                      aria-haspopup="menu"
+                      aria-expanded={copyMenuOpen}
+                      onClick={() => setCopyMenuOpen((open) => !open)}
+                      disabled={copying || savingEdit || Boolean(editingRow)}
+                      className={`inline-flex items-center rounded-r-md border border-l-0 border-blue-600 px-2.5 py-2.5 text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                        copyMenuOpen ? "bg-blue-50" : "bg-white"
+                      }`}
+                    >
+                      <svg
+                        className={`h-4 w-4 transition-transform duration-200 ease-out ${
+                          copyMenuOpen ? "rotate-180" : ""
+                        }`}
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </button>
+
+                    {/* Always mounted so it can fade / scale in and out. */}
+                    <div
+                      role="menu"
+                      aria-hidden={!copyMenuOpen}
+                      className={`absolute right-0 top-full z-30 mt-2 max-h-60 w-72 origin-top-right overflow-y-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg transition duration-150 ease-out ${
+                        copyMenuOpen
+                          ? "visible translate-y-0 scale-100 opacity-100"
+                          : "pointer-events-none invisible -translate-y-1 scale-95 opacity-0"
+                      }`}
+                    >
+                      {copySources.map((source) => (
+                        <button
+                          key={source.plan_order_id}
+                          type="button"
+                          role="menuitem"
+                          tabIndex={copyMenuOpen ? 0 : -1}
+                          onClick={() => void copyFromOrder(source)}
+                          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-blue-50 hover:text-blue-700"
+                        >
+                          <span>
+                            Copy as Cycle {source.cycle_number} / Day {source.cycle_day}
+                          </span>
+                          <span className="text-xs text-gray-400">
+                            {source.order_status === "COMPLETED"
+                              ? `Completed ${formatDateDMY(source.completed_at)}`
+                              : "Ordered"}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleNext}
+                  disabled={savingPlan}
+                  className="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {savingPlan ? "Saving..." : "Next"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* ================= DOSE CALCULATOR RESULT ================= */}
-        {doseCalculator && (
-          <div className="mx-8 mt-6 rounded-lg border border-gray-200 bg-gray-50 p-5">
-            {doseCalculator === "Body Surface Area (BSA)" && (
-              <div className="flex flex-wrap items-center gap-6">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    BSA
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-gray-900">
-                    {calcBsaDisplay}
-                  </p>
-                </div>
-                <p className="max-w-md text-sm text-gray-500">
-                  Body Surface Area (Mosteller) = √(height cm × weight kg /
-                  3600) in m². Derived from the most recent recorded height
-                  and weight for this patient.
-                </p>
-              </div>
-            )}
-
-            {doseCalculator === "Body Mass Index (BMI)" && (
-              <div className="flex flex-wrap items-center gap-6">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    BMI
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-gray-900">
-                    {calcBmiDisplay}
-                  </p>
-                </div>
-                <p className="max-w-md text-sm text-gray-500">
-                  Body Mass Index = weight (kg) / height (m)
-                  <sup>2</sup>. Derived from the most recent recorded
-                  height and weight for this patient.
-                </p>
-              </div>
-            )}
-
-            {doseCalculator ===
-              "Dosing Body Weight (Ideal & Adjusted)" && (
-              <div className="space-y-4">
-                <div className="flex flex-wrap items-end gap-6">
-                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
-                    Dosing Weight
-                    <select
-                      id="dosing-weight-type"
-                      value={dosingWeightType}
-                      onChange={(event) =>
-                        setDosingWeightType(event.target.value)
-                      }
-                      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    >
-                      <option value="">Select dosing weight…</option>
-                      <option value="Ideal Body Weight (IBW)">
-                        Ideal Body Weight (IBW)
-                      </option>
-                      <option value="Adjusted Body Weight">
-                        Adjusted Body Weight
-                      </option>
-                    </select>
-                  </label>
-                  {dosingWeightType === "Ideal Body Weight (IBW)" && (
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Ideal Body Weight (IBW)
-                      </p>
-                      <p className="mt-1 text-2xl font-semibold text-gray-900">
-                        {calcIbwDisplay}
-                      </p>
-                    </div>
-                  )}
-                  {dosingWeightType === "Adjusted Body Weight" && (
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Adjusted Body Weight
-                      </p>
-                      <p className="mt-1 text-2xl font-semibold text-gray-900">
-                        {calcAdjBwDisplay}
-                      </p>
-                    </div>
-                  )}
-                </div>
-                <p className="max-w-md text-sm text-gray-500">
-                  Ideal and adjusted body weight formulas used for
-                  chemotherapy dosing. Pick a dosing weight and drug doses
-                  are scaled by it so larger patients receive a higher dose
-                  and smaller patients a lower one (derived from the most
-                  recent recorded height, weight and gender).
-                </p>
-                <div className="rounded-md border border-gray-200 bg-white p-4">
-                  <p className="text-sm font-semibold text-gray-900">
-                    Ideal Body Weight (IBW) — Devine formula:
-                  </p>
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
-                    <li>
-                      Men: IBW (kg) = 50 + 2.3 × [Height(in) − 60]
-                    </li>
-                    <li>
-                      Women: IBW (kg) = 45.5 + 2.3 × [Height(in) − 60]
-                    </li>
-                  </ul>
-                </div>
-                <div className="rounded-md border border-gray-200 bg-white p-4">
-                  <p className="text-sm font-semibold text-gray-900">
-                    Adjusted Body Weight (for obese patients, used in some
-                    renal-dose/CrCl calculations):
-                  </p>
-                  <p className="mt-2 pl-5 text-sm text-gray-600">
-                    AdjBW (kg) = IBW + 0.4 × (Actual Weight − IBW)
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {doseCalculator ===
-              "Creatinine Clearance (CrCl) — Cockcroft-Gault" && (
-              <div className="flex flex-wrap items-center gap-6">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    CrCl
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-gray-900">
-                    {calcCrClDisplay}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-end gap-3">
-                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
-                    Age (years)
-                    <input
-                      type="number"
-                      value={calcAgeYears}
-                      onChange={(event) =>
-                        setCalcAgeYears(event.target.value)
-                      }
-                      placeholder="e.g. 55"
-                      className="w-28 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
-                    Serum creatinine (mg/dL)
-                    <input
-                      type="number"
-                      value={calcSerumCreatinine}
-                      onChange={(event) =>
-                        setCalcSerumCreatinine(event.target.value)
-                      }
-                      placeholder="0.9"
-                      className="w-36 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </label>
-                </div>
-                <p className="max-w-md text-sm text-gray-500">
-                  Cockcroft-Gault: CrCl = ((140 − age) × weight kg) / (72
-                  × serum creatinine)
-                  {calcIsFemale ? " × 0.85" : ""} mL/min.
-                </p>
-              </div>
-            )}
-
-            {doseCalculator ===
-              "Carboplatin Dose — Calvert Formula" && (
-              <div className="flex flex-wrap items-center gap-6">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Total Carboplatin Dose
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-gray-900">
-                    {calcCarboplatinDisplay}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-end gap-3">
-                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
-                    Age (years)
-                    <input
-                      type="number"
-                      value={calcAgeYears}
-                      onChange={(event) =>
-                        setCalcAgeYears(event.target.value)
-                      }
-                      placeholder="e.g. 55"
-                      className="w-28 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
-                    Serum creatinine (mg/dL)
-                    <input
-                      type="number"
-                      value={calcSerumCreatinine}
-                      onChange={(event) =>
-                        setCalcSerumCreatinine(event.target.value)
-                      }
-                      placeholder="0.9"
-                      className="w-36 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
-                    Target AUC (mg/mL·min)
-                    <input
-                      type="number"
-                      value={calcTargetAuc}
-                      onChange={(event) =>
-                        setCalcTargetAuc(event.target.value)
-                      }
-                      placeholder="5"
-                      className="w-28 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </label>
-                </div>
-                <p className="max-w-md text-sm text-gray-500">
-                  Calvert: Dose (mg) = AUC × (GFR + 25). GFR is estimated
-                  by CrCl (Cockcroft-Gault) from the age, serum creatinine
-                  and weight entered above.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* ================= ORDER TABLE ================= */}
         {activeTab === "Chemotherapy Orders" ? (
           <div className="p-8">
-            {editingRow?.kind === "drug" && editError && (
-              <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
-                {editError}
-              </div>
-            )}
+            {renderRowError()}
+
+            {/* Inputs the Dose Cal formulas use (spec Section 4). */}
+
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -2190,11 +2451,19 @@ const ChemotherapyOrder: React.FC<{
                     </th>
 
                     <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Dose Cal
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                       Dose
                     </th>
 
                     <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                       Unit
+                    </th>
+
+                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Patient Dose
                     </th>
 
                     <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
@@ -2204,10 +2473,10 @@ const ChemotherapyOrder: React.FC<{
                 </thead>
 
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {planLoading && (
+                  {tablesLoading && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={7}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
                         Loading chemotherapy orders
@@ -2215,10 +2484,10 @@ const ChemotherapyOrder: React.FC<{
                     </tr>
                   )}
 
-                  {!planLoading && !planError && drugs.length === 0 && (
+                  {!tablesLoading && !planError && drugs.length === 0 && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={7}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
                         No chemotherapy orders found for this patient.
@@ -2229,7 +2498,7 @@ const ChemotherapyOrder: React.FC<{
                   {planError && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={7}
                         className="px-6 py-8 text-center text-sm text-red-500"
                       >
                         {planError}
@@ -2240,6 +2509,7 @@ const ChemotherapyOrder: React.FC<{
                   {drugs.map((drug) => {
                     const isEditingRow =
                       editingRow?.kind === "drug" &&
+                      editingRow.view === "row" &&
                       editingRow.id === drug.id;
 
                     if (isEditingRow && editDraft) {
@@ -2248,12 +2518,20 @@ const ChemotherapyOrder: React.FC<{
                           key={drug.id}
                           className="bg-blue-50/40 transition-colors"
                         >
-                          <td className="whitespace-nowrap px-3 py-3 pl-6 pr-3 text-base font-medium text-gray-900">
-                            {editDraft.name}
+                          <td className="px-3 py-3 pl-6 pr-3">
+                            {renderDrugNameEditor()}
                           </td>
 
-                          <td className="whitespace-nowrap px-3 py-3 text-base text-gray-500">
-                            {editDraft.form}
+                          <td className="px-3 py-3">
+                            {renderEditInput("form", "Form")}
+                          </td>
+
+                          <td className="px-3 py-3">
+                            {renderDoseCalcCell(editDraft, (patch) =>
+                              setEditDraft((previous) =>
+                                previous ? { ...previous, ...patch } : previous
+                              )
+                            )}
                           </td>
 
                           <td className="px-3 py-3">
@@ -2282,6 +2560,12 @@ const ChemotherapyOrder: React.FC<{
                               }
                               className="w-full min-w-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                             />
+                          </td>
+
+                          <td className="px-3 py-3">
+                            {renderPatientDoseCell(
+                              computePatientDose(editDraft, dosingInputs)
+                            )}
                           </td>
 
                           <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
@@ -2322,6 +2606,14 @@ const ChemotherapyOrder: React.FC<{
                         {drug.form}
                       </td>
 
+                      <td className="px-3 py-5">
+                        {renderDoseCalcCell(
+                          drug,
+                          (patch) => updatePrimaryDrug(drug.id, patch),
+                          orderLocked
+                        )}
+                      </td>
+
                       <td className="whitespace-nowrap px-3 py-5 text-base text-gray-900">
                         {drug.dose}
                       </td>
@@ -2330,8 +2622,14 @@ const ChemotherapyOrder: React.FC<{
                         {drug.unit}
                       </td>
 
+                      <td className="px-3 py-5">
+                        {renderPatientDoseCell(
+                          computePatientDose(drug, dosingInputs)
+                        )}
+                      </td>
+
                       <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
-                        <div className="flex items-center justify-end gap-3 text-gray-500">
+                        <div className={`flex items-center justify-end gap-3 text-gray-500${orderLocked ? " hidden" : ""}`}>
                           <button
                             type="button"
                             aria-label={`Edit ${drug.name}`}
@@ -2362,14 +2660,11 @@ const ChemotherapyOrder: React.FC<{
 </table>
              </div>
 
+            {renderAddMedicineButton(() => addMedicineRow("drug"))}
           </div>
         ) : activeTab === "Premedication" ? (
           <div className="p-8">
-            {editingRow?.kind === "premedication" && editError && (
-              <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
-                {editError}
-              </div>
-            )}
+            {renderRowError()}
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -2397,7 +2692,7 @@ const ChemotherapyOrder: React.FC<{
                 </thead>
 
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {planLoading && (
+                  {tablesLoading && (
                     <tr>
                       <td
                         colSpan={5}
@@ -2408,7 +2703,7 @@ const ChemotherapyOrder: React.FC<{
                     </tr>
                   )}
 
-                  {!planLoading &&
+                  {!tablesLoading &&
                     !planError &&
                     premedicationDrugs.length === 0 && (
                       <tr>
@@ -2435,6 +2730,7 @@ const ChemotherapyOrder: React.FC<{
                   {premedicationDrugs.map((drug) => {
                     const isEditingRow =
                       editingRow?.kind === "premedication" &&
+                      editingRow.view === "row" &&
                       editingRow.id === drug.id;
 
                     if (isEditingRow && editDraft) {
@@ -2443,12 +2739,12 @@ const ChemotherapyOrder: React.FC<{
                           key={drug.id}
                           className="bg-blue-50/40 transition-colors"
                         >
-                          <td className="whitespace-nowrap px-3 py-3 pl-6 pr-3 text-base font-medium text-gray-900">
-                            {editDraft.name}
+                          <td className="px-3 py-3 pl-6 pr-3">
+                            {renderDrugNameEditor()}
                           </td>
 
-                          <td className="whitespace-nowrap px-3 py-3 text-base text-gray-500">
-                            {editDraft.form}
+                          <td className="px-3 py-3">
+                            {renderEditInput("form", "Form")}
                           </td>
 
                           <td className="px-3 py-3">
@@ -2526,7 +2822,7 @@ const ChemotherapyOrder: React.FC<{
                       </td>
 
                       <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
-                        <div className="flex items-center justify-end gap-3 text-gray-500">
+                        <div className={`flex items-center justify-end gap-3 text-gray-500${orderLocked ? " hidden" : ""}`}>
                           <button
                             type="button"
                             aria-label={`Edit ${drug.name}`}
@@ -2556,14 +2852,11 @@ const ChemotherapyOrder: React.FC<{
                 </tbody>
               </table>
             </div>
+            {renderAddMedicineButton(() => addMedicineRow("premedication"))}
           </div>
         ) : activeTab === "Supportive" ? (
           <div className="p-8">
-            {editingRow?.kind === "supportive" && editError && (
-              <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
-                {editError}
-              </div>
-            )}
+            {renderRowError()}
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -2591,7 +2884,7 @@ const ChemotherapyOrder: React.FC<{
                 </thead>
 
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {planLoading && (
+                  {tablesLoading && (
                     <tr>
                       <td
                         colSpan={5}
@@ -2602,7 +2895,7 @@ const ChemotherapyOrder: React.FC<{
                     </tr>
                   )}
 
-                  {!planLoading &&
+                  {!tablesLoading &&
                     !planError &&
                     supportiveDrugs.length === 0 && (
                       <tr>
@@ -2629,6 +2922,7 @@ const ChemotherapyOrder: React.FC<{
                   {supportiveDrugs.map((drug) => {
                     const isEditingRow =
                       editingRow?.kind === "supportive" &&
+                      editingRow.view === "row" &&
                       editingRow.id === drug.id;
 
                     if (isEditingRow && editDraft) {
@@ -2637,12 +2931,12 @@ const ChemotherapyOrder: React.FC<{
                           key={drug.id}
                           className="bg-blue-50/40 transition-colors"
                         >
-                          <td className="whitespace-nowrap px-3 py-3 pl-6 pr-3 text-base font-medium text-gray-900">
-                            {editDraft.name}
+                          <td className="px-3 py-3 pl-6 pr-3">
+                            {renderDrugNameEditor()}
                           </td>
 
-                          <td className="whitespace-nowrap px-3 py-3 text-base text-gray-500">
-                            {editDraft.form}
+                          <td className="px-3 py-3">
+                            {renderEditInput("form", "Form")}
                           </td>
 
                           <td className="px-3 py-3">
@@ -2714,7 +3008,7 @@ const ChemotherapyOrder: React.FC<{
                       </td>
 
                       <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
-                        <div className="flex items-center justify-end gap-3 text-gray-500">
+                        <div className={`flex items-center justify-end gap-3 text-gray-500${orderLocked ? " hidden" : ""}`}>
                           <button
                             type="button"
                             aria-label={`Edit ${drug.name}`}
@@ -2740,52 +3034,49 @@ const ChemotherapyOrder: React.FC<{
                 </tbody>
               </table>
             </div>
+            {renderAddMedicineButton(() => addMedicineRow("supportive"))}
           </div>
         ) : activeTab === "Admin Instructions" ? (
           <div className="p-8">
+            {renderRowError()}
             <p className="mb-4 text-sm text-gray-500">
-              Administration instructions for the selected protocol:
+              Administration instructions for the drugs of this order:
             </p>
 
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="py-4 pl-6 pr-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Drug Name
-                    </th>
+                    {[
+                      "Drug Name",
+                      "Route",
+                      "Infusion",
+                      "Frequency",
+                      "Timing",
+                      "Admin Detail",
+                      "Remarks",
+                    ].map((label, index) => (
+                      <th
+                        key={label}
+                        className={`${
+                          index === 0 ? "py-4 pl-6 pr-3" : "px-3 py-4"
+                        } text-left text-xs font-semibold uppercase tracking-wider text-gray-500`}
+                      >
+                        {label}
+                      </th>
+                    ))}
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Route
-                    </th>
-
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Infusion
-                    </th>
-
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Frequency
-                    </th>
-
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Timing
-                    </th>
-
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Admin Detail
-                    </th>
-
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Remarks
+                    <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Action
                     </th>
                   </tr>
                 </thead>
 
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {planLoading && (
+                  {tablesLoading && (
                     <tr>
                       <td
-                        colSpan={7}
+                        colSpan={8}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
                         Loading administration instructions
@@ -2793,24 +3084,22 @@ const ChemotherapyOrder: React.FC<{
                     </tr>
                   )}
 
-                  {!planLoading &&
-                    !planError &&
-                    adminInstructions.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={7}
-                          className="px-6 py-8 text-center text-sm text-gray-500"
-                        >
-                          No administration instructions found for this
-                          protocol.
-                        </td>
-                      </tr>
-                    )}
+                  {!tablesLoading && !planError && adminRows.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={8}
+                        className="px-6 py-8 text-center text-sm text-gray-500"
+                      >
+                        No administration instructions found for this
+                        protocol.
+                      </td>
+                    </tr>
+                  )}
 
                   {planError && (
                     <tr>
                       <td
-                        colSpan={7}
+                        colSpan={8}
                         className="px-6 py-8 text-center text-sm text-red-500"
                       >
                         {planError}
@@ -2818,46 +3107,125 @@ const ChemotherapyOrder: React.FC<{
                     </tr>
                   )}
 
-                  {adminInstructions.map((instruction) => (
-                    <tr
-                      key={instruction.id}
-                      className="align-top transition-colors hover:bg-gray-50"
-                    >
-                      <td className="whitespace-nowrap py-5 pl-6 pr-3 text-sm font-medium text-gray-900">
-                        {instruction.medicineName || "—"}
-                      </td>
+                  {adminRows.map(({ kind, drug }) => {
+                    const isEditingRow =
+                      editingRow?.view === "admin" &&
+                      editingRow.kind === kind &&
+                      editingRow.id === drug.id;
 
-                      <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
-                        {instruction.route || "—"}
-                      </td>
+                    if (isEditingRow && editDraft) {
+                      return (
+                        <tr
+                          key={`${kind}-${drug.id}`}
+                          className="bg-blue-50/40 align-top transition-colors"
+                        >
+                          <td className="py-3 pl-6 pr-3">
+                            {renderDrugNameEditor()}
+                          </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
-                        {instruction.infusion || "—"}
-                      </td>
+                          <td className="px-3 py-3">
+                            {renderEditInput("route", "e.g. IV")}
+                          </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
-                        {instruction.frequency || "—"}
-                      </td>
+                          <td className="px-3 py-3">
+                            <div className="flex min-w-[160px] flex-col gap-1.5">
+                              {renderEditInput("infusionType", "Infusion type")}
+                              <label className="flex items-center gap-1.5 text-xs text-gray-500">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={editDraft.infusionDuration ?? ""}
+                                  onChange={(event) =>
+                                    updateEditDraft(
+                                      "infusionDuration",
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="0"
+                                  className={`${EDIT_INPUT_CLASS} w-24 min-w-0`}
+                                />
+                                min
+                              </label>
+                            </div>
+                          </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
-                        {instruction.timing || "—"}
-                      </td>
+                          <td className="px-3 py-3">
+                            {renderEditInput("frequency", "Frequency")}
+                          </td>
 
-                      <td className="px-3 py-5 text-sm text-gray-700">
-                        {instruction.administrationDetail || "—"}
-                      </td>
+                          <td className="px-3 py-3">
+                            {renderEditInput("timing", "Timing")}
+                          </td>
 
-                      <td className="px-3 py-5 text-sm text-gray-500">
-                        {instruction.remarks || "—"}
-                      </td>
-                    </tr>
-                  ))}
+                          <td className="px-3 py-3">
+                            {renderEditTextarea(
+                              "administrationDetail",
+                              "Administration detail"
+                            )}
+                          </td>
+
+                          <td className="px-3 py-3">
+                            {renderEditTextarea("remarks", "Remarks")}
+                          </td>
+
+                          <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
+                            {renderEditActions(saveEditedDrug)}
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return (
+                      <tr
+                        key={`${kind}-${drug.id}`}
+                        className="align-top transition-colors hover:bg-gray-50"
+                      >
+                        <td className="whitespace-nowrap py-5 pl-6 pr-3 text-sm font-medium text-gray-900">
+                          {drug.name || "—"}
+                        </td>
+
+                        <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                          {drug.route || "—"}
+                        </td>
+
+                        <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                          {infusionLabel(drug) || "—"}
+                        </td>
+
+                        <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                          {drug.frequency || "—"}
+                        </td>
+
+                        <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                          {drug.timing || "—"}
+                        </td>
+
+                        <td className="px-3 py-5 text-sm text-gray-700">
+                          {drug.administrationDetail || "—"}
+                        </td>
+
+                        <td className="px-3 py-5 text-sm text-gray-500">
+                          {drug.remarks || "—"}
+                        </td>
+
+                        <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
+                          {renderRowActions(
+                            drug.name,
+                            () => startEdit(kind, drug, "admin"),
+                            () => handleDeleteAdminRow(kind, drug)
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
         ) : activeTab === "Hydration" ? (
           <div className="p-8">
+            {renderRowError()}
             <p className="mb-4 text-sm text-gray-500">
               Hydration guidance for the selected protocol (document Section 3
               - values by chemotherapy agent):
@@ -2867,33 +3235,30 @@ const ChemotherapyOrder: React.FC<{
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="py-4 pl-6 pr-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Stage
-                    </th>
+                    {["Stage", "Agent", "Diluent", "Volume", "Guidance"].map(
+                      (label, index) => (
+                        <th
+                          key={label}
+                          className={`${
+                            index === 0 ? "py-4 pl-6 pr-3" : "px-3 py-4"
+                          } text-left text-xs font-semibold uppercase tracking-wider text-gray-500`}
+                        >
+                          {label}
+                        </th>
+                      )
+                    )}
 
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Agent
-                    </th>
-
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Diluent
-                    </th>
-
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Volume
-                    </th>
-
-                    <th className="px-3 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Guidance
+                    <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Action
                     </th>
                   </tr>
                 </thead>
 
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {planLoading && (
+                  {tablesLoading && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={6}
                         className="px-6 py-8 text-center text-sm text-gray-500"
                       >
                         Loading hydration guidance
@@ -2901,12 +3266,12 @@ const ChemotherapyOrder: React.FC<{
                     </tr>
                   )}
 
-                  {!planLoading &&
+                  {!tablesLoading &&
                     !planError &&
                     hydrationRows.length === 0 && (
                       <tr>
                         <td
-                          colSpan={5}
+                          colSpan={6}
                           className="px-6 py-8 text-center text-sm text-gray-500"
                         >
                           No mandatory hydration for this protocol.
@@ -2917,7 +3282,7 @@ const ChemotherapyOrder: React.FC<{
                   {planError && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={6}
                         className="px-6 py-8 text-center text-sm text-red-500"
                       >
                         {planError}
@@ -2925,51 +3290,150 @@ const ChemotherapyOrder: React.FC<{
                     </tr>
                   )}
 
-                  {hydrationRows.map((row) => (
-                    <tr
-                      key={row.protocol_dilution_id}
-                      className="align-top transition-colors hover:bg-gray-50"
-                    >
-                      <td className="whitespace-nowrap py-5 pl-6 pr-3 text-sm">
-                        <span
-                          className={
-                            (row.hydration_stage ?? "").toUpperCase() === "PRE"
-                              ? "rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700"
-                              : "rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700"
-                          }
+                  {hydrationRows.map((row) => {
+                    const isEditingRow =
+                      editingRow?.view === "hydration" &&
+                      editingRow.id === row.id;
+
+                    if (isEditingRow && hydrationDraft) {
+                      return (
+                        <tr
+                          key={row.id}
+                          className="bg-blue-50/40 align-top transition-colors"
                         >
-                          {row.hydration_stage}
-                        </span>
-                      </td>
+                          <td className="py-3 pl-6 pr-3">
+                            <select
+                              value={hydrationDraft.stage}
+                              onChange={(event) =>
+                                updateHydrationDraft("stage", event.target.value)
+                              }
+                              className={`${EDIT_INPUT_CLASS} w-28 min-w-0`}
+                            >
+                              <option value="PRE">PRE</option>
+                              <option value="POST">POST</option>
+                            </select>
+                          </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-sm font-medium text-gray-900">
-                        {row.medicine_master?.medicine_name ||
-                          row.drug_brand_name ||
-                          "—"}
-                      </td>
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={hydrationDraft.agent}
+                              onChange={(event) =>
+                                updateHydrationDraft("agent", event.target.value)
+                              }
+                              placeholder="Agent"
+                              className={EDIT_INPUT_CLASS}
+                            />
+                          </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
-                        {row.diluent || "—"}
-                      </td>
+                          <td className="px-3 py-3">
+                            <input
+                              type="text"
+                              value={hydrationDraft.diluent}
+                              onChange={(event) =>
+                                updateHydrationDraft("diluent", event.target.value)
+                              }
+                              placeholder="e.g. NS 0.9%"
+                              className={EDIT_INPUT_CLASS}
+                            />
+                          </td>
 
-                      <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
-                        {row.dilution_volume != null
-                          ? `${row.dilution_volume}${
-                              row.dilution_volume_unit
-                                ? ` ${row.dilution_volume_unit}`
-                                : ""
-                            }`
-                          : "—"}
-                      </td>
+                          <td className="px-3 py-3">
+                            <div className="flex min-w-[180px] items-center gap-1.5">
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={hydrationDraft.volume}
+                                onChange={(event) =>
+                                  updateHydrationDraft("volume", event.target.value)
+                                }
+                                placeholder="0"
+                                className={`${EDIT_INPUT_CLASS} w-24 min-w-0`}
+                              />
+                              <input
+                                type="text"
+                                value={hydrationDraft.volumeUnit}
+                                onChange={(event) =>
+                                  updateHydrationDraft(
+                                    "volumeUnit",
+                                    event.target.value
+                                  )
+                                }
+                                placeholder="mL"
+                                className={`${EDIT_INPUT_CLASS} w-20 min-w-0`}
+                              />
+                            </div>
+                          </td>
 
-                      <td className="px-3 py-5 text-sm text-gray-700">
-                        {row.comment || "—"}
-                      </td>
-                    </tr>
-                  ))}
+                          <td className="px-3 py-3">
+                            <textarea
+                              value={hydrationDraft.guidance}
+                              onChange={(event) =>
+                                updateHydrationDraft("guidance", event.target.value)
+                              }
+                              placeholder="Guidance"
+                              rows={2}
+                              className={`${EDIT_INPUT_CLASS} min-w-[220px] resize-y text-sm`}
+                            />
+                          </td>
+
+                          <td className="whitespace-nowrap px-6 py-3 text-right text-sm font-medium">
+                            {renderEditActions(saveHydrationRow)}
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return (
+                      <tr
+                        key={row.id}
+                        className="align-top transition-colors hover:bg-gray-50"
+                      >
+                        <td className="whitespace-nowrap py-5 pl-6 pr-3 text-sm">
+                          <span
+                            className={
+                              row.stage === "PRE"
+                                ? "rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700"
+                                : "rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700"
+                            }
+                          >
+                            {row.stage}
+                          </span>
+                        </td>
+
+                        <td className="whitespace-nowrap px-3 py-5 text-sm font-medium text-gray-900">
+                          {row.agent || "—"}
+                        </td>
+
+                        <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                          {row.diluent || "—"}
+                        </td>
+
+                        <td className="whitespace-nowrap px-3 py-5 text-sm text-gray-500">
+                          {row.volume
+                            ? `${row.volume}${row.volumeUnit ? ` ${row.volumeUnit}` : ""}`
+                            : "—"}
+                        </td>
+
+                        <td className="px-3 py-5 text-sm text-gray-700">
+                          {row.guidance || "—"}
+                        </td>
+
+                        <td className="whitespace-nowrap px-6 py-5 text-right text-sm font-medium">
+                          {renderRowActions(
+                            row.agent || "hydration row",
+                            () => startHydrationEdit(row),
+                            () => void removeHydrationRow(row.id)
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
+            {renderAddMedicineButton(addHydrationRow)}
           </div>
         ) : (
           /* Other Tabs */

@@ -6,6 +6,16 @@ import React, {
   useMemo,
 } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import {
+  Activity,
+  Droplet,
+  Gauge,
+  HeartPulse,
+  PersonStanding,
+  Ruler,
+  Thermometer,
+  Weight,
+} from "lucide-react";
 import { employeeApi } from "../../api/employee.api";
 import { getUser } from "../../utils/token";
 import { computeBmi, computeBsa } from "../../utils/vitals";
@@ -63,6 +73,105 @@ const vitalNum = (
   if (value === null || value === undefined || value === "") return null;
   const parsed = typeof value === "number" ? value : parseFloat(String(value));
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+/* Pastel icon badges, matching the admin-side PatientVitalsPanel. */
+type VitalTone = "danger" | "warning" | "success" | "purple" | "accent";
+
+const VITAL_TONE_BADGE: Record<VitalTone, string> = {
+  danger: "bg-[#FBEAE9] text-[#B5433E]",
+  warning: "bg-[#FCF1DD] text-[#A8720F]",
+  success: "bg-[#E7F4EE] text-[#2E7D5B]",
+  purple: "bg-[#EEECF7] text-[#5A4E9C]",
+  accent: "bg-[#E6F1F5] text-[#1D6E8C]",
+};
+
+/* ------------------------------------------------------------
+   VITAL SEVERITY
+   Normal (green) / Moderate (orange) / Critical (red). The BP,
+   pulse, SpO2 and temperature bands match PatientVitalsPanel so
+   doctor and admin sides agree. A vital with no severity (height,
+   weight, BSA, or no reading) keeps its neutral tone.
+------------------------------------------------------------ */
+
+type VitalSeverity = "normal" | "moderate" | "critical";
+
+const SEVERITY_BADGE: Record<VitalSeverity, string> = {
+  normal: "bg-green-50 text-green-600",
+  moderate: "bg-orange-50 text-orange-500",
+  critical: "bg-red-50 text-red-600",
+};
+
+const SEVERITY_TEXT: Record<VitalSeverity, string> = {
+  normal: "text-green-700",
+  moderate: "text-orange-600",
+  critical: "text-red-600",
+};
+
+const inRange = (value: number, low: number, high: number) =>
+  value >= low && value <= high;
+
+/* Green inside the normal band, orange inside the wider moderate band,
+   red outside both. */
+const bandSeverity = (
+  value: number,
+  normalLow: number,
+  normalHigh: number,
+  moderateLow: number,
+  moderateHigh: number
+): VitalSeverity =>
+  inRange(value, normalLow, normalHigh)
+    ? "normal"
+    : inRange(value, moderateLow, moderateHigh)
+      ? "moderate"
+      : "critical";
+
+const worstSeverity = (levels: VitalSeverity[]): VitalSeverity | undefined =>
+  levels.includes("critical")
+    ? "critical"
+    : levels.includes("moderate")
+      ? "moderate"
+      : levels[0];
+
+/* Reads the number out of a formatted measurement ("72 bpm" -> 72). */
+const readingNum = (text: string): number | null => {
+  const parsed = parseFloat(text);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const bpSeverity = (bp: string): VitalSeverity | undefined => {
+  const [systolic, diastolic] = bp.split("/").map(readingNum);
+  const levels: VitalSeverity[] = [];
+  if (systolic != null) levels.push(bandSeverity(systolic, 90, 119, 120, 139));
+  if (diastolic != null) levels.push(bandSeverity(diastolic, 60, 79, 80, 89));
+  return worstSeverity(levels);
+};
+
+const pulseSeverity = (pulse: number) => bandSeverity(pulse, 60, 100, 101, 110);
+
+const spo2Severity = (spo2: number): VitalSeverity =>
+  spo2 < 90 ? "critical" : spo2 < 95 ? "moderate" : "normal";
+
+const temperatureSeverity = (celsius: number): VitalSeverity =>
+  celsius >= 38 || celsius < 35.5
+    ? "critical"
+    : celsius > 37.2 || celsius < 36.1
+      ? "moderate"
+      : "normal";
+
+/* BMI: 18.5-24.9 normal, 17-18.4 / 25-29.9 moderate, else critical. */
+const bmiSeverity = (bmi: number) => bandSeverity(bmi, 18.5, 24.9, 17, 29.9);
+
+/* Pain (0-10): 0-3 normal, 4-6 moderate, 7-10 critical. */
+const painSeverity = (pain: number): VitalSeverity =>
+  pain >= 7 ? "critical" : pain >= 4 ? "moderate" : "normal";
+
+const severityOf = (
+  text: string,
+  rate: (value: number) => VitalSeverity
+): VitalSeverity | undefined => {
+  const value = readingNum(text);
+  return value === null ? undefined : rate(value);
 };
 
 const buildMeasurements = (
@@ -392,6 +501,65 @@ const Consultation: React.FC = () => {
 
   const measurements = useMemo(() => buildMeasurements(encounter, recentEncounters), [encounter, recentEncounters]);
 
+  const measurementTiles: {
+    label: string;
+    icon: typeof Ruler;
+    tone: VitalTone;
+    value: string;
+    severity?: VitalSeverity;
+  }[] = [
+    { label: "Height", icon: Ruler, tone: "accent", value: measurements.height },
+    { label: "Weight", icon: Weight, tone: "accent", value: measurements.weight },
+    { label: "BSA", icon: PersonStanding, tone: "accent", value: measurements.bsa },
+    {
+      label: "BMI",
+      icon: Gauge,
+      tone: "accent",
+      value: measurements.bmi,
+      severity: severityOf(measurements.bmi, bmiSeverity),
+    },
+    {
+      label: "Blood Pressure",
+      icon: Droplet,
+      tone: "danger",
+      value: measurements.bp ? `${measurements.bp} mmHg` : "",
+      severity: bpSeverity(measurements.bp),
+    },
+    {
+      label: "Pulse",
+      icon: HeartPulse,
+      tone: "danger",
+      value: measurements.pulse,
+      severity: severityOf(measurements.pulse, pulseSeverity),
+    },
+    {
+      label: "Temperature",
+      icon: Thermometer,
+      tone: "warning",
+      value: measurements.temp,
+      severity: severityOf(measurements.temp, temperatureSeverity),
+    },
+    {
+      label: "SPO2",
+      icon: Activity,
+      tone: "success",
+      value: measurements.spo2,
+      severity: severityOf(measurements.spo2, spo2Severity),
+    },
+    /* Pain Score is only shown once it has been recorded. */
+    ...(measurements.painScore && measurements.painScore !== "—"
+      ? [
+          {
+            label: "Pain Score",
+            icon: Activity,
+            tone: "purple" as VitalTone,
+            value: measurements.painScore,
+            severity: severityOf(measurements.painScore, painSeverity),
+          },
+        ]
+      : []),
+  ];
+
   /* ============================================================
      TOAST
   ============================================================ */
@@ -716,92 +884,42 @@ const Consultation: React.FC = () => {
 
                       </div>
 
-                      {/* MEASUREMENTS */}
+                      {/* MEASUREMENTS
+                          Same tile style as the admin-side PatientVitalsPanel:
+                          pastel circular icon, muted label, bold reading. */}
 
-                      <div className="grid grid-cols-5 gap-x-6 gap-y-3">
+                      <div className="grid grid-cols-5 gap-x-6 gap-y-4">
 
-                        <div className="flex flex-col">
-                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                            HEIGHT
-                          </div>
-                          <div className="text-sm font-bold leading-5 text-slate-800">
-                            {measurements.height}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col">
-                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                            WEIGHT
-                          </div>
-                          <div className="text-sm font-bold leading-5 text-slate-800">
-                            {measurements.weight}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col">
-                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                            BSA
-                          </div>
-                          <div className="text-sm font-bold leading-5 text-slate-800">
-                            {measurements.bsa}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col">
-                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                            BMI
-                          </div>
-                          <div className="text-sm font-bold leading-5 text-slate-800">
-                            {measurements.bmi}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col">
-                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                            BP
-                          </div>
-                          <div className="text-sm font-bold leading-5 text-slate-800">
-                            {measurements.bp}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col">
-                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                            PULSE
-                          </div>
-                          <div className="text-sm font-bold leading-5 text-slate-800">
-                            {measurements.pulse}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col">
-                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                            TEMP
-                          </div>
-                          <div className="text-sm font-bold leading-5 text-slate-800">
-                            {measurements.temp}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col">
-                          <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                            SPO2
-                          </div>
-                          <div className="text-sm font-bold leading-5 text-slate-800">
-                            {measurements.spo2}
-                          </div>
-                        </div>
-
-                        {measurements.painScore && measurements.painScore !== "—" && (
-                          <div className="flex flex-col">
-                            <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-                              PAIN SCORE
+                        {measurementTiles.map((tile) => {
+                          const Icon = tile.icon;
+                          return (
+                            <div key={tile.label} className="flex items-start gap-3">
+                              <div
+                                className={`mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                                  tile.severity
+                                    ? SEVERITY_BADGE[tile.severity]
+                                    : VITAL_TONE_BADGE[tile.tone]
+                                }`}
+                              >
+                                <Icon className="h-4 w-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="mb-1 text-xs text-slate-500">
+                                  {tile.label}
+                                </p>
+                                <p
+                                  className={`truncate text-sm font-semibold ${
+                                    tile.severity
+                                      ? SEVERITY_TEXT[tile.severity]
+                                      : "text-slate-900"
+                                  }`}
+                                >
+                                  {tile.value || "—"}
+                                </p>
+                              </div>
                             </div>
-                            <div className="text-sm font-bold leading-5 text-slate-800">
-                              {measurements.painScore}
-                            </div>
-                          </div>
-                        )}
+                          );
+                        })}
 
                       </div>
 
@@ -968,6 +1086,8 @@ const Consultation: React.FC = () => {
                   <Diagnosis
                     embedded
                     patientId={patientDisplayId}
+                    appointmentId={consultationState?.appointmentId}
+                    encounterNo={encounter?.encounter_no}
                     visitDate={visitDate}
                     onVisitDateChange={setVisitDate}
                     onNext={() => { selectStep("TREATMENT PLAN", markStepCompleted("DIAGNOSIS")); }}
@@ -985,6 +1105,7 @@ const Consultation: React.FC = () => {
                     patientId={patientDisplayId}
                     measurements={measurements}
                     gender={patient?.patient_gender ?? ""}
+                    age={patient?.patient_age ?? null}
                     onNext={() => { selectStep("DISCHARGE MEDICATION", markStepCompleted("CHEMOTHERAPY ORDER")); }}
                   />
                 ) : activeStep === "DISCHARGE MEDICATION" ? (

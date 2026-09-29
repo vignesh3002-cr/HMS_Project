@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
 import { toast } from "@/hooks/use-toast";
 import LabNav from "./labnav";
+import { getDisplayBarcode } from "./reportgeneration";
 import { labReportApi, LabReportRecord } from "@/api/labReport.api";
 import { labOrderApi, labOrderItemApi, LabOrderRecord, LabOrderItemRecord } from "@/api/labOrder.api";
 import { patientApi, PatientRecord } from "@/api/patient.api";
@@ -19,6 +20,7 @@ export interface TransferItem {
   id: string;
   dispatchId: string;
   reportId: string;
+  barcode?: string;
   sampleId: string;
   patientId: string;
   patientPid?: string;
@@ -100,277 +102,6 @@ const DEFAULT_CBC_PARAMETERS: DiagnosticParameter[] = [
   },
 ];
 
-const INITIAL_TRANSFERS: TransferItem[] = [
-  {
-    id: "tx-1",
-    dispatchId: "DSP-9041",
-    reportId: "RPT-2024-0530-001",
-    sampleId: "SMP-2024-0520-001",
-    patientId: "P000123",
-    patientPid: "PAT-2024-00045",
-    patientName: "Rahul Sharma",
-    patientAgeGender: "34 Years / Male",
-    patientAvatar:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuAjfujnVpyETzEdWcHQ6RNKwBvT-8TXthHKeuFQhPG1BihEgPOa1-DfFPSDNuorXmwAdeXA_MjunB4aO_8akEBbf5XwU2SQiNtWg03OCgS0mIunVfmk3Q8kl50YQ_VaxxPmXExjJQNbpQteiwpY_JzQ17KqzDIaPuu4BkrudGKpBLBCWJzUfb5ZKV6fVKrcrrprRjfCWBckriPXZ39nQctTHZi_crHP08XTwJc-BF50",
-    patientEmail: "Rahul Sharma @gmail.com",
-    doctorName: "Dr. Sarah Johnson",
-    doctorEmail: "johnson@hospital.com",
-    testProfile: "Complete Blood Count (CBC)",
-    recipient: "Dr. Sarah Johnson (Internal Medicine)",
-    channel: "EMR / Doctor",
-    dispatchedAt: "11:35 AM",
-    collectedOn: "20 May 2024, 10:30 AM",
-    reportedOn: "20 May 2024, 11:35 AM",
-    status: "DELIVERED",
-    ackDetails: "Auto-synced to Doctor EHR consultation note",
-    clinicalRemarks:
-      "All parameters are within normal limits. The blood counts show no signs of anemia, infection, or clotting disorders at this time.",
-    clinicalCorrelation:
-      "Correlate clinically with patient's physical symptoms and history.",
-    parameters: DEFAULT_CBC_PARAMETERS,
-  },
-  {
-    id: "tx-2",
-    dispatchId: "DSP-9042",
-    reportId: "RPT-2024-0530-001",
-    sampleId: "SMP-2024-0520-001",
-    patientId: "P000123",
-    patientPid: "PAT-2024-00045",
-    patientName: "Rahul Sharma",
-    patientAgeGender: "34 Years / Male",
-    patientAvatar:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuAjfujnVpyETzEdWcHQ6RNKwBvT-8TXthHKeuFQhPG1BihEgPOa1-DfFPSDNuorXmwAdeXA_MjunB4aO_8akEBbf5XwU2SQiNtWg03OCgS0mIunVfmk3Q8kl50YQ_VaxxPmXExjJQNbpQteiwpY_JzQ17KqzDIaPuu4BkrudGKpBLBCWJzUfb5ZKV6fVKrcrrprRjfCWBckriPXZ39nQctTHZi_crHP08XTwJc-BF50",
-    patientEmail: "Rahul Sharma @gmail.com",
-    doctorName: "Dr. Sarah Johnson",
-    doctorEmail: "johnson@hospital.com",
-    testProfile: "Complete Blood Count (CBC)",
-    recipient: "+91 98765 43210 (Patient)",
-    channel: "Patient SMS / WhatsApp",
-    dispatchedAt: "11:36 AM",
-    collectedOn: "20 May 2024, 10:30 AM",
-    reportedOn: "20 May 2024, 11:35 AM",
-    status: "DELIVERED",
-    ackDetails: "WhatsApp diagnostic link delivered with passcode",
-    clinicalRemarks:
-      "All parameters are within normal limits. The blood counts show no signs of anemia, infection, or clotting disorders at this time.",
-    clinicalCorrelation:
-      "Correlate clinically with patient's physical symptoms and history.",
-    parameters: DEFAULT_CBC_PARAMETERS,
-  },
-  {
-    id: "tx-3",
-    dispatchId: "DSP-9043",
-    reportId: "RPT-2024-0530-002",
-    sampleId: "SMP-2024-0520-002",
-    patientId: "P000124",
-    patientPid: "PAT-2024-00046",
-    patientName: "Priya",
-    patientAgeGender: "28 Years / Female",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "priya.clinical@gmail.com",
-    doctorName: "Dr. Sarah Johnson",
-    doctorEmail: "patel.nephro@hospital.com",
-    testProfile: "Kidney Function Test (KFT)",
-    recipient: "Dr. Patel (Nephrology)",
-    channel: "EMR / Doctor",
-    dispatchedAt: "12:20 PM",
-    collectedOn: "20 May 2024, 11:15 AM",
-    reportedOn: "20 May 2024, 12:20 PM",
-    status: "DELIVERED",
-    ackDetails: "Received and acknowledged in physician portal",
-    clinicalRemarks:
-      "Renal biomarkers within reference intervals. Serum creatinine indicates normal glomerular filtration.",
-    clinicalCorrelation:
-      "Patient hydration adequate. No physiological indicators of renal insufficiency.",
-    parameters: [
-      {
-        parameter: "Serum Creatinine",
-        result: "0.85",
-        unit: "mg/dL",
-        referenceRange: "0.6 - 1.2",
-        status: "NORMAL",
-      },
-      {
-        parameter: "Blood Urea Nitrogen (BUN)",
-        result: "16.0",
-        unit: "mg/dL",
-        referenceRange: "7 - 20",
-        status: "NORMAL",
-      },
-      {
-        parameter: "Uric Acid",
-        result: "4.8",
-        unit: "mg/dL",
-        referenceRange: "3.5 - 7.2",
-        status: "NORMAL",
-      },
-      {
-        parameter: "eGFR",
-        result: "98",
-        unit: "mL/min/1.73m²",
-        referenceRange: "> 90",
-        status: "NORMAL",
-      },
-    ],
-  },
-  {
-    id: "tx-4",
-    dispatchId: "DSP-9044",
-    reportId: "RPT-2024-0530-003",
-    sampleId: "SMP-2024-0520-004",
-    patientId: "P000125",
-    patientPid: "PAT-2024-00047",
-    patientName: "Praveen Singh",
-    patientAgeGender: "45 Years / Male",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "praveen.singh@gmail.com",
-    doctorName: "Dr. Sarah Johnson",
-    doctorEmail: "rao.cardio@hospital.com",
-    testProfile: "Lipid Profile & Glucose Fasting",
-    recipient: "Emergency & Cardiology Station",
-    channel: "ICU / Ward",
-    dispatchedAt: "12:00 PM",
-    collectedOn: "20 May 2024, 10:45 AM",
-    reportedOn: "20 May 2024, 12:00 PM",
-    status: "DELIVERED",
-    ackDetails: "STAT alert sent directly to duty physician workstation",
-    clinicalRemarks:
-      "Marked elevation in Serum Triglycerides (480 mg/dL). High atherogenic risk index flagged.",
-    clinicalCorrelation:
-      "Urgent clinical correlation with cardiovascular risk evaluation and dietary regimen.",
-    parameters: [
-      {
-        parameter: "Total Cholesterol",
-        result: "245",
-        unit: "mg/dL",
-        referenceRange: "< 200",
-        status: "ABNORMAL",
-      },
-      {
-        parameter: "Triglycerides",
-        result: "480",
-        unit: "mg/dL",
-        referenceRange: "< 150",
-        status: "CRITICAL",
-      },
-      {
-        parameter: "HDL Cholesterol",
-        result: "32",
-        unit: "mg/dL",
-        referenceRange: "> 40",
-        status: "ABNORMAL",
-      },
-      {
-        parameter: "LDL Cholesterol",
-        result: "165",
-        unit: "mg/dL",
-        referenceRange: "< 100",
-        status: "ABNORMAL",
-      },
-    ],
-  },
-  {
-    id: "tx-5",
-    dispatchId: "DSP-9045",
-    reportId: "RPT-2024-0530-004",
-    sampleId: "SMP-2024-0520-005",
-    patientId: "P000126",
-    patientPid: "PAT-2024-00048",
-    patientName: "Naziya",
-    patientAgeGender: "31 Years / Female",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "naziya.k@email.com",
-    doctorName: "Dr. Sarah Johnson",
-    doctorEmail: "sharma.endo@hospital.com",
-    testProfile: "Thyroid Profile (T3, T4, TSH)",
-    recipient: "naziya.k@email.com (Patient)",
-    channel: "Email PDF",
-    dispatchedAt: "11:15 AM",
-    collectedOn: "20 May 2024, 09:30 AM",
-    reportedOn: "20 May 2024, 11:15 AM",
-    status: "QUEUED",
-    ackDetails: "Awaiting final pathologist signature before release",
-    clinicalRemarks:
-      "Thyroid parameters indicate euthyroid endocrine balance.",
-    clinicalCorrelation:
-      "Values concordant with baseline thyroid function.",
-    parameters: [
-      {
-        parameter: "Total T3",
-        result: "1.2",
-        unit: "ng/mL",
-        referenceRange: "0.8 - 2.0",
-        status: "NORMAL",
-      },
-      {
-        parameter: "Total T4",
-        result: "8.5",
-        unit: "µg/dL",
-        referenceRange: "5.1 - 14.1",
-        status: "NORMAL",
-      },
-      {
-        parameter: "TSH (Thyroid Stimulating)",
-        result: "2.85",
-        unit: "µIU/mL",
-        referenceRange: "0.4 - 4.2",
-        status: "NORMAL",
-      },
-    ],
-  },
-  {
-    id: "tx-6",
-    dispatchId: "DSP-9046",
-    reportId: "RPT-2024-0530-005",
-    sampleId: "SMP-2024-0520-006",
-    patientId: "P000127",
-    patientPid: "PAT-2024-00049",
-    patientName: "Meena Kumari",
-    patientAgeGender: "52 Years / Female",
-    patientAvatar:
-      "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&q=80&w=256&h=256",
-    patientEmail: "meena.kumari@gmail.com",
-    doctorName: "Dr. Sarah Johnson",
-    doctorEmail: "verma.icu@hospital.com",
-    testProfile: "Electrolytes & Arterial Blood Gas",
-    recipient: "ICU Ward 3 Bed 12",
-    channel: "ICU / Ward",
-    dispatchedAt: "09:50 AM",
-    collectedOn: "20 May 2024, 09:00 AM",
-    reportedOn: "20 May 2024, 09:50 AM",
-    status: "FAILED",
-    ackDetails: "Network socket timeout to Ward HL7 listener. Retry scheduled.",
-    clinicalRemarks:
-      "Electrolyte distribution within physiologic parameters.",
-    clinicalCorrelation: "Stable acid-base and electrolyte status.",
-    parameters: [
-      {
-        parameter: "Sodium (Na+)",
-        result: "139",
-        unit: "mmol/L",
-        referenceRange: "135 - 145",
-        status: "NORMAL",
-      },
-      {
-        parameter: "Potassium (K+)",
-        result: "4.2",
-        unit: "mmol/L",
-        referenceRange: "3.5 - 5.1",
-        status: "NORMAL",
-      },
-      {
-        parameter: "Chloride (Cl-)",
-        result: "101",
-        unit: "mmol/L",
-        referenceRange: "98 - 107",
-        status: "NORMAL",
-      },
-    ],
-  },
-];
 
 function calculateAge(dob: string): number {
   const birth = new Date(dob);
@@ -403,7 +134,7 @@ export default function ReportTransfer() {
   };
 
   const [activeNav, setActiveNav] = useState("Report Transfer");
-  const [transfers, setTransfers] = useState<TransferItem[]>(INITIAL_TRANSFERS);
+  const [transfers, setTransfers] = useState<TransferItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | "DELIVERED" | "SENT" | "QUEUED" | "FAILED"
@@ -473,7 +204,12 @@ export default function ReportTransfer() {
         const sampleBarcode =
           orderItem?.sample_collection?.[0]?.barcode ||
           orderItem?.barcode ||
-          `SMP-${rep.lab_report_id.slice(-8)}`;
+          (orderItem?.remarks?.match(/Barcode:\s*([A-Za-z0-9_-]+)/i)?.[1]) ||
+          getDisplayBarcode({
+            id: rep.lab_report_id,
+            sampleId: orderItem?.sample_collection?.[0]?.sample_collection_id,
+            requestId: rep.lab_order_id,
+          });
 
         const isDelivered = !!rep.delivered_datetime || rep.report_status?.toUpperCase() === "DELIVERED" || !!rep.delivered_to;
         const status: "DELIVERED" | "SENT" | "QUEUED" | "FAILED" = isDelivered ? "DELIVERED" : "QUEUED";
@@ -485,12 +221,17 @@ export default function ReportTransfer() {
 
         let parsedMeta: any = null;
         if (rep.report_comment) {
-          try {
-            parsedMeta = JSON.parse(rep.report_comment);
-          } catch {
-            // plain text
+          if (typeof rep.report_comment === "object") {
+            parsedMeta = rep.report_comment;
+          } else if (typeof rep.report_comment === "string") {
+            try {
+              parsedMeta = JSON.parse(rep.report_comment);
+            } catch {
+              // plain text
+            }
           }
         }
+        const commentString = typeof rep.report_comment === "string" ? rep.report_comment : "";
 
         const deliveredTimeStr = rep.delivered_datetime
           ? new Date(rep.delivered_datetime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -500,6 +241,7 @@ export default function ReportTransfer() {
           id: rep.lab_report_id,
           dispatchId,
           reportId: rep.report_number || `RPT-${rep.lab_report_id.slice(-6)}`,
+          barcode: sampleBarcode,
           sampleId: sampleBarcode,
           patientId,
           patientPid: patient?.patient_id || patientId,
@@ -519,18 +261,28 @@ export default function ReportTransfer() {
           ackDetails: isDelivered ? "Delivered and acknowledged in portal" : "Pending dispatch queue",
           collectedOn: formatReportDate((orderItem as any)?.created_at || order?.order_datetime),
           reportedOn: formatReportDate(rep.generated_datetime || rep.created_at),
-          clinicalRemarks: parsedMeta?.text || rep.report_comment || "All parameters evaluated. Laboratory diagnostics complete.",
+          clinicalRemarks: parsedMeta?.text || commentString || "All parameters evaluated. Laboratory diagnostics complete.",
           clinicalCorrelation: parsedMeta?.clinicalCorrelation || "Correlate clinically with physical findings and history.",
           parameters: parsedMeta?.parameters && parsedMeta.parameters.length > 0 ? parsedMeta.parameters : DEFAULT_CBC_PARAMETERS,
         });
       });
 
-      // 2. Map verified / completed items that don't have a report yet so they appear in transfer queue
+      // 2. Map backend items that have had reports generated (item_status === "Report Generated" or approved in localStorage)
       const reportedOrderIds = new Set(dbReports.map((r) => r.lab_order_id));
       items.forEach((item, idx) => {
         if (reportedOrderIds.has(item.lab_order_id)) return;
         const rawStatus = (item.item_status || "").toUpperCase();
-        if (rawStatus !== "VERIFIED" && rawStatus !== "REPORT GENERATED" && rawStatus !== "COMPLETED") return;
+
+        const isApprovedInStorage = typeof window !== "undefined" && (
+          localStorage.getItem(`report_approved_item-${item.lab_order_item_id}`) === "GENERATED" ||
+          localStorage.getItem(`report_approved_${item.lab_order_item_id}`) === "GENERATED" ||
+          localStorage.getItem(`report_approved_${item.lab_order_id}`) === "GENERATED"
+        );
+
+        const isGenerated = rawStatus === "REPORT GENERATED" || isApprovedInStorage;
+
+        // STRICT REQUIREMENT: Only include items where a report has been GENERATED!
+        if (!isGenerated) return;
 
         const parentOrder = orderMap.get(item.lab_order_id) || item.lab_order;
         const patientId = parentOrder?.patient_history?.patient_id || parentOrder?.patient_history_id || `PAT00${idx + 1}`;
@@ -551,14 +303,19 @@ export default function ReportTransfer() {
         const sampleBarcode =
           item.sample_collection?.[0]?.barcode ||
           item.barcode ||
-          `SMP-${item.lab_order_item_id.slice(-6)}`;
+          (item.remarks?.match(/Barcode:\s*([A-Za-z0-9_-]+)/i)?.[1]) ||
+          getDisplayBarcode({ id: item.lab_order_item_id, requestId: item.lab_order_id });
 
-        const isGenerated = rawStatus === "REPORT GENERATED" || rawStatus === "COMPLETED";
+        const isDelivered = typeof window !== "undefined" && (
+          localStorage.getItem(`report_transferred_${item.lab_order_item_id}`) === "true" ||
+          localStorage.getItem(`report_transferred_${item.lab_order_id}`) === "true"
+        );
 
         mappedTransfers.push({
           id: `item-${item.lab_order_item_id}`,
           dispatchId: `DSP-${9100 + idx + 1}`,
           reportId: `RPT-${item.lab_order_item_id.slice(-6)}`,
+          barcode: sampleBarcode,
           sampleId: sampleBarcode,
           patientId,
           patientPid: patient?.patient_id || patientId,
@@ -573,20 +330,107 @@ export default function ReportTransfer() {
           testProfile,
           recipient: `${doctorName} (Internal Medicine)`,
           channel: "EMR / Doctor",
-          dispatchedAt: "Queued",
-          status: isGenerated ? "SENT" : "QUEUED",
-          ackDetails: isGenerated ? "Report generated. Ready for portal transfer." : "Test verified. In dispatch queue.",
+          dispatchedAt: isDelivered ? "Dispatched" : "Queued",
+          status: isDelivered ? "DELIVERED" : "QUEUED",
+          ackDetails: isDelivered ? "Delivered and acknowledged in portal" : "Report generated. Ready for portal transfer.",
           collectedOn: formatReportDate((item as any)?.created_at || parentOrder?.order_datetime),
           reportedOn: formatReportDate((item as any)?.updated_at || new Date()),
-          clinicalRemarks: "Diagnostic results ready for clinical correlation and delivery.",
+          clinicalRemarks: "Diagnostic results certified by Pathologist and ready for delivery.",
           clinicalCorrelation: "Correlate with attending physician assessment.",
           parameters: DEFAULT_CBC_PARAMETERS,
         });
       });
 
-      if (mappedTransfers.length > 0) {
-        setTransfers(mappedTransfers);
-        setSelectedTransfer(mappedTransfers[0]);
+      
+
+      // Check any other sample completed & approved in Report Generation from registry
+      if (typeof window !== "undefined") {
+        const completedRegistry: any[] = JSON.parse(localStorage.getItem("completed_testing_samples") || "[]");
+        completedRegistry.forEach((cs, i) => {
+          const isApproved =
+            localStorage.getItem(`report_approved_${cs.id}`) === "GENERATED" ||
+            localStorage.getItem(`report_approved_rep-${cs.id}`) === "GENERATED" ||
+            localStorage.getItem(`report_approved_rep_RPT-${cs.sampleId || cs.id}`) === "GENERATED" ||
+            localStorage.getItem(`report_approved_smp_${cs.sampleId}`) === "GENERATED";
+          if (!isApproved) return;
+
+          const reportId = `RPT-${cs.sampleId || cs.id}`;
+          const alreadyInList = mappedTransfers.some(
+            (t) => t.id === cs.id || t.id === `item-${cs.id}` || t.id === `tx-${cs.id}` || t.reportId === reportId
+          );
+          if (alreadyInList) return;
+
+          const isDelivered =
+            localStorage.getItem(`report_transferred_${cs.id}`) === "true" ||
+            localStorage.getItem(`report_transferred_${reportId}`) === "true";
+
+          mappedTransfers.push({
+            id: `tx-${cs.id}`,
+            dispatchId: `DSP-${9300 + i}`,
+            reportId,
+            barcode: getDisplayBarcode({ id: cs.id, sampleId: cs.sampleId, barcode: cs.barcode }),
+            sampleId: cs.barcode || `SMP-${cs.id}`,
+            patientId: cs.patientId || "P000124",
+            patientPid: cs.patientId || "P000124",
+            patientName: cs.patientName || "Patient",
+            patientAgeGender: "32 Years / Male",
+            patientAvatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=256&h=256",
+            patientEmail: "patient@email.com",
+            doctorName: "Dr. Sarah Johnson",
+            doctorEmail: "doctor@hospital.com",
+            testProfile: cs.testName || "Diagnostic Test",
+            recipient: "Dr. Sarah Johnson (Internal Medicine)",
+            channel: "EMR / Doctor",
+            dispatchedAt: isDelivered ? "Dispatched" : "Queued",
+            status: isDelivered ? "DELIVERED" : "QUEUED",
+            ackDetails: isDelivered ? "Delivered and acknowledged in portal" : "Report generated. Ready for portal transfer.",
+            collectedOn: formatReportDate(cs.receivedDate || new Date()),
+            reportedOn: formatReportDate(new Date()),
+            clinicalRemarks: cs.testResult || "Diagnostic test certified by Pathologist.",
+            clinicalCorrelation: "Correlate with attending physician assessment.",
+            parameters: cs.parameters ? cs.parameters.map((p: any) => ({
+              parameter: p.parameter || "Parameter",
+              result: String(p.result || "0.0"),
+              unit: p.unit || "",
+              referenceRange: p.referenceRange || "Normal",
+              status: ((p.status || "NORMAL").toUpperCase() === "COMPLETED" ? "NORMAL" : (p.status || "NORMAL").toUpperCase()) as any,
+            })) : DEFAULT_CBC_PARAMETERS,
+          });
+        });
+      }
+
+      
+      // 5. Final strict filter: ONLY reports that have been GENERATED are allowed in Report Transfer!
+      const generatedOnlyTransfers = mappedTransfers.filter((t) => {
+        // Any database report is generated
+        if (dbReports.some((r) => r.lab_report_id === t.id || r.report_number === t.reportId)) return true;
+                // Check localStorage approval
+        const rawId = t.id.replace("item-", "").replace("tx-", "").replace("rep-", "");
+        if (
+          localStorage.getItem(`report_approved_${rawId}`) === "GENERATED" ||
+          localStorage.getItem(`report_approved_${t.id}`) === "GENERATED" ||
+          localStorage.getItem(`report_approved_rep_${t.reportId}`) === "GENERATED" ||
+          localStorage.getItem(`report_approved_smp_${t.sampleId}`) === "GENERATED"
+        ) {
+          return true;
+        }
+        // Backend order item is REPORT GENERATED
+        const matchingItem = items.find((it) => it.lab_order_item_id === rawId);
+        if (matchingItem && (matchingItem.item_status || "").toUpperCase() === "REPORT GENERATED") return true;
+
+        return false;
+      });
+
+      if (generatedOnlyTransfers.length > 0) {
+        setTransfers(generatedOnlyTransfers);
+        setSelectedTransfer((prev) => {
+          if (!prev) return generatedOnlyTransfers[0];
+          const found = generatedOnlyTransfers.find((r) => r.id === prev.id);
+          return found || generatedOnlyTransfers[0];
+        });
+      } else {
+        setTransfers([]);
+        setSelectedTransfer(null);
       }
     } catch (err: any) {
       console.error("Error fetching transfer records:", err);
@@ -605,9 +449,7 @@ export default function ReportTransfer() {
     "table",
   );
   const [returnView, setReturnView] = useState<"table" | "forward">("forward");
-  const [selectedTransfer, setSelectedTransfer] = useState<TransferItem>(
-    INITIAL_TRANSFERS[0],
-  );
+  const [selectedTransfer, setSelectedTransfer] = useState<TransferItem | null>(null);
 
   // Forward Screen Recipient Controls
   const [sendToPatient, setSendToPatient] = useState(true);
@@ -659,6 +501,7 @@ export default function ReportTransfer() {
   };
 
   const handleSendReport = async () => {
+    if (!selectedTransfer) return;
     if (!sendToPatient && !sendToDoctor && additionalRecipients.length === 0) {
       toast({
         title: "No Recipients Selected",
@@ -695,6 +538,13 @@ export default function ReportTransfer() {
         console.error("Failed to update report transfer in DB:", err);
       }
     }
+
+    try {
+      localStorage.setItem(`report_transferred_${selectedTransfer.id}`, "true");
+      localStorage.setItem(`report_transferred_${selectedTransfer.reportId}`, "true");
+      const rawId = selectedTransfer.id.replace("item-", "").replace("tx-", "");
+      localStorage.setItem(`report_transferred_${rawId}`, "true");
+    } catch {}
 
     setTransfers((prev) =>
       prev.map((t) =>
@@ -792,6 +642,8 @@ export default function ReportTransfer() {
         t.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         t.reportId.toLowerCase().includes(searchQuery.toLowerCase()) ||
         t.dispatchId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (t.barcode && t.barcode.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        getDisplayBarcode(t).toLowerCase().includes(searchQuery.toLowerCase()) ||
         t.recipient.toLowerCase().includes(searchQuery.toLowerCase()) ||
         t.channel.toLowerCase().includes(searchQuery.toLowerCase());
 
@@ -828,7 +680,7 @@ export default function ReportTransfer() {
   );
 
   const activeParameters: DiagnosticParameter[] =
-    selectedTransfer.parameters && selectedTransfer.parameters.length > 0
+    selectedTransfer?.parameters && selectedTransfer.parameters.length > 0
       ? selectedTransfer.parameters
       : DEFAULT_CBC_PARAMETERS;
 
@@ -850,7 +702,7 @@ export default function ReportTransfer() {
 
       {/* Main Content Area */}
       <div className="flex-1 ml-64 min-h-screen flex flex-col min-w-0 bg-white">
-        {viewMode === "preview" ? (
+        {viewMode === "preview" && selectedTransfer ? (
           /* ========================================================================= */
           /* BEGIN: Clinical Precision Diagnostics - Preview Report View               */
           /* ========================================================================= */
@@ -911,7 +763,7 @@ export default function ReportTransfer() {
                       className="w-full h-full object-cover"
                       src={
                         selectedTransfer.patientAvatar ||
-                        "https://lh3.googleusercontent.com/aida-public/AB6AXuAjfujnVpyETzEdWcHQ6RNKwBvT-8TXthHKeuFQhPG1BihEgPOa1-DfFPSDNuorXmwAdeXA_MjunB4aO_8akEBbf5XwU2SQiNtWg03OCgS0mIunVfmk3Q8kl50YQ_VaxxPmXExjJQNbpQteiwpY_JzQ17KqzDIaPuu4BkrudGKpBLBCWJzUfb5ZKV6fVKrcrrprRjfCWBckriPXZ39nQctTHZi_crHP08XTwJc-BF50"
+                        "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256&h=256"
                       }
                       onError={(e) => {
                         (e.target as HTMLImageElement).src =
@@ -936,7 +788,7 @@ export default function ReportTransfer() {
                       AGE / GENDER:
                     </span>
                     <span className="text-gray-900">
-                      {selectedTransfer.patientAgeGender || "34 Years / Male"}
+                      {selectedTransfer.patientAgeGender || "-"}
                     </span>
                   </div>
                 </div>
@@ -945,10 +797,10 @@ export default function ReportTransfer() {
                 <div className="w-full sm:w-1/2 flex justify-start sm:justify-end">
                   <div className="grid grid-cols-[130px_1fr] text-[13px] gap-y-1.5 font-medium">
                     <span className="font-bold text-black uppercase tracking-tight">
-                      SAMPLE ID:
+                      BARCODE:
                     </span>
                     <span className="text-gray-900 font-mono font-semibold">
-                      {selectedTransfer.sampleId}
+                      {getDisplayBarcode(selectedTransfer)}
                     </span>
                     <span className="font-bold text-black uppercase tracking-tight">
                       TEST NAME:
@@ -960,13 +812,13 @@ export default function ReportTransfer() {
                       COLLECTED ON:
                     </span>
                     <span className="text-gray-900">
-                      {selectedTransfer.collectedOn || "20 May 2024, 10:30 AM"}
+                      {selectedTransfer.collectedOn || "-"}
                     </span>
                     <span className="font-bold text-black uppercase tracking-tight">
                       REPORTED ON:
                     </span>
                     <span className="text-gray-900">
-                      {selectedTransfer.reportedOn || "20 May 2024, 11:35 AM"}
+                      {selectedTransfer.reportedOn || "-"}
                     </span>
                   </div>
                 </div>
@@ -1156,7 +1008,7 @@ export default function ReportTransfer() {
               {/* END: ActionButtons */}
             </div>
           </main>
-        ) : viewMode === "forward" ? (
+        ) : viewMode === "forward" && selectedTransfer ? (
           /* ========================================================================= */
           /* BEGIN: Forward Test Reports View                                         */
           /* ========================================================================= */
@@ -1216,10 +1068,10 @@ export default function ReportTransfer() {
                     {/* Field: Sample ID */}
                     <div>
                       <p className="text-xs font-medium text-gray-500 mb-1.5">
-                        Sample ID
+                        Barcode
                       </p>
                       <p className="text-[15px] font-semibold text-gray-900 font-mono">
-                        {selectedTransfer.sampleId}
+                        {getDisplayBarcode(selectedTransfer)}
                       </p>
                     </div>
                     {/* Field: Patient Name */}
@@ -1667,7 +1519,7 @@ export default function ReportTransfer() {
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full pl-10 pr-4 py-2.5 bg-white text-sm text-slate-800 placeholder-slate-400 border border-slate-300 rounded-lg focus:outline-none focus:border-slate-500 focus:ring-1 focus:ring-slate-500 transition-colors"
-                        placeholder="Search Patient, Dispatch ID, Recipient..."
+                        placeholder="Search Patient, Barcode, Recipient..."
                         type="text"
                       />
                       {searchQuery && (
@@ -1841,7 +1693,7 @@ export default function ReportTransfer() {
                     <thead>
                       <tr className="bg-[#f8fafc] border-y border-slate-200/90 text-[13px] font-bold text-slate-600 tracking-wider">
                         <th className="py-5 px-8 font-bold" scope="col">
-                          DISPATCH &amp; REPORT
+                          BARCODE
                         </th>
                         <th className="py-5 px-6 font-bold" scope="col">
                           PATIENT NAME
@@ -1889,12 +1741,9 @@ export default function ReportTransfer() {
                             onClick={() => handleOpenForward(t)}
                             className="hover:bg-slate-50/60 transition-colors cursor-pointer"
                           >
-                            <td className="py-5 px-8">
-                              <span className="font-semibold text-slate-900 font-mono block">
-                                {t.dispatchId}
-                              </span>
-                              <span className="font-mono text-blue-600 text-xs font-semibold">
-                                {t.reportId}
+                            <td className="py-5 px-8 whitespace-nowrap">
+                              <span className="font-mono text-slate-900 text-sm font-semibold">
+                                {getDisplayBarcode(t)}
                               </span>
                             </td>
                             <td className="py-5 px-6">

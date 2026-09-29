@@ -241,3 +241,53 @@
     transform: translateY(0) scale(1);
   }
 }
+
+@keyframes hms-modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes hms-modal-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes hms-modal-enter {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes hms-modal-exit {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to { opacity: 0; transform: scale(0.96) translateY(8px); }
+}
+
+.hms-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background-color: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+.hms-modal-overlay[data-state="open"] {
+  animation: hms-modal-fade-in 0.2s ease-in-out forwards;
+}
+.hms-modal-overlay[data-state="closed"] {
+  animation: hms-modal-fade-out 0.2s ease-in-out forwards;
+}
+
+.hms-modal-content {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 50;
+  width: 100%;
+  max-width: 24rem;
+  transform: translateX(-50%) translateY(-50%);
+}
+.hms-modal-content[data-state="open"] {
+  animation: hms-modal-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.hms-modal-content[data-state="closed"] {
+  animation: hms-modal-exit 0.2s ease-in-out forwards;
+}
