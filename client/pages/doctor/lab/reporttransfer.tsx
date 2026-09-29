@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
 import { toast } from "@/hooks/use-toast";
 import LabNav from "./labnav";
-import { labReportApi, LabReportRecord } from "@/api/labReport.api";
+import { labReportApi, LabReportRecord, parseReportComment } from "@/api/labReport.api";
 import { labOrderApi, labOrderItemApi, LabOrderRecord, LabOrderItemRecord } from "@/api/labOrder.api";
 import { patientApi, PatientRecord } from "@/api/patient.api";
 
@@ -483,14 +483,7 @@ export default function ReportTransfer() {
         const channel: "EMR / Doctor" | "Patient SMS / WhatsApp" | "Email PDF" | "ICU / Ward" =
           rep.delivered_to?.includes("Patient") ? "Patient SMS / WhatsApp" : "EMR / Doctor";
 
-        let parsedMeta: any = null;
-        if (rep.report_comment) {
-          try {
-            parsedMeta = JSON.parse(rep.report_comment);
-          } catch {
-            // plain text
-          }
-        }
+        const { meta: parsedMeta, text: commentText } = parseReportComment(rep.report_comment);
 
         const deliveredTimeStr = rep.delivered_datetime
           ? new Date(rep.delivered_datetime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -519,7 +512,7 @@ export default function ReportTransfer() {
           ackDetails: isDelivered ? "Delivered and acknowledged in portal" : "Pending dispatch queue",
           collectedOn: formatReportDate((orderItem as any)?.created_at || order?.order_datetime),
           reportedOn: formatReportDate(rep.generated_datetime || rep.created_at),
-          clinicalRemarks: parsedMeta?.text || rep.report_comment || "All parameters evaluated. Laboratory diagnostics complete.",
+          clinicalRemarks: commentText || "All parameters evaluated. Laboratory diagnostics complete.",
           clinicalCorrelation: parsedMeta?.clinicalCorrelation || "Correlate clinically with physical findings and history.",
           parameters: parsedMeta?.parameters && parsedMeta.parameters.length > 0 ? parsedMeta.parameters : DEFAULT_CBC_PARAMETERS,
         });

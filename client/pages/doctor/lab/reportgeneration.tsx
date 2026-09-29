@@ -5,7 +5,7 @@ import { toast } from "@/hooks/use-toast";
 import LabNav from "./labnav";
 import { labOrderApi, labOrderItemApi, LabOrderRecord, LabOrderItemRecord } from "@/api/labOrder.api";
 import { patientApi, PatientRecord } from "@/api/patient.api";
-import { labReportApi, LabReportRecord } from "@/api/labReport.api";
+import { labReportApi, LabReportRecord, parseReportComment } from "@/api/labReport.api";
 import {
   INITIAL_TESTING_SAMPLES,
   TestingSampleItem,
@@ -602,14 +602,7 @@ export default function ReportGeneration() {
         const testPanel = orderItem?.lab_test_master?.test_name || "Diagnostic Panel";
         const sampleType = orderItem?.lab_test_master?.sample_type || orderItem?.specimen_type || "Whole Blood (EDTA)";
 
-        let parsedMeta: any = null;
-        if (rep.report_comment) {
-          try {
-            parsedMeta = JSON.parse(rep.report_comment);
-          } catch {
-            // plain text
-          }
-        }
+        const { meta: parsedMeta, text: commentText } = parseReportComment(rep.report_comment);
 
         const rawStatus = (rep.report_status || "GENERATED").toUpperCase();
         let status: "GENERATED" | "UNDER_REVIEW" | "DRAFT" | "CRITICAL" = "GENERATED";
@@ -644,12 +637,12 @@ export default function ReportGeneration() {
           completedBy: rep.employees ? `Dr. ${rep.employees.first_name} ${rep.employees.last_name || ""}`.trim() : "Pathology Lab",
           sampleType,
           status,
-          findingsSummary: parsedMeta?.text || rep.report_comment || "Diagnostic results verified within reference ranges.",
+          findingsSummary: commentText || "Diagnostic results verified within reference ranges.",
           parameters: parsedMeta?.parameters && parsedMeta.parameters.length > 0 ? parsedMeta.parameters : getDefaultQCParametersForPanel(testPanel),
           overallDecision: parsedMeta?.overallDecision || "Approved",
-          reviewComments: parsedMeta?.text || rep.report_comment || "",
+          reviewComments: commentText,
           clinicalCorrelation: parsedMeta?.clinicalCorrelation || "Correlate clinically with physical examination and history.",
-          approvalRemarks: rep.report_comment || "Parameters approved.",
+          approvalRemarks: commentText || "Parameters approved.",
           approverName: rep.employees ? `Dr. ${rep.employees.first_name} ${rep.employees.last_name || ""}`.trim() : "Dr. Sarah Johnson",
           approverRole: rep.employees?.designation || "Senior Pathologist",
           approvalDate: formatReportDate(rep.approved_datetime),
