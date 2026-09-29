@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { getUser, remove } from "@/utils/token";
 import { toast } from "@/hooks/use-toast";
 import LabNav from "./labnav";
+import { getDisplayBarcode } from "./reportgeneration";
 import { labReportApi, LabReportRecord } from "@/api/labReport.api";
 import { labOrderApi, labOrderItemApi, LabOrderRecord, LabOrderItemRecord } from "@/api/labOrder.api";
 import { patientApi, PatientRecord } from "@/api/patient.api";
@@ -626,6 +627,8 @@ export default function ReportTransfer() {
         t.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         t.reportId.toLowerCase().includes(searchQuery.toLowerCase()) ||
         t.dispatchId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (t.barcode && t.barcode.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        getDisplayBarcode(t).toLowerCase().includes(searchQuery.toLowerCase()) ||
         t.recipient.toLowerCase().includes(searchQuery.toLowerCase()) ||
         t.channel.toLowerCase().includes(searchQuery.toLowerCase());
 
@@ -779,10 +782,10 @@ export default function ReportTransfer() {
                 <div className="w-full sm:w-1/2 flex justify-start sm:justify-end">
                   <div className="grid grid-cols-[130px_1fr] text-[13px] gap-y-1.5 font-medium">
                     <span className="font-bold text-black uppercase tracking-tight">
-                      SAMPLE ID:
+                      BARCODE:
                     </span>
                     <span className="text-gray-900 font-mono font-semibold">
-                      {selectedTransfer.sampleId}
+                      {getDisplayBarcode(selectedTransfer)}
                     </span>
                     <span className="font-bold text-black uppercase tracking-tight">
                       TEST NAME:
@@ -1050,10 +1053,10 @@ export default function ReportTransfer() {
                     {/* Field: Sample ID */}
                     <div>
                       <p className="text-xs font-medium text-gray-500 mb-1.5">
-                        Sample ID
+                        Barcode
                       </p>
                       <p className="text-[15px] font-semibold text-gray-900 font-mono">
-                        {selectedTransfer.sampleId}
+                        {getDisplayBarcode(selectedTransfer)}
                       </p>
                     </div>
                     {/* Field: Patient Name */}
@@ -1501,7 +1504,7 @@ export default function ReportTransfer() {
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full pl-10 pr-4 py-2.5 bg-white text-sm text-slate-800 placeholder-slate-400 border border-slate-300 rounded-lg focus:outline-none focus:border-slate-500 focus:ring-1 focus:ring-slate-500 transition-colors"
-                        placeholder="Search Patient, Dispatch ID, Recipient..."
+                        placeholder="Search Patient, Barcode, Recipient..."
                         type="text"
                       />
                       {searchQuery && (
@@ -1723,12 +1726,9 @@ export default function ReportTransfer() {
                             onClick={() => handleOpenForward(t)}
                             className="hover:bg-slate-50/60 transition-colors cursor-pointer"
                           >
-                            <td className="py-5 px-8">
-                              <span className="font-semibold text-slate-900 font-mono block">
-                                {t.dispatchId}
-                              </span>
-                              <span className="font-mono text-blue-600 text-xs font-semibold">
-                                {t.reportId}
+                            <td className="py-5 px-8 whitespace-nowrap">
+                              <span className="font-mono text-slate-900 text-sm font-semibold">
+                                {getDisplayBarcode(t)}
                               </span>
                             </td>
                             <td className="py-5 px-6">
