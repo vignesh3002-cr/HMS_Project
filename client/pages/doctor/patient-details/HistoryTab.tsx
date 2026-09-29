@@ -1,10 +1,19 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import API, { getActiveBranchId } from "../../../api/axios";
 import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
 import { getUser } from "../../../utils/token";
 import { chemoPlanCurrentItems, chemoPlanItemName } from "../../../api/chemotherapy.api";
 import { generatePrescriptionPdf } from "../../../utils/prescriptionPdf";
 import { BellNotificationButton } from "@/components/hms/BellNotificationButton";
+import {
+  LineChart,
+  Grid as ChartGrid,
+  XAxis as ChartXAxis,
+  YAxis as ChartYAxis,
+  Line as ChartLine,
+  Tooltip as ChartTooltip,
+  Legend as ChartLegend,
+} from "@/components/hms/LineChart";
 import type {
   SummaryPlanItem,
   SummaryPlan,
@@ -42,6 +51,28 @@ type Patient360Visit = {
     discussion: string;
   } | null;
 };
+
+/* Placeholder sample series for the Treatment Trend chart -- frontend-only
+   for now, not wired to a real API yet. Six illustrative data points spaced
+   ~3 weeks apart (roughly one per chemo cycle), ending today, so the chart
+   always renders with plausible-looking dates. Replace with real per-cycle
+   tumor marker / weight readings once that data is available from the API. */
+function buildTreatmentTrendDummyData() {
+  const today = new Date();
+  const points = [
+    { cyclesAgo: 15, tumorMarker: 128 },
+    { cyclesAgo: 12, tumorMarker: 104 },
+    { cyclesAgo: 9, tumorMarker: 81 },
+    { cyclesAgo: 6, tumorMarker: 63 },
+    { cyclesAgo: 3, tumorMarker: 47 },
+    { cyclesAgo: 0, tumorMarker: 34 },
+  ];
+  return points.map((p) => {
+    const date = new Date(today);
+    date.setDate(date.getDate() - p.cyclesAgo * 7);
+    return { date, tumorMarker: p.tumorMarker };
+  });
+}
 
 const HistoryTab: React.FC<{
   embedded?: boolean;
@@ -1114,6 +1145,9 @@ const HistoryTab: React.FC<{
     return items;
   })();
 
+  // Placeholder chart series -- see buildTreatmentTrendDummyData for why.
+  const treatmentTrendData = useMemo(() => buildTreatmentTrendDummyData(), []);
+
   /* =========================================================
      CONTENT (PATIENT HEADER + HISTORY SECTIONS + ACTIONS)
   ========================================================= */
@@ -1522,6 +1556,33 @@ const HistoryTab: React.FC<{
             </div>
           </div>
         </div>
+
+      {/* TREATMENT TREND -- frontend-only placeholder chart for now, not
+          wired to a real API yet (see buildTreatmentTrendDummyData above). */}
+      <section id="treatment-trend-section" className="px-6 pb-6">
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="flex justify-between items-center p-5 border-b border-gray-200 bg-gray-50/50">
+            <div className="flex items-center gap-2">
+              <i className="fa-solid fa-chart-simple text-blue-600" />
+              <h2 className="text-lg font-bold text-gray-900">Treatment Trend</h2>
+            </div>
+            <span className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">
+              Preview data
+            </span>
+          </div>
+
+          <div className="p-5">
+            <LineChart data={treatmentTrendData} x="date" height={260}>
+              <ChartGrid />
+              <ChartXAxis />
+              <ChartYAxis />
+              <ChartLine y="tumorMarker" name="Tumor Marker (CA-125)" curve="smooth" area dots />
+              <ChartTooltip />
+              <ChartLegend />
+            </LineChart>
+          </div>
+        </div>
+      </section>
 
       {/* CHEMOTHERAPY CYCLE HISTORY */}
       <section id="chemotherapy-cycle-history" className="px-6 pb-6">
