@@ -995,7 +995,7 @@ export default function TestingSamples() {
 
     toast({
       title: "Sample Marked as Completed",
-      description: `Sample ${selectedSample.sampleId} marked as completed and queued for Report Generation.`,
+      description: `Barcode ${selectedSample.barcode || selectedSample.sampleId} marked as completed and queued for Report Generation.`,
     });
     setViewMode("table");
   };
@@ -1105,7 +1105,7 @@ export default function TestingSamples() {
 
     toast({
       title: "Test Results Saved",
-      description: `Results recorded for sample ${selectedSample.sampleId}. Queued for report generation.`,
+      description: `Results recorded for barcode ${selectedSample.barcode || selectedSample.sampleId}. Queued for report generation.`,
     });
     setViewMode("table");
   };
@@ -1137,7 +1137,7 @@ export default function TestingSamples() {
 
     toast({
       title: "Draft Saved",
-      description: `Test results draft saved for sample ${selectedSample.sampleId}.`,
+      description: `Test results draft saved for barcode ${selectedSample.barcode || selectedSample.sampleId}.`,
     });
   };
 
@@ -1183,7 +1183,7 @@ export default function TestingSamples() {
 
     toast({
       title: "Testing Initiated",
-      description: `Sample ${selectedSample.sampleId} verified. Analyzer test run started on ${selectedSample.analyzerBench}.`,
+      description: `Barcode ${selectedSample.barcode || selectedSample.sampleId} verified. Analyzer test run started on ${selectedSample.analyzerBench}.`,
     });
     setTimeout(() => {
       setViewMode("table");
@@ -1433,10 +1433,10 @@ export default function TestingSamples() {
                       {/* Sample ID */}
                       <div className="flex items-center text-xs">
                         <span className="w-36 font-semibold tracking-wider text-slate-400 uppercase text-[11px]">
-                          SAMPLE ID
+                          BARCODE
                         </span>
                         <span className="font-medium text-slate-900 text-[13px] font-mono">
-                          {selectedSample.sampleId}
+                          {selectedSample.barcode || selectedSample.sampleId}
                         </span>
                       </div>
                       {/* Patient Name */}
@@ -1773,7 +1773,7 @@ export default function TestingSamples() {
                   Enter Test Results
                 </h1>
                 <div className="mt-1 flex items-center text-sm text-slate-600">
-                  <span>Sample ID: {selectedSample.sampleId}</span>
+                  <span>Barcode: {selectedSample.barcode || selectedSample.sampleId}</span>
                   <span
                     aria-hidden="true"
                     className="inline-block w-px h-[1.15rem] bg-[#94a3b8] align-middle ml-1.5 animate-pulse"
@@ -1972,9 +1972,9 @@ export default function TestingSamples() {
                 Mark as Completed
               </h2>
               <p className="text-[13px] text-slate-500 mt-1">
-                Sample ID:{" "}
-                <span className="font-normal text-slate-600">
-                  {selectedSample.sampleId}
+                Barcode:{" "}
+                <span className="font-normal text-slate-600 font-mono">
+                  {selectedSample.barcode || selectedSample.sampleId}
                 </span>
                 <span className="mx-1.5 text-slate-300">|</span>
                 {selectedSample.testName}{" "}
@@ -2424,7 +2424,7 @@ export default function TestingSamples() {
                 <thead>
                   <tr className="bg-[#f8fafc] border-y border-slate-200/90 text-[13px] font-bold text-slate-600 tracking-wider">
                     <th className="py-5 px-8 font-bold" scope="col">
-                      SAMPLE &amp; BARCODE
+                      BARCODE
                     </th>
                     <th className="py-5 px-6 font-bold" scope="col">
                       PATIENT NAME
@@ -2497,11 +2497,8 @@ export default function TestingSamples() {
                         className="hover:bg-slate-50/70 transition-colors cursor-pointer"
                       >
                         <td className="py-5 px-8 whitespace-nowrap">
-                          <span className="font-semibold text-slate-900 font-mono block">
-                            {s.sampleId}
-                          </span>
-                          <span className="font-mono text-blue-600 text-xs font-semibold">
-                            {s.barcode}
+                          <span className="font-mono text-slate-900 text-sm font-semibold">
+                            {s.barcode || s.sampleId}
                           </span>
                         </td>
                         <td className="py-5 px-6 whitespace-nowrap">

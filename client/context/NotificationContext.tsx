@@ -546,25 +546,30 @@ export function NotificationProvider({ children, employeeId }: NotificationProvi
     const pageSize = 100;
     const sortBy = "created_at";
     const sortOrder = "desc";
-    const firstPage = await appointmentApi.getAll({
-      limit: pageSize,
-      page: 1,
-      sortBy,
-      sortOrder,
-      ...(feedBranchId ? { branchId: feedBranchId } : {}),
-    });
-    const total = firstPage.data?.data?.total || 0;
-    const totalPages = Math.ceil(total / pageSize);
-    let all = extractArray(firstPage, ["appointments", "appointment", "data", "results"]);
-    for (let page = 2; page <= totalPages && all.length < 2000; page++) {
-      const response = await appointmentApi.getAll({
+    let all: GenericRecord[] = [];
+    try {
+      const firstPage = await appointmentApi.getAll({
         limit: pageSize,
-        page,
+        page: 1,
         sortBy,
         sortOrder,
         ...(feedBranchId ? { branchId: feedBranchId } : {}),
       });
-      all = all.concat(extractArray(response, ["appointments", "appointment", "data", "results"]));
+      const total = firstPage.data?.data?.total || 0;
+      const totalPages = Math.ceil(total / pageSize);
+      all = extractArray(firstPage, ["appointments", "appointment", "data", "results"]);
+      for (let page = 2; page <= totalPages && all.length < 2000; page++) {
+        const response = await appointmentApi.getAll({
+          limit: pageSize,
+          page,
+          sortBy,
+          sortOrder,
+          ...(feedBranchId ? { branchId: feedBranchId } : {}),
+        });
+        all = all.concat(extractArray(response, ["appointments", "appointment", "data", "results"]));
+      }
+    } catch {
+      return [];
     }
     return all;
   }, []);
