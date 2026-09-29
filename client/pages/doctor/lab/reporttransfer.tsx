@@ -20,6 +20,7 @@ export interface TransferItem {
   id: string;
   dispatchId: string;
   reportId: string;
+  barcode?: string;
   sampleId: string;
   patientId: string;
   patientPid?: string;
@@ -203,7 +204,12 @@ export default function ReportTransfer() {
         const sampleBarcode =
           orderItem?.sample_collection?.[0]?.barcode ||
           orderItem?.barcode ||
-          `SMP-${rep.lab_report_id.slice(-8)}`;
+          (orderItem?.remarks?.match(/Barcode:\s*([A-Za-z0-9_-]+)/i)?.[1]) ||
+          getDisplayBarcode({
+            id: rep.lab_report_id,
+            sampleId: orderItem?.sample_collection?.[0]?.sample_collection_id,
+            requestId: rep.lab_order_id,
+          });
 
         const isDelivered = !!rep.delivered_datetime || rep.report_status?.toUpperCase() === "DELIVERED" || !!rep.delivered_to;
         const status: "DELIVERED" | "SENT" | "QUEUED" | "FAILED" = isDelivered ? "DELIVERED" : "QUEUED";
@@ -230,6 +236,7 @@ export default function ReportTransfer() {
           id: rep.lab_report_id,
           dispatchId,
           reportId: rep.report_number || `RPT-${rep.lab_report_id.slice(-6)}`,
+          barcode: sampleBarcode,
           sampleId: sampleBarcode,
           patientId,
           patientPid: patient?.patient_id || patientId,
@@ -291,7 +298,8 @@ export default function ReportTransfer() {
         const sampleBarcode =
           item.sample_collection?.[0]?.barcode ||
           item.barcode ||
-          `SMP-${item.lab_order_item_id.slice(-6)}`;
+          (item.remarks?.match(/Barcode:\s*([A-Za-z0-9_-]+)/i)?.[1]) ||
+          getDisplayBarcode({ id: item.lab_order_item_id, requestId: item.lab_order_id });
 
         const isDelivered = typeof window !== "undefined" && (
           localStorage.getItem(`report_transferred_${item.lab_order_item_id}`) === "true" ||
@@ -302,6 +310,7 @@ export default function ReportTransfer() {
           id: `item-${item.lab_order_item_id}`,
           dispatchId: `DSP-${9100 + idx + 1}`,
           reportId: `RPT-${item.lab_order_item_id.slice(-6)}`,
+          barcode: sampleBarcode,
           sampleId: sampleBarcode,
           patientId,
           patientPid: patient?.patient_id || patientId,
@@ -354,6 +363,7 @@ export default function ReportTransfer() {
             id: `tx-${cs.id}`,
             dispatchId: `DSP-${9300 + i}`,
             reportId,
+            barcode: getDisplayBarcode({ id: cs.id, sampleId: cs.sampleId, barcode: cs.barcode }),
             sampleId: cs.barcode || `SMP-${cs.id}`,
             patientId: cs.patientId || "P000124",
             patientPid: cs.patientId || "P000124",
@@ -1678,7 +1688,7 @@ export default function ReportTransfer() {
                     <thead>
                       <tr className="bg-[#f8fafc] border-y border-slate-200/90 text-[13px] font-bold text-slate-600 tracking-wider">
                         <th className="py-5 px-8 font-bold" scope="col">
-                          DISPATCH &amp; REPORT
+                          BARCODE
                         </th>
                         <th className="py-5 px-6 font-bold" scope="col">
                           PATIENT NAME
