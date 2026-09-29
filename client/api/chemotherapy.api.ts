@@ -201,28 +201,123 @@ export interface ChemoPlan {
     regimen_name?: string | null;
   } | null;
   chemotherapy_cycle?: ChemoPlanCycle[] | null;
+  /* The plan's saved cycle day orders (headers, by cycle / day) and its
+     current one - the first still ORDERED day, else the latest COMPLETED -
+     with that day's drugs and hydration. */
+  plan_orders?: ChemoPlanOrderHeader[] | null;
+  current_order?: ChemoPlanOrder | null;
 }
 
+/* A plan drug: a medicine from medicine_master, or (medicine_id null) a
+   name the doctor typed for this patient, kept in drug_name. */
 export interface ChemoPlanItem {
   chemotherapy_plan_item_id: string;
-  medicine_id: string;
+  medicine_id: string | null;
+  drug_name?: string | null;
+  plan_order_id?: string | null;
   drug_sequence: number;
   drug_role?: string | null;
   drug_type?: string | null;
   protocol_dose?: string | number | null;
   protocol_dose_unit?: string | null;
+  dose_calculation_method?: string | null;
   calculated_dose?: string | number | null;
+  calculated_dose_unit?: string | null;
   administration_route?: string | null;
   formulation?: string | null;
   infusion_type?: string | null;
+  infusion_duration_minutes?: number | null;
+  infusion_rate?: string | null;
+  dilution_solution?: string | null;
+  dilution_volume?: string | number | null;
+  administration_day?: number | null;
   frequency?: string | null;
+  timing_relative_to_primary?: string | null;
+  administration_detail?: string | null;
+  maximum_dose?: string | number | null;
+  minimum_dose?: string | number | null;
   remarks?: string | null;
   medicine_master?: {
     medicine_id?: string;
     medicine_name?: string | null;
     brand_name?: string | null;
     generic_name?: string | null;
+    dosage_form?: string | null;
+    unit?: string | null;
   } | null;
+}
+
+/* A cycle day's hydration row (chemotherapy_plan_hydration). */
+export interface ChemoPlanHydration {
+  plan_hydration_id: string;
+  plan_order_id?: string | null;
+  source_dilution_id: string | null;
+  hydration_stage: string;
+  agent_name: string | null;
+  diluent: string | null;
+  dilution_volume: number | string | null;
+  dilution_volume_unit: string | null;
+  guidance: string | null;
+  display_order?: number | null;
+}
+
+/* One saved order per plan + cycle + day: ORDERED until the consultation
+   is submitted, then COMPLETED (read-only). */
+export interface ChemoPlanOrderHeader {
+  plan_order_id: string;
+  chemotherapy_plan_id: string;
+  chemotherapy_cycle_id: string;
+  cycle_number: number;
+  cycle_day: number;
+  order_status: "ORDERED" | "COMPLETED" | string;
+  hydration_saved: boolean;
+  copied_from_order_id?: string | null;
+  encounter_no?: string | null;
+  completed_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  chemotherapy_cycle?: { cycle_status: string | null } | null;
+}
+
+export interface ChemoPlanOrder extends ChemoPlanOrderHeader {
+  dosing_height_cm?: number | string | null;
+  dosing_weight_kg?: number | string | null;
+  dosing_bsa?: number | string | null;
+  dosing_serum_creatinine?: number | string | null;
+  dosing_crcl?: number | string | null;
+  chemotherapy_plan_items: ChemoPlanItem[];
+  chemotherapy_plan_hydration: ChemoPlanHydration[];
+}
+
+/* PUT /chemotherapy/plans/:planId/orders/:cycle/:day. hydration left out
+   keeps that day's hydration as it is. */
+export interface ChemoPlanOrderPayload {
+  items: Record<string, unknown>[];
+  hydration?: {
+    source_dilution_id?: string | null;
+    hydration_stage: "PRE" | "POST";
+    agent_name?: string | null;
+    diluent?: string | null;
+    dilution_volume?: number | null;
+    dilution_volume_unit?: string | null;
+    guidance?: string | null;
+  }[];
+  dosing?: {
+    height_cm?: number | null;
+    weight_kg?: number | null;
+    bsa?: number | null;
+    serum_creatinine?: number | null;
+    crcl?: number | null;
+  };
+  encounter_no?: string | null;
+  copied_from_order_id?: string | null;
+}
+
+export interface ChemoPlanOrderCompletion {
+  completed_orders: { plan_order_id: string; cycle_number: number; cycle_day: number }[];
+  completed_cycles: number[];
+  plan_completed: boolean;
+  treatment_status: string | null;
 }
 
 // Full single-plan fetch (GET /chemotherapy/plans/:planId) -- unlike ChemoPlan
@@ -232,6 +327,33 @@ export interface ChemoPlanItem {
 export interface ChemoPlanDetail extends ChemoPlan {
   chemotherapy_plan_items?: ChemoPlanItem[] | null;
 }
+
+export const CHEMO_PLAN_CLOSED_STATUSES = ["COMPLETED", "DISCONTINUED", "CANCELLED"];
+
+/* The plan is one course; a closed one takes no more orders. */
+export const isChemoPlanClosed = (plan?: { treatment_status?: string | null } | null) =>
+  CHEMO_PLAN_CLOSED_STATUSES.includes(String(plan?.treatment_status ?? "").toUpperCase());
+
+/* A plan drug's display name: its medicine, else the name typed for it. */
+export const chemoPlanItemName = (item?: {
+  drug_name?: string | null;
+  medicine_master?: { medicine_name?: string | null; generic_name?: string | null } | null;
+} | null) =>
+  item?.medicine_master?.medicine_name ||
+  item?.medicine_master?.generic_name ||
+  item?.drug_name ||
+  "";
+
+/* The drugs to show / print for a plan: its current cycle day order,
+   else the plan's baseline (protocol copy). */
+export const chemoPlanCurrentItems = <T = ChemoPlanItem>(plan?: {
+  current_order?: { chemotherapy_plan_items?: unknown[] | null } | null;
+  chemotherapy_plan_items?: unknown[] | null;
+} | null): T[] => {
+  const orderItems = plan?.current_order?.chemotherapy_plan_items;
+  if (orderItems && orderItems.length > 0) return orderItems as T[];
+  return (plan?.chemotherapy_plan_items ?? []) as T[];
+};
 
 export interface LabReviewRecord {
   lab_review_id?: string;
@@ -270,6 +392,35 @@ export const chemotherapyApi = {
   getPlan: (planId: string) =>
     API.get<{ success: boolean; message: string; data: ChemoPlanDetail }>(
       `/chemotherapy/plans/${planId}`
+    ),
+  getLatestPlanForPatient: (patientId: string) =>
+    API.get<{ success: boolean; message: string; data: ChemoPlanDetail | null }>(
+      "/chemotherapy/plans/latest-for-patient",
+      { params: { patient_id: patientId } }
+    ),
+  listPlanOrders: (planId: string) =>
+    API.get<{ success: boolean; message: string; data: ChemoPlanOrderHeader[] }>(
+      `/chemotherapy/plans/${planId}/orders`
+    ),
+  getPlanOrder: (planId: string, cycleNumber: number, cycleDay: number) =>
+    API.get<{ success: boolean; message: string; data: ChemoPlanOrder | null }>(
+      `/chemotherapy/plans/${planId}/orders/${cycleNumber}/${cycleDay}`
+    ),
+  savePlanOrder: (
+    planId: string,
+    cycleNumber: number,
+    cycleDay: number,
+    payload: ChemoPlanOrderPayload
+  ) =>
+    API.put<{ success: boolean; message: string; data: ChemoPlanOrder }>(
+      `/chemotherapy/plans/${planId}/orders/${cycleNumber}/${cycleDay}`,
+      payload
+    ),
+  /* Consultation submit: completes the order(s) saved in this encounter. */
+  completePlanOrders: (planId: string, encounterNo: string) =>
+    API.post<{ success: boolean; message: string; data: ChemoPlanOrderCompletion }>(
+      `/chemotherapy/plans/${planId}/orders/complete`,
+      { encounter_no: encounterNo }
     ),
   listLabReviews: (cycleId: string) =>
     API.get<{ success: boolean; message: string; data: LabReviewRecord[] }>(

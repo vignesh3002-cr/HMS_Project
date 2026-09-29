@@ -103,7 +103,7 @@ export function generateClinicalNotePdf(data: any) {
     y += 14;
 
     const tableBody = items.map((it: any, idx: number) => {
-      const medicine = it.medicine_name || it.medicine_master?.medicine_name || "Unknown";
+      const medicine = it.medicine_name || it.medicine_master?.medicine_name || it.drug_name || "Unknown";
       const dose = it.dosage ?? it.dose ?? "";
       const unit = it.unit || "";
       const route = it.route || it.administration_route || "";

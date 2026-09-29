@@ -21,8 +21,6 @@ export interface EncounterRecord {
   encounter_type: string;
   encounter_ts?: string | null;
   status: string;
-  encounter_ts?: string | null;
-  diagnosis_text?: string | null;
   chief_complaint: string | null;
   symptoms: string | null;
   diagnosis_id: string | null;
@@ -44,6 +42,8 @@ export interface EncounterRecord {
   general_examination_cyanosis: boolean | null;
   general_examination_oedema: boolean | null;
   general_examination_lymphadenopathy: boolean | null;
+  /* Extra findings ticked from general_examination_master. */
+  general_examination_others?: { code: string; name: string }[] | null;
   past_history_treatment_type: string | null;
   past_history_treatment_date: string | null;
   past_history_treatment_note: string | null;

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import API from "../../../api/axios";
+import { isChemoPlanClosed } from "../../../api/chemotherapy.api";
 import { getUser } from "../../../utils/token";
 import { Calendar } from "../../../components/ui/calendar";
 import {
@@ -14,7 +15,6 @@ import type { ConsultationState, MeasurementValues } from "./types";
 import {
   createChemotherapyPlanForPatient,
   formatPickedDate,
-  loadProtocolSyncData,
   parsePickedDate,
   toIsoDate,
 } from "./helpers";
@@ -54,34 +54,19 @@ const syncExistingPlanProtocol = async (
        admins don't get a silent 403 that leaves it unchanged. */
     const existing = await API.get<{
       success: boolean;
-      data: { chemotherapy_plan_id: string } | null;
+      data: { chemotherapy_plan_id: string; treatment_status?: string | null } | null;
     }>("/chemotherapy/plans/latest-for-patient", {
       params: { patient_id: patientId },
     });
     const existingPlanId = existing.data.data?.chemotherapy_plan_id;
-    if (!existingPlanId) return;
+    /* A completed / discontinued course keeps its protocol; Save starts
+       the next course with the new one. */
+    if (!existingPlanId || isChemoPlanClosed(existing.data.data)) return;
 
-    const protocolSync = await loadProtocolSyncData(protocolId);
-    if (!protocolSync) return;
-
-    const planChanges: Record<string, unknown> = {
-      source_protocol_id: protocolSync.source_protocol_id,
-    };
-    if (protocolSync.regimen_name) {
-      planChanges.regimen_name = protocolSync.regimen_name;
-      planChanges.protocol_name = protocolSync.regimen_name;
-    }
-    if (protocolSync.regimen_code) {
-      planChanges.regimen_code = protocolSync.regimen_code;
-    }
-    if (protocolSync.planned_cycles > 0) {
-      planChanges.planned_cycles = protocolSync.planned_cycles;
-    }
-    if (protocolSync.cycle_interval_days > 0) {
-      planChanges.cycle_interval_days = protocolSync.cycle_interval_days;
-    }
-
-    await API.put(`/chemotherapy/plans/${existingPlanId}`, planChanges);
+    /* The server copies the protocol's regimen name / code / cycles. */
+    await API.put(`/chemotherapy/plans/${existingPlanId}`, {
+      source_protocol_id: protocolId,
+    });
   } catch (error: any) {
     console.error(
       "Failed to instantly sync protocol onto existing plan:",
@@ -386,11 +371,16 @@ const TreatmentPlan: React.FC<{
         toIsoDate(plannedStartDate) ||
         toIsoDate(new Date().toISOString());
 
+      /* The only step that may start a new course once the previous
+         plan is completed / discontinued / cancelled. */
       const { error } = await createChemotherapyPlanForPatient(
         resolvedPatientId,
         planStartDate,
         undefined,
-        undefined
+        undefined,
+        undefined,
+        undefined,
+        { allowNewCourse: true }
       );
 
       if (error) {

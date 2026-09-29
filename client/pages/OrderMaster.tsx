@@ -316,10 +316,18 @@ export default function OrderMaster() {
       setRows(mapped);
       setLabs({});
       setLabsLoading({});
-    } catch {
+    } catch (e: any) {
       setRows([]);
       setLabs({});
       setLabsLoading({});
+      // Surface the backend's own message: a failed fetch is otherwise
+      // indistinguishable from a genuine empty result, so a 400 renders as
+      // "No orders found" and hides the real cause entirely.
+      toast({
+        title: "Failed to load chemo orders",
+        description: e?.response?.data?.message ?? e?.message ?? "Something went wrong.",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
