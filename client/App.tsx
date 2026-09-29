@@ -29,9 +29,9 @@ import { getToken, getUser } from "@/utils/token";
 
 import AddBranch from "@/components/Forms/AddBranch";
 import AddEmployee from "@/components/Forms/Addemployee";
+import AddAppointment from "@/components/Forms/AddAppointment";
 import PatientRegistrationForm from "@/components/Forms/PatientRegistrationForm";
 import EditPatientForm from "@/components/Forms/edit/EditPatientForm";
-import AddAppointment from "@/components/Forms/AddAppointment";
 
 // ============================================================
 // VIEW FORMS
@@ -49,6 +49,7 @@ import Security from "@/components/Forms/view/Security";
 // ============================================================
 
 import Appointments from "./pages/Appointments";
+import BedMaster from "./pages/BedMaster";
 import Departments from "./pages/Departments";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
@@ -96,6 +97,9 @@ import DoctorProfile from "./pages/doctor/Profile";
 import DoctorNotifications from "./pages/doctor/DoctorNotifications";
 import Consultation from "./pages/doctor/Patientconsut";
 import DoctorPatientProfile from "./pages/doctor/notes and doc";
+<<<<<<< HEAD
+import PatientDetails from "./pages/doctor/patient-details/PatientDetails";
+=======
 import PatientDetails from "./pages/doctor/patient-details";
 import LabDashboard from "./pages/doctor/lab/labdashboard";
 import SampleVerification from "./pages/doctor/lab/sampleverification";
@@ -103,6 +107,7 @@ import TestingSamples from "./pages/doctor/lab/testingsamples";
 import ReportGeneration from "./pages/doctor/lab/reportgeneration";
 import ReportTransfer from "./pages/doctor/lab/reporttransfer";
 import LabProfile from "./pages/doctor/lab/labprofile";
+>>>>>>> 1dafd6de30f7c5f4b78fa8304588323acf5ca525
 
 // ============================================================
 // HOOKS / AUTH
@@ -337,6 +342,12 @@ const protectedRoutes = [
   {
     path: "/ipd",
     element: <Appointments defaultTab="ipd" />,
+    permission: "admission.read",
+  },
+
+  {
+    path: "/ipd/beds",
+    element: <BedMaster />,
     permission: "admission.read",
   },
 

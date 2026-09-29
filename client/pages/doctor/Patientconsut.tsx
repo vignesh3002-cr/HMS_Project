@@ -968,6 +968,8 @@ const Consultation: React.FC = () => {
                   <Diagnosis
                     embedded
                     patientId={patientDisplayId}
+                    appointmentId={consultationState?.appointmentId}
+                    encounterNo={encounter?.encounter_no}
                     visitDate={visitDate}
                     onVisitDateChange={setVisitDate}
                     onNext={() => { selectStep("TREATMENT PLAN", markStepCompleted("DIAGNOSIS")); }}
@@ -985,6 +987,7 @@ const Consultation: React.FC = () => {
                     patientId={patientDisplayId}
                     measurements={measurements}
                     gender={patient?.patient_gender ?? ""}
+                    age={patient?.patient_age ?? null}
                     onNext={() => { selectStep("DISCHARGE MEDICATION", markStepCompleted("CHEMOTHERAPY ORDER")); }}
                   />
                 ) : activeStep === "DISCHARGE MEDICATION" ? (

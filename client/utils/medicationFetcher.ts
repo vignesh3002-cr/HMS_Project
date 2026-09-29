@@ -1,8 +1,10 @@
 import API from "../api/axios";
+import { chemoPlanCurrentItems } from "../api/chemotherapy.api";
 
 export interface CycleMedication {
   chemotherapy_plan_item_id: string;
   drug_role: string | null;
+  drug_name?: string | null;
   medicine_master: {
     medicine_name: string;
     generic_name: string | null;
@@ -73,7 +75,10 @@ export async function fetchPatientMedications(
           data: any;
         }>(`/chemotherapy/cycles/${encodeURIComponent(cycle.chemotherapy_cycle_id)}`);
 
-        const items = cycleResponse.data?.data?.chemotherapy_plan_items ?? [];
+        // Cycle rows carry no drugs; fall back to the plan's current cycle
+        // day order (else its baseline).
+        const cycleItems = cycleResponse.data?.data?.chemotherapy_plan_items;
+        const items = cycleItems?.length ? cycleItems : chemoPlanCurrentItems<CycleMedication>(plan);
 
         return {
           cycleId: cycle.chemotherapy_cycle_id,

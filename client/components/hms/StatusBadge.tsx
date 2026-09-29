@@ -57,6 +57,9 @@ const statusToneMap: Record<string, StatusTone> = {
   admitted: "green",
   discharged: "slate",
   transferred: "blue",
+  available: "green",
+  occupied: "blue",
+  maintenance: "orange",
 };
 
 // CHECKED_IN is no longer surfaced as its own state anywhere in the UI --

@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { aiChatApi, type AIPerformedAction } from "@/api/ai-chat.api";
 import { getUser } from "@/utils/token";
 import { NAV_ROUTES } from "@/config/nav-routes";
+import { AIDashboardView, buildDashboard } from "./AIDashboardView";
 
 interface ChatMessage {
     id: string;
@@ -505,7 +506,9 @@ export function AIChatBox() {
                                 </div>
                             ) : (
                                 <div className="space-y-4">
-                                    {messages.map((m) => (
+                                    {messages.map((m) => {
+                                        const dashboard = m.role === "ai" ? buildDashboard(m.actions) : null;
+                                        return (
                                         <div
                                             key={m.id}
                                             className={cn(
@@ -525,7 +528,10 @@ export function AIChatBox() {
                                                     <Bot className="h-4 w-4 text-[#004785]" />
                                                 )}
                                             </div>
-                                            <div className="max-w-[85%]">
+                                            <div className={dashboard ? "min-w-0 flex-1" : "max-w-[85%]"}>
+                                                {dashboard ? (
+                                                    <AIDashboardView spec={dashboard} />
+                                                ) : (
                                                 <div
                                                     className={cn(
                                                         "rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed shadow-sm",
@@ -537,6 +543,7 @@ export function AIChatBox() {
                                                 >
                                                     {m.content}
                                                 </div>
+                                                )}
                                                 {m.actions && m.actions.length > 0 && (
                                                     <div className="mt-2 space-y-1">
                                                         {m.actions.map((action, i) => (
@@ -568,7 +575,8 @@ export function AIChatBox() {
                                                 </div>
                                             </div>
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                                     {loading && (
                                         <div className="flex items-start gap-2.5">
                                             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#D6E3FF]">

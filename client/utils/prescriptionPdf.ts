@@ -3,10 +3,12 @@ import autoTable from "jspdf-autotable";
 
 export interface PrescriptionItem {
   medicine_name?: string;
+  // Free-text name of a custom drug (no medicine_master row).
+  drug_name?: string | null;
   medicine_master?: {
     medicine_name?: string;
     generic_name?: string;
-  };
+  } | null;
   dosage?: string | number;
   dose?: string | number;
   unit?: string;
@@ -398,9 +400,9 @@ export async function generatePrescriptionPdf(prescription: PrescriptionData) {
     }
 
     const body = grouped[role]
-      .filter(it => (it.medicine_name || it.medicine_master?.medicine_name))
+      .filter(it => (it.medicine_name || it.medicine_master?.medicine_name || it.drug_name))
       .map(it => [
-        it.medicine_name || it.medicine_master?.medicine_name || '',
+        it.medicine_name || it.medicine_master?.medicine_name || it.drug_name || '',
         `${it.dosage || ''} ${it.unit || ''}`.trim() || '',
         it.frequency || '',
         it.instruction || '',
@@ -460,12 +462,12 @@ export async function generatePrescriptionPdf(prescription: PrescriptionData) {
     }
     // If instruction contains pipe separator and medicine name is missing, parse instruction
     const instr = (it.instruction || it.remarks || '').toString();
-    if ((!it.medicine_name && !it.medicine_master?.medicine_name && !it.medicineName) && instr.includes('|')) {
+    if ((!it.medicine_name && !it.medicine_master?.medicine_name && !it.drug_name && !it.medicineName) && instr.includes('|')) {
       const parsed = parsePipeLine(instr);
       if (parsed) return parsed;
     }
     // Normalize structured item
-    const medicine = it.medicine_name || it.medicine_master?.medicine_name || it.medicineName || '';
+    const medicine = it.medicine_name || it.medicine_master?.medicine_name || it.drug_name || it.medicineName || '';
     if (!medicine) return null;
     return {
       medicine_name: medicine,

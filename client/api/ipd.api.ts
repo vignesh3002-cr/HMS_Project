@@ -160,13 +160,20 @@ export interface BedRecord {
   branch_id: string;
   bed_number: string;
   bed_type: string;
+  tariff?: number | string | null;
   status: "AVAILABLE" | "OCCUPIED" | "MAINTENANCE" | string;
+  remarks?: string | null;
   active_status: number;
   ward_master?: {
     ward_id: string;
     ward_name: string;
     branch_id: string;
   };
+}
+
+export interface UpdateBedStatusPayload {
+  status: "AVAILABLE" | "MAINTENANCE";
+  remarks?: string;
 }
 
 export interface GetAdmissionsParams {
@@ -198,6 +205,22 @@ export interface CreateBedPayload {
   bed_type?: string;
   tariff?: number;
   status?: string;
+}
+
+export interface UpdateWardPayload {
+  ward_name?: string;
+  ward_type?: string;
+  floor?: string;
+  tariff?: number;
+  active_status?: number;
+}
+
+export interface UpdateBedPayload {
+  bed_number?: string;
+  bed_type?: string;
+  tariff?: number;
+  ward_id?: string;
+  active_status?: number;
 }
 
 export const ipdApi = {
@@ -251,6 +274,9 @@ export const ipdApi = {
   createWard: (data: CreateWardPayload) =>
     API.post<{ success: boolean; message: string; data: WardRecord }>("/ipd/wards", data),
 
+  updateWard: (wardId: string, data: UpdateWardPayload) =>
+    API.patch<{ success: boolean; message: string; data: WardRecord }>(`/ipd/wards/${wardId}`, data),
+
   getBeds: (wardId?: string, branchId?: string) =>
     API.get<{ success: boolean; message: string; data: BedRecord[] }>("/ipd/beds", {
       params: { ...(wardId ? { wardId } : {}), ...(branchId ? { branchId } : {}) },
@@ -258,5 +284,11 @@ export const ipdApi = {
 
   createBed: (data: CreateBedPayload) =>
     API.post<{ success: boolean; message: string; data: BedRecord }>("/ipd/beds", data),
+
+  updateBed: (bedId: string, data: UpdateBedPayload) =>
+    API.patch<{ success: boolean; message: string; data: BedRecord }>(`/ipd/beds/${bedId}`, data),
+
+  updateBedStatus: (bedId: string, data: UpdateBedStatusPayload) =>
+    API.patch<{ success: boolean; message: string; data: BedRecord }>(`/ipd/beds/${bedId}/status`, data),
 };
 

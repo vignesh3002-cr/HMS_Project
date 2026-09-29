@@ -6,6 +6,12 @@ import { encounterApi } from "../../../api/encounter.api";
 import { UserProfileDropdown } from "../../../components/ui/User_profile_dropdown";
 import type { DischargeMedicineRecord, Drug, MeasurementValues } from "./types";
 import {
+  buildDosingSnapshot,
+  buildPlanItemsFromOrder,
+  normalizeLegacyDraftDrug,
+  type DosingInputs,
+} from "./doseCalculation";
+import {
   createChemotherapyPlanForPatient,
   findActiveEncounter,
   toIsoDate,
@@ -261,6 +267,10 @@ const DischargeMedication: React.FC<{
                 drugs?: Drug[];
                 premedicationDrugs?: Drug[];
                 supportiveDrugs?: Drug[];
+                dosingInputs?: DosingInputs;
+                planId?: string | null;
+                orderCycle?: number | null;
+                orderDay?: number | null;
               })
             : null;
         } catch (error) {
@@ -269,54 +279,27 @@ const DischargeMedication: React.FC<{
         }
       })();
 
-      const planItems: Array<{
-        medicine_id: string;
-        drug_role: string;
-        drug_sequence: number;
-        dosage?: number;
-        dosage_unit?: string;
-        administration_route?: string;
-        remarks?: string;
-      }> = [];
-
-      (draft?.drugs ?? []).forEach((drug, index) => {
-        if (drug.medicineId) {
-          planItems.push({
-            medicine_id: drug.medicineId,
-            drug_role: "PRIMARY",
-            drug_sequence: index + 1,
-            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
-            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
-            administration_route: "IV",
-          });
-        }
-      });
-
-      (draft?.premedicationDrugs ?? []).forEach((drug, index) => {
-        if (drug.medicineId) {
-          planItems.push({
-            medicine_id: drug.medicineId,
-            drug_role: "PREMEDICATION",
-            drug_sequence: 90 + index,
-            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
-            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
-            administration_route: "IV",
-          });
-        }
-      });
-
-      (draft?.supportiveDrugs ?? []).forEach((drug, index) => {
-        if (drug.medicineId) {
-          planItems.push({
-            medicine_id: drug.medicineId,
-            drug_role: "SUPPORTIVE",
-            drug_sequence: 100 + index,
-            ...(drug.dose ? { dosage: Number(drug.dose) || undefined } : {}),
-            ...(drug.unit ? { dosage_unit: drug.unit } : {}),
-            administration_route: "IV",
-          });
-        }
-      });
+      /* Same builder as the Chemotherapy Order step, so the Dose Cal /
+         Patient Dose it calculated are re-saved unchanged. */
+      const dosingInputs: DosingInputs = draft?.dosingInputs ?? {
+        heightCm: null,
+        weightKg: null,
+        ageYears: null,
+        sex: null,
+        serumCreatinine: null,
+      };
+      const planItems = buildPlanItemsFromOrder(
+        (draft?.drugs ?? []).map(normalizeLegacyDraftDrug),
+        (draft?.premedicationDrugs ?? []).map(normalizeLegacyDraftDrug),
+        (draft?.supportiveDrugs ?? []).map(normalizeLegacyDraftDrug),
+        dosingInputs
+      );
+      /* The draft's rows are the order of the cycle day it was saved
+         for; hydration is left as the Chemotherapy Order step saved it. */
+      const orderTarget =
+        draft?.planId && draft?.orderCycle && draft?.orderDay
+          ? { planId: draft.planId, cycle: draft.orderCycle, day: draft.orderDay }
+          : undefined;
 
       const planStartDate =
         toIsoDate(draft?.startDate) ||
@@ -329,7 +312,10 @@ const DischargeMedication: React.FC<{
         resolvedPatientId,
         planStartDate,
         planItems.length > 0 ? planItems : undefined,
-        undefined
+        undefined,
+        undefined,
+        draft?.dosingInputs ? buildDosingSnapshot(draft.dosingInputs) : undefined,
+        { order: orderTarget }
       );
       if (error) {
         setMedsError(error);

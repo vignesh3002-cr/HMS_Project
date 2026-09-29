@@ -390,34 +390,45 @@ export default function Dashboard() {
   const { selectedBranchId, isAllBranches, branches: branchDirectory } = useBranchFilter();
   const { can, canAny, permissions, loading: permissionsLoading } = usePermission();
 
-  // Track if KPI preferences have been loaded from backend
-  const kpiHydratedRef = useRef(false);
+  // Track if KPI preferences have been loaded from backend. Kept as state (not
+  // only a ref) so the auto-save effect can re-run once hydration finishes.
+  const [kpiHydrated, setKpiHydrated] = useState(false);
+  // Set right before hydration applies its result so the very first
+  // auto-save effect run after hydration is skipped -- loading preferences
+  // from the server is not a user edit and must never be saved back.
+  const skipNextKpiSaveRef = useRef(false);
 
   // Fetch saved KPI preferences from backend (once after permissions load)
   useEffect(() => {
     if (permissionsLoading) return;
-    if (kpiHydratedRef.current) return;
+    if (kpiHydrated) return;
 
     getKpiPreferences()
       .then((saved) => {
+        skipNextKpiSaveRef.current = true;
         if (saved.length > 0) {
           setSelectedKpis(saved);
         }
-        kpiHydratedRef.current = true;
+        setKpiHydrated(true);
       })
       .catch(() => {
-        kpiHydratedRef.current = true;
+        skipNextKpiSaveRef.current = true;
+        setKpiHydrated(true);
       });
-  }, [permissionsLoading]);
+  }, [permissionsLoading, kpiHydrated]);
 
-  // Debounced auto-save when user changes KPI selection
+  // Debounced auto-save for user-initiated KPI selection changes only.
   useEffect(() => {
-    if (!kpiHydratedRef.current) return; // don't save before initial load
+    if (!kpiHydrated) return; // don't save before initial load
+    if (skipNextKpiSaveRef.current) {
+      skipNextKpiSaveRef.current = false;
+      return;
+    }
     const timer = setTimeout(() => {
       saveKpiPreferences(selectedKpis).catch(() => {});
     }, 500);
     return () => clearTimeout(timer);
-  }, [selectedKpis]);
+  }, [kpiHydrated, selectedKpis]);
 
  
   const [realDoctors, setRealDoctors] = useState<Record<string, unknown>[] | null>(null);
@@ -1265,6 +1276,24 @@ export default function Dashboard() {
         },
       },
       {
+        id: "critical-patients",
+        label: "Critical Patients",
+        subLabel: "Needs immediate attention",
+        permission: "patient.read",
+        loading: criticalPatientsQuery.isLoading,
+        value: criticalPatientCount,
+        tag: "Alert",
+        bg: "rgba(220, 38, 38, 0.12)",
+        border: "none",
+        valueColor: "#DC2626",
+        iconBg: "rgba(255, 255, 255, 0.40)",
+        icon: <AlertCircle className="w-[17px] h-[17px]" color="#DC2626" />,
+        isActive: false,
+        onClick: () => {
+          navigate("/patients");
+        },
+      },
+      {
         id: "ipd-patients",
         label: "Total IPD Patients",
         subLabel: "Currently admitted",
@@ -1297,7 +1326,7 @@ export default function Dashboard() {
         icon: <Bed className="w-[17px] h-[17px]" color="#007A4D" />,
         isActive: false,
         onClick: () => {
-          navigate("/ipd");
+          navigate("/ipd/beds");
         },
       },
       {

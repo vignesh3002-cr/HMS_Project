@@ -4,6 +4,7 @@ import type { PatientRecord } from "../../../api/patient.api";
 import { encounterApi, type EncounterRecord } from "../../../api/encounter.api";
 import {
   consultationApi,
+  type ConsultationOptionRecord,
   type ImmunizationRecord,
   type DrugConsumptionRecord,
   type PersonalHistoryItem,
@@ -20,6 +21,7 @@ import {
   PopoverTrigger,
 } from "../../../components/ui/popover";
 import { MultiSelectDropdown } from "../../../components/ui/multi-select-dropdown";
+import { SingleSelectDropdown } from "../../../components/ui/single-select-dropdown";
 import VoiceToText from "@/components/ui/voicetotext";
 import AdviceSection, {
   type AdviceSaveResult,
@@ -42,17 +44,13 @@ import {
    other steps) so unsaved input survives step switches.
    ============================================================ */
 
-/* Treatment types selectable under the Past History section. Picking a
-   type reveals the date / brief note / treatment response fields. */
-const TREATMENT_TYPES = [
-  "Chemotherapy",
-  "Radiotherapy",
-  "Surgery",
-  "Immunotherapy",
-  "Targeted Therapy",
-  "Hormone Therapy",
-  "Bone Marrow Transplant",
-  "Other",
+/* Master option names plus any selected value that isn't in the master
+   (e.g. an older free-text "Others" entry), so it still shows ticked. */
+const withSelected = (names: string[], selected: string[]) => [
+  ...names,
+  ...selected.filter(
+    (value) => !names.some((name) => name.toLowerCase() === value.toLowerCase())
+  ),
 ];
 
 interface ConsultationStepProps {
@@ -112,9 +110,23 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     useState("");
 
   const [reportsTest, setReportsTest] = useState("");
+  /* A test typed by hand when it isn't in lab_test_master; saved on this
+     patient's report only (the master isn't changed). */
+  const [reportsTestName, setReportsTestName] = useState("");
   const [reportsTestDate, setReportsTestDate] = useState("");
   const [reportsTestResult, setReportsTestResult] = useState("");
   const [reportsTestImpression, setReportsTestImpression] = useState("");
+
+  /* Molecular Testing (moved here from the Diagnosis tab): one row per test
+     per visit in encounter_molecular_test. A test that isn't listed is
+     typed by hand and saved for this patient only. */
+  const [molecularTestOptions, setMolecularTestOptions] = useState<string[]>(
+    []
+  );
+  const [molecularTest, setMolecularTest] = useState("");
+  const [molecularTestDate, setMolecularTestDate] = useState("");
+  const [molecularTestResult, setMolecularTestResult] = useState("");
+  const [molecularTestImpression, setMolecularTestImpression] = useState("");
   const [reportsText, setReportsText] = useState("");
 
   const [chiefComplaint, setChiefComplaint] = useState("");
@@ -138,6 +150,14 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
   const [generalExamOedema, setGeneralExamOedema] = useState(false);
   const [generalExamLymphadenopathy, setGeneralExamLymphadenopathy] =
     useState(false);
+  /* Extra General Examination findings (general_examination_master). */
+  const [generalExamOthers, setGeneralExamOthers] = useState<string[]>([]);
+  const [generalExamOptions, setGeneralExamOptions] = useState<
+    ConsultationOptionRecord[]
+  >([]);
+  const [treatmentTypeOptions, setTreatmentTypeOptions] = useState<
+    ConsultationOptionRecord[]
+  >([]);
 
   const [systemicCns, setSystemicCns] = useState("");
   const [systemicCvs, setSystemicCvs] = useState("");
@@ -159,8 +179,6 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
   const [selectedDrugConsumptions, setSelectedDrugConsumptions] = useState<
     string[]
   >([]);
-  const [immunizationOthers, setImmunizationOthers] = useState("");
-  const [drugConsumptionOthers, setDrugConsumptionOthers] = useState("");
   const [dietType, setDietType] = useState("");
 
   const [proceeding, setProceeding] = useState(false);
@@ -193,6 +211,11 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     setGeneralExamOedema(!!encounter?.general_examination_oedema);
     setGeneralExamLymphadenopathy(
       !!encounter?.general_examination_lymphadenopathy
+    );
+    setGeneralExamOthers(
+      (encounter?.general_examination_others ?? []).map(
+        (finding) => finding.name
+      )
     );
 
     /* Past History treatment + Previous Reports free text. */
@@ -269,6 +292,30 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
         console.error("Failed to load drug consumption options:", error)
       );
     consultationApi
+      .getGeneralExaminationFindings()
+      .then((response) => {
+        if (!cancelled) setGeneralExamOptions(response.data.data ?? []);
+      })
+      .catch((error) =>
+        console.error("Failed to load general examination findings:", error)
+      );
+    consultationApi
+      .getTreatmentTypes()
+      .then((response) => {
+        if (!cancelled) setTreatmentTypeOptions(response.data.data ?? []);
+      })
+      .catch((error) =>
+        console.error("Failed to load treatment types:", error)
+      );
+    consultationApi
+      .getMolecularTestOptions()
+      .then((response) => {
+        if (!cancelled) setMolecularTestOptions(response.data.data ?? []);
+      })
+      .catch((error) =>
+        console.error("Failed to load molecular test options:", error)
+      );
+    consultationApi
       .getDietTypes()
       .then((response) => {
         if (!cancelled) setDietTypeOptions(response.data.data ?? []);
@@ -290,29 +337,14 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
         const record = response.data.data;
         if (!record) return;
 
-        const immunizationItems = record.immunization ?? [];
-        setSelectedImmunizations(
-          immunizationItems
-            .filter((item) => !item.others)
-            .map((item) => item.name)
-        );
-        setImmunizationOthers(
-          immunizationItems
-            .filter((item) => item.others)
-            .map((item) => item.others ?? "")
-            .join(", ")
-        );
-
-        const drugItems = record.drug_consumption ?? [];
-        setSelectedDrugConsumptions(
-          drugItems.filter((item) => !item.others).map((item) => item.name)
-        );
-        setDrugConsumptionOthers(
-          drugItems
-            .filter((item) => item.others)
-            .map((item) => item.others ?? "")
-            .join(", ")
-        );
+        /* Master values by name; older free-text "Others" entries by
+           their typed text, shown as selected values of their own. */
+        const toNames = (items: PersonalHistoryItem[]) =>
+          items
+            .map((item) => (item.others ? item.others : item.name))
+            .filter(Boolean);
+        setSelectedImmunizations(toNames(record.immunization ?? []));
+        setSelectedDrugConsumptions(toNames(record.drug_consumption ?? []));
 
         setDietType(record.diet_type ?? "");
       })
@@ -324,41 +356,92 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     };
   }, [encounter?.encounter_no]);
 
+  /* Master values are saved as {code, name}; a value that isn't in the
+     master (an older free-text entry) keeps the "Others" item shape. */
+  /* Show the visit's most recent saved molecular test, so a saved (or
+     migrated) value is visible when the consultation is reopened. */
+  useEffect(() => {
+    const encounterNo = encounter?.encounter_no;
+    if (!encounterNo) return;
+    let cancelled = false;
+    consultationApi
+      .getMolecularTests(encounterNo)
+      .then((response) => {
+        if (cancelled) return;
+        const rows = response.data.data ?? [];
+        const latest = rows[rows.length - 1];
+        setMolecularTest(latest?.test_name ?? "");
+        setMolecularTestDate(latest?.test_date?.slice(0, 10) ?? "");
+        setMolecularTestResult(latest?.result ?? "");
+        setMolecularTestImpression(latest?.impression ?? "");
+      })
+      .catch((error) =>
+        console.error("Failed to load molecular tests:", error)
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [encounter?.encounter_no]);
+
   const buildPersonalHistoryItems = (
     selectedNames: string[],
-    options: ImmunizationRecord[] | DrugConsumptionRecord[],
-    others: string
-  ): PersonalHistoryItem[] => {
-    const items: PersonalHistoryItem[] = selectedNames.map((name) => {
-      const match = options.find((option) => option.name === name);
-      return { code: match?.code ?? "", name };
+    options: ImmunizationRecord[] | DrugConsumptionRecord[]
+  ): PersonalHistoryItem[] =>
+    selectedNames.map((name) => {
+      const match = options.find(
+        (option) => option.name.toLowerCase() === name.toLowerCase()
+      );
+      return match
+        ? { code: match.code, name: match.name }
+        : { code: "OTHERS", name: "Others", others: name };
     });
-    const othersTrimmed = others.trim();
-    if (othersTrimmed) {
-      items.push({
-        code: "OTHERS",
-        name: "Others",
-        others: othersTrimmed,
-      });
-    }
-    return items;
-  };
 
   const savePersonalHistory = async (encounterNo: string) => {
     await consultationApi.savePersonalHistory(encounterNo, {
       immunization: buildPersonalHistoryItems(
         selectedImmunizations,
-        immunizationOptions,
-        immunizationOthers
+        immunizationOptions
       ),
       drug_consumption: buildPersonalHistoryItems(
         selectedDrugConsumptions,
-        drugConsumptionOptions,
-        drugConsumptionOthers
+        drugConsumptionOptions
       ),
       diet_type: dietType || null,
     });
   };
+
+  /* "+ Add" on a search with no match: the value is added to its master
+     list (so every patient gets it as an option) and selected here. The
+     backend returns the existing row when the name is already there. */
+  const addMasterOption = async <T extends { code: string; name: string }>(
+    create: () => Promise<{ data: { data: T } }>,
+    setOptions: React.Dispatch<React.SetStateAction<T[]>>,
+    select: (name: string) => void,
+    label: string
+  ) => {
+    try {
+      const record = (await create()).data.data;
+      setOptions((previous) =>
+        previous.some((option) => option.code === record.code)
+          ? previous
+          : [...previous, record]
+      );
+      select(record.name);
+    } catch (error: any) {
+      showToast(
+        error?.response?.data?.message ?? `Failed to add the ${label}.`
+      );
+    }
+  };
+
+  const addToSelection =
+    (setter: React.Dispatch<React.SetStateAction<string[]>>) =>
+    (name: string) =>
+      setter((previous) =>
+        previous.some((value) => value.toLowerCase() === name.toLowerCase())
+          ? previous
+          : [...previous, name]
+      );
 
   const registeredOn = patient
     ? formatDateDMY(patient.user_table?.created_at)
@@ -539,6 +622,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
       general_examination_cyanosis?: boolean;
       general_examination_oedema?: boolean;
       general_examination_lymphadenopathy?: boolean;
+      general_examination_others?: { code: string; name: string }[];
       past_history_treatment_type?: string;
       past_history_treatment_date?: string;
       past_history_treatment_note?: string;
@@ -590,6 +674,12 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     payload.general_examination_cyanosis = generalExamCyanosis;
     payload.general_examination_oedema = generalExamOedema;
     payload.general_examination_lymphadenopathy = generalExamLymphadenopathy;
+    payload.general_examination_others = generalExamOthers.map((name) => {
+      const match = generalExamOptions.find(
+        (option) => option.name.toLowerCase() === name.toLowerCase()
+      );
+      return { code: match?.code ?? "", name: match?.name ?? name };
+    });
 
     /* Past History treatment details (type/date/note/response). */
     if (pastHistoryTreatmentType.trim()) {
@@ -649,17 +739,24 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
      into encounter_report, upserting the row for the selected test so
      repeated saves never duplicate it. */
   const persistReportsPrevious = async (targetEncounterNo: string) => {
-    if (!reportsTest) return;
+    const typedTest = reportsTestName.trim();
+    if (!reportsTest && !typedTest) return;
     try {
       const existingReports = await consultationApi.getReports(
         targetEncounterNo
       );
       const rows = existingReports.data?.data ?? [];
-      const existing = rows.find(
-        (report) => String(report.lab_test_id) === String(reportsTest)
+      /* A master test matches on its id, a typed one on its name. */
+      const existing = rows.find((report) =>
+        reportsTest
+          ? String(report.lab_test_id) === String(reportsTest)
+          : !report.lab_test_id &&
+            (report.test_name ?? "").toLowerCase() === typedTest.toLowerCase()
       );
       const payload = {
-        lab_test_id: reportsTest,
+        ...(reportsTest
+          ? { lab_test_id: reportsTest }
+          : { test_name: typedTest }),
         report_completed_date: reportsTestDate || null,
         result: reportsTestResult || null,
         impression: reportsTestImpression || null,
@@ -675,6 +772,41 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
     } catch (error: any) {
       console.error(
         "Failed to save previous reports:",
+        error?.response?.data?.message ?? error?.message
+      );
+    }
+  };
+
+  /* Persists the Molecular Testing form into encounter_molecular_test,
+     upserting the row for the selected test (matched by name) so repeated
+     saves never duplicate it. */
+  const persistMolecularTest = async (targetEncounterNo: string) => {
+    const testName = molecularTest.trim();
+    if (!testName) return;
+    try {
+      const existingTests = await consultationApi.getMolecularTests(
+        targetEncounterNo
+      );
+      const existing = (existingTests.data?.data ?? []).find(
+        (row) => row.test_name.toLowerCase() === testName.toLowerCase()
+      );
+      const payload = {
+        test_name: testName,
+        test_date: molecularTestDate || null,
+        result: molecularTestResult || null,
+        impression: molecularTestImpression || null,
+      };
+      if (existing) {
+        await consultationApi.updateMolecularTest(
+          existing.encounter_molecular_test_id,
+          payload
+        );
+      } else {
+        await consultationApi.addMolecularTest(targetEncounterNo, payload);
+      }
+    } catch (error: any) {
+      console.error(
+        "Failed to save molecular test:",
         error?.response?.data?.message ?? error?.message
       );
     }
@@ -709,6 +841,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
         (await clinicalDetailsRef.current?.handleSave()) ?? true;
       await persistConsultation(encounter);
       await persistReportsPrevious(encounter.encounter_no);
+      await persistMolecularTest(encounter.encounter_no);
       const adviceResult = await saveAdvice(encounter);
 
       const failedParts = [
@@ -1041,26 +1174,22 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
         </label>
 
         <MultiSelectDropdown
-          options={[
-            ...immunizationOptions.map((option) => option.name),
-            "Others",
-          ]}
+          options={withSelected(
+            immunizationOptions.map((option) => option.name),
+            selectedImmunizations
+          )}
           value={selectedImmunizations}
           onValueChange={setSelectedImmunizations}
+          onCreateOption={(typed) =>
+            addMasterOption(
+              () => consultationApi.createCustomImmunization({ name: typed }),
+              setImmunizationOptions,
+              addToSelection(setSelectedImmunizations),
+              "immunization"
+            )
+          }
           placeholder="Select immunization(s)"
         />
-
-        {selectedImmunizations.includes("Others") && (
-          <input
-            type="text"
-            value={immunizationOthers}
-            onChange={(event) =>
-              setImmunizationOthers(event.target.value)
-            }
-            placeholder="Specify other immunization..."
-            className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-          />
-        )}
 
       </div>
 
@@ -1073,26 +1202,22 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
         </label>
 
         <MultiSelectDropdown
-          options={[
-            ...drugConsumptionOptions.map((option) => option.name),
-            "Others",
-          ]}
+          options={withSelected(
+            drugConsumptionOptions.map((option) => option.name),
+            selectedDrugConsumptions
+          )}
           value={selectedDrugConsumptions}
           onValueChange={setSelectedDrugConsumptions}
+          onCreateOption={(typed) =>
+            addMasterOption(
+              () => consultationApi.createCustomDrugConsumption({ name: typed }),
+              setDrugConsumptionOptions,
+              addToSelection(setSelectedDrugConsumptions),
+              "drug consumption"
+            )
+          }
           placeholder="Select drug consumption(s)"
         />
-
-        {selectedDrugConsumptions.includes("Others") && (
-          <input
-            type="text"
-            value={drugConsumptionOthers}
-            onChange={(event) =>
-              setDrugConsumptionOthers(event.target.value)
-            }
-            placeholder="Specify other drug consumption..."
-            className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-          />
-        )}
 
       </div>
 
@@ -1194,6 +1319,34 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
         </label>
       ))}
 
+    </div>
+
+    {/* Other findings: search general_examination_master; "+ Add" adds a
+        finding to the master and ticks it for this patient. */}
+    <div className="flex flex-col gap-2">
+      <label className="text-xs font-bold leading-4 text-slate-500">
+        Other Findings
+      </label>
+      <MultiSelectDropdown
+        options={withSelected(
+          generalExamOptions.map((option) => option.name),
+          generalExamOthers
+        )}
+        value={generalExamOthers}
+        onValueChange={setGeneralExamOthers}
+        onCreateOption={(typed) =>
+          addMasterOption(
+            () =>
+              consultationApi.createCustomGeneralExaminationFinding({
+                name: typed,
+              }),
+            setGeneralExamOptions,
+            addToSelection(setGeneralExamOthers),
+            "finding"
+          )
+        }
+        placeholder="Search or add other findings"
+      />
     </div>
 
     </section>
@@ -1327,41 +1480,31 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                 Select Test
               </label>
 
-              <div className="relative">
-                <select
-                  value={reportsTest}
-                  onChange={(event) =>
-                    setReportsTest(event.target.value)
-                  }
-                  className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-                >
-                  <option value="" disabled>
-                    Select Test
-                  </option>
-                  {labTests.map((test) => (
-                    <option
-                      key={test.lab_test_id}
-                      value={test.lab_test_id}
-                    >
-                      {test.test_name}
-                    </option>
-                  ))}
-                </select>
-
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#94a3b8"
-                  strokeWidth="1.8"
-                  className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
-                >
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
-              </div>
+              {/* Not in the list: the typed name is used for this
+                  patient's report only (lab_test_master is unchanged). */}
+              <SingleSelectDropdown
+                options={labTests.map((test) => ({
+                  label: test.test_name,
+                  value: test.lab_test_id,
+                }))}
+                value={reportsTest || reportsTestName}
+                valueLabel={reportsTestName}
+                onValueChange={(labTestId) => {
+                  setReportsTest(labTestId);
+                  setReportsTestName("");
+                }}
+                onCreateOption={(typed) => {
+                  setReportsTest("");
+                  setReportsTestName(typed);
+                }}
+                createLabel="Use"
+                placeholder="Select or type a test"
+                className="h-[38px] rounded-md border-slate-200 text-slate-700 shadow-none"
+              />
             </div>
 
             {/* DATE / RESULT / IMPRESSION */}
-            {reportsTest && (
+            {(reportsTest || reportsTestName) && (
               <>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
@@ -1439,36 +1582,28 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                 Treatment Type
               </label>
 
-              <div className="relative">
-                <select
-                  value={pastHistoryTreatmentType}
-                  onChange={(event) =>
-                    setPastHistoryTreatmentType(
-                      event.target.value
-                    )
-                  }
-                  className="h-[38px] w-full appearance-none rounded-md border border-slate-200 bg-white px-[13px] pr-10 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
-                >
-                  <option value="" disabled>
-                    Select Treatment
-                  </option>
-                  {TREATMENT_TYPES.map((treatment) => (
-                    <option key={treatment} value={treatment}>
-                      {treatment}
-                    </option>
-                  ))}
-                </select>
-
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#94a3b8"
-                  strokeWidth="1.8"
-                  className="pointer-events-none absolute right-3 top-2.5 h-4 w-4"
-                >
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
-              </div>
+              {/* treatment_type_master; "+ Add" adds a new type to it. */}
+              <SingleSelectDropdown
+                options={withSelected(
+                  treatmentTypeOptions.map((option) => option.name),
+                  pastHistoryTreatmentType ? [pastHistoryTreatmentType] : []
+                )}
+                value={pastHistoryTreatmentType}
+                onValueChange={setPastHistoryTreatmentType}
+                onCreateOption={(typed) =>
+                  addMasterOption(
+                    () =>
+                      consultationApi.createCustomTreatmentType({
+                        name: typed,
+                      }),
+                    setTreatmentTypeOptions,
+                    setPastHistoryTreatmentType,
+                    "treatment type"
+                  )
+                }
+                placeholder="Select Treatment"
+                className="h-[38px] rounded-md border-slate-200 text-slate-700 shadow-none"
+              />
             </div>
 
             {/* DATE / BRIEF NOTE / TREATMENT RESPONSE */}
@@ -1526,6 +1661,86 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
           onChange={(text) => setPastHistory(text)}
           placeholder="Type the patient's past history..."
         />
+
+      </div>
+
+      {/* MOLECULAR TESTING */}
+
+      <div className="flex flex-col gap-2">
+
+        <label className="text-xs font-bold leading-4 text-slate-500">
+          Molecular Testing
+        </label>
+
+        <div className="flex w-full flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+
+            {/* SELECT TEST */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                Select Test
+              </label>
+
+              {/* Not in the list: the typed name is used for this
+                  patient only. */}
+              <SingleSelectDropdown
+                options={molecularTestOptions}
+                value={molecularTest}
+                onValueChange={setMolecularTest}
+                onCreateOption={setMolecularTest}
+                createLabel="Use"
+                placeholder="Select or type a test"
+                className="h-[38px] rounded-md border-slate-200 text-slate-700 shadow-none"
+              />
+            </div>
+
+            {/* DATE / RESULT / IMPRESSION */}
+            {molecularTest && (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    value={molecularTestDate}
+                    onChange={(event) =>
+                      setMolecularTestDate(event.target.value)
+                    }
+                    className="h-[38px] w-full rounded-md border border-slate-200 bg-white px-[13px] text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    Enter Result
+                  </label>
+                  <textarea
+                    value={molecularTestResult}
+                    onChange={(event) =>
+                      setMolecularTestResult(event.target.value)
+                    }
+                    placeholder="Type the result..."
+                    className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
+                    Enter Impression
+                  </label>
+                  <textarea
+                    value={molecularTestImpression}
+                    onChange={(event) =>
+                      setMolecularTestImpression(event.target.value)
+                    }
+                    placeholder="Type the impression..."
+                    className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
+                  />
+                </div>
+              </>
+            )}
+
+          </div>
 
       </div>
 
