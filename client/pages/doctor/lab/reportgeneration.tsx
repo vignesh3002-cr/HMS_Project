@@ -222,6 +222,74 @@ function formatReportDate(dateVal?: string | Date | null): string {
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+export function getDisplayBarcode(r?: {
+  barcode?: string;
+  sampleId?: string;
+  id?: string;
+  requestId?: string;
+} | null): string {
+  if (!r) return "-";
+  if (
+    r.barcode &&
+    r.barcode.startsWith("BC") &&
+    !r.barcode.startsWith("BC-s") &&
+    !r.barcode.startsWith("BC-SMP") &&
+    !r.barcode.startsWith("BC-item")
+  ) {
+    return r.barcode;
+  }
+
+  if (typeof window !== "undefined") {
+    const rawId = (r.id || "").replace(/^(rep-|item-)/, "");
+    if (rawId) {
+      const storedItem = localStorage.getItem(`generated_barcode_item_${rawId}`);
+      if (storedItem && storedItem.startsWith("BC")) return storedItem;
+      const storedTesting = localStorage.getItem(`testing_sample_barcode_${rawId}`);
+      if (storedTesting && storedTesting.startsWith("BC")) return storedTesting;
+    }
+    if (r.sampleId) {
+      const storedSmpBc = localStorage.getItem(`testing_sample_barcode_${r.sampleId}`);
+      if (storedSmpBc && storedSmpBc.startsWith("BC")) return storedSmpBc;
+    }
+  }
+
+  const rawId = (r.id || "").replace(/^(rep-|item-)/, "");
+  const matchInitial = INITIAL_TESTING_SAMPLES.find(
+    (its) =>
+      its.id === r.id ||
+      its.id === rawId ||
+      (r.sampleId && its.sampleId === r.sampleId) ||
+      (r.barcode && its.barcode === r.barcode)
+  );
+  if (matchInitial?.barcode) return matchInitial.barcode;
+
+  const sampleNumMatch = (r.sampleId || r.id || r.requestId || "").match(/SMP-?0*(\d+)/i);
+  if (sampleNumMatch) {
+    const num = parseInt(sampleNumMatch[1], 10);
+    return `BC240520${String(num).padStart(4, "0")}`;
+  }
+
+  if (r.barcode && r.barcode.startsWith("BC-")) {
+    const cleanNum = r.barcode.replace(/\D/g, "");
+    if (cleanNum) {
+      return `BC240520${cleanNum.slice(-4).padStart(4, "0")}`;
+    }
+  }
+
+  if (
+    r.barcode &&
+    !r.barcode.startsWith("SMP-") &&
+    !r.barcode.startsWith("RPT-") &&
+    !r.barcode.startsWith("TRF-") &&
+    !r.barcode.startsWith("REQ")
+  ) {
+    return r.barcode;
+  }
+
+  const digits = (r.id || r.sampleId || r.requestId || "1").replace(/\D/g, "").slice(-4) || "0001";
+  return `BC240520${digits.padStart(4, "0")}`;
+}
+
 export default function ReportGeneration() {
   const navigate = useNavigate();
   const currentUser = getUser();
@@ -664,6 +732,7 @@ export default function ReportGeneration() {
           (ts) =>
             ts.id === rawId ||
             ts.sampleId === r.sampleId ||
+            (r.barcode && ts.barcode === r.barcode) ||
             (r.requestId && ts.barcode === r.requestId)
         );
         if (matchInitial) {
@@ -1014,6 +1083,8 @@ export default function ReportGeneration() {
         rep.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         rep.requestId.toLowerCase().includes(searchQuery.toLowerCase()) ||
         rep.reportId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (rep.barcode && rep.barcode.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        getDisplayBarcode(rep).toLowerCase().includes(searchQuery.toLowerCase()) ||
         rep.doctorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         rep.testPanel.toLowerCase().includes(searchQuery.toLowerCase());
 
@@ -2279,7 +2350,7 @@ export default function ReportGeneration() {
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full pl-10 pr-4 py-2.5 bg-white text-sm text-slate-800 placeholder-slate-400 border border-slate-300 rounded-lg focus:outline-none focus:border-slate-500 focus:ring-1 focus:ring-slate-500 transition-colors"
-                        placeholder="Search Patient, Report ID, Doctor..."
+                        placeholder="Search Patient, Barcode, Doctor..."
                         type="text"
                       />
                       {searchQuery && (
@@ -2481,7 +2552,7 @@ export default function ReportGeneration() {
                           >
                             <td className="py-5 px-8 whitespace-nowrap">
                               <span className="font-mono text-slate-900 text-sm font-semibold">
-                                {r.barcode || r.sampleId || r.requestId}
+                                {getDisplayBarcode(r)}
                               </span>
                             </td>
                             <td className="py-5 px-6 whitespace-nowrap">
