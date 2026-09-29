@@ -1445,10 +1445,10 @@ export default function ReportGeneration() {
                     <div className="space-y-5">
                       <div>
                         <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">
-                          SAMPLE ID
+                          BARCODE
                         </p>
                         <p className="text-sm font-bold text-slate-800 mt-1 font-mono">
-                          {selectedReport.sampleId || "-"}
+                          {getDisplayBarcode(selectedReport)}
                         </p>
                       </div>
                       <div>
@@ -1781,10 +1781,10 @@ export default function ReportGeneration() {
                     {/* Row 1 */}
                     <div className="flex items-baseline">
                       <span className="w-36 text-slate-500 font-normal shrink-0">
-                        Sample ID
+                        Barcode
                       </span>
                       <span className="font-semibold text-slate-900 font-mono">
-                        {selectedReport.sampleId || "-"}
+                        {getDisplayBarcode(selectedReport)}
                       </span>
                     </div>
                     <div className="flex items-baseline">
