@@ -21,6 +21,8 @@ export interface FormDropdownProps
   options: (FormDropdownOption | string)[];
   value?: string;
   onValueChange?: (value: string) => void;
+  /* When set, a search with no exact match offers "+ Add '<typed>'". */
+  onCreateOption?: (typed: string) => void;
   emptyMessage?: string;
   leftIcon?: React.ReactNode;
   loading?: boolean;
@@ -54,6 +56,7 @@ const FormProtocolDropdown = React.forwardRef<HTMLInputElement, FormDropdownProp
       options,
       value,
       onValueChange,
+      onCreateOption,
       placeholder = "Select...",
       emptyMessage = "No results found.",
       disabled,
@@ -73,7 +76,9 @@ const FormProtocolDropdown = React.forwardRef<HTMLInputElement, FormDropdownProp
     );
 
     const [open, setOpen] = React.useState(false);
-    const [search, setSearch] = React.useState(selectedOption?.label ?? "");
+    const [search, setSearch] = React.useState(
+      selectedOption?.label ?? value ?? "",
+    );
     const [coords, setCoords] = React.useState<{
       top: number;
       left: number;
@@ -82,10 +87,11 @@ const FormProtocolDropdown = React.forwardRef<HTMLInputElement, FormDropdownProp
     const containerRef = React.useRef<HTMLDivElement>(null);
     const inputRef = React.useRef<HTMLInputElement>(null);
     const listRef = React.useRef<HTMLDivElement>(null);
+    const chipRef = React.useRef<HTMLButtonElement>(null);
 
     React.useEffect(() => {
-      setSearch(selectedOption?.label ?? "");
-    }, [selectedOption]);
+      setSearch(selectedOption?.label ?? value ?? "");
+    }, [selectedOption, value]);
 
     React.useEffect(() => {
       if (!open) return;
@@ -99,13 +105,13 @@ const FormProtocolDropdown = React.forwardRef<HTMLInputElement, FormDropdownProp
           !listRef.current.contains(target)
         ) {
           setOpen(false);
-          setSearch(selectedOption?.label ?? "");
+          setSearch(selectedOption?.label ?? value ?? "");
         }
       }
 
       document.addEventListener("mousedown", handleClickOutside);
       return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, [open, selectedOption]);
+    }, [open, selectedOption, value]);
 
     const filtered = React.useMemo(() => {
       const query = search.trim().toLowerCase();
@@ -123,12 +129,33 @@ const FormProtocolDropdown = React.forwardRef<HTMLInputElement, FormDropdownProp
       setOpen(false);
     }
 
+    /* A typed value with no exact label match is offered as "+ Add". */
+    const typed = search.trim();
+    const canCreate =
+      !disabled &&
+      !loading &&
+      Boolean(onCreateOption) &&
+      typed.length > 0 &&
+      typed.toLowerCase() !== (value ?? "").trim().toLowerCase() &&
+      !normalized.some(
+        (option) => option.label.toLowerCase() === typed.toLowerCase(),
+      );
+
+    function handleCreate() {
+      if (!canCreate) return;
+      onCreateOption?.(typed);
+      setSearch(typed);
+      setOpen(false);
+    }
+
     function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
       if (event.key === "Escape") {
         setOpen(false);
-        setSearch(selectedOption?.label ?? "");
+        setSearch(selectedOption?.label ?? value ?? "");
       } else if (event.key === "Enter" && filtered.length === 1) {
         handleSelect(filtered[0]);
+      } else if (event.key === "Enter" && canCreate && filtered.length === 0) {
+        handleCreate();
       }
     }
 
@@ -140,8 +167,13 @@ const FormProtocolDropdown = React.forwardRef<HTMLInputElement, FormDropdownProp
         setOpen(false);
         return;
       }
-      const fitsBelow = rect.bottom + 260 <= window.innerHeight;
-      const top = fitsBelow ? rect.bottom : Math.max(8, rect.top - 264);
+      /* The "+ Add" chip sits directly under the input (mt-1); start the
+         list below it so the two never overlap. */
+      const chipOffset = chipRef.current ? chipRef.current.offsetHeight + 4 : 0;
+      const fitsBelow = rect.bottom + chipOffset + 260 <= window.innerHeight;
+      const top = fitsBelow
+        ? rect.bottom + chipOffset
+        : Math.max(8, rect.top - 264);
       const baseWidth = rect.width;
       const targetWidth = Math.min(window.innerWidth - 24, Math.round(baseWidth * 1.3));
       setCoords({ top, left: rect.left, width: targetWidth });
@@ -156,7 +188,7 @@ const FormProtocolDropdown = React.forwardRef<HTMLInputElement, FormDropdownProp
         window.removeEventListener("scroll", updatePosition, true);
         window.removeEventListener("resize", updatePosition);
       };
-    }, [open, updatePosition]);
+    }, [open, updatePosition, canCreate]);
 
     function openDropdown() {
       if (loading || disabled) return;
@@ -222,7 +254,30 @@ const FormProtocolDropdown = React.forwardRef<HTMLInputElement, FormDropdownProp
           )}
         </div>
 
-        {open && !disabled && !loading && coords
+        {/* "+ Add" chip - sits directly under the input box and appears only
+            when the typed text matches no option. The option list below is
+            offset so it always opens underneath this chip. */}
+        {canCreate ? (
+          <button
+            ref={chipRef}
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={handleCreate}
+            className="mt-1 flex w-full items-center gap-1.5 overflow-hidden rounded-[11px] border border-[#dde4ec] bg-white px-3 py-1.5 text-left text-[12.5px] font-semibold leading-4 text-[#12335c] shadow-sm transition-colors hover:bg-[#f4f6f9] focus:outline-none focus:ring-2 focus:ring-[#12335c]/20"
+          >
+            <span className="shrink-0">+ Add</span>
+            <span className="truncate">"{typed}"</span>
+          </button>
+        ) : null}
+
+        {/* Creatable fields (FORM / MEDICATION / BRAND) never show the
+            empty-list message - with no match the list simply stays closed
+            and the "+ Add" chip under the input carries the affordance. */}
+        {open &&
+        !disabled &&
+        !loading &&
+        coords &&
+        !(onCreateOption && filtered.length === 0)
           ? createPortal(
               <div
                 ref={listRef}

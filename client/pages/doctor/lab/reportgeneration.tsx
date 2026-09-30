@@ -5,7 +5,7 @@ import { toast } from "@/hooks/use-toast";
 import LabNav from "./labnav";
 import { labOrderApi, labOrderItemApi, LabOrderRecord, LabOrderItemRecord } from "@/api/labOrder.api";
 import { patientApi, PatientRecord } from "@/api/patient.api";
-import { labReportApi, LabReportRecord } from "@/api/labReport.api";
+import { labReportApi, LabReportRecord, parseReportComment } from "@/api/labReport.api";
 import {
   INITIAL_TESTING_SAMPLES,
   TestingSampleItem,

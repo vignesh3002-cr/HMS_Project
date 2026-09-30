@@ -28,6 +28,8 @@ import AdviceSection, {
   type AdviceSectionHandle,
 } from "./AdviceSection";
 import type { ConsultationState } from "./types";
+import { computeBmi, computeBsa } from "../../../utils/vitals";
+import { printConsultationSummary } from "../../../utils/consultationSummaryPrint";
 import {
   formatDateDMY,
   formatPickedDate,
@@ -142,6 +144,7 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
   const [investigationNotes, setInvestigationNotes] = useState<
     Record<string, string>
   >({});
+  const [additionalInstructions, setAdditionalInstructions] = useState("");
 
   const [generalExamIcterus, setGeneralExamIcterus] = useState(false);
   const [generalExamPallor, setGeneralExamPallor] = useState(false);
@@ -554,8 +557,151 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
      PRINT
   ============================================================ */
 
+  /* Prints a clean A4 report built from the current form values (see
+     utils/consultationSummaryPrint.ts), not a screenshot of the form. */
   const printSummary = () => {
-    window.print();
+    const clinical = clinicalDetailsRef.current?.getPrintSummary();
+    const vitalNumber = (value: number | string | null | undefined) => {
+      const parsed = parseFloat(String(value ?? ""));
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    const height = vitalNumber(encounter?.height);
+    const weight = vitalNumber(encounter?.weight);
+    const systolic = vitalNumber(encounter?.systolic_bp);
+    const diastolic = vitalNumber(encounter?.diastolic_bp);
+    const bmi = vitalNumber(encounter?.BMI) ?? computeBmi(height, weight);
+    const bsa = computeBsa(height, weight);
+    const withUnit = (value: number | null, unit: string) =>
+      value === null ? "" : `${value}${unit}`;
+
+    const reportTestName =
+      reportsTestName.trim() ||
+      labTests.find((test) => String(test.lab_test_id) === String(reportsTest))
+        ?.test_name ||
+      "";
+
+    printConsultationSummary({
+      hospitalName: patient?.branch?.branch_name ?? "",
+      patient: {
+        name: patientName,
+        displayId: patientDisplayId,
+        age:
+          patient?.patient_age != null ? `${patient.patient_age} yrs` : "",
+        gender: patient?.patient_gender ?? "",
+        mobile: patient?.patient_primary_mobile ?? "",
+      },
+      visit: {
+        date: visitDate,
+        time: visitTime,
+        type: visitType,
+        consultedBy,
+        encounterNo: encounter?.encounter_no ?? "",
+        firstVisit: registeredOn,
+      },
+      vitals: [
+        { label: "Height", value: withUnit(height, " cm") },
+        { label: "Weight", value: withUnit(weight, " kg") },
+        { label: "BMI", value: withUnit(bmi, "") },
+        { label: "BSA", value: withUnit(bsa, " m²") },
+        {
+          label: "Blood Pressure",
+          value:
+            systolic !== null && diastolic !== null
+              ? `${systolic}/${diastolic} mmHg`
+              : "",
+        },
+        { label: "Pulse", value: withUnit(vitalNumber(encounter?.pulse), " bpm") },
+        {
+          label: "Temperature",
+          value: withUnit(vitalNumber(encounter?.temperature), " °C"),
+        },
+        { label: "SpO2", value: withUnit(vitalNumber(encounter?.spo2), "%") },
+        {
+          label: "Respiratory Rate",
+          value: withUnit(vitalNumber(encounter?.respiratory_rate), " /min"),
+        },
+        {
+          label: "Pain Score",
+          value: withUnit(vitalNumber(encounter?.pain_score), "/10"),
+        },
+      ],
+      chiefComplaint,
+      reasonOfVisit,
+      consultationNotes,
+      historyOfPresentIllness,
+      performanceStatus: clinical?.performanceStatus ?? "",
+      symptoms: clinical?.symptoms ?? [],
+      allergies: clinical?.allergies ?? [],
+      comorbidities: clinical?.comorbidities ?? [],
+      personalHistory: [
+        { label: "Immunization", value: selectedImmunizations.join(", ") },
+        {
+          label: "Drug Consumption",
+          value: selectedDrugConsumptions.join(", "),
+        },
+        { label: "Diet Type", value: dietType },
+      ],
+      generalExamination: [
+        ...(generalExamIcterus ? ["Icterus"] : []),
+        ...(generalExamPallor ? ["Pallor"] : []),
+        ...(generalExamClubbing ? ["Clubbing"] : []),
+        ...(generalExamCyanosis ? ["Cyanosis"] : []),
+        ...(generalExamOedema ? ["Oedema"] : []),
+        ...(generalExamLymphadenopathy ? ["Lymphadenopathy"] : []),
+        ...generalExamOthers,
+      ],
+      systemicExamination: [
+        { label: "CNS", value: systemicCns },
+        { label: "CVS", value: systemicCvs },
+        { label: "Respiratory", value: systemicRespiratory },
+        { label: "Per Abdomen", value: systemicPerAbdomen },
+      ],
+      clinicalFindings: systemicClinicalFindings,
+      pastHistory,
+      pastTreatment: {
+        type: pastHistoryTreatmentType,
+        date: formatDateDMY(pastHistoryTreatmentDate),
+        note: pastHistoryTreatmentNote,
+        response: pastHistoryTreatmentResponse,
+      },
+      previousReports: reportTestName
+        ? [
+            {
+              test: reportTestName,
+              date: formatDateDMY(reportsTestDate),
+              result: reportsTestResult,
+              impression: reportsTestImpression,
+            },
+          ]
+        : [],
+      previousReportsText: reportsText,
+      molecularTests: molecularTest.trim()
+        ? [
+            {
+              test: molecularTest,
+              date: formatDateDMY(molecularTestDate),
+              result: molecularTestResult,
+              impression: molecularTestImpression,
+            },
+          ]
+        : [],
+      investigations: selectedInvestigations.map((name) => ({
+        name,
+        notes: investigationNotes[name] ?? "",
+      })),
+      investigationInstructions: additionalInstructions,
+      medicines: (adviceSectionRef.current?.getDraftRows() ?? []).map(
+        (row) => ({
+          form: row.drugForm,
+          name: row.drugName,
+          dosage: row.dosage,
+          frequency: row.frequency,
+          duration: row.duration,
+          instruction: row.instruction,
+        })
+      ),
+      adviceDiscussion: adviceSectionRef.current?.getDraftDiscussion() ?? "",
+    });
   };
 
   /* ============================================================
@@ -1097,19 +1243,6 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
           </div>
 
-          <div className="flex flex-col gap-1">
-
-            <div className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
-              Reason of Visit
-            </div>
-
-            <VoiceToText
-              value={reasonOfVisit}
-              onChange={(text) => setReasonOfVisit(text)}
-              placeholder="Type the reason of visit..."
-            />
-
-          </div>
 
           </div>
 
@@ -1265,19 +1398,6 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
 
       {/* PATIENT HISTORY (REASON OF VISIT) */}
 
-      <div className="flex flex-col gap-2">
-
-        <label className="text-xs font-bold leading-4 text-slate-500">
-          Patient History (Reason of Visit)
-        </label>
-
-        <VoiceToText
-          value={reasonOfVisit}
-          onChange={(text) => setReasonOfVisit(text)}
-          placeholder="Type the reason of visit..."
-        />
-
-      </div>
 
     </div>
 
@@ -1389,13 +1509,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
       <label className="text-xs font-bold leading-4 text-slate-500">
         Clinical Findings
       </label>
-      <textarea
+      <VoiceToText
         value={systemicClinicalFindings}
-        onChange={(event) =>
-          setSystemicClinicalFindings(event.target.value)
-        }
+        onChange={(text) => setSystemicClinicalFindings(text)}
         placeholder="Type clinical findings..."
-        className="h-24 w-full resize-none rounded-md border border-gray-300 bg-white py-3 pl-4 pr-4 text-sm text-gray-800 focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]"
       />
     </div>
 
@@ -1524,13 +1641,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                   <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
                     Enter Result
                   </label>
-                  <textarea
+                  <VoiceToText
                     value={reportsTestResult}
-                    onChange={(event) =>
-                      setReportsTestResult(event.target.value)
-                    }
+                    onChange={(text) => setReportsTestResult(text)}
                     placeholder="Type the result..."
-                    className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
                   />
                 </div>
 
@@ -1538,13 +1652,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                   <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
                     Enter Impression
                   </label>
-                  <textarea
+                  <VoiceToText
                     value={reportsTestImpression}
-                    onChange={(event) =>
-                      setReportsTestImpression(event.target.value)
-                    }
+                    onChange={(text) => setReportsTestImpression(text)}
                     placeholder="Type the impression..."
-                    className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
                   />
                 </div>
               </>
@@ -1640,15 +1751,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                   <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
                     Treatment Response
                   </label>
-                  <textarea
+                  <VoiceToText
                     value={pastHistoryTreatmentResponse}
-                    onChange={(event) =>
-                      setPastHistoryTreatmentResponse(
-                        event.target.value
-                      )
-                    }
+                    onChange={(text) => setPastHistoryTreatmentResponse(text)}
                     placeholder="Type the treatment response..."
-                    className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
                   />
                 </div>
               </>
@@ -1714,13 +1820,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                   <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
                     Enter Result
                   </label>
-                  <textarea
+                  <VoiceToText
                     value={molecularTestResult}
-                    onChange={(event) =>
-                      setMolecularTestResult(event.target.value)
-                    }
+                    onChange={(text) => setMolecularTestResult(text)}
                     placeholder="Type the result..."
-                    className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
                   />
                 </div>
 
@@ -1728,13 +1831,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
                   <label className="text-[10px] font-bold uppercase leading-[15px] tracking-[0.5px] text-slate-400">
                     Enter Impression
                   </label>
-                  <textarea
+                  <VoiceToText
                     value={molecularTestImpression}
-                    onChange={(event) =>
-                      setMolecularTestImpression(event.target.value)
-                    }
+                    onChange={(text) => setMolecularTestImpression(text)}
                     placeholder="Type the impression..."
-                    className="h-[60px] w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-sm leading-5 text-slate-700 outline-none focus:border-slate-400"
                   />
                 </div>
               </>
@@ -1871,16 +1971,15 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
               Clinical Notes - {investigation}
             </label>
 
-            <textarea
+            <VoiceToText
               value={investigationNotes[investigation] ?? ""}
-              onChange={(e) =>
+              onChange={(text) =>
                 setInvestigationNotes((prev) => ({
                   ...prev,
-                  [investigation]: e.target.value,
+                  [investigation]: text,
                 }))
               }
               placeholder={`Enter clinical notes for ${investigation}`}
-              className="h-24 w-full resize-none rounded-md border border-slate-200 bg-white p-[13px] text-sm leading-[22.75px] text-slate-600 outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-300"
             />
 
           </div>
@@ -1896,10 +1995,10 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
         Additional Instructions (if any)
       </label>
 
-      <input
-        type="text"
+      <VoiceToText
+        value={additionalInstructions}
+        onChange={(text) => setAdditionalInstructions(text)}
         placeholder="Enter any special instructions for the selected investigations"
-        className="h-[38px] w-full rounded-md border border-slate-200 bg-slate-50 px-[9px] text-sm text-gray-500 outline-none"
       />
 
     </div>

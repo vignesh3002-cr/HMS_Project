@@ -65,6 +65,15 @@ export interface ClinicalDetailsSectionHandle {
   /* Resolves true when the clinical details were saved (or there was
      nothing editable to save yet), false when any write failed. */
   handleSave: () => Promise<boolean>;
+  /* Current selections, for the printed consultation summary. */
+  getPrintSummary: () => ClinicalDetailsPrintSummary;
+}
+
+export interface ClinicalDetailsPrintSummary {
+  performanceStatus: string;
+  symptoms: { name: string; severity: string; durationDays: string; notes: string }[];
+  allergies: { name: string; severity: string; reaction: string }[];
+  comorbidities: string[];
 }
 
 const ChevronDownIcon = () => (
@@ -524,6 +533,30 @@ export const ClinicalDetailsSection = forwardRef<
   ============================================================ */
   useImperativeHandle(ref, () => ({
     handleSave,
+    getPrintSummary: () => {
+      const ecog = performanceStatusOptions.find(
+        (option) => String(option.id) === String(ecogId),
+      );
+      return {
+        performanceStatus: ecog
+          ? `${ecog.code} - ${ecog.description}`
+          : "",
+        symptoms: symptomSelections.map((item) => ({
+          name: item.symptomName,
+          severity: item.severity,
+          durationDays: item.durationDays,
+          notes: item.clinicalNotes,
+        })),
+        allergies: allergySelections.map((item) => ({
+          name: item.substanceName,
+          severity: item.severity,
+          reaction: item.reaction,
+        })),
+        comorbidities: comorbiditySelections.map(
+          (item) => item.comorbidityName,
+        ),
+      };
+    },
   }));
 
   useEffect(() => {
