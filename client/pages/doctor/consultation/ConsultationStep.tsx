@@ -28,6 +28,8 @@ import AdviceSection, {
   type AdviceSectionHandle,
 } from "./AdviceSection";
 import type { ConsultationState } from "./types";
+import { computeBmi, computeBsa } from "../../../utils/vitals";
+import { printConsultationSummary } from "../../../utils/consultationSummaryPrint";
 import {
   formatDateDMY,
   formatPickedDate,
@@ -555,8 +557,151 @@ const ConsultationStep: React.FC<ConsultationStepProps> = ({
      PRINT
   ============================================================ */
 
+  /* Prints a clean A4 report built from the current form values (see
+     utils/consultationSummaryPrint.ts), not a screenshot of the form. */
   const printSummary = () => {
-    window.print();
+    const clinical = clinicalDetailsRef.current?.getPrintSummary();
+    const vitalNumber = (value: number | string | null | undefined) => {
+      const parsed = parseFloat(String(value ?? ""));
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    const height = vitalNumber(encounter?.height);
+    const weight = vitalNumber(encounter?.weight);
+    const systolic = vitalNumber(encounter?.systolic_bp);
+    const diastolic = vitalNumber(encounter?.diastolic_bp);
+    const bmi = vitalNumber(encounter?.BMI) ?? computeBmi(height, weight);
+    const bsa = computeBsa(height, weight);
+    const withUnit = (value: number | null, unit: string) =>
+      value === null ? "" : `${value}${unit}`;
+
+    const reportTestName =
+      reportsTestName.trim() ||
+      labTests.find((test) => String(test.lab_test_id) === String(reportsTest))
+        ?.test_name ||
+      "";
+
+    printConsultationSummary({
+      hospitalName: patient?.branch?.branch_name ?? "",
+      patient: {
+        name: patientName,
+        displayId: patientDisplayId,
+        age:
+          patient?.patient_age != null ? `${patient.patient_age} yrs` : "",
+        gender: patient?.patient_gender ?? "",
+        mobile: patient?.patient_primary_mobile ?? "",
+      },
+      visit: {
+        date: visitDate,
+        time: visitTime,
+        type: visitType,
+        consultedBy,
+        encounterNo: encounter?.encounter_no ?? "",
+        firstVisit: registeredOn,
+      },
+      vitals: [
+        { label: "Height", value: withUnit(height, " cm") },
+        { label: "Weight", value: withUnit(weight, " kg") },
+        { label: "BMI", value: withUnit(bmi, "") },
+        { label: "BSA", value: withUnit(bsa, " m²") },
+        {
+          label: "Blood Pressure",
+          value:
+            systolic !== null && diastolic !== null
+              ? `${systolic}/${diastolic} mmHg`
+              : "",
+        },
+        { label: "Pulse", value: withUnit(vitalNumber(encounter?.pulse), " bpm") },
+        {
+          label: "Temperature",
+          value: withUnit(vitalNumber(encounter?.temperature), " °C"),
+        },
+        { label: "SpO2", value: withUnit(vitalNumber(encounter?.spo2), "%") },
+        {
+          label: "Respiratory Rate",
+          value: withUnit(vitalNumber(encounter?.respiratory_rate), " /min"),
+        },
+        {
+          label: "Pain Score",
+          value: withUnit(vitalNumber(encounter?.pain_score), "/10"),
+        },
+      ],
+      chiefComplaint,
+      reasonOfVisit,
+      consultationNotes,
+      historyOfPresentIllness,
+      performanceStatus: clinical?.performanceStatus ?? "",
+      symptoms: clinical?.symptoms ?? [],
+      allergies: clinical?.allergies ?? [],
+      comorbidities: clinical?.comorbidities ?? [],
+      personalHistory: [
+        { label: "Immunization", value: selectedImmunizations.join(", ") },
+        {
+          label: "Drug Consumption",
+          value: selectedDrugConsumptions.join(", "),
+        },
+        { label: "Diet Type", value: dietType },
+      ],
+      generalExamination: [
+        ...(generalExamIcterus ? ["Icterus"] : []),
+        ...(generalExamPallor ? ["Pallor"] : []),
+        ...(generalExamClubbing ? ["Clubbing"] : []),
+        ...(generalExamCyanosis ? ["Cyanosis"] : []),
+        ...(generalExamOedema ? ["Oedema"] : []),
+        ...(generalExamLymphadenopathy ? ["Lymphadenopathy"] : []),
+        ...generalExamOthers,
+      ],
+      systemicExamination: [
+        { label: "CNS", value: systemicCns },
+        { label: "CVS", value: systemicCvs },
+        { label: "Respiratory", value: systemicRespiratory },
+        { label: "Per Abdomen", value: systemicPerAbdomen },
+      ],
+      clinicalFindings: systemicClinicalFindings,
+      pastHistory,
+      pastTreatment: {
+        type: pastHistoryTreatmentType,
+        date: formatDateDMY(pastHistoryTreatmentDate),
+        note: pastHistoryTreatmentNote,
+        response: pastHistoryTreatmentResponse,
+      },
+      previousReports: reportTestName
+        ? [
+            {
+              test: reportTestName,
+              date: formatDateDMY(reportsTestDate),
+              result: reportsTestResult,
+              impression: reportsTestImpression,
+            },
+          ]
+        : [],
+      previousReportsText: reportsText,
+      molecularTests: molecularTest.trim()
+        ? [
+            {
+              test: molecularTest,
+              date: formatDateDMY(molecularTestDate),
+              result: molecularTestResult,
+              impression: molecularTestImpression,
+            },
+          ]
+        : [],
+      investigations: selectedInvestigations.map((name) => ({
+        name,
+        notes: investigationNotes[name] ?? "",
+      })),
+      investigationInstructions: additionalInstructions,
+      medicines: (adviceSectionRef.current?.getDraftRows() ?? []).map(
+        (row) => ({
+          form: row.drugForm,
+          name: row.drugName,
+          dosage: row.dosage,
+          frequency: row.frequency,
+          duration: row.duration,
+          instruction: row.instruction,
+        })
+      ),
+      adviceDiscussion: adviceSectionRef.current?.getDraftDiscussion() ?? "",
+    });
   };
 
   /* ============================================================
