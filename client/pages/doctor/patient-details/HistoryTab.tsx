@@ -12,7 +12,7 @@ import {
   YAxis as ChartYAxis,
   Line as ChartLine,
   Tooltip as ChartTooltip,
-  Legend as ChartLegend,
+  ReferenceBand as ChartReferenceBand,
 } from "@/components/hms/LineChart";
 import type {
   SummaryPlanItem,
@@ -52,26 +52,289 @@ type Patient360Visit = {
   } | null;
 };
 
-/* Placeholder sample series for the Treatment Trend chart -- frontend-only
-   for now, not wired to a real API yet. Six illustrative data points spaced
-   ~3 weeks apart (roughly one per chemo cycle), ending today, so the chart
-   always renders with plausible-looking dates. Replace with real per-cycle
-   tumor marker / weight readings once that data is available from the API. */
-function buildTreatmentTrendDummyData() {
-  const today = new Date();
-  const points = [
-    { cyclesAgo: 15, tumorMarker: 128 },
-    { cyclesAgo: 12, tumorMarker: 104 },
-    { cyclesAgo: 9, tumorMarker: 81 },
-    { cyclesAgo: 6, tumorMarker: 63 },
-    { cyclesAgo: 3, tumorMarker: 47 },
-    { cyclesAgo: 0, tumorMarker: 34 },
-  ];
-  return points.map((p) => {
-    const date = new Date(today);
-    date.setDate(date.getDate() - p.cyclesAgo * 7);
-    return { date, tumorMarker: p.tumorMarker };
+/* A saved Investigation Results value (patient_investigation_result, from
+   the Diagnosis tab) with its test and the test's cancer type. */
+type InvestigationResultRow = {
+  investigation_result_id: string;
+  encounter_no: string;
+  parameter_id: string;
+  report_date: string;
+  value_text: string;
+  value_numeric: string | number | null;
+  is_abnormal: boolean;
+  investigation_parameter?: {
+    parameter_id: string;
+    parameter_name: string;
+    chart_name: string;
+    input_type: string;
+    unit: string | null;
+    normal_min: string | number | null;
+    normal_max: string | number | null;
+    range_label: string | null;
+    display_order: number | null;
+    cancer_type_id: string;
+    cancer_types?: { cancer_type_id: string; cancer_type: string } | null;
+  } | null;
+};
+
+/* Treatment Trend: one reading of a test, one test's series, and a cancer
+   type's tests. */
+type TrendPoint = { date: Date; value: number; status: "High" | "Low" | null };
+type TrendChart = {
+  parameterId: string;
+  name: string;
+  chartName: string;
+  unit: string | null;
+  rangeLabel: string | null;
+  min: number | null;
+  max: number | null;
+  order: number;
+  points: TrendPoint[];
+};
+type TrendGroup = { cancerTypeId: string; cancerType: string; charts: TrendChart[] };
+
+const TREND_LINE_COLOR = "#004785";
+const TREND_OUT_OF_RANGE_COLOR = "#DC2626";
+
+const toNumberOrNull = (value: string | number | null | undefined) =>
+  value === null || value === undefined || value === "" || !Number.isFinite(Number(value))
+    ? null
+    : Number(value);
+
+/* The patient's number tests as one series each (oldest reading first),
+   grouped per cancer type: the diagnosis's primary cancer type first,
+   then the others by name. */
+function buildTreatmentTrends(
+  rows: InvestigationResultRow[],
+  primaryCancerTypeId?: string | null
+): TrendGroup[] {
+  const groups = new Map<string, TrendGroup>();
+
+  for (const row of rows) {
+    const parameter = row.investigation_parameter;
+    const value = toNumberOrNull(row.value_numeric);
+    if (!parameter || parameter.input_type !== "NUMBER" || value === null) continue;
+    const date = new Date(row.report_date);
+    if (Number.isNaN(date.getTime())) continue;
+
+    const cancerTypeId = parameter.cancer_type_id;
+    const group = groups.get(cancerTypeId) ?? {
+      cancerTypeId,
+      cancerType: parameter.cancer_types?.cancer_type || "Cancer type",
+      charts: [],
+    };
+    groups.set(cancerTypeId, group);
+
+    let chart = group.charts.find((item) => item.parameterId === parameter.parameter_id);
+    if (!chart) {
+      chart = {
+        parameterId: parameter.parameter_id,
+        name: parameter.parameter_name,
+        chartName: parameter.chart_name,
+        unit: parameter.unit,
+        rangeLabel: parameter.range_label,
+        min: toNumberOrNull(parameter.normal_min),
+        max: toNumberOrNull(parameter.normal_max),
+        order: parameter.display_order ?? 0,
+        points: [],
+      };
+      group.charts.push(chart);
+    }
+
+    chart.points.push({
+      date,
+      value,
+      status:
+        chart.max !== null && value > chart.max
+          ? "High"
+          : chart.min !== null && value < chart.min
+            ? "Low"
+            : null,
+    });
+  }
+
+  const list = [...groups.values()];
+  list.forEach((group) => {
+    group.charts.forEach((chart) => chart.points.sort((a, b) => a.date.getTime() - b.date.getTime()));
+    group.charts.sort(
+      (a, b) => a.chartName.localeCompare(b.chartName) || a.order - b.order
+    );
   });
+  return list.sort((a, b) => {
+    if (a.cancerTypeId === primaryCancerTypeId) return -1;
+    if (b.cancerTypeId === primaryCancerTypeId) return 1;
+    return a.cancerType.localeCompare(b.cancerType);
+  });
+}
+
+const formatTrendValue = (value: number) =>
+  value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+const formatTrendDate = (date: Date) =>
+  date.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+
+/* Where the latest reading sits against the normal range - an icon and a
+   word with the color, never the color alone. */
+function TrendStatusChip({ status, hasRange }: { status: TrendPoint["status"]; hasRange: boolean }) {
+  if (!hasRange) return null;
+  return status ? (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700 ring-1 ring-inset ring-red-200">
+      <i className={`fa-solid ${status === "High" ? "fa-arrow-up" : "fa-arrow-down"} text-[10px]`} />
+      {status === "High" ? "Above normal" : "Below normal"}
+    </span>
+  ) : (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
+      <i className="fa-solid fa-check text-[10px]" />
+      Within range
+    </span>
+  );
+}
+
+/* One test's trend: the latest value with its change since the previous
+   reading, a smooth line over the visits with the normal range shaded and
+   out-of-range readings marked, and the values as a table. */
+function TrendChartCard({ chart }: { chart: TrendChart }) {
+  const [showValues, setShowValues] = useState(false);
+  const latest = chart.points[chart.points.length - 1];
+  const previous = chart.points.length > 1 ? chart.points[chart.points.length - 2] : null;
+  const delta = previous ? latest.value - previous.value : null;
+  const hasRange = chart.min !== null || chart.max !== null;
+  const rangeText =
+    chart.rangeLabel ||
+    (chart.min !== null && chart.max !== null
+      ? `${chart.min}–${chart.max}`
+      : chart.min !== null
+        ? `≥${chart.min}`
+        : chart.max !== null
+          ? `≤${chart.max}`
+          : null);
+  const unitSuffix = chart.unit ? ` ${chart.unit}` : "";
+
+  /* Keep the normal limits in view, and start non-negative markers at 0. */
+  const include = [chart.min, chart.max].filter((value): value is number => value !== null);
+  if (Math.min(...chart.points.map((point) => point.value), ...include) >= 0) include.push(0);
+
+  const rows = chart.points.map((point) => ({
+    date: point.date,
+    value: point.value,
+    status: point.status,
+  }));
+
+  return (
+    <div className="flex flex-col rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h4 className="truncate text-sm font-bold text-gray-900">{chart.name} Trend</h4>
+          <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-gray-500">
+            {rangeText && (
+              <>
+                {/* Key for the shaded normal band in the chart. */}
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm bg-[#00A87E]/15 ring-1 ring-inset ring-[#00A87E]/60"
+                />
+                <span className="shrink-0">Normal {rangeText}</span>
+                <span aria-hidden="true">·</span>
+              </>
+            )}
+            <span className="truncate">{chart.chartName}</span>
+          </p>
+        </div>
+        <TrendStatusChip status={latest.status} hasRange={hasRange} />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-2xl font-semibold text-gray-900">{formatTrendValue(latest.value)}</span>
+        {chart.unit && <span className="text-sm font-medium text-gray-500">{chart.unit}</span>}
+        {delta !== null && previous && (
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-500">
+            <i
+              className={`fa-solid ${
+                delta > 0 ? "fa-arrow-trend-up" : delta < 0 ? "fa-arrow-trend-down" : "fa-minus"
+              } text-[11px]`}
+            />
+            {delta > 0 ? "+" : ""}
+            {formatTrendValue(delta)} since {formatTrendDate(previous.date)}
+          </span>
+        )}
+      </div>
+
+      <div className="mt-2">
+        <LineChart
+          data={rows}
+          x="date"
+          height={200}
+          margin={{ top: 14, right: 40, bottom: 30, left: 44 }}
+          yInclude={include}
+        >
+          <ChartGrid />
+          <ChartReferenceBand from={chart.min} to={chart.max} />
+          <ChartXAxis maxTicks={6} />
+          <ChartYAxis />
+          <ChartLine
+            y="value"
+            name={chart.name}
+            color={TREND_LINE_COLOR}
+            strokeWidth={2}
+            curve="smooth"
+            area={!hasRange}
+            areaOpacity={0.12}
+            markerRadius={4}
+            pointColor={(row) => (row.status ? TREND_OUT_OF_RANGE_COLOR : undefined)}
+          />
+          <ChartTooltip
+            formatY={(value) => `${formatTrendValue(value)}${unitSuffix}`}
+            detail={(row) =>
+              row.status
+                ? `${row.status} - outside the normal range`
+                : hasRange
+                  ? "Within the normal range"
+                  : null
+            }
+          />
+        </LineChart>
+        {chart.points.length === 1 && (
+          <p className="text-center text-xs text-gray-400">The trend line appears after the next reading.</p>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setShowValues((open) => !open)}
+        aria-expanded={showValues}
+        className="mt-2 self-start text-xs font-semibold text-[#004785] hover:underline focus:outline-none focus-visible:underline"
+      >
+        {showValues ? "Hide values" : `Show values (${chart.points.length})`}
+      </button>
+      {showValues && (
+        <table className="mt-2 w-full text-left text-xs">
+          <thead>
+            <tr className="border-b border-gray-100 text-gray-500">
+              <th className="py-1.5 pr-3 font-semibold">Report date</th>
+              <th className="py-1.5 pr-3 text-right font-semibold">Value</th>
+              <th className="py-1.5 font-semibold">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {[...chart.points].reverse().map((point, index) => (
+              <tr key={`${point.date.getTime()}-${index}`}>
+                <td className="py-1.5 pr-3 text-gray-700">{formatTrendDate(point.date)}</td>
+                <td
+                  className="py-1.5 pr-3 text-right font-semibold text-gray-900"
+                  style={{ fontVariantNumeric: "tabular-nums" }}
+                >
+                  {formatTrendValue(point.value)}
+                  {unitSuffix}
+                </td>
+                <td className={`py-1.5 ${point.status ? "font-semibold text-red-700" : "text-gray-500"}`}>
+                  {point.status ? `${point.status}` : hasRange ? "Normal" : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
 }
 
 const HistoryTab: React.FC<{
@@ -1145,8 +1408,47 @@ const HistoryTab: React.FC<{
     return items;
   })();
 
-  // Placeholder chart series -- see buildTreatmentTrendDummyData for why.
-  const treatmentTrendData = useMemo(() => buildTreatmentTrendDummyData(), []);
+  /* Treatment Trend: the Investigation Results the Diagnosis tab saved on
+     each visit, as one trend per number test, grouped per cancer type. */
+  const [investigationResults, setInvestigationResults] = useState<InvestigationResultRow[]>([]);
+  const [investigationLoading, setInvestigationLoading] = useState(false);
+
+  useEffect(() => {
+    if (!patientId) return;
+    let cancelled = false;
+    setInvestigationLoading(true);
+    API.get<{ success: boolean; data: InvestigationResultRow[] }>(
+      "/oncology/investigation-results",
+      { params: { patient_id: patientId } }
+    )
+      .then((response) => {
+        if (!cancelled) setInvestigationResults(response.data?.data ?? []);
+      })
+      .catch((error) => {
+        console.warn("Failed to load investigation results for the trends:", error);
+        if (!cancelled) setInvestigationResults([]);
+      })
+      .finally(() => {
+        if (!cancelled) setInvestigationLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
+
+  const treatmentTrends = useMemo(
+    () =>
+      buildTreatmentTrends(
+        investigationResults,
+        (stagingDetails[0] as { cancer_type_id?: string | null } | undefined)?.cancer_type_id
+      ),
+    [investigationResults, stagingDetails]
+  );
+  const trendTestCount = treatmentTrends.reduce((sum, group) => sum + group.charts.length, 0);
+  const trendReadingCount = treatmentTrends.reduce(
+    (sum, group) => sum + group.charts.reduce((count, chart) => count + chart.points.length, 0),
+    0
+  );
 
   /* =========================================================
      CONTENT (PATIENT HEADER + HISTORY SECTIONS + ACTIONS)
@@ -1557,29 +1859,63 @@ const HistoryTab: React.FC<{
           </div>
         </div>
 
-      {/* TREATMENT TREND -- frontend-only placeholder chart for now, not
-          wired to a real API yet (see buildTreatmentTrendDummyData above). */}
+      {/* TREATMENT TREND - the patient's Investigation Results over the
+          visits: one chart per test, grouped per cancer type. */}
       <section id="treatment-trend-section" className="px-6 pb-6">
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="flex justify-between items-center p-5 border-b border-gray-200 bg-gray-50/50">
-            <div className="flex items-center gap-2">
-              <i className="fa-solid fa-chart-simple text-blue-600" />
-              <h2 className="text-lg font-bold text-gray-900">Treatment Trend</h2>
+          <div className="flex flex-wrap justify-between items-center gap-3 p-5 border-b border-gray-200 bg-gray-50/50">
+            <div>
+              <div className="flex items-center gap-2">
+                <i className="fa-solid fa-chart-line text-[#004785]" />
+                <h2 className="text-lg font-bold text-gray-900">Treatment Trend</h2>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Investigation Results from the Diagnosis tab, per cancer type, oldest to newest visit.
+              </p>
             </div>
-            <span className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">
-              Preview data
-            </span>
+            {trendReadingCount > 0 && (
+              <span className="text-xs font-semibold text-[#004785] bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-full">
+                {trendTestCount} test{trendTestCount === 1 ? "" : "s"} · {trendReadingCount} reading
+                {trendReadingCount === 1 ? "" : "s"}
+              </span>
+            )}
           </div>
 
-          <div className="p-5">
-            <LineChart data={treatmentTrendData} x="date" height={260}>
-              <ChartGrid />
-              <ChartXAxis />
-              <ChartYAxis />
-              <ChartLine y="tumorMarker" name="Tumor Marker (CA-125)" curve="smooth" area dots />
-              <ChartTooltip />
-              <ChartLegend />
-            </LineChart>
+          <div className={`space-y-7 p-5 transition-opacity ${investigationLoading && treatmentTrends.length > 0 ? "opacity-60" : ""}`}>
+            {investigationLoading && treatmentTrends.length === 0 ? (
+              <div className="flex items-center justify-center py-10 text-sm text-gray-500">
+                <i className="fa-solid fa-circle-notch fa-spin mr-2" />
+                Loading investigation results...
+              </div>
+            ) : treatmentTrends.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 bg-gray-50/60 px-6 py-10 text-center">
+                <i className="fa-solid fa-chart-line mb-3 text-2xl text-gray-300" />
+                <p className="text-sm font-semibold text-gray-700">No investigation results yet</p>
+                <p className="mt-1 max-w-md text-xs text-gray-500">
+                  Values entered in the Diagnosis tab's Investigation Results (PSA, CEA, CA-125 and
+                  others) appear here as a trend for each test.
+                </p>
+              </div>
+            ) : (
+              treatmentTrends.map((group, index) => (
+                <div key={group.cancerTypeId}>
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#004785] text-xs font-bold text-white">
+                      {index + 1}
+                    </span>
+                    <h3 className="text-sm font-bold text-gray-900">{group.cancerType}</h3>
+                    <span className="text-xs text-gray-400">
+                      {group.charts.length} test{group.charts.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {group.charts.map((chart) => (
+                      <TrendChartCard key={chart.parameterId} chart={chart} />
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </section>

@@ -46,6 +46,9 @@ interface ChartContextValue {
   xScale: (d: any, i: number) => number;
   yScale: (v: number) => number;
   yTicks: number[];
+  /* The plotted y-domain (after nice-tick rounding). */
+  yMin: number;
+  yMax: number;
   lines: { y: string; name?: string; color: string }[];
   colorFor: (key: string) => string | undefined;
   hoverIndex: number | null;
@@ -114,6 +117,9 @@ interface LineChartProps {
   height?: number;
   margin?: { top: number; right: number; bottom: number; left: number };
   yDomain?: [number, number];
+  /* Extra values the automatic y-domain must include (e.g. 0 or a normal
+     range limit), so a reference band stays in view. */
+  yInclude?: number[];
   theme?: Partial<ChartTheme>;
   children?: ReactNode;
 }
@@ -124,6 +130,7 @@ export function LineChart({
   height = 280,
   margin = { top: 16, right: 20, bottom: 32, left: 48 },
   yDomain,
+  yInclude,
   theme: themeOverride,
   children,
 }: LineChartProps) {
@@ -149,7 +156,9 @@ export function LineChart({
     if (continuousX) {
       const vals = data.map((d) => +d[x]);
       const min = Math.min(...vals),
-        span = Math.max(...vals) - min || 1;
+        span = Math.max(...vals) - min;
+      // A single x position (e.g. one reading) sits in the middle.
+      if (!span) return () => innerW / 2;
       return (d: any) => ((+d[x] - min) / span) * innerW;
     }
     const n = Math.max(data.length - 1, 1);
@@ -157,13 +166,17 @@ export function LineChart({
   }, [data, x, innerW, continuousX]);
 
   const lineKeys = lines.map((l) => l.y).join("|");
-  const { yScale, yTicks } = useMemo(() => {
+  const includeKey = (yInclude ?? []).join("|");
+  const { yScale, yTicks, yMin, yMax } = useMemo(() => {
     let lo: number, hi: number;
     if (yDomain) [lo, hi] = yDomain;
     else {
-      const vals = data.flatMap((d) =>
-        lines.filter((l) => !hidden.has(l.y) && typeof d[l.y] === "number").map((l) => d[l.y]),
-      );
+      const vals = [
+        ...data.flatMap((d) =>
+          lines.filter((l) => !hidden.has(l.y) && typeof d[l.y] === "number").map((l) => d[l.y]),
+        ),
+        ...(yInclude ?? []).filter((v) => Number.isFinite(v)),
+      ];
       lo = vals.length ? Math.min(...vals) : 0;
       hi = vals.length ? Math.max(...vals) : 1;
     }
@@ -174,9 +187,11 @@ export function LineChart({
     return {
       yScale: (v: number) => innerH - ((v - tMin) / span) * innerH,
       yTicks: ticks.filter((t) => t >= tMin && t <= tMax),
+      yMin: tMin,
+      yMax: tMax,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, lineKeys, hidden, innerH, yDomain]);
+  }, [data, lineKeys, hidden, innerH, yDomain, includeKey]);
 
   const handleMove = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!data.length) return;
@@ -212,6 +227,8 @@ export function LineChart({
     xScale,
     yScale,
     yTicks,
+    yMin,
+    yMax,
     lines,
     colorFor,
     hoverIndex,
@@ -275,9 +292,7 @@ export function Grid({ vertical = false }: { vertical?: boolean }) {
           y1={yScale(t)}
           y2={yScale(t)}
           stroke={theme.grid}
-          strokeDasharray="1 4"
-          strokeLinecap="round"
-          strokeWidth={1.5}
+          strokeWidth={1}
         />
       ))}
       {vertical &&
@@ -290,16 +305,53 @@ export function Grid({ vertical = false }: { vertical?: boolean }) {
   );
 }
 
+/* A shaded y-range (e.g. a test's normal range) with hairlines at its
+   defined limits and an optional label. An open end runs to the plot edge. */
+export function ReferenceBand({
+  from,
+  to,
+  label,
+  color = "#00A87E",
+}: {
+  from?: number | null;
+  to?: number | null;
+  label?: string;
+  color?: string;
+}) {
+  const { yScale, yMin, yMax, innerW, theme } = useChart();
+  if (from == null && to == null) return null;
+  const clamp = (v: number) => Math.min(Math.max(v, yMin), yMax);
+  const top = yScale(clamp(to ?? yMax));
+  const bottom = yScale(clamp(from ?? yMin));
+  if (bottom - top <= 0) return null;
+  return (
+    <g aria-hidden="true">
+      <rect x={0} y={top} width={innerW} height={bottom - top} fill={color} opacity={0.08} />
+      {to != null && to <= yMax && (
+        <line x1={0} x2={innerW} y1={top} y2={top} stroke={color} strokeOpacity={0.55} strokeWidth={1} />
+      )}
+      {from != null && from >= yMin && from > yMin && (
+        <line x1={0} x2={innerW} y1={bottom} y2={bottom} stroke={color} strokeOpacity={0.55} strokeWidth={1} />
+      )}
+      {label && (
+        <text x={innerW - 4} y={top + 12} textAnchor="end" fill={theme.label} fontSize={10.5} fontWeight={600}>
+          {label}
+        </text>
+      )}
+    </g>
+  );
+}
+
 export function XAxis({ format = formatShortDate, maxTicks }: { format?: (v: any) => string; maxTicks?: number }) {
   const { data, x, xScale, innerW, innerH, theme } = useChart();
   const every = Math.ceil(data.length / (maxTicks ?? Math.max(Math.floor(innerW / 80), 2)));
   return (
     <g transform={`translate(0,${innerH})`} aria-hidden="true">
-      <line x1={0} x2={innerW} stroke={theme.grid} strokeWidth={1.5} />
+      <line x1={0} x2={innerW} stroke={theme.grid} strokeWidth={1} />
       {data.map((d, i) =>
         i % every === 0 ? (
           <g key={i} transform={`translate(${xScale(d, i)},0)`}>
-            <line y2={6} stroke={theme.grid} strokeWidth={1.5} />
+            <line y2={6} stroke={theme.grid} strokeWidth={1} />
             <text y={20} textAnchor="middle" fill={theme.label} fontSize={11} fontWeight={600}>
               {format(d[x])}
             </text>
@@ -343,6 +395,14 @@ interface LineProps {
   area?: boolean;
   curve?: "linear" | "smooth";
   endLabel?: boolean;
+  /* Filled markers (radius) with a 2px surface ring, instead of the small
+     hollow dots. */
+  markerRadius?: number;
+  /* A point's own marker color (e.g. a status color for an out-of-range
+     value); the series color otherwise. */
+  pointColor?: (row: any) => string | undefined;
+  /* Opacity of the area wash at the line. */
+  areaOpacity?: number;
 }
 
 export function Line({
@@ -354,6 +414,9 @@ export function Line({
   area = false,
   curve = "linear",
   endLabel = true,
+  markerRadius,
+  pointColor,
+  areaOpacity = 0.22,
 }: LineProps) {
   const { data, xScale, yScale, innerH, hoverIndex, hidden, colorFor, theme } = useChart();
   const gid = useId().replace(/:/g, "");
@@ -390,7 +453,7 @@ export function Line({
         <>
           <defs>
             <linearGradient id={`g${gid}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={stroke} stopOpacity={0.22} />
+              <stop offset="0%" stopColor={stroke} stopOpacity={areaOpacity} />
               <stop offset="100%" stopColor={stroke} stopOpacity={0} />
             </linearGradient>
           </defs>
@@ -407,15 +470,29 @@ export function Line({
         strokeLinecap="round"
       />
       {endLabel && (
-        <text x={last[0] + 8} y={last[1]} dy="0.32em" fill={stroke} fontSize={11.5} fontWeight={700}>
+        <text x={last[0] + 8} y={last[1]} dy="0.32em" fill={theme.text} fontSize={11.5} fontWeight={700}>
           {formatNumber(data[last[2]][y])}
         </text>
       )}
-      {dots &&
-        pts.map((p) => (
-          <circle key={p[2]} cx={p[0]} cy={p[1]} r={2.5} fill={theme.background} stroke={stroke} strokeWidth={1.5} />
-        ))}
-      {hovered && <circle cx={hovered[0]} cy={hovered[1]} r={4} fill={theme.background} stroke={stroke} strokeWidth={2.5} />}
+      {markerRadius
+        ? pts.map((p) => (
+            <circle
+              key={p[2]}
+              cx={p[0]}
+              cy={p[1]}
+              r={p[2] === hoverIndex ? markerRadius + 1.5 : markerRadius}
+              fill={pointColor?.(data[p[2]]) ?? stroke}
+              stroke={theme.background}
+              strokeWidth={2}
+            />
+          ))
+        : dots &&
+          pts.map((p) => (
+            <circle key={p[2]} cx={p[0]} cy={p[1]} r={2.5} fill={theme.background} stroke={stroke} strokeWidth={1.5} />
+          ))}
+      {hovered && !markerRadius && (
+        <circle cx={hovered[0]} cy={hovered[1]} r={4} fill={theme.background} stroke={stroke} strokeWidth={2.5} />
+      )}
     </g>
   );
 }
@@ -423,9 +500,12 @@ export function Line({
 export function Tooltip({
   formatX = formatLongDate,
   formatY = formatNumber,
+  detail,
 }: {
   formatX?: (v: any) => string;
   formatY?: (v: any) => string;
+  /* An extra line under the values for the hovered row. */
+  detail?: (row: any) => ReactNode;
 }) {
   const { data, x, xScale, yScale, margin, innerW, hoverIndex, lines, hidden, theme } = useChart();
   if (hoverIndex === null || !data[hoverIndex]) return null;
@@ -435,6 +515,7 @@ export function Tooltip({
   const px = xScale(d, hoverIndex);
   const top = margin.top + 8 + Math.min(...visible.map((l) => yScale(d[l.y])));
   const flip = px > innerW * 0.62;
+  const extra = detail?.(d);
 
   return (
     <div
@@ -459,6 +540,7 @@ export function Tooltip({
           </span>
         </div>
       ))}
+      {extra ? <div className="mt-1 border-t border-white/15 pt-1.5 opacity-90">{extra}</div> : null}
     </div>
   );
 }
