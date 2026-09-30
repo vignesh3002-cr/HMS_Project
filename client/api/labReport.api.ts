@@ -1,5 +1,30 @@
 import API from "./axios";
 
+/* A lab report's comment, stored as JSON. Older reports may hold it as a
+   JSON string or plain text - read it with parseReportComment. */
+export interface LabReportComment {
+  text?: string;
+  parameters?: any[];
+  clinicalCorrelation?: string;
+  overallDecision?: "Approved" | "Rejected" | "Pending";
+}
+
+export const parseReportComment = (
+  value: LabReportComment | string | null | undefined
+): { meta: LabReportComment | null; text: string } => {
+  if (!value) return { meta: null, text: "" };
+  if (typeof value === "object") return { meta: value, text: value.text ?? "" };
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === "object") {
+      return { meta: parsed, text: parsed.text ?? "" };
+    }
+  } catch {
+    // plain text
+  }
+  return { meta: null, text: value };
+};
+
 export interface LabReportRecord {
   id: number;
   lab_report_id: string;
@@ -11,7 +36,7 @@ export interface LabReportRecord {
   report_status?: string | null;
   report_file?: string | null;
   digital_signature?: string | null;
-  report_comment?: string | null;
+  report_comment?: LabReportComment | string | null;
   delivered_to?: string | null;
   delivered_datetime?: string | null;
   branch_id?: string | null;
@@ -90,7 +115,7 @@ export const labReportApi = {
     report_status?: string;
     report_file?: string;
     digital_signature?: string;
-    report_comment?: string;
+    report_comment?: string | LabReportComment;
     delivered_to?: string;
     delivered_datetime?: string | Date;
     branch_id?: string;

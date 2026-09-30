@@ -810,6 +810,54 @@ type CancerScoreItem = {
   subtype_keywords: string | null;
 };
 
+/* An Investigation Results test of a cancer type (investigation_parameter):
+   a tumour marker / monitoring test with its normal range. */
+type InvestigationParameterItem = {
+  parameter_id: string;
+  cancer_type_id: string;
+  chart_name: string;
+  subtype_keywords: string | null;
+  parameter_code: string;
+  parameter_name: string;
+  input_type: "NUMBER" | "TEXT" | "DATE" | "SELECT";
+  unit: string | null;
+  normal_min: string | number | null;
+  normal_max: string | number | null;
+  range_label: string | null;
+  select_options: string | null;
+  display_order: number | null;
+};
+
+/* A saved Investigation Results value of one visit
+   (patient_investigation_result). */
+type InvestigationResultRecord = {
+  investigation_result_id: string;
+  encounter_no: string;
+  parameter_id: string;
+  report_date: string;
+  value_text: string;
+  is_abnormal: boolean;
+  investigation_parameter?: InvestigationParameterItem | null;
+};
+
+/* "High" / "Low" when a number test's value is outside its normal range. */
+const investigationFlag = (
+  parameter: InvestigationParameterItem,
+  value: string
+): "High" | "Low" | null => {
+  if (parameter.input_type !== "NUMBER" || !value.trim()) return null;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  const min = parameter.normal_min != null ? Number(parameter.normal_min) : null;
+  const max = parameter.normal_max != null ? Number(parameter.normal_max) : null;
+  if (max !== null && number > max) return "High";
+  if (min !== null && number < min) return "Low";
+  return null;
+};
+
+const INVESTIGATION_INPUT_CLASS =
+  "block w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 shadow-sm focus:border-[#1d4ed8] focus:outline-none focus:ring-[#1d4ed8]";
+
 /* Master rows tagged with the cancer type they were loaded for, so the
    dropdowns can group them per selected cancer type like T/N/M. */
 type ForCancerType<T> = T & { cancerType: string };
@@ -874,6 +922,8 @@ const Diagnosis: React.FC<{
     mStage: [],
     icdCode: "",
     notes: "",
+    investigationReportDate: "",
+    investigationResults: {},
   });
 
   const diagnosisDraftKey = `hms_diagnosis_form_${resolvedPatientId}`;
@@ -907,6 +957,16 @@ const Diagnosis: React.FC<{
         tStage: asArray(data.tStage),
         nStage: asArray(data.nStage),
         mStage: asArray(data.mStage),
+        investigationReportDate:
+          typeof data.investigationReportDate === "string"
+            ? data.investigationReportDate
+            : "",
+        investigationResults:
+          data.investigationResults &&
+          typeof data.investigationResults === "object" &&
+          !Array.isArray(data.investigationResults)
+            ? data.investigationResults
+            : {},
       }));
       const savedTypes = asArray(data.cancerTypes);
       if (savedTypes.length > 0) setSelectedCancerTypes(savedTypes);
@@ -1160,6 +1220,55 @@ const Diagnosis: React.FC<{
     resolvedPatientId,
   ]);
 
+  /* Every visit's Investigation Results for the patient. This visit's
+     values pre-fill the section unless the draft already holds some. */
+  useEffect(() => {
+    if (!resolvedPatientId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [visitNo, response] = await Promise.all([
+          resolveVisitEncounterNo().catch(() => ""),
+          API.get<{ success: boolean; data: InvestigationResultRecord[] }>(
+            "/oncology/investigation-results",
+            { params: { patient_id: resolvedPatientId } }
+          ),
+        ]);
+        if (cancelled) return;
+        const rows = response.data.data ?? [];
+        setInvestigationVisitNo(visitNo);
+        setInvestigationHistory(rows);
+        const own = visitNo ? rows.filter((row) => row.encounter_no === visitNo) : [];
+        if (own.length === 0) return;
+        setFormData((previous) => {
+          const draftHasValues = Object.values(
+            previous.investigationResults ?? {}
+          ).some((value) => String(value ?? "").trim());
+          if (draftHasValues) return previous;
+          const values: Record<string, string> = {};
+          own.forEach((row) => {
+            values[row.parameter_id] =
+              row.investigation_parameter?.input_type === "DATE"
+                ? toPickedDateValue(row.value_text)
+                : row.value_text;
+          });
+          return {
+            ...previous,
+            investigationResults: values,
+            investigationReportDate:
+              previous.investigationReportDate ||
+              toPickedDateValue(own[0].report_date),
+          };
+        });
+      } catch (error) {
+        console.error("Failed to load investigation results:", error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPatientId, encounterNo, appointmentId]);
+
   const [stageLabels, setStageLabels] = useState<StageOption[]>([]);
 
   const [tOptions, setTOptions] = useState<StageOption[]>([]);
@@ -1177,6 +1286,15 @@ const Diagnosis: React.FC<{
   const [scoreMasterOptions, setScoreMasterOptions] = useState<
     ForCancerType<CancerScoreItem>[]
   >([]);
+  /* Investigation Results: the tests of the selected cancer types, every
+     visit's saved values for this patient, and this visit's encounter. */
+  const [investigationParameters, setInvestigationParameters] = useState<
+    ForCancerType<InvestigationParameterItem>[]
+  >([]);
+  const [investigationHistory, setInvestigationHistory] = useState<
+    InvestigationResultRecord[]
+  >([]);
+  const [investigationVisitNo, setInvestigationVisitNo] = useState("");
   const [metastasisSites, setMetastasisSites] = useState<string[]>([]);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
   const [diagnosisError, setDiagnosisError] = useState("");
@@ -1289,6 +1407,7 @@ const Diagnosis: React.FC<{
       setBodySiteOptions([]);
       setGradeMasterOptions([]);
       setScoreMasterOptions([]);
+      setInvestigationParameters([]);
       return;
     }
 
@@ -1319,6 +1438,12 @@ const Diagnosis: React.FC<{
     });
     fetchTagged<CancerScoreItem>("scores", "cancer scores").then((items) => {
       if (requestId === masterRequestRef.current) setScoreMasterOptions(items);
+    });
+    fetchTagged<InvestigationParameterItem>(
+      "investigation-parameters",
+      "investigation tests"
+    ).then((items) => {
+      if (requestId === masterRequestRef.current) setInvestigationParameters(items);
     });
   };
 
@@ -1654,15 +1779,19 @@ const Diagnosis: React.FC<{
     })
   );
 
-  /* Score options: subtype-specific scores (e.g. IPI for DLBCL) only appear
-     once a matching Histopathology value is ticked for that cancer type. */
-  const scoreOptions: ScoreOption[] = optionTypes.flatMap((cancerType) => {
-    const subtypeLabels = formData.subType
+  /* The Histopathology values ticked under a cancer type. */
+  const subtypeLabelsFor = (cancerType: string) =>
+    formData.subType
       .filter((value) => {
         const parsed = splitQualified(value);
         return !parsed.cancerType || parsed.cancerType === cancerType;
       })
       .map((value) => splitQualified(value).raw);
+
+  /* Score options: subtype-specific scores (e.g. IPI for DLBCL) only appear
+     once a matching Histopathology value is ticked for that cancer type. */
+  const scoreOptions: ScoreOption[] = optionTypes.flatMap((cancerType) => {
+    const subtypeLabels = subtypeLabelsFor(cancerType);
     return scoreMasterOptions
       .filter(
         (score) =>
@@ -1675,6 +1804,157 @@ const Diagnosis: React.FC<{
         value: score.score_value,
       }));
   });
+
+  /* Investigation Results: one numbered panel per selected cancer type,
+     holding only that type's tests (grouped by chart; subtype-specific
+     charts once a matching Histopathology is ticked) and the values of its
+     earlier visits. A test two types share (e.g. CEA) is kept per type. */
+  const investigationPanels = optionTypes.map((cancerType, index) => {
+    const subtypeLabels = subtypeLabelsFor(cancerType);
+    const parameters = investigationParameters.filter(
+      (parameter) =>
+        parameter.cancerType === cancerType &&
+        matchesSubtypeKeywords(parameter.subtype_keywords, subtypeLabels)
+    );
+
+    const charts: {
+      name: string;
+      parameters: ForCancerType<InvestigationParameterItem>[];
+    }[] = [];
+    parameters.forEach((parameter) => {
+      let chart = charts.find((item) => item.name === parameter.chart_name);
+      if (!chart) {
+        chart = { name: parameter.chart_name, parameters: [] };
+        charts.push(chart);
+      }
+      chart.parameters.push(parameter);
+    });
+
+    const shownIds = new Set(parameters.map((parameter) => parameter.parameter_id));
+    const visits = new Map<
+      string,
+      { encounterNo: string; reportDate: string; values: Record<string, InvestigationResultRecord> }
+    >();
+    investigationHistory
+      .filter(
+        (row) =>
+          row.encounter_no !== investigationVisitNo && shownIds.has(row.parameter_id)
+      )
+      .forEach((row) => {
+        const visit = visits.get(row.encounter_no) ?? {
+          encounterNo: row.encounter_no,
+          reportDate: row.report_date,
+          values: {},
+        };
+        visit.values[row.parameter_id] = row;
+        visits.set(row.encounter_no, visit);
+      });
+    const history = [...visits.values()]
+      .sort((a, b) => b.reportDate.localeCompare(a.reportDate))
+      .slice(0, 5);
+
+    return { number: index + 1, cancerType, charts, parameters, history };
+  });
+
+  const setInvestigationValue = (parameterId: string, value: string) =>
+    setFormData((previous) => ({
+      ...previous,
+      investigationResults: {
+        ...previous.investigationResults,
+        [parameterId]: value,
+      },
+    }));
+
+  /* One test's input: a number with its range and a High / Low tag, a
+     free-text report, a date, or a +/- choice. */
+  const renderInvestigationInput = (
+    parameter: ForCancerType<InvestigationParameterItem>
+  ) => {
+    const id = `investigation-${parameter.parameter_id}`;
+    const value = formData.investigationResults[parameter.parameter_id] ?? "";
+
+    if (parameter.input_type === "DATE") {
+      return (
+        <DiagnosisDateField
+          key={parameter.parameter_id}
+          id={id}
+          title={parameter.parameter_name}
+          value={value}
+          onChange={(next) => setInvestigationValue(parameter.parameter_id, next)}
+        />
+      );
+    }
+
+    const flag = investigationFlag(parameter, value);
+    return (
+      <div key={parameter.parameter_id}>
+        <div className="mb-1.5 flex items-baseline justify-between gap-2">
+          <label htmlFor={id} className="text-sm font-semibold text-gray-600">
+            {parameter.parameter_name}
+            {parameter.unit ? ` (${parameter.unit})` : ""}
+          </label>
+          {parameter.range_label && (
+            <span className="shrink-0 text-xs text-gray-400">
+              Normal {parameter.range_label}
+            </span>
+          )}
+        </div>
+        {parameter.input_type === "SELECT" ? (
+          <select
+            id={id}
+            value={value}
+            onChange={(event) =>
+              setInvestigationValue(parameter.parameter_id, event.target.value)
+            }
+            className={INVESTIGATION_INPUT_CLASS}
+          >
+            <option value="">Select</option>
+            {(parameter.select_options ?? "")
+              .split("|")
+              .map((option) => option.trim())
+              .filter(Boolean)
+              .map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+          </select>
+        ) : parameter.input_type === "TEXT" ? (
+          <textarea
+            id={id}
+            rows={2}
+            value={value}
+            onChange={(event) =>
+              setInvestigationValue(parameter.parameter_id, event.target.value)
+            }
+            placeholder="Enter report findings"
+            className={`${INVESTIGATION_INPUT_CLASS} resize-y`}
+          />
+        ) : (
+          <div className="relative">
+            <input
+              id={id}
+              type="text"
+              inputMode="decimal"
+              value={value}
+              onChange={(event) =>
+                setInvestigationValue(parameter.parameter_id, event.target.value)
+              }
+              placeholder="Value"
+              className={`${INVESTIGATION_INPUT_CLASS} ${
+                flag ? "border-red-300 pr-16 text-red-700" : ""
+              }`}
+            />
+            {flag && (
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-600 ring-1 ring-inset ring-red-200">
+                {flag}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const scoreSystemOf = (qualified: string) => {
     const { cancerType, raw } = splitQualified(qualified);
@@ -1793,6 +2073,36 @@ const Diagnosis: React.FC<{
         );
         return;
       }
+    }
+
+    /* Investigation Results: number tests must be numbers and dates real
+       dates. The Report Date defaults to the Date of Diagnosis. */
+    const shownInvestigationParameters = investigationPanels.flatMap(
+      (panel) => panel.parameters
+    );
+    const enteredInvestigations = shownInvestigationParameters.filter((parameter) =>
+      (formData.investigationResults[parameter.parameter_id] ?? "").trim()
+    );
+    for (const parameter of enteredInvestigations) {
+      const value = formData.investigationResults[parameter.parameter_id].trim();
+      if (parameter.input_type === "NUMBER" && !Number.isFinite(Number(value))) {
+        setDiagnosisError(
+          `${parameter.parameter_name} (${parameter.cancerType}) must be a number.`
+        );
+        return;
+      }
+      if (parameter.input_type === "DATE" && !parsePickedDate(value)) {
+        setDiagnosisError(
+          `${parameter.parameter_name} (${parameter.cancerType}) must be in DD-MM-YYYY format.`
+        );
+        return;
+      }
+    }
+    const investigationReportDate =
+      formData.investigationReportDate.trim() || formData.diagnosisDate.trim();
+    if (investigationReportDate && !parsePickedDate(investigationReportDate)) {
+      setDiagnosisError("Investigation Report Date must be in DD-MM-YYYY format.");
+      return;
     }
 
     /* T / N / M picked from an older option list (e.g. "T1a/b/c") can't be
@@ -2043,6 +2353,46 @@ const Diagnosis: React.FC<{
             planSyncError?.response?.data?.message ?? planSyncError?.message
           );
         }
+      }
+
+      /* This visit's Investigation Results, saved with the diagnosis. Every
+         shown test is sent - a cleared one is removed for this visit. */
+      const visitHasSavedResults = investigationHistory.some(
+        (row) => row.encounter_no === (visitEncounterNo || investigationVisitNo)
+      );
+      if (enteredInvestigations.length > 0 || visitHasSavedResults) {
+        const resultsVisitNo = visitEncounterNo || investigationVisitNo;
+        if (!resultsVisitNo) {
+          setDiagnosisError(
+            "No active encounter was found for this visit, so the investigation results could not be saved."
+          );
+          return;
+        }
+        const savedResults = await API.put<{
+          success: boolean;
+          data: InvestigationResultRecord[];
+        }>("/oncology/investigation-results", {
+          patient_id: resolvedPatientId,
+          encounter_no: resultsVisitNo,
+          ...(stagingDetailId ? { staging_detail_id: stagingDetailId } : {}),
+          report_date:
+            toIsoDate(investigationReportDate) ||
+            toIsoDate(visitDate) ||
+            new Date().toISOString().slice(0, 10),
+          results: shownInvestigationParameters.map((parameter) => {
+            const raw = (
+              formData.investigationResults[parameter.parameter_id] ?? ""
+            ).trim();
+            return {
+              parameter_id: parameter.parameter_id,
+              value: parameter.input_type === "DATE" && raw ? toIsoDate(raw) : raw,
+            };
+          }),
+        });
+        setInvestigationHistory((previous) => [
+          ...previous.filter((row) => row.encounter_no !== resultsVisitNo),
+          ...(savedResults.data.data ?? []),
+        ]);
       }
 
       onNext?.();
@@ -2395,6 +2745,133 @@ const Diagnosis: React.FC<{
             }
             placeholder="Enter notes..."
           />
+        </div>
+
+        {/* Investigation Results - one numbered panel per selected cancer
+            type (1 | 2 | 3), each with its own tests and ranges. */}
+        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-4 border-b border-gray-100 pb-4">
+            <div>
+              <h3 className="text-base font-semibold text-gray-800">
+                Investigation Results
+              </h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Test report values for this visit, per selected cancer type.
+                Values outside the normal range are flagged.
+              </p>
+            </div>
+            <div className="w-full sm:w-56">
+              <DiagnosisDateField
+                id="investigationReportDate"
+                title="Report Date"
+                value={formData.investigationReportDate || formData.diagnosisDate}
+                onChange={(value) =>
+                  setFormData((previous) => ({
+                    ...previous,
+                    investigationReportDate: value,
+                  }))
+                }
+              />
+            </div>
+          </div>
+
+          {investigationPanels.length === 0 ? (
+            <p className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+              Select a cancer type to enter its investigation results.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+              {investigationPanels.map((panel) => (
+                <div
+                  key={panel.cancerType}
+                  className="flex flex-col rounded-lg border border-gray-200 bg-slate-50/60"
+                >
+                  <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#1d4ed8] text-xs font-bold text-white">
+                      {panel.number}
+                    </span>
+                    <span className="text-sm font-semibold text-gray-800">
+                      {panel.cancerType}
+                    </span>
+                  </div>
+
+                  <div className="flex-1 space-y-5 p-4">
+                    {panel.charts.length === 0 ? (
+                      <p className="text-sm text-gray-500">
+                        No investigation tests are defined for {panel.cancerType}.
+                      </p>
+                    ) : (
+                      panel.charts.map((chart) => (
+                        <div key={chart.name}>
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            {chart.name}
+                          </p>
+                          <div className="space-y-3">
+                            {chart.parameters.map(renderInvestigationInput)}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {panel.history.length > 0 && (
+                    <div className="border-t border-gray-200 px-4 py-3">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Previous results
+                      </p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead>
+                            <tr className="text-gray-500">
+                              <th className="whitespace-nowrap py-1 pr-3 font-semibold">
+                                Date
+                              </th>
+                              {panel.parameters.map((parameter) => (
+                                <th
+                                  key={parameter.parameter_id}
+                                  className="whitespace-nowrap py-1 pr-3 font-semibold"
+                                >
+                                  {parameter.parameter_name}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {panel.history.map((visit) => (
+                              <tr key={visit.encounterNo}>
+                                <td className="whitespace-nowrap py-1.5 pr-3 text-gray-700">
+                                  {toPickedDateValue(visit.reportDate) || "—"}
+                                </td>
+                                {panel.parameters.map((parameter) => {
+                                  const row = visit.values[parameter.parameter_id];
+                                  return (
+                                    <td
+                                      key={parameter.parameter_id}
+                                      className={`py-1.5 pr-3 ${
+                                        row?.is_abnormal
+                                          ? "font-semibold text-red-600"
+                                          : "text-gray-700"
+                                      }`}
+                                    >
+                                      {row
+                                        ? parameter.input_type === "DATE"
+                                          ? toPickedDateValue(row.value_text)
+                                          : row.value_text
+                                        : "—"}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Footer Action */}
