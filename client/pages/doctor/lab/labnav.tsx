@@ -6,10 +6,12 @@ import { employeeApi } from "@/api/employee.api";
 
 export type LabTab =
   | "Dashboard"
+  | "Lab Orders"
   | "Samples Verification"
   | "Testing Samples"
   | "Report Generation"
   | "Report Transfer"
+  | "Notifications"
   | "Profile";
 
 export interface LabNavProps {
@@ -110,6 +112,29 @@ export default function LabNav({ activeTab, onTabChange }: LabNavProps) {
               <rect height="7" rx="1.5" width="7" x="14" y="14" />
             </svg>
             <span>Dashboard</span>
+          </button>
+
+          {/* Lab Orders */}
+          <button
+            type="button"
+            onClick={() => handleNavClick("Lab Orders", "/lab/orders")}
+            aria-current={activeTab === "Lab Orders" ? "page" : undefined}
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-lg font-medium text-sm transition-colors text-left cursor-pointer ${
+              activeTab === "Lab Orders"
+                ? "bg-[#0b4a8b] text-white shadow-sm"
+                : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <svg
+              className={`w-5 h-5 shrink-0 ${activeTab === "Lab Orders" ? "text-white" : "text-slate-500"}`}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-6 9 2 2 4-4" />
+            </svg>
+            <span>Lab Orders</span>
           </button>
 
           {/* Samples Verification */}
@@ -216,6 +241,33 @@ export default function LabNav({ activeTab, onTabChange }: LabNavProps) {
               />
             </svg>
             <span>Report Transfer</span>
+          </button>
+
+          {/* Notifications */}
+          <button
+            type="button"
+            onClick={() => handleNavClick("Notifications", "/lab/notifications")}
+            aria-current={activeTab === "Notifications" ? "page" : undefined}
+            className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-lg font-medium text-sm transition-colors text-left cursor-pointer ${
+              activeTab === "Notifications"
+                ? "bg-[#0b4a8b] text-white shadow-sm"
+                : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <svg
+              className={`w-5 h-5 shrink-0 ${activeTab === "Notifications" ? "text-white" : "text-slate-500"}`}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              viewBox="0 0 24 24"
+            >
+              <path
+                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span>Notifications</span>
           </button>
         </nav>
       </div>

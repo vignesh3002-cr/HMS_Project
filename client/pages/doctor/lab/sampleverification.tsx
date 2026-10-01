@@ -10,6 +10,7 @@ import {
   LabOrderItemRecord,
 } from "@/api/labOrder.api";
 import { patientApi, PatientRecord } from "@/api/patient.api";
+import { LabNotificationBell } from "@/components/hms/LabNotificationBell";
 
 function calculateAge(dobString?: string): number {
   if (!dobString) return 30;
@@ -680,6 +681,10 @@ export default function SampleVerification() {
                         : "Check if the sample transport conditions are appropriate"}
                     </p>
                   </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <LabNotificationBell size="md" />
                 </div>
               </div>
             </header>
@@ -2771,6 +2776,8 @@ export default function SampleVerification() {
                   className="flex flex-wrap items-center gap-3 w-full md:w-auto"
                   data-purpose="search-and-filter-group"
                 >
+                  <LabNotificationBell size="md" />
+
                   {/* Barcode Quick Scan Input */}
                   <form
                     onSubmit={handleBarcodeScan}

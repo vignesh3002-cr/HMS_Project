@@ -15,12 +15,14 @@ import {
   Routes,
   Route,
   Navigate,
+  Outlet,
 } from "react-router-dom";
 
 import { AppLayout } from "@/components/layout/AppLayout";
 import DoctorLayout from "@/components/layout/DoctorLayout";
 import { PermissionProvider } from "@/context/PermissionContext";
 import { NotificationProvider } from "@/context/NotificationContext";
+import { LabNotificationProvider } from "@/context/LabNotificationContext";
 import { getToken, getUser } from "@/utils/token";
 
 // ============================================================
@@ -99,11 +101,13 @@ import Consultation from "./pages/doctor/Patientconsut";
 import DoctorPatientProfile from "./pages/doctor/notes and doc";
 import PatientDetails from "./pages/doctor/patient-details";
 import LabDashboard from "./pages/doctor/lab/labdashboard";
+import LabOrders from "./pages/doctor/lab/LabOrders";
 import SampleVerification from "./pages/doctor/lab/sampleverification";
 import TestingSamples from "./pages/doctor/lab/testingsamples";
 import ReportGeneration from "./pages/doctor/lab/reportgeneration";
 import ReportTransfer from "./pages/doctor/lab/reporttransfer";
 import LabProfile from "./pages/doctor/lab/labprofile";
+import LabNotifications from "./pages/doctor/lab/LabNotifications";
 
 // ============================================================
 // HOOKS / AUTH
@@ -578,58 +582,84 @@ const App = () => (
             ================================================== */}
 
             <Route
-              path="/lab/dashboard"
               element={
-                <ProtectedRoute>
-                  <LabDashboard />
-                </ProtectedRoute>
+                <LabNotificationProvider>
+                  <Outlet />
+                </LabNotificationProvider>
               }
-            />
+            >
+              <Route
+                path="/lab/dashboard"
+                element={
+                  <ProtectedRoute>
+                    <LabDashboard />
+                  </ProtectedRoute>
+                }
+              />
 
-            <Route
-              path="/lab/sample-verification"
-              element={
-                <ProtectedRoute>
-                  <SampleVerification />
-                </ProtectedRoute>
-              }
-            />
+              <Route
+                path="/lab/orders"
+                element={
+                  <ProtectedRoute>
+                    <LabOrders />
+                  </ProtectedRoute>
+                }
+              />
 
-            <Route
-              path="/lab/testing-samples"
-              element={
-                <ProtectedRoute>
-                  <TestingSamples />
-                </ProtectedRoute>
-              }
-            />
+              <Route
+                path="/lab/sample-verification"
+                element={
+                  <ProtectedRoute>
+                    <SampleVerification />
+                  </ProtectedRoute>
+                }
+              />
 
-            <Route
-              path="/lab/report-generation"
-              element={
-                <ProtectedRoute>
-                  <ReportGeneration />
-                </ProtectedRoute>
-              }
-            />
+              <Route
+                path="/lab/testing-samples"
+                element={
+                  <ProtectedRoute>
+                    <TestingSamples />
+                  </ProtectedRoute>
+                }
+              />
 
-            <Route
-              path="/lab/report-transfer"
-              element={
-                <ProtectedRoute>
-                  <ReportTransfer />
-                </ProtectedRoute>
-              }
-            />
+              <Route
+                path="/lab/report-generation"
+                element={
+                  <ProtectedRoute>
+                    <ReportGeneration />
+                  </ProtectedRoute>
+                }
+              />
 
-            <Route
-              path="/lab/profile"
-              element={
-                <ProtectedRoute>
-                  <LabProfile />
-                </ProtectedRoute>
-              }
-            />
+              <Route
+                path="/lab/report-transfer"
+                element={
+                  <ProtectedRoute>
+                    <ReportTransfer />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/lab/profile"
+                element={
+                  <ProtectedRoute>
+                    <LabProfile />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/lab/notifications"
+                element={
+                  <ProtectedRoute>
+                    <LabNotifications />
+                  </ProtectedRoute>
+                }
+              />
+            </Route>
 
             {/* ==================================================
                 DOCTOR PORTAL
