@@ -1,15 +1,9 @@
 import React from "react";
-import { useNavigate } from "react-router-dom";
-import { BranchFilterProvider } from "../../../context/BranchFilterContext";
-import { HMSPatientPortal } from "./OrderSummary";
+import { default as PatientDetailsPage } from "../patient-details";
 
-const PatientDetails: React.FC = () => {
-  const navigate = useNavigate();
-  return (
-    <BranchFilterProvider>
-      <HMSPatientPortal onBack={() => navigate(-1)} />
-    </BranchFilterProvider>
-  );
-};
+/* OrderSummary.tsx was removed when the portal was split into the tab
+   components in this folder. The live page (and its HMSPatientPortal)
+   now lives in ../patient-details.tsx, so this module just re-exports it. */
+const PatientDetails: React.FC = () => <PatientDetailsPage />;
 
 export default PatientDetails;
