@@ -56,6 +56,10 @@ export type FormData = {
 export type DischargeMedicineRecord = {
   discharge_instruction_id?: string;
   protocol_id?: string;
+  /* The protocol's discharge row can also name a drug the doctor typed, in
+     which case there is no medicine_id. */
+  medicine_id?: string | null;
+  drug_name?: string | null;
   drug_sequence?: number | null;
   drug_from?: string | null;
   frequency?: string | null;
